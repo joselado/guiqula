@@ -68,7 +68,12 @@ def test_build_summary(manager):
     assert job.status == "done", job.error
     summary = job.value
     assert summary["mode"] == "spinful" and summary["sites"] == 8 and summary["dimension"] == 16
-    assert [r["status"] for r in summary["reports"]] == ["ok"] * 5
+    assert [r["status"] for r in summary["reports"]] == ["ok"] * 5 + ["disabled"]   # mean field
+    assert "sz" in manager.names["operators"] and "random" in manager.names["guesses"]
+    view = summary["hamiltonian"]                  # PLAN 13.8: what the terms put on the sites
+    assert view["onsite"].shape == (8,) and view["exchange"].shape == (8, 3)
+    assert view["hoppings"].shape[1] == 5 and len(view["amplitude"]) == len(view["hoppings"])
+    assert view["spin"].max() > 0                  # Rashba mixes the spins
 
 
 def test_cancel_running_job_restarts_only_that_worker(manager):

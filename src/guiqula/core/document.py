@@ -3,7 +3,9 @@
 
 A document holds systems and calculations. A system of kind ``quantum`` has
 a geometry stack (a base lattice and ordered ops), regions, and a
-Hamiltonian (construction and an ordered term stack). The classical kinds
+Hamiltonian (construction, an ordered term stack, and the mean-field block
+that turns the terms into a self-consistent interacting Hamiltonian when it
+is enabled). The classical kinds
 (``classical_spin``, ``lattice_gas``, ``ising``) are reserved in the schema;
 they get their model stack in phase 4. Entry ids are unique across the
 document, so a command can name any entry by id alone.
@@ -16,6 +18,8 @@ import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from guiqula.core import fields as field_tools
 
 SCHEMA_VERSION = 1
 # a JSON list spread over lines whose items are numbers, strings without
@@ -67,9 +71,19 @@ class Construction(_Model):
     is_sparse: bool = False
 
 
+class MeanField(_Model):
+    """Interactions solved at the mean-field level after the term stack
+    (PLAN.md section 5); kind names a registry entry of the "meanfield"
+    family, whose declaration checks params."""
+    enabled: bool = False
+    kind: str = "interactions"
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
 class Hamiltonian(_Model):
     construction: Construction = Field(default_factory=Construction)
     terms: list[Entry] = Field(default_factory=list)
+    meanfield: MeanField = Field(default_factory=MeanField)
 
 
 class System(_Model):
@@ -175,6 +189,15 @@ class Document(_Model):
         return f"{prefix}{max(used, default=0) + 1}"
 
 
+def region_users(system):
+    """(owner, params) of everything in a system whose parameters can name
+    regions (piecewise Fields): the terms, then the mean field."""
+    if system.hamiltonian is None:
+        return []
+    users = [(term.id, term.params) for term in system.hamiltonian.terms]
+    return users + [(f"{system.id}/meanfield", system.hamiltonian.meanfield.params)]
+
+
 def check(document):
     """Raise DocumentError on duplicate ids or dangling references."""
     ids = document.all_ids()
@@ -191,6 +214,12 @@ def check(document):
                 if term.region is not None and term.region not in regions:
                     raise DocumentError(f"term {term.id!r} refers to region {term.region!r}, "
                                         f"which system {system.id!r} does not have")
+            for owner, params in region_users(system):
+                missing = [r for r in field_tools.regions_of(list(params.values()))
+                           if r not in regions]
+                if missing:
+                    raise DocumentError(f"{owner} has a piecewise Field over region "
+                                        f"{missing[0]!r}, which system {system.id!r} does not have")
         for op in system.geometry.ops:
             if op.region is not None:
                 raise DocumentError(f"geometry op {op.id!r} cannot carry a region in phase 1")

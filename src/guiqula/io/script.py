@@ -17,10 +17,11 @@ from guiqula.registry.params import FieldParam, VectorFieldParam
 
 
 class ScriptContext:
-    def __init__(self, spec, params, region=None):
+    def __init__(self, spec, params, region=None, regions=None):
         self.spec = spec
         self.params = params
         self.weight = region_tools.code_indicator(region) if region else None
+        self.regions = regions or {}
 
     def value(self, name):
         return self.params[name]
@@ -30,9 +31,9 @@ class ScriptContext:
         value = self.params[name]
         weight = self.weight if getattr(param, "native", False) else None
         if isinstance(param, VectorFieldParam):
-            return fields.code_vector(value, weight)
+            return fields.code_vector(value, weight, self.regions)
         if isinstance(param, FieldParam):
-            return fields.code_scalar(value, weight)
+            return fields.code_scalar(value, weight, self.regions)
         return repr(value)
 
 
@@ -110,12 +111,13 @@ def export_script(document, calc_id, skipped=None):
                 lines.append("h.turn_nambu()")
             continue
         if not stage.enabled:
-            lines += _comment(stage, "disabled")
+            if stage.stage != "meanfield":     # every system has one, disabled by default
+                lines += _comment(stage, "disabled")
             continue
         if stage.problem or stage.id in skipped:
             lines += _comment(stage, f"skipped, {stage.problem or skipped[stage.id]}")
             continue
-        ctx = ScriptContext(stage.spec, stage.params, stage.region)
+        ctx = ScriptContext(stage.spec, stage.params, stage.region, stage.regions)
         seed = stage.spec.seed_param
         if seed is not None:
             s = stage.params[seed.name]

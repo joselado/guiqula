@@ -101,3 +101,72 @@ def test_region_on_constant_only_term_is_invalid():
     r = d.do("add_region", system=s, select={"kind": "expression", "expr": "x < 0"})
     t = d.do("add_term", system=s, kind="anderson_disorder", region=r)
     assert "cannot be restricted to a region" in pipeline.plan_system(d.document, s).stage(t).problem
+
+
+def test_piecewise_fields_resolve_regions():
+    """A piecewise Field depends on the selections of its regions, not on
+    their ids; a missing region makes the entry invalid (skipped)."""
+    d, s, op, t1, t2, c = pipeline_doc()
+    r = d.do("add_region", system=s, select={"kind": "expression", "expr": "x < 0"})
+    d.do("set_param", entry=t1, name="mu", value={
+        "kind": "piecewise", "default": 0.0, "pieces": [{"region": r, "value": 0.3}]})
+    plan = pipeline.plan_system(d.document, s)
+    assert plan.stage(t1).problem is None and plan.stage(t1).regions == {
+        r: {"kind": "expression", "expr": "x < 0"}}
+    key = pipeline.calculation_key(d.document, c)
+    d.do("set_selection", entry=r, select={"kind": "expression", "expr": "x < 1"})
+    assert pipeline.calculation_key(d.document, c) != key
+    d.undo()
+    twin = d.do("duplicate", entry=r)                 # same selection, another id
+    d.do("set_param", entry=t1, name="mu", value={
+        "kind": "piecewise", "default": 0.0, "pieces": [{"region": twin, "value": 0.3}]})
+    assert pipeline.calculation_key(d.document, c) == key
+    with pytest.raises(Exception, match="does not have"):     # refused at the command
+        d.do("set_param", entry=t1, name="mu", value={
+            "kind": "piecewise", "default": 0.0, "pieces": [{"region": "r99", "value": 0.3}]})
+    data = d.document.model_dump()
+    data["systems"][0]["regions"][-1]["select"] = {"kind": "lasso"}   # a broken selection
+    from guiqula.core.document import Document
+    assert "unknown selection kind" in pipeline.plan_system(
+        Document.from_data(data), s).stage(t1).problem
+
+
+def test_meanfield_stage():
+    """The mean field is the last stage; it needs spin, and the builds of
+    the canvas stop before it (preview_key)."""
+    d, s, op, t1, t2, c = pipeline_doc()
+    d.do("set_enabled", entry=t2, enabled=False)         # no Zeeman: spinless
+    plan = pipeline.plan_system(d.document, s)
+    stage = plan.meanfield
+    assert stage.id == f"{s}/meanfield" and not stage.applied and plan.mode == "spinless"
+    assert plan.preview_key == plan.key
+    key = pipeline.calculation_key(d.document, c)
+    d.do("set_meanfield", system=s, enabled=True, params={"U": 2.0})
+    plan = pipeline.plan_system(d.document, s)
+    assert plan.meanfield.applied and plan.mode == "spinful"
+    assert plan.upgraded_by == [f"{s}/meanfield"]
+    assert plan.preview_key != plan.key and pipeline.calculation_key(d.document, c) != key
+    preview = plan.preview_key
+    d.do("set_meanfield", system=s, params={"U": 3.0})
+    assert pipeline.plan_system(d.document, s).preview_key == preview    # no rebuild needed
+    assert d.document.system(s).hamiltonian.meanfield.params["U"] == 3.0
+    d.do("set_meanfield", system=s, enabled=False)
+    assert pipeline.calculation_key(d.document, c) == key               # disabled == absent
+    with pytest.raises(Exception, match="mix"):
+        d.do("set_meanfield", system=s, params={"mix": 0})
+    with pytest.raises(Exception, match="constant"):
+        d.do("set_meanfield", system=s, params={"V1": "x"})          # pyqula takes a number
+
+
+def test_cost_estimate():
+    from guiqula.registry import cost
+    d, s, op, t1, t2, c = pipeline_doc()
+    assert cost.estimate(d.document, c, {}) is None                     # not built yet
+    small = cost.estimate(d.document, c, {s: {"dimension": 16, "dimensionality": 2, "sites": 8}})
+    big = cost.estimate(d.document, c, {s: {"dimension": 4000, "dimensionality": 2,
+                                            "sites": 2000}})
+    assert small["seconds"] < 1 < cost.SLOW < big["seconds"] and small["meanfield"] == 0
+    d.do("set_meanfield", system=s, enabled=True)
+    with_mf = cost.estimate(d.document, c, {s: {"dimension": 16, "dimensionality": 2, "sites": 8}})
+    assert with_mf["meanfield"] > 0 and with_mf["seconds"] > small["seconds"]
+    assert cost.describe(0.2) == "under a second" and cost.describe(600) == "about 10 min"

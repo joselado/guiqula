@@ -26,7 +26,7 @@ from guiqula.io import autosave as autosave_files
 from guiqula.io import project
 from guiqula.io import results as result_files
 from guiqula.io.script import export_script
-from guiqula.registry import pipeline
+from guiqula.registry import cost, pipeline
 from guiqula.worker.client import JobManager
 
 
@@ -162,14 +162,23 @@ class Session:
         return [self.build(system.id, wait=False) for system in self.document.systems]
 
     def build_is_current(self, system):
-        """Whether builds[system] was built from the current Document."""
+        """Whether builds[system] was built from the current Document (the
+        builds stop before the mean field, which runs with calculations)."""
         build = self.builds.get(system)
         if build is None:
             return False
         try:
-            return build["key"] == pipeline.plan_system(self.document, system).key
+            return build["key"] == pipeline.plan_system(self.document, system).preview_key
         except Exception:
             return False
+
+    def estimate(self, calculation):
+        """The cost guard (PLAN.md 13.12): the rough duration of a
+        calculation from the latest build of its system, or None."""
+        try:
+            return cost.estimate(self.document, calculation, self.builds)
+        except Exception:
+            return None
 
     def cancel(self, calculation_or_job):
         job = self.calc_jobs.get(calculation_or_job) or self.jobs.jobs.get(calculation_or_job)

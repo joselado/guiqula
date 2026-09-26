@@ -1,5 +1,6 @@
 """Calculations. Each adapter returns plain arrays (never figures, PLAN.md
 3.3) and names the plot kind that draws them (PLAN.md 3.4)."""
+from guiqula.registry import cost
 from guiqula.registry.base import entry
 from guiqula.registry.params import ChoiceParam, FloatParam, IntParam
 
@@ -44,7 +45,9 @@ entry("calculation", "bands", "Band structure",
       ChoiceParam("operator", None, source="operators", optional=True, label="operator",
                   doc="colour the bands by this operator's expectation value"),
       group="Spectral", doc="Bands along the default high-symmetry path of the geometry.",
-      apply=_bands, script=_bands_script, plot=_bands_plot)
+      apply=_bands, script=_bands_script, plot=_bands_plot,
+      cost=lambda p, size: p["nk"] * cost.diagonalization(size["dimension"])
+      * (2 if p["operator"] else 1))
 
 
 def _dos(h, ctx):
@@ -67,6 +70,13 @@ def _dos_script(ctx):
             "arrays = dict(energies=np.asarray(es, dtype=float), dos=np.asarray(ds, dtype=float))"]
 
 
+def _dos_cost(p, size):
+    points = cost.kmesh(p["nk"], size["dimensionality"])
+    if p["mode"] == "Green":                  # an inversion per energy and k-point
+        return p["ne"] * points * cost.diagonalization(size["dimension"]) / 3
+    return points * cost.diagonalization(size["dimension"]) * (2 if p["operator"] else 1)
+
+
 entry("calculation", "dos", "Density of states",
       FloatParam("emin", -4.0, "lowest energy"),
       FloatParam("emax", 4.0, "highest energy"),
@@ -78,6 +88,6 @@ entry("calculation", "dos", "Density of states",
       ChoiceParam("operator", None, source="operators", optional=True, label="projection",
                   doc="project the DOS on this operator"),
       group="Spectral", doc="Density of states on an energy window.",
-      apply=_dos, script=_dos_script,
+      apply=_dos, script=_dos_script, cost=_dos_cost,
       plot=lambda params: {"kind": "lines", "x": "energies", "y": "dos",
                            "xlabel": "energy", "ylabel": "DOS"})

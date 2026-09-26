@@ -11,15 +11,21 @@ executes the plan) and the UI (which shows modes, flags and staleness).
   ``requires`` of every enabled, valid term (PLAN.md 3.1): pyqula would
   otherwise upgrade it in the middle of the stack.
 - Each stage has a content key: the key of the stage before, plus what this
-  stage does, plus everything it references (a term's region selection;
-  other systems and results once from_result Fields exist). Keys are
-  DAG-aware (decision 14.9) and hash physics only: ids, names and the ui
-  block never enter them. A disabled or invalid entry does nothing, so its
-  key is the key before it. The key of a calculation is what a result is
-  stamped with; a result whose key differs from the current one is stale.
+  stage does, plus everything it references (a term's region selection,
+  the regions of its piecewise Fields; other systems and results once
+  from_result Fields exist). Keys are DAG-aware (decision 14.9) and hash
+  physics only: ids, names and the ui block never enter them. A disabled
+  or invalid entry does nothing, so its key is the key before it. The key
+  of a calculation is what a result is stamped with; a result whose key
+  differs from the current one is stale.
+- The mean-field block is the last stage of a quantum system. It is
+  expensive, so it runs with the calculations only: the interactive
+  builds (canvas, outliner) stop before it and are stamped with
+  ``preview_key``, the key of the stage before it.
 """
 from dataclasses import dataclass, field
 
+from guiqula.core import fields
 from guiqula.core import regions as region_tools
 from guiqula.core.document import DocumentError
 from guiqula.core.hashing import content_hash
@@ -31,8 +37,8 @@ MODES = ("spinless", "spinful", "nambu")
 
 @dataclass
 class StagePlan:
-    stage: str                  # "base", "op", "construction", "term"
-    id: str | None              # entry id (None for base and construction)
+    stage: str                  # "base", "op", "construction", "term", "meanfield"
+    id: str | None              # entry id (None for base and construction; <system>/meanfield)
     kind: str
     enabled: bool = True
     spec: object = None         # registry EntrySpec
@@ -41,6 +47,7 @@ class StagePlan:
     problem: str | None = None  # why the entry is invalid (skipped)
     key: str = ""
     applied: bool = False       # enabled and valid: the engine runs it
+    regions: dict = field(default_factory=dict)   # {id: selection} of its piecewise Fields
 
     def describe(self):
         return {"stage": self.stage, "id": self.id, "kind": self.kind,
@@ -61,6 +68,18 @@ class SystemPlan:
     def key(self):
         return self.stages[-1].key if self.stages else ""
 
+    @property
+    def preview_key(self):
+        """The key of what the interactive builds build: everything but
+        the mean field."""
+        stages = [s for s in self.stages if s.stage != "meanfield"]
+        return stages[-1].key if stages else ""
+
+    @property
+    def meanfield(self):
+        """The mean-field stage, or None (a system that has no Hamiltonian)."""
+        return next((s for s in self.stages if s.stage == "meanfield"), None)
+
     def stage(self, entry_id):
         for s in self.stages:
             if s.id == entry_id:
@@ -80,6 +99,29 @@ def _check_entry(family, entry_kind, params, system_kind):
         return spec, spec.normalize_params(params), None
     except ParamError as error:
         return spec, None, str(error)
+
+
+def _field_regions(spec, params, regions):
+    """({id: selection} of the regions the piecewise Fields of an entry
+    name, problem or None)."""
+    wanted = [r for p in spec.params if isinstance(p, FieldParam)
+              for r in fields.regions_of(params[p.name])]
+    out = {}
+    for region_id in wanted:
+        if region_id not in regions:
+            return {}, f"region {region_id!r} does not exist"
+        try:
+            out[region_id] = region_tools.normalize(regions[region_id].select)
+        except region_tools.RegionError as error:
+            return {}, f"region {region_id!r}: {error}"
+    return out, None
+
+
+def _hashed(params, selections):
+    """Parameters as a key hashes them: region ids replaced by selections."""
+    if not selections:
+        return params
+    return {name: fields.resolve_regions(value, selections) for name, value in params.items()}
 
 
 def plan_system(document, system_id):
@@ -125,9 +167,23 @@ def plan_system(document, system_id):
                     select = region_tools.normalize(regions[term.region].select)
                 except region_tools.RegionError as error:
                     problem = f"region {term.region!r}: {error}"
-        stage = StagePlan("term", term.id, term.kind, term.enabled, spec, params, select, problem)
+        selections = {}
+        if problem is None:
+            selections, problem = _field_regions(spec, params, regions)
+        stage = StagePlan("term", term.id, term.kind, term.enabled, spec, params, select, problem,
+                          regions=selections)
         stage.applied = term.enabled and problem is None
         term_stages.append(stage)
+
+    block = system.hamiltonian.meanfield
+    spec, params, problem = _check_entry("meanfield", block.kind, block.params, system.kind)
+    selections = {}
+    if problem is None:
+        selections, problem = _field_regions(spec, params, regions)
+    meanfield = StagePlan("meanfield", f"{system.id}/meanfield", block.kind, block.enabled, spec,
+                          params, None, problem, regions=selections)
+    meanfield.applied = block.enabled and problem is None
+    term_stages.append(meanfield)
 
     requested = system.hamiltonian.construction
     needs = {req for s in term_stages if s.applied for req in s.spec.requires}
@@ -146,8 +202,9 @@ def plan_system(document, system_id):
 
     for stage in term_stages:
         if stage.applied:
-            key = content_hash({"prev": key, "stage": "term", "kind": stage.kind,
-                                "params": stage.params, "region": stage.region})
+            key = content_hash({"prev": key, "stage": stage.stage, "kind": stage.kind,
+                                "params": _hashed(stage.params, stage.regions),
+                                "region": stage.region})
         stage.key = key
         plan.stages.append(stage)
     return plan

@@ -12,7 +12,12 @@ content key. Execution:
   seeded with its seed right before it runs;
 - an entry pyqula rejects is flagged with pyqula's message and skipped: it
   runs on a copy, and the object before it carries on (decision 14.3). Only
-  a failing base lattice or construction stops the build.
+  a failing base lattice, construction or mean field stops the build: a
+  mean field that does not converge must not quietly hand the calculation
+  the non-interacting Hamiltonian;
+- the mean field (the last stage) runs only when asked for: the
+  calculations ask, the interactive builds do not (``meanfield=False``),
+  and then report it as "deferred".
 """
 import contextlib
 import io
@@ -99,8 +104,8 @@ def _seed(stage):
 
 def _apply_stage(stage, obj):
     """Returns (new object, record). record: message (None if fine),
-    output (what pyqula printed), mode after the stage."""
-    record = {"message": None, "output": "", "mode": None}
+    output (what pyqula printed), mode after the stage, notes of the entry."""
+    record = {"message": None, "output": "", "mode": None, "notes": {}}
     if stage.stage == "base":
         ctx = ApplyContext(stage.spec, stage.params)
         try:
@@ -126,8 +131,19 @@ def _apply_stage(stage, obj):
         record["mode"] = mode_of(h)
         return h, record
 
+    ctx = ApplyContext(stage.spec, stage.params, region=stage.region, regions=stage.regions)
+    if stage.stage == "meanfield":
+        def solve():
+            _seed(stage)
+            return stage.spec.apply(obj, ctx)       # a new Hamiltonian; obj is untouched
+        try:
+            h, record["output"] = _run(solve)
+        except Exception as error:
+            raise BuildError(f"mean field: {type(error).__name__}: {error}") from None
+        record["mode"], record["notes"] = mode_of(h), dict(ctx.notes)
+        return h, record
+
     work = obj.copy()
-    ctx = ApplyContext(stage.spec, stage.params, region=stage.region)
 
     def step():
         _seed(stage)
@@ -152,14 +168,15 @@ def _apply_stage(stage, obj):
     return new, record
 
 
-def build_system(document, system_id, cache=None):
+def build_system(document, system_id, cache=None, meanfield=True):
     """Build one system; returns a Built with the Hamiltonian and a report
-    per stage: status "ok", "disabled" or "invalid" (with the message)."""
+    per stage: status "ok", "disabled", "invalid" (with the message) or,
+    for a mean field left out with meanfield=False, "deferred"."""
     vendoring.ensure_pyqula_on_path()
     plan = pipeline.plan_system(document, system_id)
     if plan.problem:
         raise BuildError(plan.problem)
-    stages = plan.stages
+    stages = plan.stages if meanfield else [s for s in plan.stages if s.stage != "meanfield"]
     obj, info, resume = None, {}, -1
     if cache is not None:
         for i in reversed([i for i, s in enumerate(stages) if s.applied]):
@@ -175,22 +192,26 @@ def build_system(document, system_id, cache=None):
         if cache is not None:
             cache.put(stage.key, obj, info)
 
-    reports, mode = [], None
-    for stage in stages:
+    reports, mode, executed = [], None, {id(s) for s in stages}
+    for stage in plan.stages:
         report = {"id": stage.id, "stage": stage.stage, "kind": stage.kind,
                   "status": "ok", "message": None, "output": ""}
         if not stage.enabled:
             report["status"] = "disabled"
         elif stage.problem:
             report.update(status="invalid", message=stage.problem)
+        elif id(stage) not in executed:
+            report.update(status="deferred", message="runs with the calculations")
         else:
             record = info.get(stage.key, {})
             if record.get("message"):
                 report.update(status="invalid", message=record["message"])
             report["output"] = record.get("output", "")
+            if record.get("notes"):
+                report["notes"] = record["notes"]
             mode = record.get("mode") or mode
-        if stage.stage in ("construction", "term"):
+        if stage.stage in ("construction", "term", "meanfield"):
             report["mode"] = mode
         reports.append(report)
     return Built(system_id=system_id, h=obj, plan=plan, reports=reports,
-                 mode=mode_of(obj), key=plan.key)
+                 mode=mode_of(obj), key=plan.key if meanfield else plan.preview_key)

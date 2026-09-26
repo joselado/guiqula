@@ -1,7 +1,9 @@
 """What the structure canvas draws (PLAN.md section 4): the positions,
 lattice vectors, sublattice and first-neighbour bonds of a built geometry,
-as numpy arrays that cross the process boundary (the UI process never
-loads pyqula or scipy, PLAN.md 13.15).
+and what the Hamiltonian puts on them (13.8: onsite energies, exchange
+fields, pairing, and every hopping with its amplitude and phase), as numpy
+arrays that cross the process boundary (the UI process never loads pyqula
+or scipy, PLAN.md 13.15).
 
 Bonds are pyqula's own first neighbours (neighbor.find_first_neighbor,
 distance 1 within 1%), the pairs the default hopping connects. Bonds to the
@@ -46,3 +48,88 @@ def describe(g):
     return {"positions": positions, "lattice": lattice, "dimensionality": dimensionality,
             "sublattice": sublattice, "bonds": bonds,
             "image_bonds": np.array(image_bonds, dtype=np.int64).reshape(-1, 5)}
+
+
+HAMILTONIAN_LIMIT = 20000     # sites; above this the Hamiltonian view is not computed
+
+
+def _coo(matrix):
+    from scipy import sparse
+    return sparse.coo_matrix(matrix)
+
+
+def _site_diagonal(matrix, n, norb):
+    """The norb x norb onsite blocks of a matrix, as an (n, norb, norb) array."""
+    m = _coo(matrix)
+    keep = (m.row // norb) == (m.col // norb)
+    blocks = np.zeros((n, norb, norb), dtype=complex)
+    np.add.at(blocks, (m.row[keep] // norb, m.row[keep] % norb, m.col[keep] % norb),
+              m.data[keep])
+    return blocks
+
+
+def _positive(cell):
+    """One of each pair of cells (cell, -cell), the central one included."""
+    nonzero = [c for c in cell if c]
+    return not nonzero or nonzero[0] > 0
+
+
+def hamiltonian_view(h, limit=HAMILTONIAN_LIMIT):
+    """What the terms did (PLAN.md 13.8), or None above limit sites.
+
+    onsite (N,): spin-averaged onsite energy; exchange (N, 3) or None:
+    the exchange field (mx, my, mz) in pyqula's extract convention; pairing
+    (N,) or None: |Delta| of the onsite singlet pairing (Nambu);
+    hoppings (K, 5) rows (i, j, n1, n2, n3) listed once (i < j inside the
+    cell, positive half of the other cells), with amplitude (K,) the norm of
+    the orbital block per orbital (|t| for a spin-independent t), phase (K,)
+    the argument of its spin-independent part, and spin (K,) the norm of its
+    spin-dependent part (spin-orbit, per orbital)."""
+    n = len(h.geometry.r)
+    if n > limit:
+        return None
+    pairing = None
+    if getattr(h, "has_eh", False):
+        blocks = _site_diagonal(h.intra, n, 4)
+        pairing = np.abs(blocks[:, 0, 2])      # e-up with h-down, pyqula's extract.swave
+        h = h.copy()
+        h.remove_nambu()
+    norb = 2 if h.has_spin else 1
+    matrices = h.get_multihopping().get_dict()
+    blocks = _site_diagonal(matrices[(0, 0, 0)], n, norb)
+    onsite = np.real(np.trace(blocks, axis1=1, axis2=2)) / norb
+    exchange = None
+    if norb == 2:
+        exchange = np.stack([blocks[:, 0, 1].real, -blocks[:, 0, 1].imag,
+                             (blocks[:, 0, 0] - blocks[:, 1, 1]).real / 2], axis=1)
+    rows, amplitude, phase, spin = [], [], [], []
+    for cell, matrix in matrices.items():
+        cell = tuple(int(c) for c in cell)
+        if not _positive(cell):
+            continue
+        m = _coo(matrix)
+        i, j = m.row // norb, m.col // norb
+        keep = (i < j) if not any(cell) else np.ones(len(i), dtype=bool)
+        keep &= np.abs(m.data) > 1e-12
+        if not np.any(keep):
+            continue
+        i, j, data = i[keep], j[keep], m.data[keep]
+        same = (m.row[keep] % norb) == (m.col[keep] % norb)
+        pairs, index = np.unique(i * n + j, return_inverse=True)
+        norm2 = np.bincount(index, weights=np.abs(data) ** 2, minlength=len(pairs))
+        trace = (np.bincount(index, weights=np.where(same, data.real, 0.0), minlength=len(pairs))
+                 + 1j * np.bincount(index, weights=np.where(same, data.imag, 0.0),
+                                    minlength=len(pairs)))
+        rows.append(np.column_stack([pairs // n, pairs % n,
+                                     np.tile(np.array(cell), (len(pairs), 1))]))
+        amplitude.append(np.sqrt(norm2 / norb))
+        phase.append(np.where(np.abs(trace) > 1e-9, np.angle(trace), 0.0))
+        spin.append(np.sqrt(np.maximum(norm2 - np.abs(trace) ** 2 / norb, 0.0) / norb))
+    if rows:
+        hoppings = np.concatenate(rows).astype(np.int64)
+        amplitude, phase, spin = (np.concatenate(a) for a in (amplitude, phase, spin))
+    else:
+        hoppings = np.zeros((0, 5), dtype=np.int64)
+        amplitude = phase = spin = np.zeros(0)
+    return {"onsite": onsite, "exchange": exchange, "pairing": pairing, "hoppings": hoppings,
+            "amplitude": amplitude, "phase": phase, "spin": spin}

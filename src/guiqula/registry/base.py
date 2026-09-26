@@ -16,7 +16,7 @@ from typing import Any, Callable
 
 from guiqula.registry.params import Param, ParamError, SeedParam
 
-FAMILIES = ("lattice", "geometry_op", "term", "calculation")
+FAMILIES = ("lattice", "geometry_op", "term", "meanfield", "calculation")
 CATALOGUE = {family: {} for family in FAMILIES}
 
 
@@ -70,6 +70,7 @@ class EntrySpec:
     apply: Callable | None = None    # custom: (target, ctx) -> result
     script: Callable | None = None   # custom: (ctx) -> list of source lines
     plot: dict | None = None         # calculations: plot kind and array mapping
+    cost: Callable | None = None     # calculations: (params, size) -> seconds (registry/cost.py)
     extra: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
@@ -147,7 +148,8 @@ def _load_builtins():
     global _loaded
     if not _loaded:
         _loaded = True
-        from guiqula.registry import calculations, geometry_ops, lattices, terms  # noqa: F401
+        from guiqula.registry import (calculations, geometry_ops, lattices, meanfield,  # noqa: F401
+                                      terms)
 
 
 def entry(family, kind, label, *params, **meta):

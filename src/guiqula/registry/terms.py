@@ -43,3 +43,27 @@ entry("term", "anderson_disorder", "Anderson disorder",
       group="Disorder", formula=r"\sum_i \epsilon_i c^\dagger_i c_i,\ \epsilon_i\in[-w,w]",
       doc="Random onsite energies (pyqula.disorder.anderson); reproducible through the seed.",
       call=Call("disorder.anderson", H, w="w", p="p"))
+
+entry("term", "kane_mele", "Kane-Mele spin-orbit coupling",
+      FieldParam("t", 0.05, "strength", "intrinsic spin-orbit coupling between second neighbours, "
+                                        "at the bond midpoint"),
+      group="Spin-orbit", formula=r"i\lambda_{SO} \sum_{\langle\langle ij\rangle\rangle} \nu_{ij} "
+                                  r"c^\dagger_i \sigma_z c_j",
+      doc="Intrinsic spin-orbit coupling of the Kane-Mele model: a Haldane coupling of opposite "
+          "sign for each spin; preserves time reversal.",
+      requires=("spin",), call=Call("h.add_kane_mele", "t"))
+
+entry("term", "antiferromagnetism", "Antiferromagnetic exchange",
+      FieldParam("m", 0.1, "exchange", "staggered exchange field along z: +m on sublattice A, "
+                                       "-m on B"),
+      group="Magnetism", formula=r"\sum_i m(\vec r_i)\, \tau_i\, \sigma^z_i",
+      doc="Exchange field along z whose sign alternates between the two sublattices (Neel "
+          "order); needs a bipartite geometry.",
+      requires=("spin",), call=Call("h.add_antiferromagnetism", "m"))
+
+entry("term", "swave", "s-wave pairing",
+      FieldParam("delta", 0.1, "pairing", "singlet pairing amplitude on every site"),
+      group="Superconductivity", formula=r"\sum_i \Delta(\vec r_i)\, c^\dagger_{i\uparrow} "
+                                         r"c^\dagger_{i\downarrow} + h.c.",
+      doc="Onsite spin-singlet superconducting pairing; turns the Hamiltonian into Nambu form.",
+      requires=("nambu",), call=Call("h.add_swave", "delta"))

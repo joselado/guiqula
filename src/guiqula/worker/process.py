@@ -119,8 +119,9 @@ def main(conn, config):
             return run_calculation(document, payload["calculation"], cache, progress)
         if kind == "build":
             document = Document.from_json(payload["document"])
-            built = build_system(document, payload["system"], cache)
+            built = build_system(document, payload["system"], cache, meanfield=False)
             return dict(structure.describe(built.g),
+                        hamiltonian=structure.hamiltonian_view(built.h),
                         system=payload["system"], key=built.key, mode=built.mode,
                         reports=built.reports, upgraded_by=built.plan.upgraded_by,
                         sites=len(built.g.r), dimension=int(built.h.intra.shape[0]),
@@ -167,8 +168,8 @@ def main(conn, config):
 def _names():
     """The name lists pyqula itself provides (CLAUDE.md), for the forms of
     the UI process, which cannot import pyqula."""
-    from pyqula import operatorlist
-    return {"operators": list(operatorlist.get_operator_names())}
+    from guiqula.engine.context import SOURCES, source_names
+    return {source: source_names(source) for source in SOURCES}
 
 
 def _warm_up():

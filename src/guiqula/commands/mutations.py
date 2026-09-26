@@ -8,9 +8,10 @@ unknown to the registry (a missing plugin) can still be edited as raw JSON
 and is flagged by the pipeline planner.
 """
 from guiqula.commands.dispatcher import CommandError, mutation
+from guiqula.core import fields as field_tools
 from guiqula.core import regions as region_tools
 from guiqula.core.document import (Base, Calculation, Construction, Entry, Geometry,
-                                   Hamiltonian, Region, System)
+                                   Hamiltonian, MeanField, Region, System, region_users)
 from guiqula.registry import base as registry
 from guiqula.registry.params import ParamError
 
@@ -22,6 +23,10 @@ def _normalize(family, kind, params):
         return registry.get(family, kind).normalize_params(params)
     except (registry.RegistryError, ParamError) as error:
         raise CommandError(str(error).strip("\"'")) from None
+
+
+def _rename_regions(params, mapping):
+    return {name: field_tools.rename_regions(value, mapping) for name, value in params.items()}
 
 
 def _insert(items, item, index):
@@ -64,6 +69,21 @@ def set_construction(document, system, has_spin=None, nambu=None, tij=None, is_s
         if value is not None:
             data[key] = value
     target.hamiltonian.construction = Construction.model_validate(data)
+
+
+@mutation
+def set_meanfield(document, system, enabled=None, params=None, kind=None):
+    """Enable or disable the mean-field block of a system, change its
+    parameters (merged into the stored ones, one undo step) or its kind."""
+    target = document.system(system)
+    if target.hamiltonian is None:
+        raise CommandError(f"system {system!r} has no Hamiltonian")
+    block = target.hamiltonian.meanfield
+    kind = block.kind if kind is None else kind
+    merged = dict(block.params if kind == block.kind else {}, **(params or {}))
+    target.hamiltonian.meanfield = MeanField(
+        enabled=block.enabled if enabled is None else bool(enabled), kind=kind,
+        params=_normalize("meanfield", kind, merged))
 
 
 @mutation
@@ -149,6 +169,8 @@ def remove(document, entry):
     if family == "region":
         users = [t.id for t in owner.hamiltonian.terms if t.region == entry] \
             if owner.hamiltonian else []
+        users += [user for user, params in region_users(owner)
+                  if entry in field_tools.regions_of(list(params.values())) and user not in users]
         if users:
             raise CommandError(f"region {entry!r} is used by {users}")
     if family == "system":
@@ -183,6 +205,9 @@ def duplicate(document, entry):
             term.id = document.new_id("term")
             if term.region is not None:
                 term.region = regions[term.region]
+            term.params = _rename_regions(term.params, regions)
+        block = copy.hamiltonian.meanfield
+        block.params = _rename_regions(block.params, regions)
     return copy.id
 
 

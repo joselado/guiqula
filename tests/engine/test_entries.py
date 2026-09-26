@@ -86,6 +86,14 @@ TERM_CASES = {
     "haldane": [({"t": 0.05}, lambda h: h.add_haldane(0.05)),
                 ({"t": "0.05*exp(-r)"}, lambda h: h.add_haldane(lambda r: 0.05 * np.exp(-np.linalg.norm(r))))],
     "anderson_disorder": [({"w": 0.5, "p": 1.0, "seed": 7}, None)],
+    "kane_mele": [({"t": 0.05}, lambda h: h.add_kane_mele(0.05)),
+                  ({"t": "0.05*cos(x)"}, lambda h: h.add_kane_mele(lambda r: 0.05 * np.cos(r[0])))],
+    "antiferromagnetism": [({"m": 0.2}, lambda h: h.add_antiferromagnetism(0.2)),
+                           ({"m": "0.2*tanh(x)"},
+                            lambda h: h.add_antiferromagnetism(lambda r: 0.2 * np.tanh(r[0])))],
+    "swave": [({"delta": 0.1}, lambda h: h.add_swave(0.1)),
+              ({"delta": "0.1*exp(-r)"},
+               lambda h: h.add_swave(lambda r: 0.1 * np.exp(-np.linalg.norm(r))))],
 }
 
 
@@ -96,7 +104,7 @@ def test_term(pyqula, kind, case):
     params, direct_term = TERM_CASES[kind][case]
     d, s, _ = system(ops=[("supercell", {"n": [2, 2, 1]})], terms=[(kind, params)])
     built = build_system(d.document, s)
-    assert [r["status"] for r in built.reports] == ["ok"] * len(built.reports)
+    assert [r["status"] for r in built.reports] == ["ok"] * (len(built.reports) - 1) + ["disabled"]
     h = geometry.honeycomb_lattice().get_supercell([2, 2, 1]).get_hamiltonian(has_spin=True)
     if kind == "anderson_disorder":
         np.random.seed(7)
@@ -107,6 +115,21 @@ def test_term(pyqula, kind, case):
     assert_same_hamiltonian(built.h, h)
 
 
+def test_piecewise_field(pyqula):
+    """One value per region plus a default; the later piece wins where
+    regions overlap (PLAN.md 3.8)."""
+    from pyqula import geometry
+    d, s, (t,) = system(ops=[("supercell", {"n": [3, 3, 1]})], terms=[("onsite", {"mu": 0.0})])
+    r1 = d.do("add_region", system=s, select={"kind": "expression", "expr": "x > 1"})
+    r2 = d.do("add_region", system=s, select={"kind": "expression", "expr": "y > 0"})
+    d.do("set_param", entry=t, name="mu", value={
+        "kind": "piecewise", "default": 0.1,
+        "pieces": [{"region": r1, "value": "0.5*y"}, {"region": r2, "value": -0.3}]})
+    h = geometry.honeycomb_lattice().get_supercell([3, 3, 1]).get_hamiltonian(has_spin=True)
+    h.add_onsite(lambda r: -0.3 if r[1] > 0 else (0.5 * r[1] if r[0] > 1 else 0.1))
+    assert_same_hamiltonian(build_system(d.document, s).h, h)
+
+
 def test_region_restricts_a_field(pyqula):
     from pyqula import geometry
     d, s, (t,) = system(ops=[("supercell", {"n": [3, 3, 1]})], terms=[("onsite", {"mu": 0.4})])
@@ -115,6 +138,51 @@ def test_region_restricts_a_field(pyqula):
     h = geometry.honeycomb_lattice().get_supercell([3, 3, 1]).get_hamiltonian(has_spin=True)
     h.add_onsite(lambda r: 0.4 * float(r[0] > 1))
     assert_same_hamiltonian(build_system(d.document, s).h, h)
+
+
+MEANFIELD_CASES = {
+    "interactions": [
+        {"U": 3.0, "mf": "antiferro", "nk": 4, "mix": 0.5},
+        {"U": "2.5 + 0.5*tanh(x)", "V1": 0.2, "mf": "random", "seed": 5, "nk": 4, "mix": 0.5},
+        {"U": 2.0, "fix": "mu", "mu": 0.1, "mf": "ferro", "nk": 3, "mix": 0.5},
+    ],
+}
+
+
+@pytest.mark.parametrize("kind, case", [(k, i) for k in sorted(MEANFIELD_CASES)
+                                        for i in range(len(MEANFIELD_CASES[k]))])
+def test_meanfield(pyqula, kind, case):
+    from pyqula import geometry
+    params = MEANFIELD_CASES[kind][case]
+    d, s, _ = system(terms=[("rashba", {"c": 0.1})], has_spin=False)
+    d.do("set_meanfield", system=s, enabled=True, kind=kind, params=params)
+    built = build_system(d.document, s)
+    report = built.reports[-1]
+    assert report["id"] == f"{s}/meanfield" and report["status"] == "ok"
+    p = registry.get("meanfield", kind).normalize_params(params)
+    h = geometry.honeycomb_lattice().get_hamiltonian(has_spin=True)
+    h.add_rashba(0.1)
+    kwargs = {name: p[name] for name in ("V1", "V2", "V3", "J1", "J2", "J3", "mf", "nk", "mix",
+                                         "maxerror", "maxite", "T")}
+    kwargs["U"] = p["U"] if isinstance(p["U"], float) else \
+        (lambda r: 2.5 + 0.5 * np.tanh(r[0]))
+    kwargs.update({"mu": p["mu"]} if p["fix"] == "mu" else {"filling": p["filling"]})
+    np.random.seed(p["seed"])
+    random.seed(p["seed"])
+    direct, energy = h.get_mean_field_hamiltonian(return_total_energy=True, **kwargs)
+    assert direct is not None
+    assert report["notes"]["total_energy"] == pytest.approx(energy, abs=1e-10)
+    assert_same_hamiltonian(built.h, direct)
+
+
+def test_meanfield_that_does_not_converge_fails_the_build(pyqula):
+    from guiqula.engine.build import BuildError
+    d, s, _ = system()
+    d.do("set_meanfield", system=s, enabled=True, params={"U": 3.0, "maxite": 1, "nk": 2})
+    with pytest.raises(BuildError, match="did not converge"):
+        build_system(d.document, s)
+    deferred = build_system(d.document, s, meanfield=False)        # the interactive build
+    assert deferred.reports[-1]["status"] == "deferred"
 
 
 CALC_CASES = {
@@ -157,6 +225,7 @@ def test_calculation(pyqula, kind, case):
 
 def test_every_entry_has_a_case():
     covered = {"lattice": set(LATTICES), "geometry_op": set(OP_CASES),
-               "term": set(TERM_CASES), "calculation": set(CALC_CASES)}
+               "term": set(TERM_CASES), "meanfield": set(MEANFIELD_CASES),
+               "calculation": set(CALC_CASES)}
     for family, kinds in covered.items():
         assert kinds == set(registry.kinds(family)), family

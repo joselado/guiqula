@@ -21,9 +21,18 @@ class Result:
         """Entries flagged invalid and skipped while building (decision 14.3)."""
         return [r for r in self.reports if r["status"] == "invalid"]
 
+    @property
+    def meanfield(self):
+        """What the mean field reported (its total energy), or None when it
+        did not run."""
+        for report in self.reports:
+            if report.get("stage") == "meanfield" and report["status"] == "ok":
+                return report.get("notes", {})
+        return None
+
     def summary(self):
         return {"calculation": self.calculation, "kind": self.kind, "key": self.key,
                 "arrays": {k: list(getattr(v, "shape", ())) for k, v in self.arrays.items()},
                 "plot": self.plot["kind"], "mode": self.mode,
-                "skipped": [r["id"] for r in self.skipped],
+                "skipped": [r["id"] for r in self.skipped], "meanfield": self.meanfield,
                 "seconds": self.meta.get("seconds")}

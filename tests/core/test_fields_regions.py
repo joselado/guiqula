@@ -44,3 +44,43 @@ def test_region_selections():
                 {"kind": "expression", "expr": "import os"}, {"kind": "positions", "tol": -1}):
         with pytest.raises(regions.RegionError):
             regions.normalize(bad)
+
+
+PIECEWISE = {"kind": "piecewise", "default": "0.1*x",
+             "pieces": [{"region": "r1", "value": 1.0}, {"region": "r2", "value": "y"}]}
+REGIONS = {"r1": {"kind": "expression", "expr": "x > 0"},
+           "r2": {"kind": "positions", "positions": [[1.0, 2.0, 0.0]], "tol": 0.05}}
+
+
+def test_piecewise_forms():
+    assert fields.normalize(PIECEWISE) == {
+        "kind": "piecewise", "default": "0.1*x",
+        "pieces": [{"region": "r1", "value": 1.0}, {"region": "r2", "value": "y"}]}
+    assert fields.normalize({"kind": "piecewise"}) == {"kind": "piecewise", "default": 0.0,
+                                                       "pieces": []}
+    assert fields.kind_of(fields.normalize(PIECEWISE)) == "piecewise"
+    assert fields.regions_of([0.0, PIECEWISE, "x"]) == ["r1", "r2"]
+    assert fields.regions_of(fields.rename_regions(PIECEWISE, {"r1": "r7"})) == ["r7", "r2"]
+    nested = dict(PIECEWISE, pieces=[{"region": "r1", "value": PIECEWISE}])
+    for bad in (nested, dict(PIECEWISE, extra=1), dict(PIECEWISE, pieces=[{"region": "r1"}]),
+                dict(PIECEWISE, pieces=[{"region": 3, "value": 1}]),
+                dict(PIECEWISE, default="x +")):
+        with pytest.raises(fields.FieldError):
+            fields.normalize(bad)
+
+
+def test_piecewise_compile_code_and_evaluate_agree():
+    """The later piece wins where regions overlap; the default elsewhere."""
+    positions = np.array([[-1.0, 0, 0], [0.5, 0, 0], [1.0, 2.0, 0.0], [2.0, -1, 0]])
+    expected = [-0.1, 1.0, 2.0, 1.0]           # (1, 2) is in r1 and r2: r2 wins
+    f = fields.compile_scalar(PIECEWISE, regions=REGIONS)
+    g = eval(fields.code_scalar(PIECEWISE, regions=REGIONS), {"np": np})
+    assert [f(p) for p in positions] == pytest.approx(expected)
+    assert [g(p) for p in positions] == pytest.approx(expected)
+    assert fields.evaluate_positions(PIECEWISE, positions, REGIONS).tolist() == \
+        pytest.approx(expected)
+    weight = regions.compile_indicator({"kind": "expression", "expr": "y < 1"})
+    weighted = fields.compile_scalar(PIECEWISE, weight, REGIONS)
+    assert [weighted(p) for p in positions] == pytest.approx([-0.1, 1.0, 0.0, 1.0])
+    with pytest.raises(fields.FieldError, match="does not exist"):
+        fields.compile_scalar(PIECEWISE, regions={"r1": REGIONS["r1"]})

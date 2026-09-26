@@ -61,6 +61,31 @@ def test_everything_at_once(pyqula, repo, tmp_path):
     assert_reproduces(d.document, c, repo, tmp_path)
 
 
+def test_piecewise_pairing_and_mean_field(pyqula, repo, tmp_path):
+    """A piecewise Field over two regions, a Nambu upgrade by s-wave pairing,
+    Kane-Mele, and a mean field seeded with a random guess."""
+    d = Dispatcher()
+    s = d.do("add_system", lattice="honeycomb_lattice")
+    d.do("set_construction", system=s, has_spin=False)
+    d.do("add_geometry_op", system=s, kind="supercell", params={"n": [2, 1, 1]})
+    left = d.do("add_region", system=s, select={"kind": "expression", "expr": "x < 0.5"})
+    picked = d.do("add_region", system=s, select={"kind": "positions",
+                                                  "positions": [[1.0, 0.0, 0.0]], "tol": 0.3})
+    d.do("add_term", system=s, kind="onsite", params={"mu": {
+        "kind": "piecewise", "default": "0.1*y",
+        "pieces": [{"region": left, "value": 0.2}, {"region": picked, "value": "-0.3*x"}]}})
+    d.do("add_term", system=s, kind="kane_mele", params={"t": 0.03})
+    d.do("add_term", system=s, kind="swave", params={"delta": 0.05})
+    d.do("set_meanfield", system=s, enabled=True,
+         params={"U": -1.0, "mf": "random", "seed": 4, "nk": 3, "mix": 0.5})
+    c = d.do("add_calculation", system=s, kind="bands", params={"nk": 12})
+    source = export_script(d.document, c)
+    assert "h = g.get_hamiltonian(has_spin=True)\nh.turn_nambu()" in source
+    assert "np.random.seed(4)" in source and "get_mean_field_hamiltonian(U=-1.0" in source
+    result = assert_reproduces(d.document, c, repo, tmp_path)
+    assert result.mode == "nambu" and result.reports[-1]["notes"]["total_energy"] < 0
+
+
 def test_island(pyqula, repo, tmp_path):
     """A module-level Call with a keyword geometry (islands.get_geometry)."""
     d = Dispatcher()

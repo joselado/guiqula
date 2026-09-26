@@ -105,3 +105,21 @@ def test_introspection_lists_signatures():
     assert d.mutations()["set_param"] == ["entry", "name", "value"]
     d.register_action("run_calculation", lambda calculation, wait=False: None)
     assert d.actions()["run_calculation"] == ["calculation", "wait=False"]
+
+
+def test_regions_used_by_piecewise_fields():
+    d = Dispatcher()
+    s = d.do("add_system")
+    r = d.do("add_region", system=s, select={"kind": "expression", "expr": "x > 0"})
+    t = d.do("add_term", system=s, kind="onsite", params={"mu": {
+        "kind": "piecewise", "default": 0.0, "pieces": [{"region": r, "value": 0.2}]}})
+    d.do("set_meanfield", system=s, params={"U": {
+        "kind": "piecewise", "default": 1.0, "pieces": [{"region": r, "value": 2.0}]}})
+    with pytest.raises(CommandError, match=rf"used by \['{t}', '{s}/meanfield'\]"):
+        d.do("remove", entry=r)
+    copy = d.do("duplicate", entry=s)
+    system = d.document.system(copy)
+    new = system.regions[0].id
+    assert new != r
+    assert system.hamiltonian.terms[0].params["mu"]["pieces"][0]["region"] == new
+    assert system.hamiltonian.meanfield.params["U"]["pieces"][0]["region"] == new

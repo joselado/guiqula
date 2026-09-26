@@ -1,6 +1,8 @@
 """What a registry entry sees while the engine applies it: its parameters,
 compiled to what pyqula takes (Fields become numbers or callables of one
-position, restricted to the entry's region), and a progress reporter."""
+position, restricted to the entry's region; piecewise Fields look up the
+regions they name in ``regions``), a progress reporter, and ``note`` for
+what the entry wants reported (the mean field's total energy)."""
 import importlib
 
 from guiqula.core import fields
@@ -10,22 +12,30 @@ from guiqula.registry.params import ChoiceParam, FieldParam, ParamError, VectorF
 
 
 class ApplyContext:
-    def __init__(self, spec, params, region=None, progress=None):
+    def __init__(self, spec, params, region=None, progress=None, regions=None):
         self.spec = spec
         self.params = params
         self.weight = region_tools.compile_indicator(region) if region else None
+        self.regions = regions or {}
+        self.notes = {}
         self._progress = progress
 
     def value(self, name):
         param = self.spec.param_map[name]
         value = self.params[name]
         if isinstance(param, VectorFieldParam):
-            return fields.compile_vector(value, self.weight if param.native else None)
+            return fields.compile_vector(value, self.weight if param.native else None,
+                                         self.regions)
         if isinstance(param, FieldParam):
-            return fields.compile_scalar(value, self.weight if param.native else None)
+            return fields.compile_scalar(value, self.weight if param.native else None,
+                                         self.regions)
         if isinstance(param, ChoiceParam) and param.source and value is not None:
             _check_source(param, value)
         return value
+
+    def note(self, name, value):
+        """Something to report with the stage (JSON data)."""
+        self.notes[name] = value
 
     def progress(self, fraction, text=""):
         if self._progress is not None:
@@ -41,14 +51,25 @@ class ApplyContext:
         return callback
 
 
-def _check_source(param, value):
-    if param.source == "operators":
+def source_names(source):
+    """The names pyqula itself lists for a ChoiceParam source (CLAUDE.md)."""
+    if source == "operators":
         from pyqula import operatorlist
-        names = operatorlist.get_operator_names()
-        if value not in names:
-            raise ParamError(f"{param.name}: pyqula has no operator {value!r}; it has {names}")
-    else:
-        raise ParamError(f"{param.name}: unknown name source {param.source!r}")
+        return list(operatorlist.get_operator_names())
+    if source == "guesses":
+        from pyqula import meanfield
+        return list(meanfield.get_guess_names())
+    raise ParamError(f"unknown name source {source!r}")
+
+
+SOURCES = ("operators", "guesses")
+
+
+def _check_source(param, value):
+    names = source_names(param.source)
+    if value not in names:
+        raise ParamError(f"{param.name}: pyqula has no {param.source[:-1]} {value!r}; "
+                         f"it has {names}")
 
 
 def resolve(call, h=None, g=None):
