@@ -120,8 +120,9 @@ def main(conn, config):
         if kind == "build":
             document = Document.from_json(payload["document"])
             built = build_system(document, payload["system"], cache, meanfield=False)
-            return dict(structure.describe(built.g),
-                        hamiltonian=structure.hamiltonian_view(built.h),
+            view = bool(payload.get("view"))
+            return dict(structure.describe(built.g), view=view,
+                        hamiltonian=structure.hamiltonian_view(built.h) if view else None,
                         system=payload["system"], key=built.key, mode=built.mode,
                         reports=built.reports, upgraded_by=built.plan.upgraded_by,
                         sites=len(built.g.r), dimension=int(built.h.intra.shape[0]),

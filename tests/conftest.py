@@ -87,7 +87,7 @@ class NoJobs:
     def supersede(self, kind, label):
         return []
 
-    def build(self, document_json, system, timeout=None):
+    def build(self, document_json, system, timeout=None, view=False):
         raise RuntimeError("NoJobs runs nothing")
 
     def shutdown(self):

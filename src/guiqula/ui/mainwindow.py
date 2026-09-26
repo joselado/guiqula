@@ -538,7 +538,7 @@ class MainWindow(QMainWindow):
         if self.session is None:
             return
         try:
-            self.session.build_all()
+            self.session.build_all(view=self.canvas_view == "hamiltonian")
         except Exception as error:
             self.message(f"could not ask for a build: {error}", error=True)
 
@@ -633,6 +633,8 @@ class MainWindow(QMainWindow):
         self.structure.set_view(name)
         if self.session is not None:
             self._refresh_structure()
+            if name == "hamiltonian" and any(not b.get("view") for b in self.builds.values()):
+                self.build_timer.start(0)      # the builds so far left the view out
         return name
 
     def preview_field(self, entry, param):
@@ -708,8 +710,11 @@ class MainWindow(QMainWindow):
 
     def _hamiltonian_overlay(self, build):
         view = build.get("hamiltonian")
+        if not build.get("view"):
+            return {}, "computing the Hamiltonian view…"
         if view is None:
-            return {}, "the Hamiltonian view is not computed for this many sites"
+            return {}, (f"the Hamiltonian view is not computed for this size (dense "
+                        f"dimension above {cost.DENSE_DIMENSION})")
         overlays = {"site_values": {"values": view["onsite"], "label": "onsite energy"},
                     "hoppings": view}
         parts = [f"onsite {np.min(view['onsite']):.3g} to {np.max(view['onsite']):.3g}"]

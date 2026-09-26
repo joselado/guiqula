@@ -75,7 +75,11 @@ def _positive(cell):
 
 
 def hamiltonian_view(h, limit=HAMILTONIAN_LIMIT):
-    """What the terms did (PLAN.md 13.8), or None above limit sites.
+    """What the terms did (PLAN.md 13.8), or None above limit sites or, for
+    a dense Hamiltonian, above pyqula's limits.densedimension. It costs about as much as
+    building the Hamiltonian (pyqula copies every dense cell matrix, and
+    each is scanned: 3 s for 2450 sites, dimension 4900), so the
+    interactive worker computes it only when the canvas shows it.
 
     onsite (N,): spin-averaged onsite energy; exchange (N, 3) or None:
     the exchange field (mx, my, mz) in pyqula's extract convention; pairing
@@ -85,8 +89,9 @@ def hamiltonian_view(h, limit=HAMILTONIAN_LIMIT):
     the orbital block per orbital (|t| for a spin-independent t), phase (K,)
     the argument of its spin-independent part, and spin (K,) the norm of its
     spin-dependent part (spin-orbit, per orbital)."""
+    from pyqula.limits import densedimension
     n = len(h.geometry.r)
-    if n > limit:
+    if n > limit or (not h.is_sparse and h.intra.shape[0] > densedimension):
         return None
     pairing = None
     if getattr(h, "has_eh", False):

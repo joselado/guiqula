@@ -123,8 +123,10 @@ def test_hamiltonian_view(window, qtbot, shot):
     session.do("add_term", system="s1", kind="haldane", params={"t": 0.1})
     session.do("add_term", system="s1", kind="onsite", params={"mu": "0.2*x"})
     settle(qtbot, window)
+    assert window.builds["s1"]["hamiltonian"] is None       # not computed while not shown
     window.set_workspace("hamiltonian")
     assert window.canvas_view == "hamiltonian"
+    qtbot.waitUntil(lambda: window.builds["s1"]["hamiltonian"] is not None, timeout=60_000)
     view = window.builds["s1"]["hamiltonian"]
     assert len(view["hoppings"]) > len(window.builds["s1"]["bonds"])   # second neighbours
     ax = window.structure.ax

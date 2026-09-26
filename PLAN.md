@@ -754,9 +754,10 @@ the structure canvas (the value being typed, restricted to the term's
 region: colours for a scalar, in-plane arrows and z dots for a vector);
 the Hamiltonian view of 13.8 (atoms by onsite energy, every hopping of
 `get_multihopping()` with a width by |t| and a colour by phase, exchange
-as arrows and dots; the arrays come with every interactive build,
-`engine/structure.hamiltonian_view`, from sparse block reductions, up to
-20,000 sites), with a Show box choosing among sites and bonds, Hamiltonian
+as arrows and dots; `engine/structure.hamiltonian_view`, from sparse
+block reductions, up to 20,000 sites and pyqula's dense limit; the
+interactive worker computes it only while the canvas shows it, since it
+costs about as much as the build), with a Show box choosing among sites and bonds, Hamiltonian
 and Field preview, and the workspaces choosing the first two; the
 mean-field block (`Hamiltonian.meanfield` = enabled, kind, params, checked
 by a registry entry of the new `meanfield` family: U as a Field, V1..V3
@@ -806,7 +807,10 @@ spinful and then Nambu, with the per-site order (e↑, e↓, h↓, h↑) and the
 singlet pairing at (4i, 4i+2); `add_antiferromagnetism` reads any list as
 per-site values (and refuses one of another length), so a vector cannot be
 given as a list and its entry takes a scalar Field (along z); a mean-field call takes 2 to 5 s the first
-time in a process even with numba's cache warm; matplotlib truncates
+time in a process even with numba's cache warm; `get_multihopping()` of
+a dense Hamiltonian copies every cell matrix (with the scan of each, the
+Hamiltonian view takes 3 s for 2450 sites, dimension 4900, about the
+time of the build); matplotlib truncates
 synthetic mouse events to whole pixels; a `QTabWidget` tab loses its
 close button with `setTabButton(index, side, None)`.
 

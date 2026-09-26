@@ -146,20 +146,21 @@ class Session:
         return job
 
     # ---- builds (the interactive worker)
-    def build(self, system, wait=True, timeout=None):
+    def build(self, system, wait=True, timeout=None, view=False):
         """Ask the interactive worker to build a system: its geometry arrays,
-        stage reports and Hilbert space land in ``builds[system]``. A request
-        still queued for the same system is superseded, so a burst of edits
-        costs one build, not one per edit."""
+        stage reports and Hilbert space land in ``builds[system]``, with the
+        Hamiltonian view when view is true (it costs about as much as the
+        build). A request still queued for the same system is superseded,
+        so a burst of edits costs one build, not one per edit."""
         self.document.system(system)
         self.jobs.supersede("build", system)
-        job = self.jobs.build(self.document.to_json(), system)
+        job = self.jobs.build(self.document.to_json(), system, view=view)
         if wait:
             self.jobs.wait(job, timeout)
         return job
 
-    def build_all(self):
-        return [self.build(system.id, wait=False) for system in self.document.systems]
+    def build_all(self, view=False):
+        return [self.build(system.id, wait=False, view=view) for system in self.document.systems]
 
     def build_is_current(self, system):
         """Whether builds[system] was built from the current Document (it

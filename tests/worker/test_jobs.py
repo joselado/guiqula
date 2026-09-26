@@ -64,7 +64,9 @@ def test_ready_reports_pyqula_names(manager):
 
 
 def test_build_summary(manager):
-    job = manager.wait(manager.build(project.load("honeycomb_zeeman_rashba").to_json(), "s1"), 120)
+    document = project.load("honeycomb_zeeman_rashba").to_json()
+    assert manager.wait(manager.build(document, "s1"), 120).value["hamiltonian"] is None
+    job = manager.wait(manager.build(document, "s1", view=True), 120)
     assert job.status == "done", job.error
     summary = job.value
     assert summary["mode"] == "spinful" and summary["sites"] == 8 and summary["dimension"] == 16

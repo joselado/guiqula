@@ -188,8 +188,9 @@ class JobManager:
         return self.submit("run", {"document": document_json, "calculation": calculation,
                                    "cores": cores}, "batch", timeout, label=calculation)
 
-    def build(self, document_json, system, timeout=None):
-        return self.submit("build", {"document": document_json, "system": system},
+    def build(self, document_json, system, timeout=None, view=False):
+        """view: include the Hamiltonian view (engine/structure.py)."""
+        return self.submit("build", {"document": document_json, "system": system, "view": view},
                            "interactive", timeout, label=system)
 
     def cancel(self, job):
