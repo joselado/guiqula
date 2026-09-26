@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+
+# pyqula outputs (never belong in the repo; calculations run in scratch dirs)
+*.OUT
+*.pkl
+
+# local state
+.claude/settings.local.md
+CLAUDE.local.md
+ui_dump/
