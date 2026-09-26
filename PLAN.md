@@ -5,8 +5,8 @@ the Python tight-binding library. This document records the requirements, the
 framework decision, the architecture, and the phased plan. It is the reference
 for every later design discussion; update it when a decision changes.
 
-Status: **all decisions in sections 12 and 13 made on 2026-09-26 (only 13.13 is
-still open); the plan review of the same day is in section 14 (decided items)
+Status: **all decisions in sections 12 and 13 made on 2026-09-26 (13.13, in-app
+help from pyqula's documentation, decided after phase 1); the plan review of the same day is in section 14 (decided items)
 and at the end of section 11 (items still open).** Phases 0 and 1 were done
 on 2026-09-26 (section 7); phase 2 is next.
 
@@ -685,7 +685,7 @@ wrapper (the Claude add-on).
 | 2 | 13.2 selection tools on the canvas; 13.6 plain Qt theme; 13.14 crash reports |
 | 3 | 13.12 cost guard; 13.8 Hamiltonian view (first version: bonds and onsite); Fields: constant, expression, piecewise (section 3.8) |
 | 4 | 13.5 classical systems; 13.7 trust prompt (arrives with Python nodes); 14.1 remote console; 13.9 Brillouin-zone canvas; 13.10 sliders and sweeps; 13.11 overlays; Fields: profile, interpolated, painted, from_result (section 3.8) |
-| 5 | 13.16 teaching presets and exports; 13.13 in-app help if adopted |
+| 5 | 13.16 teaching presets and exports; 13.13 in-app help from pyqula's documentation |
 
 ## 8. Risks and mitigations
 
@@ -732,7 +732,6 @@ supersede quantum-lattice; both can coexist.
   reproducibility).
 - Whether sweeps should be a calculation kind or a first-class "study" object
   with its own outliner section.
-- 13.13, in-app help rendered from the vendored user guide: not decided.
 - How a classical texture is handed to a quantum system's exchange term
   (result reference in the Document, or a copied array), and how staleness
   propagates across that link.
@@ -762,8 +761,9 @@ supersede quantum-lattice; both can coexist.
 ## 13. Further considerations (decided 2026-09-26)
 
 All items were accepted by the maintainer, with item 5 changed from "quantum-only
-v1" to "classical models included, with their own features", and item 13 left
-undecided. Items 1 to 7 touch the Document schema or the package layout; items 8
+v1" to "classical models included, with their own features", and item 13 decided
+later the same day (after phase 1), with its content taken from pyqula's own
+documentation. Items 1 to 7 touch the Document schema or the package layout; items 8
 onward are features (placement per phase at the end of section 7).
 
 1. **Several systems per document.** Transport needs leads and a central
@@ -833,9 +833,17 @@ onward are features (placement per phase at the end of section 7).
    per calculation in the status bar, switch to sparse above pyqula's
    `limits.densedimension`, and warn before jobs that will take minutes.
 
-13. **In-app help from the vendored user guide** (undecided). Each registry entry names its
-   user-guide anchor; a help panel renders that section. quantum-lattice's
-   `TERM_TOOLTIPS` seed the short descriptions.
+13. **In-app help from pyqula's documentation** (accepted after phase 1: "in app
+   help ok, but get from pyqula docs"). The help text is pyqula's own, not
+   written again in guiqula: each registry entry names the section of the
+   vendored user guide (`vendor/pyqula_user_guide.md`, upstream
+   `documentation/user_guide.md`) that covers it, and a help panel renders
+   that section together with the docstring of the pyqula call behind the
+   entry. quantum-lattice's `TERM_TOOLTIPS` no longer seed it. Refreshing the
+   vendored copy refreshes the help; a test checks that every anchor a
+   registry entry names exists in the vendored guide, so a renamed upstream
+   section fails at refresh time. The guide ships with the package next to
+   the vendored pyqula. Phase 5.
 
 14. **Crash reports.** On an unexpected error, write a bundle with log,
    traceback, Document snapshot and versions to the user data directory and
