@@ -8,10 +8,15 @@ A region's ``select`` is JSON:
   sites within ``tol`` of one of the stored positions (positions survive
   upstream changes of the supercell, indices would not).
 
-Selections by sublattice, layer or edge distance come with the canvas tools
-in phase 2. compile_indicator gives a callable of one position returning 1.0
-inside and 0.0 outside, which is what restricting a Field to a region needs;
-code_indicator gives the same as Python source for script export.
+The structure canvas (phase 2) selects sites by click, box, lasso,
+sublattice or edge (fewer neighbours than the rest) and stores the result
+as a ``positions`` selection; a layer is an expression such as
+``abs(z - 3) < 0.1``. Selections by rule that follow later changes of the
+geometry (by sublattice, edge distance) would need the built geometry, not
+just a position, and are not implemented. compile_indicator gives a
+callable of one position returning 1.0 inside and 0.0 outside, which is
+what restricting a Field to a region needs; code_indicator gives the same
+as Python source for script export.
 """
 import numpy as np
 

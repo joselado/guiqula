@@ -6,6 +6,9 @@ through the same Session and command API as the window and the tests.
 
 Examples:
     python tools/drive.py honeycomb_zeeman_rashba --run c1 --shot bands.png
+    python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "select_sites", "box": [0.9, -2, 2.1, 2]}'
+        --do '{"do": "remove_selected"}' --widget structureView --shot sculpted.png
+    python tools/drive.py --recover --shot recovered.png
     python tools/drive.py project.guiqula --do '{"do": "set_param", "entry": "t2",
         "name": "c", "value": 0.3}' --run c1 --widget plotView --shot plot.png
     python tools/drive.py --list-widgets
@@ -13,8 +16,11 @@ Examples:
 
 A --do object names a mutation or an action with "do" and gives its
 arguments as the other keys; --commands FILE holds a JSON list of them.
-The report printed last is JSON: the document outline, job and result
-summaries, the end of the log, and the screenshot path.
+Window actions work too: select, workspace, tool, select_sites,
+region_from_selection, remove_selected. After each command the driver
+waits for the rebuild of the geometry, so a selection sees the new sites.
+The report printed last is JSON: the document outline, the builds, job and
+result summaries, the selection, the end of the log, and the screenshot.
 """
 import argparse
 import json
@@ -43,6 +49,12 @@ def parse_args(argv):
     parser.add_argument("--no-warm", action="store_true", help="skip the numba warm-up")
     parser.add_argument("--no-session", action="store_true",
                         help="only the window, without workers or a document")
+    parser.add_argument("--recover", action="store_true",
+                        help="recover the newest unsaved work of a session that did not close "
+                             "cleanly, before the commands")
+    parser.add_argument("--hold", type=float, default=0.0, metavar="SECONDS",
+                        help="keep the window running (autosave included) for this long "
+                             "before the report")
     parser.add_argument("--size", default="1200x800", metavar="WxH", help="window size")
     parser.add_argument("--python", action="append", default=[], metavar="CODE",
                         help="execute CODE with app, window, session in scope; repeatable")
@@ -66,14 +78,16 @@ def widget_tree(widget, depth=0):
     return lines
 
 
-def settle(app, window, session, timeout):
-    """Process events until no job is pending (builds and runs), including
-    the build the window schedules shortly after a document change."""
+def settle(app, window, session, timeout, builds_only=False):
+    """Process events until no job is pending (builds and runs, or builds
+    only), including the build the window schedules shortly after a
+    document change."""
     deadline = time.monotonic() + timeout
     while True:
         app.processEvents()
         pending = session is not None and (
-            window.build_timer.isActive() or not all(j.done for j in session.jobs.jobs.values()))
+            window.build_timer.isActive() or not all(
+                j.done for j in session.jobs.jobs.values() if j.kind == "build" or not builds_only))
         if not pending:
             app.processEvents()
             return True
@@ -85,7 +99,7 @@ def settle(app, window, session, timeout):
 def outline(document):
     out = []
     for system in document.systems:
-        out.append({"system": system.id, "lattice": system.geometry.base.kind,
+        out.append({"system": system.id, "name": system.name, "lattice": system.geometry.base.kind,
                     "ops": [f"{o.id}:{o.kind}" + ("" if o.enabled else "(off)")
                             for o in system.geometry.ops],
                     "terms": [f"{t.id}:{t.kind}" + ("" if t.enabled else "(off)")
@@ -116,15 +130,18 @@ def main(argv=None):
     try:
         if not args.no_session:
             session = window.start_session(args.document, warm=not args.no_warm)
-        elif args.document or commands or args.run:
+        elif args.document or commands or args.run or args.recover:
             print("drive.py: --no-session cannot load documents or run", file=sys.stderr)
             return 2
+        if args.recover:
+            report["recovered"] = session.act("recover")
+        settle(app, window, session, args.timeout, builds_only=True)
         for command in commands:
             command = dict(command)
             name = command.pop("do")
             value = session.run(name, **command)
             report.setdefault("commands", []).append({"do": name, "result": value})
-            app.processEvents()
+            settle(app, window, session, args.timeout, builds_only=True)
         for calc in args.run:
             window.select_calculation(calc)
             window.run_button.click()
@@ -136,6 +153,10 @@ def main(argv=None):
             if job.status != "done":
                 status = 1
         settle(app, window, session, args.timeout)
+        deadline = time.monotonic() + args.hold
+        while time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.02)
         for code in args.python:
             exec(code, {"app": app, "window": window, "session": session})
             app.processEvents()
@@ -143,6 +164,12 @@ def main(argv=None):
             print("\n".join(widget_tree(window)))
         if session is not None:
             report["document"] = outline(session.document)
+            report["builds"] = {s: {k: b[k] for k in ("sites", "dimensionality", "mode", "dimension")}
+                                for s, b in session.builds.items()}
+            report["build_errors"] = dict(session.build_errors)
+            report["selected"] = window.selected
+            report["selection"] = len(window.structure.selected())
+            report["modified"] = session.modified
             report["jobs"] = [j.summary() for j in session.jobs.jobs.values() if j.kind != "build"]
             report["results"] = {c: r.summary() for c, r in session.results.items()}
             report["stale"] = [c for c in session.results if session.is_stale(c)]

@@ -8,8 +8,8 @@ for every later design discussion; update it when a decision changes.
 Status: **all decisions in sections 12 and 13 made on 2026-09-26 (13.13, in-app
 help from pyqula's documentation, decided after phase 1, with open design
 points in section 11); the plan review of the same day is in section 14
-(decided items) and at the end of section 11 (items still open).** Phases 0 and 1 were done
-on 2026-09-26 (section 7); phase 2 is next.
+(decided items) and at the end of section 11 (items still open).** Phases 0, 1 and 2 were
+done on 2026-09-26 (section 7); phase 3 is next.
 
 ## 1. Requirements (as stated by the maintainer)
 
@@ -109,8 +109,8 @@ src/guiqula/
               console, the CLI driver and the future Claude add-on.
   session.py  Dispatcher + job manager + results: the one object the tests, the
               CLI, tools/drive.py, the UI and the remote API drive (phase 1).
-  io/         Project save/load (.guiqula), autosave journal, crash recovery,
-              pyqula script export.
+  io/         Project save/load (.guiqula), autosave and crash recovery, crash
+              reports, pyqula script export, result files.
   ui/         PySide6: main window, outliner, properties forms (auto-generated
               from schemas), viewport (structure canvas + plot tabs), console,
               job panel. Widgets carry stable objectNames for tests.
@@ -172,6 +172,12 @@ with its ordered stacks, plus a list of calculations and their results:
   "ui": {"workspace": "hamiltonian", "selected": "t1"}
 }
 ```
+
+(Since phase 2 the selected item, the workspace and the canvas selection
+are window state, reached through dispatcher actions, not stored in `ui`:
+writing them into the Document outside a Command would break the
+every-mutation-is-a-Command rule, and a Command per click would fill the
+undo stack. Whether a saved project should remember them is open.)
 
 A document holds a list of **systems** (decision 13.1). Each system has a
 `kind`: `quantum` (geometry, regions, Hamiltonian construction, term stack,
@@ -654,6 +660,44 @@ Carried over from phase 1: coalesce the interactive worker's build requests
 per system (every document event queues one build now, which a slider drag
 would pile up); show the Hilbert-space mode after each entry in the outliner
 (the build reports carry it, the phase-1 tree only shows the system's mode).
+**Done 2026-09-26**, acceptance tests `test_sculpt_by_command_and_see_it` and
+`test_kill_and_recover` in `tests/test_drive.py`. Built: the window of
+section 4 (workspace tabs switching palette toolbars built from the
+registry, outliner with enable checkboxes and the mode after each term,
+properties forms generated from the parameter declarations, a Structure and
+a Result tab, jobs and log docks, status bar); the structure canvas
+(`ui/structure.py`: atoms as circles in data units coloured by sublattice,
+pyqula's first-neighbour bonds, the neighbouring cells faded, the unit
+cell, overlays for the selected region or removal op, wheel zoom, and the
+pick, box and lasso tools plus select by sublattice or edge); regions and
+removals made from a selection (`remove_selected` grows a trailing Remove
+atoms op, PLAN 3.1); the island op (`pyqula.islands`); the build summary
+carries the geometry arrays (`engine/structure.py`); build requests
+coalesce per system; `io/autosave.py` (debounced, driven from
+`Session.poll()`, a recovered file is taken over so it stays recoverable
+until saved) with a non-modal recovery bar; `io/crashreport.py` and an
+exception hook with a non-modal error bar; a `duplicate` mutation; the
+window's own actions (`select`, `workspace`, `tool`, `select_sites`,
+`region_from_selection`, `remove_selected`) so drivers reach everything;
+`tools/drive.py --recover --hold`; `$GUIQULA_DATA_DIR`. Left for later:
+drag to reorder in the outliner (Alt+arrows and the context menu move
+entries), region kinds by rule that follow geometry changes (by sublattice
+or edge distance; the canvas tools store positions), crash reports for
+worker deaths (shown next to the job, as in phase 1), rendered formulas
+(the LaTeX source is shown), a 3D view (the canvas draws xy). Facts
+learned: with `geo=` given, `islands.get_geometry` still takes the default
+`nedges` from `name="square"` (4), so the entry always passes it, and the
+island size does not depend on the input cell (inradius 1.5 n); PySide6
+6.11 hands exceptions raised in slots and timers to `sys.excepthook`;
+`QScrollArea.setWidget` deletes the previous widget at once and
+`QTreeWidget.clear()` deletes items, so a form or a tree rebuilt from
+inside one of its own signals must be deleted later (the window does);
+pytest-qt creates the QApplication, so the theme is applied to an existing
+application too; matplotlib's selectors and synthetic `MouseEvent`s work
+offscreen (a press outside the axes is ignored); `os.kill(pid, 0)`
+terminates a process on Windows, so the autosave's liveness check uses
+`OpenProcess` there; pyqula's KD-tree neighbour search takes 0.2 s for
+10,000 sites.
 
 **Phase 3 — Hamiltonian workspace and results.** Term palette, schema forms
 with `f(r)` expressions, invalid-entry flagging with pyqula's messages, job
@@ -907,7 +951,9 @@ onward are features (placement per phase at the end of section 7).
    matplotlib loaded; importing pyqula alone takes 0.7 s.
    `tests/ui/test_startup.py` asserts the module set and a 2 s budget.
    Phase 1: 0.63 s to a shown window, now with matplotlib and numpy for the
-   plot tab; the workers are started after the window is shown.
+   plot tab; the workers are started after the window is shown. Phase 2:
+   0.68 s with the full shell; scipy joined the modules the UI process must
+   not load (the worker computes the bonds).
 
 16. **Teaching use.** A preset gallery, one-click export of figure plus data plus
    script, and presets with locked parameters, for use in courses.

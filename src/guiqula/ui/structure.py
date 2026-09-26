@@ -3,23 +3,121 @@ the interactive worker built it (engine/structure.py), drawn with
 matplotlib: atoms coloured by sublattice, first-neighbour bonds, the unit
 cell and the neighbouring cells faded, and overlays for what the selected
 entry touches (a region's sites, the positions a removal op deletes).
-Drawn in the xy plane."""
+Drawn in the xy plane.
+
+Site selection (PLAN.md 13.2): the pick tool selects the atom under a
+click (shift adds, ctrl toggles, a click on nothing clears), the box and
+lasso tools select what they enclose; the mouse wheel zooms, and the
+toolbar pans and zooms (while it does, the tools are off). The selection
+is kept as positions, so it survives a rebuild of the same geometry. The
+window turns it into a region or a removal op; the pure functions below do
+the geometry, so tests and drivers use them without a mouse.
+"""
 import itertools
 
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
-from matplotlib.collections import LineCollection
+from matplotlib.collections import EllipseCollection, LineCollection
 from matplotlib.figure import Figure
 from matplotlib.patches import Polygon
+from matplotlib.path import Path
+from matplotlib.widgets import LassoSelector, RectangleSelector
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from guiqula.ui import theme
 
 IMAGE_LIMIT = 3000       # above this many sites the neighbouring cells are not drawn
+RADIUS = 0.22            # of an atom, in pyqula's length unit (first neighbours at 1)
+PICK_RADIUS = 0.5        # a click selects the nearest site within this distance
+SAME_SITE = 1e-3         # positions closer than this are the same site
+TOOLS = ("pick", "box", "lasso")
+MODES = ("replace", "add", "toggle", "remove")
+SELECTION_ZORDER = 6
 
 
-def marker_size(n):
-    return float(np.clip(3000.0 / max(n, 1), 6.0, 120.0))
+# ---- selection geometry (pure numpy)
+def indices_in_box(xy, x0, y0, x1, y1):
+    xy = np.asarray(xy)[:, :2]
+    (xa, xb), (ya, yb) = sorted((x0, x1)), sorted((y0, y1))
+    inside = (xy[:, 0] >= xa) & (xy[:, 0] <= xb) & (xy[:, 1] >= ya) & (xy[:, 1] <= yb)
+    return np.nonzero(inside)[0]
+
+
+def indices_in_polygon(xy, vertices):
+    vertices = np.asarray(vertices, dtype=float).reshape(-1, 2)
+    if len(vertices) < 3:
+        return np.zeros(0, dtype=int)
+    return np.nonzero(Path(vertices).contains_points(np.asarray(xy)[:, :2]))[0]
+
+
+def nearest_index(xy, x, y, radius=PICK_RADIUS):
+    """The site nearest to (x, y) within radius, or None."""
+    xy = np.asarray(xy)[:, :2]
+    if len(xy) == 0:
+        return None
+    d = np.hypot(xy[:, 0] - x, xy[:, 1] - y)
+    i = int(np.argmin(d))
+    return i if d[i] <= radius else None
+
+
+def coordination(build):
+    """First neighbours of each site, counting bonds to the neighbouring cells."""
+    n = np.zeros(len(build["positions"]), dtype=int)
+    for pairs in (np.asarray(build["bonds"]).reshape(-1, 2),
+                  np.asarray(build["image_bonds"]).reshape(-1, 5)[:, :2]):
+        np.add.at(n, pairs[:, 0], 1)
+        np.add.at(n, pairs[:, 1], 1)
+    return n
+
+
+def edge_indices(build):
+    """Sites with fewer first neighbours than the best-connected ones."""
+    n = coordination(build)
+    return np.nonzero(n < n.max())[0] if len(n) else np.zeros(0, dtype=int)
+
+
+def sublattice_indices(build, sign):
+    sublattice = build.get("sublattice")
+    if sublattice is None:
+        return np.zeros(0, dtype=int)
+    return np.nonzero(np.sign(sublattice) == np.sign(sign))[0]
+
+
+def combine(current, new, mode="replace"):
+    """Apply a selection gesture to a set of indices."""
+    current, new = set(map(int, current)), set(map(int, new))
+    if mode == "replace":
+        out = new
+    elif mode == "add":
+        out = current | new
+    elif mode == "toggle":
+        out = current ^ new
+    elif mode == "remove":
+        out = current - new
+    else:
+        raise ValueError(f"unknown selection mode {mode!r}; modes: {list(MODES)}")
+    return np.array(sorted(out), dtype=int)
+
+
+def match_positions(positions, stored, tol=SAME_SITE):
+    """Indices of the sites at the stored positions (those still there)."""
+    positions = np.asarray(positions, dtype=float)
+    stored = np.asarray(stored, dtype=float).reshape(-1, 3)
+    if len(stored) == 0 or len(positions) == 0:
+        return np.zeros(0, dtype=int)
+    d = np.linalg.norm(positions[:, None, :] - stored[None, :, :], axis=2)
+    return np.nonzero(d.min(axis=1) < tol)[0]
+
+
+def circles(ax, xy, radius, zorder, autolim=False, **style):
+    """Circles of a radius in data units (they grow when zooming in), one
+    per row of xy; set_offsets() moves them later."""
+    collection = EllipseCollection(2 * radius, 2 * radius, 0.0, units="xy",
+                                   offsets=np.asarray(xy, dtype=float).reshape(-1, 2),
+                                   offset_transform=ax.transData, zorder=zorder, **style)
+    ax.add_collection(collection, autolim=autolim)
+    return collection
 
 
 def image_cells(dimensionality):
@@ -60,11 +158,12 @@ def cell_outline(build):
 
 def draw_structure(ax, build, highlight=None, selected=None, removed=None, images=True):
     """Draw a build summary on a matplotlib Axes. highlight: boolean mask of
-    sites (a region), selected: site indices, removed: (M, 3) positions."""
+    sites (a region), selected: site indices, removed: (M, 3) positions.
+    Only the central cell sets the view; the neighbouring cells show at its
+    border. Returns the collection of the selection rings."""
     r = np.asarray(build["positions"])
     xy = r[:, :2]
     n = len(r)
-    size = marker_size(n)
     colors = site_colors(build)
     lattice = np.asarray(build["lattice"])[:, :2]
     central = bond_segments(build)
@@ -73,37 +172,43 @@ def draw_structure(ax, build, highlight=None, selected=None, removed=None, image
         shifts = np.array([c @ lattice for c in cells])
         faded = (central[None, :, :, :] + shifts[:, None, None, :]).reshape(-1, 2, 2)
         ax.add_collection(LineCollection(faded, colors=theme.BOND, linewidths=0.8, alpha=0.25,
-                                         zorder=1))
+                                         zorder=1), autolim=False)
         ghosts = (xy[None, :, :] + shifts[:, None, :]).reshape(-1, 2)
-        ax.scatter(ghosts[:, 0], ghosts[:, 1], c=colors * len(cells), s=size, alpha=0.2,
-                   linewidths=0, zorder=2)
+        circles(ax, ghosts, RADIUS, 2, facecolors=colors * len(cells), alpha=0.2,
+                linewidths=0)
     if len(central):
-        ax.add_collection(LineCollection(central, colors=theme.BOND, linewidths=1.2, zorder=3))
-    ax.scatter(xy[:, 0], xy[:, 1], c=colors, s=size, edgecolors="white", linewidths=0.5,
-               zorder=4)
+        ax.add_collection(LineCollection(central, colors=theme.BOND, linewidths=1.2, zorder=3),
+                          autolim=False)
+    circles(ax, xy, RADIUS, 4, autolim=True, facecolors=colors, edgecolors="white",
+            linewidths=0.5)
     outline = cell_outline(build)
     if outline is not None:
         ax.add_patch(Polygon(outline, closed=True, fill=False, edgecolor=theme.CELL,
                              linestyle="--", linewidth=1.0, zorder=0))
     if highlight is not None and np.any(highlight):
-        ax.scatter(xy[highlight, 0], xy[highlight, 1], s=size * 2.6, facecolors="none",
-                   edgecolors=theme.REGION, linewidths=1.8, zorder=5)
-    if selected is not None and len(selected):
-        idx = np.asarray(selected, dtype=int)
-        ax.scatter(xy[idx, 0], xy[idx, 1], s=size * 2.0, facecolors="none",
-                   edgecolors=theme.SELECTED, linewidths=2.0, zorder=6)
+        circles(ax, xy[np.asarray(highlight, dtype=bool)], 1.7 * RADIUS, 5, facecolors="none",
+                edgecolors=theme.REGION, linewidths=1.8)
+    idx = np.asarray(selected if selected is not None else [], dtype=int)
+    selection = circles(ax, xy[idx], 1.45 * RADIUS, SELECTION_ZORDER, facecolors="none",
+                        edgecolors=theme.SELECTED, linewidths=2.0)
     if removed is not None and len(removed):
-        p = np.asarray(removed, dtype=float).reshape(-1, 3)
-        ax.scatter(p[:, 0], p[:, 1], marker="x", c=theme.REMOVED, s=size, linewidths=2.0,
+        p = np.asarray(removed, dtype=float).reshape(-1, 3)[:, :2]
+        circles(ax, p, RADIUS, 7, facecolors="none", edgecolors=theme.REMOVED,
+                linewidths=1.2, linestyles="--")
+        ax.scatter(p[:, 0], p[:, 1], marker="x", c=theme.REMOVED, s=20, linewidths=1.5,
                    zorder=7)
-    ax.set_aspect("equal", adjustable="box")
+    ax.set_aspect("equal", adjustable="datalim")
+    ax.margins(0.15 if cells else 0.08)
     ax.autoscale_view()
-    ax.margins(0.08)
     ax.tick_params(labelsize=8)
+    return selection
 
 
 class StructureView(QWidget):
-    """A matplotlib canvas with its navigation toolbar (pan, zoom, save)."""
+    """A matplotlib canvas with its navigation toolbar (pan, zoom, save)
+    and the site-selection tools."""
+
+    selection_changed = Signal(int)          # number of selected sites
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -124,27 +229,143 @@ class StructureView(QWidget):
         self.system_id = None
         self.build = None
         self.ax = None
+        self.tool = "pick"
+        self.selected_positions = np.zeros((0, 3))
+        self._selection_artist = None
+        self._selector = None
+        self._caption = ""
+        self.canvas.mpl_connect("button_press_event", self._on_press)
+        self.canvas.mpl_connect("scroll_event", self._on_scroll)
 
+    # ---- drawing
     def show_structure(self, system_id, build, caption="", **overlays):
-        """Redraw; keeps the zoom when the same system is shown again."""
+        """Redraw; keeps the zoom when the same geometry is shown again,
+        and the selection when its sites are still there."""
         limits = None
         if self.ax is not None and system_id == self.system_id and self.build is not None:
             limits = (self.ax.get_xlim(), self.ax.get_ylim())
         same_sites = self.build is not None and build is not None and \
             np.shape(self.build["positions"]) == np.shape(build["positions"])
+        if system_id != self.system_id:
+            self.selected_positions = np.zeros((0, 3))
         self.system_id, self.build = system_id, build
         self.figure.clear()
         self.ax = self.figure.add_subplot(111)
-        draw_structure(self.ax, build, **overlays)
+        self._selection_artist = draw_structure(self.ax, build, selected=self.selected(),
+                                                **overlays)
+        self.figure.tight_layout()
         if limits is not None and same_sites:
+            self.ax.get_xlim()               # settle the autoscaling of the new artists first
             self.ax.set_xlim(*limits[0])
             self.ax.set_ylim(*limits[1])
-        self.figure.tight_layout()
-        self.caption.setText(caption)
-        self.canvas.draw_idle()
+            self.ax.set_autoscale_on(True)   # the equal aspect may widen one of them
+        self._caption = caption
+        self._install_tool()
+        self._update_selection()
 
     def clear(self, caption=""):
         self.system_id, self.build, self.ax = None, None, None
+        self._selector = self._selection_artist = None
+        self.selected_positions = np.zeros((0, 3))
         self.figure.clear()
+        self._caption = caption
         self.caption.setText(caption)
+        self.canvas.draw_idle()
+        self.selection_changed.emit(0)
+
+    # ---- selection
+    def selected(self):
+        """Indices of the selected sites in the geometry shown."""
+        if self.build is None:
+            return np.zeros(0, dtype=int)
+        return match_positions(self.build["positions"], self.selected_positions)
+
+    def select(self, indices, mode="replace"):
+        """Apply a selection gesture (MODES) with site indices; returns the
+        number of selected sites."""
+        if self.build is None:
+            raise ValueError("there is no geometry to select from")
+        indices = combine(self.selected(), indices, mode)
+        self.selected_positions = np.asarray(self.build["positions"])[indices].reshape(-1, 3)
+        self._update_selection()
+        return len(indices)
+
+    def _update_selection(self):
+        indices = self.selected()
+        if self._selection_artist is not None and self.build is not None:
+            xy = np.asarray(self.build["positions"])[indices, :2]
+            self._selection_artist.set_offsets(xy.reshape(-1, 2))
+        n = len(indices)
+        text = self._caption + (f" · {n} selected" if n else "")
+        self.caption.setText(text)
+        self.canvas.draw_idle()
+        self.selection_changed.emit(n)
+
+    # ---- tools
+    def set_tool(self, tool):
+        if tool not in TOOLS:
+            raise ValueError(f"unknown tool {tool!r}; tools: {list(TOOLS)}")
+        self.tool = tool
+        self._install_tool()
+        return tool
+
+    def _install_tool(self):
+        if self._selector is not None:
+            self._selector.set_active(False)
+            self._selector = None
+        if self.ax is None:
+            return
+        props = {"color": theme.SELECTED, "linewidth": 1.5}
+        if self.tool == "box":
+            self._selector = RectangleSelector(
+                self.ax, self._on_box, useblit=False, button=[1], interactive=False,
+                props={"edgecolor": theme.SELECTED, "fill": False, "linewidth": 1.5})
+        elif self.tool == "lasso":
+            self._selector = LassoSelector(self.ax, self._on_lasso, useblit=False, button=[1],
+                                           props=props)
+
+    def _navigating(self):
+        return bool(getattr(self.toolbar, "mode", ""))
+
+    @staticmethod
+    def _mode(key):
+        key = key or ""
+        if "shift" in key:
+            return "add"
+        if "control" in key or "ctrl" in key:
+            return "toggle"
+        return "replace"
+
+    def _on_press(self, event):
+        if self.tool != "pick" or self.build is None or event.inaxes is not self.ax \
+                or event.button != 1 or self._navigating():
+            return
+        i = nearest_index(self.build["positions"], event.xdata, event.ydata)
+        mode = self._mode(event.key)
+        if i is None:
+            if mode == "replace":
+                self.select([], "replace")
+            return
+        self.select([i], mode)
+
+    def _on_box(self, press, release):
+        if self.build is None or self._navigating():
+            return
+        indices = indices_in_box(self.build["positions"], press.xdata, press.ydata,
+                                 release.xdata, release.ydata)
+        self.select(indices, self._mode(release.key))
+
+    def _on_lasso(self, vertices):
+        if self.build is None or self._navigating():
+            return
+        self.select(indices_in_polygon(self.build["positions"], vertices))
+
+    def _on_scroll(self, event):
+        if self.ax is None or event.inaxes is not self.ax or event.xdata is None:
+            return
+        factor = 1 / 1.2 if event.button == "up" else 1.2
+        for get, set_, centre in ((self.ax.get_xlim, self.ax.set_xlim, event.xdata),
+                                  (self.ax.get_ylim, self.ax.set_ylim, event.ydata)):
+            low, high = get()
+            set_(centre - (centre - low) * factor, centre + (high - centre) * factor)
         self.canvas.draw_idle()

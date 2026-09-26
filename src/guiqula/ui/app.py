@@ -20,7 +20,9 @@ def create_application(argv=None):
         env.configure_qt()
         app = QApplication(list(argv) if argv is not None else sys.argv[:1])
         app.setApplicationName("guiqula")
-        theme.apply(app)     # plain Qt look (decision 13.6)
+    if not app.property("guiqula_theme"):    # also an application someone else made (pytest-qt)
+        theme.apply(app)                     # plain Qt look (decision 13.6)
+        app.setProperty("guiqula_theme", True)
     return app
 
 

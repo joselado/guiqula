@@ -151,6 +151,47 @@ def test_structure_canvas_and_overlays(window, qtbot, shot):
     shot(window, "region_overlay")
 
 
+def test_selection_to_removal_and_region(window, qtbot, shot):
+    """Select on the canvas, remove the selection (one Remove atoms op that
+    grows), make a region from a selection, all undoable. The preset's 2x2
+    honeycomb cell has sites at x = -2, -1, 1, 2 (y = 0) and x = +-0.5
+    (y = +-0.87), sublattices alternating."""
+    fresh(qtbot, window)
+    session = window.session
+    assert not window.remove_button.isEnabled()
+    assert session.act("select_sites", box=[0.9, -2.0, 2.1, 2.0]) == 2      # x = 1 and 2
+    assert window.remove_button.isEnabled() and "2 selected" in window.structure.caption.text()
+    op = session.act("remove_selected")
+    assert window.selected == op and window.structure.selected().tolist() == []
+    assert len(session.document.find(op)[-1].params["positions"]) == 2
+    settle(qtbot, window)
+    assert window.builds["s1"]["sites"] == 6
+    assert 0 < session.act("select_sites", edge=True) < 6    # the neighbours of the hole
+    assert session.act("select_sites", sublattice=1) == 3
+    assert session.act("remove_selected") == op          # the trailing removal op grows
+    assert len(session.document.find(op)[-1].params["positions"]) == 5
+    settle(qtbot, window)
+    assert window.builds["s1"]["sites"] == 3
+    shot(window, "removed")
+    assert session.act("select_sites", point=[100.0, 100.0]) == 0
+    with pytest.raises(ValueError, match="no sites are selected"):
+        session.act("region_from_selection")
+    with pytest.raises(ValueError, match="exactly one"):
+        session.act("select_sites", all=True, edge=True)
+    assert session.act("select_sites", all=True) == 3
+    assert session.act("select_sites", indices=[0], mode="remove") == 2
+    region = session.act("region_from_selection", name="picked")
+    select = session.document.find(region)[-1].select
+    assert select["kind"] == "positions" and len(select["positions"]) == 2
+    assert isinstance(window.properties.form, RegionForm)
+    session.act("select_sites", indices=[])
+    window.properties.form.show_sites.click()            # the region form selects its sites
+    assert len(window.structure.selected()) == 2
+    session.undo()                                       # the region
+    session.undo()                                       # the grown removal
+    assert len(session.document.find(op)[-1].params["positions"]) == 2
+
+
 def test_report_exception_writes_a_crash_report(window, tmp_path, monkeypatch):
     monkeypatch.setenv("GUIQULA_DATA_DIR", str(tmp_path))
     try:

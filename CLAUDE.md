@@ -23,8 +23,8 @@ a thin UI already in phase 1, invalid entries are skipped and flagged; the revie
 still open are at the end of section 11). Read it before designing anything; update it when
 a decision changes.
 
-Status (2026-09-26): phases 0 and 1 are done (PLAN.md section 7 says what each built).
-Phase 2 (UI shell, geometry workspace, autosave and recovery) is next.
+Status (2026-09-26): phases 0, 1 and 2 are done (PLAN.md section 7 says what each built
+and what was left for later). Phase 3 (Hamiltonian workspace, `f(r)` editor, results) is next.
 
 ## Code map
 
@@ -43,14 +43,22 @@ a `Session`.
 - `commands/`: `Dispatcher` (mutations with snapshot undo, actions journaled only);
   `mutations.py` lists every mutation. Command arguments are JSON.
 - `engine/`: `build.py` executes a plan (per-stage cache handing out copies, skip on error,
-  seeds), `calculations.py` runs an adapter and returns a `Result`.
+  seeds), `calculations.py` runs an adapter and returns a `Result`, `structure.py` gives the
+  canvas its arrays (positions, lattice, sublattice, pyqula's first-neighbour bonds).
 - `worker/`: `process.py` (the worker, imports the engine inside `main()` only), `client.py`
   (`JobManager`: interactive and batch workers, cancel, respawn, timeouts), `protocol.py`.
-- `session.py`: dispatcher + job manager + results; the object tests, `guiqula run`,
-  `tools/drive.py` and the window drive. `io/`: project files, presets
-  (`src/guiqula/presets/*.json`, loadable by name), script export, result files.
-- `ui/`: the phase-1 window (`mainwindow.py`, `jobpanel.py`, `plots.py`, `doctree.py`); it
-  polls the session from a `QTimer` and starts the workers after it is shown.
+- `session.py`: dispatcher + job manager + results + the latest build of each system
+  (coalesced requests) + `modified`; with `autosave=True` (the window's) it autosaves from
+  `poll()`. The object tests, `guiqula run`, `tools/drive.py` and the window drive.
+- `io/`: project files, presets (`src/guiqula/presets/*.json`, loadable by name), script
+  export, result files, `autosave.py` (autosave and recovery), `crashreport.py`.
+- `ui/`: `mainwindow.py` (workspaces, palettes from the registry, docks, bars; the window's
+  own dispatcher actions `select`, `workspace`, `tool`, `select_sites`,
+  `region_from_selection`, `remove_selected`), `outliner.py`, `properties.py` + `forms.py`
+  (forms from the parameter declarations), `structure.py` (canvas and selection tools),
+  `plots.py`, `jobpanel.py`, `bars.py`, `errors.py` (exception hook), `theme.py`. The window
+  polls the session from a `QTimer` and starts the workers after it is shown; a form or tree
+  rebuilt from inside one of its own signals must be deleted later (PLAN.md phase 2 facts).
 
 ## Hard rules
 
@@ -134,7 +142,7 @@ Nothing is installed: pytest puts `src/` on the path (`pyproject.toml`), and `to
 does it itself. Keep this section in sync with what exists.
 
 ```bash
-python -m pytest                       # everything (offscreen Qt, worker processes; 1.5-2.5 min)
+python -m pytest                       # everything (offscreen Qt, worker processes; 2-3 min)
 python -m pytest -m "not slow"         # skip the wheel build
 python -m pytest tests/core            # pure Python, under a second
 python -m pytest tests/engine -k zeeman  # one area / one test
@@ -145,11 +153,17 @@ python tools/drive.py honeycomb_zeeman_rashba --run c1 --shot bands.png    # dri
 python tools/drive.py preset --do '{"do": "add_term", "system": "s1", "kind": "haldane"}' \
     --run c1 --widget plotView --shot plot.png     # also --commands FILE, --python CODE,
                                                    # --list-widgets, --no-warm (see --help)
+python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "select_sites", "box": [0.9, -2, 2.1, 2]}' \
+    --do '{"do": "remove_selected"}' --widget structureView --shot sculpted.png
+python tools/drive.py --recover --shot recovered.png   # unsaved work of a killed session
+                                                   # (--hold SECONDS keeps the window running)
 tools/update_vendor.sh                 # refresh vendor/ from upstream pyqula
 ```
 
-`drive.py` prints a JSON report last (document outline, jobs, result summaries, log tail,
-screenshot path); a `--do` object names a mutation or an action with `"do"`. In Python,
+`drive.py` prints a JSON report last (document outline, builds, jobs, result summaries,
+selection, log tail, screenshot path); a `--do` object names a mutation or an action with
+`"do"`, and the driver waits for the rebuild after each one. Autosaves and crash reports go to
+the user data directory, or to `$GUIQULA_DATA_DIR` (the test suite sets it). In Python,
 `Session("honeycomb_zeeman_rashba", warm=False)` gives the same API: `do(...)`, `act(...)`,
 `run_calculation(calc, wait=True)`, `result(calc)`, `status(calc)`, `undo()`, `close()`.
 

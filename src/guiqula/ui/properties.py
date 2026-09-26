@@ -11,7 +11,7 @@ otherwise the form is rebuilt.
 """
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QGroupBox, QLabel, QLineEdit,
-                               QScrollArea, QVBoxLayout, QWidget)
+                               QPushButton, QScrollArea, QVBoxLayout, QWidget)
 
 from guiqula.core import regions as region_tools
 from guiqula.core.document import DocumentError
@@ -322,7 +322,22 @@ class RegionForm(Form):
         self.rows.addRow("sites now", self.sites)
         self.users = QLabel()
         self.rows.addRow("used by", self.users)
+        self.show_sites = QPushButton("Select on canvas")
+        self.show_sites.setObjectName("selectRegionSites")
+        self.show_sites.setToolTip("select these sites on the Structure tab (e.g. to remove "
+                                   "them, or to make a region by position from them)")
+        self.show_sites.clicked.connect(self._select_sites)
+        self.rows.addRow("", self.show_sites)
         self.update_values()
+
+    def _select_sites(self):
+        region = self.session.document.find(self.item_id)[-1]
+        build = self.session.builds.get(self.system_id)
+        if build is None:
+            self.error.setText("the geometry is not built yet")
+            return
+        mask = region_tools.evaluate_positions(region.select, build["positions"])
+        self.commit("select_sites", indices=[int(i) for i in mask.nonzero()[0]])
 
     def signature(self):
         region = self.session.document.find(self.item_id)[-1]

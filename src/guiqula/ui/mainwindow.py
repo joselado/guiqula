@@ -5,10 +5,13 @@ Structure tab and the Result tab) in the centre, the properties form and
 the jobs on the right, the log at the bottom, and the status bar.
 
 The window is a client of a Session: every change goes through the
-dispatcher. The selected item and the workspace are window state, not
-Document mutations; they are registered on the dispatcher as the actions
-``select`` and ``workspace``, so tools/drive.py and the future remote API
-reach them without putting clicks on the undo stack.
+dispatcher. The selected item, the workspace, the canvas tool and the site
+selection are window state, not Document mutations; they are registered on
+the dispatcher as actions (select, workspace, tool, select_sites), so
+tools/drive.py and the future remote API reach them without putting clicks
+on the undo stack. region_from_selection and remove_selected are actions
+that apply one mutation each (add_region; add_geometry_op, or set_param on
+a trailing removal op, PLAN.md 3.1).
 
 The window does not start workers by itself: start_session() creates the
 Session (app.run calls it right after the window is shown, so the window
@@ -22,9 +25,9 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
-from PySide6.QtWidgets import (QComboBox, QDockWidget, QFileDialog, QLabel, QMainWindow, QMenu,
-                               QMessageBox, QPlainTextEdit, QPushButton, QTabBar, QTabWidget,
-                               QToolBar, QToolButton, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QButtonGroup, QComboBox, QDockWidget, QFileDialog, QLabel,
+                               QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QPushButton,
+                               QTabBar, QTabWidget, QToolBar, QToolButton, QVBoxLayout, QWidget)
 
 import guiqula
 from guiqula import vendoring
@@ -37,12 +40,16 @@ from guiqula.ui.jobpanel import JobPanel
 from guiqula.ui.outliner import Outliner, system_of
 from guiqula.ui.plots import PlotView
 from guiqula.ui.properties import PropertiesPanel
+from guiqula.ui import structure as structure_tools
 from guiqula.ui.structure import StructureView
 
 POLL_MS = 30
 BUILD_DELAY_MS = 150
 WORKSPACES = ("geometry", "hamiltonian", "calculate")
+# actions of the window itself: they change what is shown, not the Document
+WINDOW_ACTIONS = ("select", "workspace", "tool", "select_sites")
 STRUCTURE_TAB, RESULT_TAB = 0, 1
+REGION_TOLERANCE = 0.05      # positions regions made from a canvas selection
 
 
 def _grouped(family):
@@ -71,6 +78,7 @@ class MainWindow(QMainWindow):
         self.outliner.command.connect(self._outliner_command)
         self.properties = PropertiesPanel(self._do)
         self.structure = StructureView()
+        self.structure.selection_changed.connect(self._selection_changed)
         self.plot = PlotView()
         self.viewport = QTabWidget()
         self.viewport.setObjectName("viewport")
@@ -170,30 +178,6 @@ class MainWindow(QMainWindow):
             self.workspace_tabs.addTab(name.capitalize())
         self.workspace_tabs.currentChanged.connect(lambda i: self.set_workspace(WORKSPACES[i]))
         bar.addWidget(self.workspace_tabs)
-
-        self.palettes = {}
-        geometry = self._toolbar("Geometry", "geometryToolbar")
-        self._menu_button(geometry, "New system", "newSystemButton", _grouped("lattice"),
-                          self.new_system, "newSystem")
-        self._menu_button(geometry, "Add op", "addOpButton", _grouped("geometry_op"),
-                          self.add_op, "addOp")
-        self.add_region_button = QPushButton("Add region")
-        self.add_region_button.setObjectName("addRegionButton")
-        self.add_region_button.setToolTip("a region of the current system, by expression")
-        self.add_region_button.clicked.connect(self.add_region)
-        geometry.addWidget(self.add_region_button)
-        self.palettes["geometry"] = geometry
-
-        hamiltonian = self._toolbar("Hamiltonian", "hamiltonianToolbar")
-        self._menu_button(hamiltonian, "Add term", "addTermButton", _grouped("term"),
-                          self.add_term, "addTerm")
-        self.palettes["hamiltonian"] = hamiltonian
-
-        calculate = self._toolbar("Calculate", "calculateToolbar")
-        self._menu_button(calculate, "Add calculation", "addCalculationButton",
-                          _grouped("calculation"), self.add_calculation, "addCalc")
-        self.palettes["calculate"] = calculate
-
         run = self._toolbar("Run", "runToolbar")
         run.addWidget(QLabel(" Calculation "))
         self.calc_box = QComboBox()
@@ -209,6 +193,69 @@ class MainWindow(QMainWindow):
         self.cancel_button.setObjectName("cancelButton")
         self.cancel_button.clicked.connect(self.cancel_selected)
         run.addWidget(self.cancel_button)
+        self.addToolBarBreak()              # the palettes get a row of their own
+
+        self.palettes = {}
+        geometry = self._toolbar("Geometry", "geometryToolbar")
+        self._menu_button(geometry, "New system", "newSystemButton", _grouped("lattice"),
+                          self.new_system, "newSystem")
+        self._menu_button(geometry, "Add op", "addOpButton", _grouped("geometry_op"),
+                          self.add_op, "addOp")
+        self.add_region_button = QPushButton("Add region")
+        self.add_region_button.setObjectName("addRegionButton")
+        self.add_region_button.setToolTip("a region of the current system, by expression")
+        self.add_region_button.clicked.connect(self.add_region)
+        geometry.addWidget(self.add_region_button)
+        geometry.addSeparator()
+        self.tool_buttons = QButtonGroup(self)
+        for tool, text, tip in (("pick", "Pick", "click an atom; shift adds, ctrl toggles"),
+                                ("box", "Box", "drag a rectangle"),
+                                ("lasso", "Lasso", "draw around the atoms")):
+            button = QToolButton()
+            button.setText(text)
+            button.setToolTip(f"select sites: {tip}")
+            button.setObjectName(f"tool_{tool}")
+            button.setCheckable(True)
+            button.setChecked(tool == "pick")
+            button.clicked.connect(lambda checked=False, t=tool: self.set_tool(t))
+            self.tool_buttons.addButton(button)
+            geometry.addWidget(button)
+        select = QToolButton()
+        select.setText("Select")
+        select.setObjectName("selectSitesButton")
+        select.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        menu = QMenu(select)
+        for text, name, args in (("All", "selectAll", {"all": True}),
+                                 ("Sublattice A", "selectSublatticeA", {"sublattice": 1}),
+                                 ("Sublattice B", "selectSublatticeB", {"sublattice": -1}),
+                                 ("Edge sites", "selectEdge", {"edge": True}),
+                                 ("Invert", "selectInvert", {"all": True, "mode": "toggle"}),
+                                 ("Nothing", "selectNone", {"indices": []})):
+            action = menu.addAction(text)
+            action.setObjectName(name)
+            action.triggered.connect(lambda checked=False, a=args: self._act("select_sites", **a))
+        select.setMenu(menu)
+        geometry.addWidget(select)
+        self.region_button = QPushButton("Region from selection")
+        self.region_button.setObjectName("regionFromSelectionButton")
+        self.region_button.clicked.connect(lambda: self._act("region_from_selection"))
+        geometry.addWidget(self.region_button)
+        self.remove_button = QPushButton("Remove selected")
+        self.remove_button.setObjectName("removeSelectedButton")
+        self.remove_button.setToolTip("remove the selected atoms (a Remove atoms op, by position)")
+        self.remove_button.clicked.connect(lambda: self._act("remove_selected"))
+        geometry.addWidget(self.remove_button)
+        self.palettes["geometry"] = geometry
+
+        hamiltonian = self._toolbar("Hamiltonian", "hamiltonianToolbar")
+        self._menu_button(hamiltonian, "Add term", "addTermButton", _grouped("term"),
+                          self.add_term, "addTerm")
+        self.palettes["hamiltonian"] = hamiltonian
+
+        calculate = self._toolbar("Calculate", "calculateToolbar")
+        self._menu_button(calculate, "Add calculation", "addCalculationButton",
+                          _grouped("calculation"), self.add_calculation, "addCalc")
+        self.palettes["calculate"] = calculate
 
     def _action(self, menu, text, slot, shortcut=None, name=None):
         action = QAction(text, self)
@@ -274,6 +321,10 @@ class MainWindow(QMainWindow):
         dispatcher = session.dispatcher
         dispatcher.register_action("select", lambda entry="": self.select(entry))
         dispatcher.register_action("workspace", lambda name: self.set_workspace(name))
+        dispatcher.register_action("tool", lambda name: self.set_tool(name))
+        dispatcher.register_action("select_sites", self.select_sites)
+        dispatcher.register_action("region_from_selection", self.region_from_selection)
+        dispatcher.register_action("remove_selected", self.remove_selected)
         self.timer.start(POLL_MS)
         self._document_changed()
         self.offer_recovery(quiet=True)
@@ -323,8 +374,7 @@ class MainWindow(QMainWindow):
                 self.message(f"{payload['role']} worker restarted (pid {payload['pid']})")
 
     def _document_changed(self, event=None):
-        if event is not None and event["type"] == "action" and event["name"] in ("select",
-                                                                                 "workspace"):
+        if event is not None and event["type"] == "action" and event["name"] in WINDOW_ACTIONS:
             return
         if self.selected and not self._exists(self.selected):
             self.selected = ""
@@ -439,6 +489,91 @@ class MainWindow(QMainWindow):
             bar.setVisible(key == name)
         self.viewport.setCurrentIndex(RESULT_TAB if name == "calculate" else STRUCTURE_TAB)
         return name
+
+    # ---- canvas tools and the site selection
+    def set_tool(self, name):
+        self.structure.set_tool(name)
+        for button in self.tool_buttons.buttons():
+            button.setChecked(button.objectName() == f"tool_{name}")
+        return name
+
+    def select_sites(self, mode="replace", indices=None, box=None, polygon=None, point=None,
+                     positions=None, sublattice=None, edge=False, all=False):
+        """Select sites of the geometry on the Structure tab, as the canvas
+        tools do; give one of: indices, box [x0, y0, x1, y1], polygon
+        [[x, y], ...], point [x, y], positions [[x, y, z], ...], sublattice
+        (1 or -1), edge (sites with fewer neighbours than the most
+        connected), all. mode: replace, add, toggle, remove. Returns the
+        number of selected sites."""
+        build = self.structure.build
+        if build is None:
+            raise ValueError("there is no geometry on the Structure tab to select from")
+        r = build["positions"]
+        given = [k for k, v in dict(indices=indices, box=box, polygon=polygon, point=point,
+                                    positions=positions, sublattice=sublattice).items()
+                 if v is not None] + (["edge"] if edge else []) + (["all"] if all else [])
+        if len(given) != 1:
+            raise ValueError(f"give exactly one way of selecting, got {given or 'none'}")
+        if indices is not None:
+            chosen = [int(i) for i in indices]
+            if any(not 0 <= i < len(r) for i in chosen):
+                raise ValueError(f"site indices go from 0 to {len(r) - 1}")
+        elif box is not None:
+            chosen = structure_tools.indices_in_box(r, *box)
+        elif polygon is not None:
+            chosen = structure_tools.indices_in_polygon(r, polygon)
+        elif point is not None:
+            i = structure_tools.nearest_index(r, *point)
+            chosen = [] if i is None else [i]
+        elif positions is not None:
+            chosen = structure_tools.match_positions(r, positions, REGION_TOLERANCE)
+        elif sublattice is not None:
+            chosen = structure_tools.sublattice_indices(build, sublattice)
+        elif edge:
+            chosen = structure_tools.edge_indices(build)
+        else:
+            chosen = range(len(r))
+        return self.structure.select(chosen, mode)
+
+    def _selection_positions(self):
+        system = self.structure.system_id
+        positions = self.structure.selected_positions
+        if system is None or not len(self.structure.selected()):
+            raise ValueError("no sites are selected")
+        if not self.session.build_is_current(system):
+            raise ValueError("the geometry is being rebuilt; select again when it is shown")
+        return system, [[float(c) for c in p] for p in positions]
+
+    def region_from_selection(self, name=""):
+        """A region holding the selected sites, by position; returns its id."""
+        system, positions = self._selection_positions()
+        region = self.session.do("add_region", system=system, name=name, select={
+            "kind": "positions", "positions": positions, "tol": REGION_TOLERANCE})
+        self.select(region)
+        return region
+
+    def remove_selected(self):
+        """Remove the selected sites: extend the system's last op if it is
+        an enabled Remove atoms op, else add one. Returns the op id."""
+        system, positions = self._selection_positions()
+        ops = self.session.document.system(system).geometry.ops
+        last = ops[-1] if ops else None
+        if last is not None and last.kind == "remove_atoms" and last.enabled:
+            stored = last.params["positions"]
+            new = [p for p in positions if not len(structure_tools.match_positions(
+                [p], stored, structure_tools.SAME_SITE))]
+            self.session.do("set_param", entry=last.id, name="positions", value=stored + new)
+            op = last.id
+        else:
+            op = self.session.do("add_geometry_op", system=system, kind="remove_atoms",
+                                 params={"positions": positions})
+        self.structure.select([], "replace")
+        self.select(op)
+        return op
+
+    def _selection_changed(self, count):
+        self.region_button.setEnabled(count > 0)
+        self.remove_button.setEnabled(count > 0)
 
     def current_system(self):
         """The system of the selected item, else the first one, else None."""
@@ -695,6 +830,7 @@ class MainWindow(QMainWindow):
         self.redo_action.setEnabled(has and self.session.dispatcher.can_redo())
         self.run_button.setEnabled(has and self.calc_box.count() > 0)
         self.add_region_button.setEnabled(has and bool(self.session.document.systems))
+        self._selection_changed(len(self.structure.selected()))
 
     # ---- commands and messages
     def _do(self, command, /, **args):
