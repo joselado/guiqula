@@ -92,6 +92,26 @@ def test_piecewise_pairing_and_mean_field(pyqula, repo, tmp_path):
     assert result.mode == "nambu" and result.reports[-1]["notes"]["total_energy"] < 0
 
 
+def test_meanfield_engines_and_site_filling(pyqula, repo, tmp_path):
+    """A per-site filling (a Field) with the numpy engine and an
+    antiferromagnetic vector field; then the jax engine."""
+    d = Dispatcher()
+    s = d.do("add_system", lattice="honeycomb_lattice")
+    d.do("add_geometry_op", system=s, kind="supercell", params={"n": [2, 1, 1]})
+    d.do("add_term", system=s, kind="antiferromagnetism", params={"m": [0.05, 0, "0.1*tanh(x)"]})
+    d.do("set_meanfield", system=s, enabled=True, params={
+        "U": 3.0, "filling": "0.5 + 0.03*cos(x)", "mf": "antiferro", "nk": 4, "mix": 0.5})
+    c = d.do("add_calculation", system=s, kind="bands", params={"nk": 10})
+    source = export_script(d.document, c)
+    assert "filling = np.array([(lambda r:" in source and "afm = [0.05, 0.0, lambda r:" in source
+    assert "T=" not in source and "maxite=" not in source         # the engine's defaults
+    assert_reproduces(d.document, c, repo, tmp_path)
+    d.do("set_meanfield", system=s, params={"filling": 0.5, "engine": "jax",
+                                            "solver": "linear_mixing"})
+    assert "use_jax=True, solver='linear_mixing'" in export_script(d.document, c)
+    assert_reproduces(d.document, c, repo, tmp_path)
+
+
 def test_island(pyqula, repo, tmp_path):
     """A module-level Call with a keyword geometry (islands.get_geometry)."""
     d = Dispatcher()

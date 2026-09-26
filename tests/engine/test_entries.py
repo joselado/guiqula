@@ -88,9 +88,10 @@ TERM_CASES = {
     "anderson_disorder": [({"w": 0.5, "p": 1.0, "seed": 7}, None)],
     "kane_mele": [({"t": 0.05}, lambda h: h.add_kane_mele(0.05)),
                   ({"t": "0.05*cos(x)"}, lambda h: h.add_kane_mele(lambda r: 0.05 * np.cos(r[0])))],
-    "antiferromagnetism": [({"m": 0.2}, lambda h: h.add_antiferromagnetism(0.2)),
-                           ({"m": "0.2*tanh(x)"},
-                            lambda h: h.add_antiferromagnetism(lambda r: 0.2 * np.tanh(r[0])))],
+    "antiferromagnetism": [({"m": [0, 0, 0.2]}, lambda h: h.add_antiferromagnetism(0.2)),
+                           ({"m": [0.1, 0, "0.2*tanh(x)"]},
+                            lambda h: h.add_antiferromagnetism(
+                                lambda r: [0.1, 0.0, 0.2 * np.tanh(r[0])]))],
     "swave": [({"delta": 0.1}, lambda h: h.add_swave(0.1)),
               ({"delta": "0.1*exp(-r)"},
                lambda h: h.add_swave(lambda r: 0.1 * np.exp(-np.linalg.norm(r))))],
@@ -145,6 +146,10 @@ MEANFIELD_CASES = {
         {"U": 3.0, "mf": "antiferro", "nk": 4, "mix": 0.5},
         {"U": "2.5 + 0.5*tanh(x)", "V1": 0.2, "mf": "random", "seed": 5, "nk": 4, "mix": 0.5},
         {"U": 2.0, "fix": "mu", "mu": 0.1, "mf": "ferro", "nk": 3, "mix": 0.5},
+        {"U": 3.0, "filling": "0.5 + 0.05*tanh(x)", "mf": "antiferro", "nk": 4, "mix": 0.5},
+        {"U": 3.0, "mf": "antiferro", "nk": 4, "engine": "jax", "solver": "newton"},
+        {"U": 3.0, "mf": "antiferro", "nk": 4, "engine": "jax", "solver": "linear_mixing",
+         "mix": 0.5, "maxite": 500, "T": 1e-3},
     ],
 }
 
@@ -162,17 +167,39 @@ def test_meanfield(pyqula, kind, case):
     p = registry.get("meanfield", kind).normalize_params(params)
     h = geometry.honeycomb_lattice().get_hamiltonian(has_spin=True)
     h.add_rashba(0.1)
-    kwargs = {name: p[name] for name in ("V1", "V2", "V3", "J1", "J2", "J3", "mf", "nk", "mix",
-                                         "maxerror", "maxite", "T")}
+    kwargs = {name: p[name] for name in ("V1", "V2", "V3", "J1", "J2", "J3", "mf", "nk",
+                                         "maxerror")}
+    kwargs.update({name: p[name] for name in ("mix", "maxite", "T") if p[name] is not None})
     kwargs["U"] = p["U"] if isinstance(p["U"], float) else \
         (lambda r: 2.5 + 0.5 * np.tanh(r[0]))
-    kwargs.update({"mu": p["mu"]} if p["fix"] == "mu" else {"filling": p["filling"]})
+    filling = p["filling"] if isinstance(p["filling"], float) else \
+        np.array([0.5 + 0.05 * np.tanh(r[0]) for r in h.geometry.r])
+    kwargs.update({"mu": p["mu"]} if p["fix"] == "mu" else {"filling": filling})
+    if p["engine"] == "jax":
+        kwargs.update(use_jax=True, solver=p["solver"])
     np.random.seed(p["seed"])
     random.seed(p["seed"])
     direct, energy = h.get_mean_field_hamiltonian(return_total_energy=True, **kwargs)
     assert direct is not None
     assert report["notes"]["total_energy"] == pytest.approx(energy, abs=1e-10)
     assert_same_hamiltonian(built.h, direct)
+
+
+def test_meanfield_names_and_bounds(pyqula):
+    """The solver names come from pyqula; the filling's constants are
+    checked, an expression is checked by pyqula when it runs."""
+    from pyqula.scftk import densitydensity_jax
+
+    from guiqula.engine.context import source_names
+    assert source_names("jax_solvers") == densitydensity_jax.get_jax_solver_names()
+    d, s, _ = system()
+    with pytest.raises(Exception, match="filling: must be at most 1"):
+        d.do("set_meanfield", system=s, params={"filling": 1.5})
+    d.do("set_meanfield", system=s, enabled=True, params={"U": 3.0, "nk": 2, "mix": 0.5,
+                                                          "filling": "0.5 + 2*x"})
+    from guiqula.engine.build import BuildError
+    with pytest.raises(BuildError, match=r"must lie in \[0,1\]"):
+        build_system(d.document, s)                 # pyqula refuses a filling outside [0, 1]
 
 
 def test_meanfield_that_does_not_converge_fails_the_build(pyqula):

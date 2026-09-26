@@ -59,17 +59,20 @@ def source_names(source):
     if source == "guesses":
         from pyqula import meanfield
         return list(meanfield.get_guess_names())
+    if source == "jax_solvers":
+        from pyqula.scftk import densitydensity_jax
+        return list(densitydensity_jax.get_jax_solver_names())
     raise ParamError(f"unknown name source {source!r}")
 
 
-SOURCES = ("operators", "guesses")
+SOURCES = ("operators", "guesses", "jax_solvers")
 
 
 def _check_source(param, value):
     names = source_names(param.source)
     if value not in names:
-        raise ParamError(f"{param.name}: pyqula has no {param.source[:-1]} {value!r}; "
-                         f"it has {names}")
+        what = param.source[:-1].replace("_", " ")
+        raise ParamError(f"{param.name}: pyqula has no {what} {value!r}; it has {names}")
 
 
 def resolve(call, h=None, g=None):

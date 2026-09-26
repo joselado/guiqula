@@ -38,12 +38,24 @@ class Param:
 
 
 class FieldParam(Param):
-    """A scalar Field (constant or expression of position)."""
+    """A scalar Field (constant, expression of position, piecewise).
+    minimum and maximum bound its constant values (an expression is checked
+    by pyqula when it runs)."""
     type_name = "field"
 
-    def __init__(self, name, default=0.0, label=None, doc="", native=True):
+    def __init__(self, name, default=0.0, label=None, doc="", native=True, minimum=None,
+                 maximum=None):
         super().__init__(name, default, label, doc)
         self.native = native
+        self.minimum, self.maximum = minimum, maximum
+
+    def _check_bounds(self, value):
+        constants = [value] if fields.is_constant(value) else []
+        if isinstance(value, dict):          # piecewise
+            constants = [v for v in [value["default"]] + [p["value"] for p in value["pieces"]]
+                         if fields.is_constant(v)]
+        for constant in constants:
+            _number(self.name, constant, float, self.minimum, self.maximum)
 
     def normalize(self, value):
         try:
@@ -53,10 +65,12 @@ class FieldParam(Param):
         if not self.native and not fields.is_constant(value):
             raise ParamError(f"{self.name}: this parameter must be a constant; the pyqula call "
                              f"behind it does not take a function of position")
+        self._check_bounds(value)
         return value
 
     def describe(self):
-        return dict(super().describe(), native=self.native)
+        return dict(super().describe(), native=self.native, minimum=self.minimum,
+                    maximum=self.maximum)
 
 
 class VectorFieldParam(FieldParam):
@@ -74,6 +88,8 @@ class VectorFieldParam(FieldParam):
             raise ParamError(f"{self.name}: {error}") from None
         if not self.native and not all(fields.is_constant(v) for v in value):
             raise ParamError(f"{self.name}: this parameter must be constant")
+        for component in value:
+            self._check_bounds(component)
         return value
 
 
@@ -96,14 +112,23 @@ def _number(name, value, kind, minimum, maximum):
 
 
 class IntParam(Param):
+    """An integer; optional: None is allowed too (and means "pyqula's
+    default", which the entry then does not pass)."""
     type_name = "int"
 
-    def __init__(self, name, default, label=None, doc="", minimum=None, maximum=None):
+    def __init__(self, name, default, label=None, doc="", minimum=None, maximum=None,
+                 optional=False):
         super().__init__(name, default, label, doc)
         self.minimum, self.maximum = minimum, maximum
+        self.optional = optional
 
     def normalize(self, value):
+        if value is None and self.optional:
+            return None
         return _number(self.name, value, int, self.minimum, self.maximum)
+
+    def describe(self):
+        return dict(super().describe(), optional=self.optional)
 
 
 class FloatParam(IntParam):
@@ -111,6 +136,8 @@ class FloatParam(IntParam):
     type_name = "float"
 
     def normalize(self, value):
+        if value is None and self.optional:
+            return None
         return _number(self.name, value, float, self.minimum, self.maximum)
 
 

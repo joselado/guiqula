@@ -30,8 +30,15 @@ def kmesh(nk, dimensionality):
 
 
 def meanfield_iterations(params):
-    """A guess: plain linear mixing converges in about 10/mix iterations."""
-    return min(params["maxite"], max(10, int(10 / params["mix"])))
+    """A guess: plain linear mixing converges in about 10/mix iterations
+    (mix 0.1 when not given), the jax root finders in a few tens."""
+    if params.get("engine") == "jax" and params.get("solver") not in ("linear_mixing",
+                                                                      "fixed_point"):
+        guess = 30
+    else:
+        guess = max(10, int(10 / (params.get("mix") or 0.1)))
+    limit = params.get("maxite")
+    return guess if limit is None else min(limit, guess)
 
 
 def estimate(document, calc_id, builds):

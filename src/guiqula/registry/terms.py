@@ -53,13 +53,25 @@ entry("term", "kane_mele", "Kane-Mele spin-orbit coupling",
           "sign for each spin; preserves time reversal.",
       requires=("spin",), call=Call("h.add_kane_mele", "t"))
 
+def _antiferromagnetism(h, ctx):
+    components = ctx.value("m")
+    h.add_antiferromagnetism(lambda r, c=components: [f(r) if callable(f) else f for f in c])
+
+
+def _antiferromagnetism_script(ctx):
+    return [f"afm = {ctx.code('m')}",
+            "h.add_antiferromagnetism(lambda r: [f(r) if callable(f) else f for f in afm])"]
+
+
+# pyqula reads a list as one value per site, so the exchange vector always
+# goes in as a function of position returning (mx, my, mz)
 entry("term", "antiferromagnetism", "Antiferromagnetic exchange",
-      FieldParam("m", 0.1, "exchange", "staggered exchange field along z: +m on sublattice A, "
-                                       "-m on B"),
-      group="Magnetism", formula=r"\sum_i m(\vec r_i)\, \tau_i\, \sigma^z_i",
-      doc="Exchange field along z whose sign alternates between the two sublattices (Neel "
+      VectorFieldParam("m", (0.0, 0.0, 0.1), "exchange (mx, my, mz)",
+                       "staggered exchange field: +m on sublattice A, -m on B"),
+      group="Magnetism", formula=r"\sum_i \tau_i\, \vec m(\vec r_i)\cdot\vec\sigma_i",
+      doc="Exchange field whose sign alternates between the two sublattices (Neel "
           "order); needs a bipartite geometry.",
-      requires=("spin",), call=Call("h.add_antiferromagnetism", "m"))
+      requires=("spin",), apply=_antiferromagnetism, script=_antiferromagnetism_script)
 
 entry("term", "swave", "s-wave pairing",
       FieldParam("delta", 0.1, "pairing", "singlet pairing amplitude on every site"),

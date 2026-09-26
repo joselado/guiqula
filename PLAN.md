@@ -418,7 +418,9 @@ script.
 review item 4): `add_zeeman`/`add_magnetism`/`add_exchange`,
 `add_antiferromagnetism`, `add_sublattice_imbalance`, `add_rashba`,
 `add_haldane`, `add_kane_mele`, `add_kekule`, `add_onsite`, and `add_peierls`
-as a two-point function. Not `add_valley_exchange` and not
+as a two-point function; phase 3 added `add_swave`, the U of
+`get_mean_field_hamiltonian` and its filling (as one value per site), and
+found that `add_antiferromagnetism` takes a function returning a vector. Not `add_valley_exchange` and not
 `add_crystal_field`. A registry entry declares whether its pyqula call takes
 a Field natively; otherwise it declares a fallback designed per term (one
 candidate: apply the term with a unit amplitude and scale the resulting
@@ -546,8 +548,10 @@ One window, one document, three workspaces switched by tabs in the header
   field, python.
 - **Mean field**: U, V1, V2, J1..J3, filling or Fermi energy, initial guess
   from `get_guess_names()`, solver, mixing, max iterations, temperature.
-  (Phase 3 built all but the solver, which only pyqula's jax engine
-  offers: the numpy engine always mixes linearly.)
+  (Phase 3 built all of it: the filling is a Field, a function of
+  position fixing every site's occupation; the solver is a choice of
+  engine, pyqula's numpy engine with linear mixing or its jax engine with
+  the solvers pyqula lists.)
 - **Classical systems** (decision 13.5), built on `classicalspin.SpinModel`,
   `latticegas.LatticeGas` and `latticeising.LatticeIsing`, which take a
   `Geometry` and are otherwise independent of the quantum Hamiltonian. They
@@ -813,6 +817,31 @@ Hamiltonian view takes 3 s for 2450 sites, dimension 4900, about the
 time of the build); matplotlib truncates
 synthetic mouse events to whole pixels; a `QTabWidget` tab loses its
 close button with `setTabButton(index, side, None)`.
+Maintainer's answers to the phase-3 report (numbered as reported): 1 to 4,
+7, 9 and 10 stand as built (a mean field that does not converge fails the
+calculation; the interactive builds carry the full key; `is_sparse` stays
+a boolean; the cost guard is the window's only; auto re-run is saved with
+the project; the search ranking; detaching by a button); 5, the filling
+became a Field: a function of position gives pyqula one filling per site
+(its numpy engine only), a constant stays a number; 6, the jax engine is
+offered (engine numpy or jax, and the solver from
+`densitydensity_jax.get_jax_solver_names()`), and the mixing, the
+iterations and the temperature became optional, empty meaning the chosen
+engine's own default (numpy mix 0.1, 1000 iterations, T 1e-7; jax 2000
+iterations, T 1e-4, too sharp a T being unusable there), which the entry
+then does not pass; 8, asked whether a function works for the
+antiferromagnetic term: it does, also one returning a vector, so the term
+now takes a vector Field (mx, my, mz) and always hands pyqula a function
+(a list would be read as one value per site). Facts learned: jax is
+imported on pyqula's usual path anyway, so listing its solvers costs the
+worker nothing; the jax engine's first call compiles for about 5 s, then
+takes milliseconds; its solvers other than linear mixing and Broyden
+ignore (and warn about) the mixing; it refuses Nambu Hamiltonians and
+per-site fillings; on the honeycomb Hubbard model at U = 3 the newton
+solver ended at another total energy than linear mixing (-1.677 against
+-1.691, jax and numpy linear mixing agreeing), so the result may depend on
+the solver; pyqula refuses a per-site filling outside [0, 1]
+with its own message, and a constant one is checked by the entry.
 
 **Phase 4 — breadth and freedom.** Python nodes with the trust prompt,
 embedded console, the rest of the geometry ops and terms, first-wave

@@ -174,6 +174,18 @@ def test_meanfield_block(window, qtbot, shot):
     form.editors["U"].edit.setText("2.5")
     finish(form.editors["U"].edit)
     assert session.document.system("s1").hamiltonian.meanfield.params["U"] == 2.5
+    temperature = form.editors["T"].edit                   # empty: the engine's default
+    assert temperature.text() == "" and temperature.placeholderText() == "default"
+    temperature.setText("1e-4")
+    finish(temperature)
+    assert session.document.system("s1").hamiltonian.meanfield.params["T"] == 1e-4
+    temperature = window.properties.form.editors["T"].edit
+    temperature.setText("")
+    finish(temperature)
+    assert session.document.system("s1").hamiltonian.meanfield.params["T"] is None
+    solvers = window.properties.form.editors["solver"].combo
+    assert {"newton", "linear_mixing"} <= {solvers.itemText(i) for i in range(solvers.count())}
+    form = window.properties.form
     assert "runs with every calculation" in form.status.text()
     assert window.outliner.item("s1/meanfield").text(1) == "runs with the calculations"
     settle(qtbot, window)

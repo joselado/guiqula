@@ -53,6 +53,18 @@ def parse_float(text):
         raise ValueError(f"{text.strip()!r} is not a number") from None
 
 
+def parse_optional(text, integer=False):
+    """Empty text is None (the default); otherwise a number."""
+    if not text.strip():
+        return None
+    value = parse_float(text)
+    if integer:
+        if not value.is_integer():
+            raise ValueError(f"{text.strip()!r} is not an integer")
+        return int(value)
+    return value
+
+
 class Editor(QWidget):
     committed = Signal()
 
@@ -518,6 +530,10 @@ def make_editor(param, names=None, regions=()):
         return VectorFieldEditor(param, regions)
     if isinstance(param, FieldParam):
         return FieldEditor(param, regions)
+    if isinstance(param, IntParam) and param.optional:
+        integer = not isinstance(param, FloatParam)
+        return LineEditor(param, lambda t: parse_optional(t, integer),
+                          lambda v: "" if v is None else format_number(v), "default")
     if isinstance(param, SeedParam):
         return LineEditor(param, lambda t: int(parse_float(t)) if parse_float(t).is_integer()
                           else parse_float(t), str)
