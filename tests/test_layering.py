@@ -23,6 +23,9 @@ PYQULA_ALLOWED = {"engine", "worker"}
 PYQULA_LAZY_ONLY = {"registry"}
 # modules of the UI process: never pyqula, never the engine (13.15)
 UI_PROCESS = {"worker/client.py", "worker/protocol.py"}
+# imported by the UI process to name the worker's entry point: pyqula and
+# the engine only inside functions
+LAZY_MODULES = {"worker/process.py"}
 ENGINE_FORBIDDEN = {"ui", "remote", "core", "commands", "io", "registry"}
 
 
@@ -53,6 +56,10 @@ def violations(source, layer, module=""):
         engine = name == "guiqula.engine" or name.startswith("guiqula.engine.")
         if engine and (layer in ENGINE_FORBIDDEN or module in UI_PROCESS or layer == ""):
             found.append(f"line {line}: {name!r} imported outside engine/ and the worker process")
+        if module in LAZY_MODULES and top and (engine or name.split(".")[0] == "pyqula"):
+            found.append(f"line {line}: {name!r} at module level in {module}, which the UI "
+                         f"process imports")
+            continue
         if module in UI_PROCESS and name.split(".")[0] == "pyqula":
             found.append(f"line {line}: pyqula import {name!r} in {module}, which runs in the UI process")
             continue
@@ -106,8 +113,11 @@ def test_checker_catches(source, layer, bad):
     ("from guiqula.engine.build import build_system", "ui", "ui/x.py", True),
     ("def f():\n    from guiqula.engine import calculations", "", "session.py", True),
     ("def f():\n    from pyqula import geometry", "worker", "worker/client.py", True),
-    ("from guiqula.engine.calculations import run_calculation", "worker", "worker/process.py", False),
+    ("from guiqula.engine.calculations import run_calculation", "worker", "worker/jobs.py", False),
     ("from guiqula.engine import build", "worker", "worker/client.py", True),
+    ("from guiqula.engine import build", "worker", "worker/process.py", True),
+    ("import pyqula", "worker", "worker/process.py", True),
+    ("def main():\n    from pyqula import parallel", "worker", "worker/process.py", False),
 ])
 def test_checker_catches_process_rules(source, layer, module, bad):
     assert bool(violations(source, layer, module)) == bad

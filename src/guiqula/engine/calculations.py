@@ -46,7 +46,7 @@ def run_calculation(document, calc_id, cache=None, progress=None):
     try:
         arrays = plan.spec.apply(built.h, ctx)
     except Exception as error:
-        raise CalculationError(f"{plan.spec.label}: {type(error).__name__}: {error}") from None
+        raise CalculationError(f"{plan.spec.label}: {type(error).__name__}: {error}") from error
     seconds = time.perf_counter() - start
     from pyqula import parallel
     plot = plan.spec.plot(plan.params) if callable(plan.spec.plot) else dict(plan.spec.plot)
