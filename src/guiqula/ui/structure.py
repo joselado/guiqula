@@ -42,7 +42,8 @@ from matplotlib.widgets import LassoSelector, RectangleSelector
 from matplotlib import cm, colors as mcolors
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QCheckBox, QComboBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit,
+                               QToolButton, QVBoxLayout, QWidget)
 
 from guiqula.ui import theme
 
@@ -436,6 +437,7 @@ class StructureView(QWidget):
     and the site-selection tools."""
 
     selection_changed = Signal(int)          # number of selected sites
+    paint_stroke = Signal(object, bool)      # indices under the brush, the stroke is over
     view_chosen = Signal(str)                # a key of VIEWS, chosen by the user
     projection_chosen = Signal(str)          # "xy" or "3d", chosen with the 3D box
 
@@ -462,6 +464,28 @@ class StructureView(QWidget):
                                "selection tools work on the flat (xy) drawing")
         self.box_3d.clicked.connect(
             lambda checked: self.projection_chosen.emit("3d" if checked else "xy"))
+        self.paint = QToolButton()
+        self.paint.setText("Paint")
+        self.paint.setObjectName("paintTool")
+        self.paint.setCheckable(True)
+        self.paint.setToolTip("paint the Field being previewed: the sites under the brush take "
+                              "its value (the Field becomes a painted one)")
+        self.brush_value = QLineEdit("1")
+        self.brush_value.setObjectName("brushValue")
+        self.brush_value.setToolTip("the value painted")
+        self.brush_radius = QLineEdit("0.6")
+        self.brush_radius.setObjectName("brushRadius")
+        self.brush_radius.setToolTip("the radius of the brush")
+        self.brush_component = QComboBox()
+        self.brush_component.setObjectName("brushComponent")
+        self.brush_component.setToolTip("the component painted, for a vector Field")
+        for component, text in ((None, "—"), (0, "x"), (1, "y"), (2, "z")):
+            self.brush_component.addItem(text, component)
+        for widget in (self.brush_value, self.brush_radius):
+            widget.setMaximumWidth(60)
+        self.paint_widgets = (self.paint, QLabel("value"), self.brush_value, QLabel("radius"),
+                              self.brush_radius, self.brush_component)
+        self._painting = False
         self.caption = QLabel("No system yet: add one from the Geometry toolbar.")
         self.caption.setObjectName("structureCaption")
         self.caption.setWordWrap(True)
@@ -471,6 +495,9 @@ class StructureView(QWidget):
         top.addWidget(QLabel("Show"))
         top.addWidget(self.view_box)
         top.addWidget(self.box_3d)
+        for widget in self.paint_widgets:
+            top.addWidget(widget)
+            widget.hide()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.addLayout(top)
@@ -486,11 +513,18 @@ class StructureView(QWidget):
         self._selector = None
         self._caption = ""
         self.canvas.mpl_connect("button_press_event", self._on_press)
+        self.canvas.mpl_connect("motion_notify_event", self._on_paint_motion)
+        self.canvas.mpl_connect("button_release_event", self._on_paint_release)
         self.canvas.mpl_connect("scroll_event", self._on_scroll)
 
     # ---- drawing
     def set_view(self, view):
-        """Show which view is drawn (the window decides and redraws)."""
+        """Show which view is drawn (the window decides and redraws); the
+        brush belongs to the Field preview."""
+        for widget in self.paint_widgets:
+            widget.setVisible(view == "field")
+        if view != "field":
+            self.paint.setChecked(False)
         index = self.view_box.findData(view)
         if index >= 0 and index != self.view_box.currentIndex():
             self.view_box.blockSignals(True)
@@ -634,7 +668,41 @@ class StructureView(QWidget):
             return "toggle"
         return "replace"
 
+    # ---- the brush (the Field preview)
+    def brush(self):
+        """(value, radius, component) of the brush."""
+        def number(edit, default):
+            try:
+                return float(edit.text())
+            except ValueError:
+                return default
+        return (number(self.brush_value, 1.0), number(self.brush_radius, 0.6),
+                self.brush_component.currentData())
+
+    def under_brush(self, x, y):
+        """Indices of the sites within the brush's radius of (x, y)."""
+        if self.build is None:
+            return []
+        xy = np.asarray(self.build["positions"])[:, :2]
+        return [int(i) for i in np.nonzero(np.hypot(xy[:, 0] - x, xy[:, 1] - y)
+                                           <= self.brush()[1])[0]]
+
+    def _on_paint_motion(self, event):
+        if self._painting and event.inaxes is self.ax and event.xdata is not None:
+            self.paint_stroke.emit(self.under_brush(event.xdata, event.ydata), False)
+
+    def _on_paint_release(self, event):
+        if self._painting:
+            self._painting = False
+            self.paint_stroke.emit([], True)
+
     def _on_press(self, event):
+        if self.paint.isChecked() and self.paint.isVisible() and self.build is not None \
+                and event.inaxes is self.ax and event.button == 1 and not self._navigating() \
+                and not self._is_3d():
+            self._painting = True
+            self.paint_stroke.emit(self.under_brush(event.xdata, event.ydata), False)
+            return
         if self.tool != "pick" or self.build is None or event.inaxes is not self.ax \
                 or event.button != 1 or self._navigating() or self._is_3d():
             return

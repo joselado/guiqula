@@ -25,11 +25,11 @@ a decision changes.
 
 Status (2026-09-26): phases 0 to 3 are done and the maintainer has answered the phase-3
 report (PLAN.md section 7 says what each phase built, what was left for later, and the
-answers). Phase 4 is under way in four parts (PLAN.md section 7): parts 1 (the breadth of
-the quantum registry, the plot kinds, the 3D drawing), 2 (Python nodes, trust, console) and
-3 (classical systems, `from_result` Fields) and 4a (results in project files, presets
-gallery, overlays, sweeps, sliders) are done; part 4b (the Brillouin-zone canvas, the
-remaining Fields: profile, interpolated, painted) is next.
+answers). Phase 4 is done (2026-09-27, in parts 1 to 4b: the breadth of the registry and the
+plot kinds, Python nodes, trust and the console, classical systems and `from_result` Fields,
+results in projects, presets gallery, overlays, sweeps, sliders, the Brillouin-zone canvas,
+the remaining Fields and the brush); its report, with numbered decisions, awaits the
+maintainer's answers (PLAN.md section 7, end of phase 4). Phase 5 (polish) is next.
 
 ## Code map
 
@@ -39,14 +39,16 @@ a `Session`.
 - `core/`: `document.py` (pydantic models; ids unique across the document; a quantum
   system's Hamiltonian = construction, terms, mean-field block; a classical system's
   `model` = the model entry's set-up and its terms; `terms_of(system)`), `fields.py` and
-  `expressions.py` (Fields: constant, expression, piecewise over regions, from_result; the
+  `expressions.py` (Fields: constant, expression, piecewise over regions, from_result,
+  profile, interpolated, painted; the
   AST-whitelisted expression evaluator), `regions.py`, `results.py` (the `Result` dataclass
   that crosses the process boundary; a result drawn on the atoms carries its geometry in
   `structure`; `ResultRef`, what a from_result Field reads), `hashing.py`.
 - `registry/`: one declaration per lattice, op, term, mean field and calculation
   (`lattices.py`, `geometry_ops.py`, `terms.py`, `meanfield.py`, `calculations.py`,
   `classical.py` for the classical models, terms and calculations, `python_nodes.py`,
-  `sweeps.py`, a calculation that runs another one over parameter values); an
+  `sweeps.py`, a calculation that runs another one over parameter values; `kpaths.py`, the
+  points of a k-path); an
   entry's `systems` names the system kinds it applies to. A
   declarative `Call("h.add_zeeman", "m")` drives both the engine and the script export; a
   custom entry gives `apply` and `script`. `pipeline.py` plans a system without pyqula: the
@@ -84,8 +86,8 @@ a `Session`.
   bars, one result view per calculation, the cost guard, auto re-run; the window's own
   dispatcher actions `select`, `workspace`, `tool`, `select_sites`, `region_from_selection`,
   `remove_selected`, `canvas_view`, `preview`, `auto_rerun`, `projection`, `overlay`,
-  `slider`, `set_slider`, `remove_slider`), `outliner.py`, `gallery.py` (presets),
-  `sliders.py` (the Sliders dock),
+  `slider`, `set_slider`, `remove_slider`, `paint`), `outliner.py`, `gallery.py`
+  (presets), `sliders.py` (the Sliders dock), `kspace.py` (the Brillouin-zone canvas),
   `properties.py` + `forms.py` (forms from the parameter declarations; the `f(r)` Field
   editor), `formulas.py` (mathtext images), `structure.py` (canvas, its three views,
   selection tools, and the mplot3d drawing of geometries that are not flat), `plots.py`

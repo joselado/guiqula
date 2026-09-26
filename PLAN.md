@@ -9,7 +9,8 @@ Status: **all decisions in sections 12 and 13 made on 2026-09-26 (13.13, in-app
 help from pyqula's documentation, decided after phase 1, with open design
 points in section 11); the plan review of the same day is in section 14
 (decided items) and at the end of section 11 (items still open).** Phases 0 to 3 were
-done on 2026-09-26 (section 7); phase 4 is under way (part 1 of 4 done).
+done on 2026-09-26 and phase 4 on 2026-09-27 (section 7); the phase-4 report
+awaits the maintainer's answers, phase 5 is next.
 
 ## 1. Requirements (as stated by the maintainer)
 
@@ -1074,6 +1075,75 @@ script, in one interpreter), `test_overlays`, `tests/engine/test_sweeps.py`
 (the Haldane phase diagram point by point against pyqula, the scripts),
 `test_merged_mutations_are_one_undo_step`,
 `test_sliders_and_a_sweep_in_the_window`.
+**Part 4b done 2026-09-27.** Built: the Brillouin-zone canvas (13.9,
+`ui/kspace.py`), a fixed viewport tab next to the Structure: the zone of
+the current system (the Wigner-Seitz cell of pyqula's reciprocal lattice,
+a_i . b_j = delta_ij), the high-symmetry points pyqula names for its
+geometry, pyqula's default path (dashed), the k-path of the chosen
+calculation with vertices that are added (Add points), dragged (they
+snap onto the high-symmetry points), removed, or reset to the default,
+and the latest Fermi surface of the system underneath; the worker hands
+k-space in the build summary (`engine/structure.kspace`: the reciprocal
+vectors, the map from pyqula's mesh coordinates to reduced k, the
+special points, the default path). The bands and the spectral function
+take a `kpath` (`KPathParam`: labels or reduced coordinates; a label takes
+the image nearest to the vertex before it, ties going to the image
+nearest the origin; `registry/kpaths.py` spreads the points, and the
+exported script defines the same functions); the vertices become named
+ticks (the engine names a vertex after the high-symmetry point it is an
+image of). The remaining Fields (3.8): `profile` (gaussian, step, disk,
+plane wave, Aubry-Andre, domain wall: an expression once its numbers are
+filled in), `interpolated` (control points smoothed with Gaussian
+weights) and `painted` (values per site by position and a default), with
+their panels in the Field editor, and the brush of the Field preview
+(the Paint tool with its value, radius and component; the `paint`
+action; a stroke is one undo step; painting a Field that is not painted
+yet keeps its values: a constant becomes the default, anything else is
+baked into every site). Tests: `tests/ui/test_kspace.py`, the k-path
+cases of the bands and the spectral function, the new Field kinds in
+`tests/core/test_fields_regions.py` and on the onsite term in the engine
+and export tests, `test_new_field_kinds_and_the_brush`.
+**Phase 4 done 2026-09-27.** Decisions taken while building, for the
+maintainer to confirm (numbered for the phase-4 report; the parts above
+say more):
+1. the 3D drawing is matplotlib's mplot3d, not pyqtgraph.opengl (Qt
+   refuses OpenGL widgets offscreen, PyOpenGL is not a dependency);
+2. Z2 is reported as pyqula's parity (-1 topological, +1 trivial);
+3. the numbers of the new terms that pyqula takes as numbers only are
+   constant-only Fields (crystal field cutoff, electric field, spin
+   spiral axis and wavevector);
+4. result figures use constrained layout;
+5. the palette search ranks a label that starts with the text, then a
+   word of a label, before the rest (the phase-3 ranking, refined for the
+   larger palettes);
+6. the hopping modulation (a factor) refuses a region: a piecewise Field
+   does it;
+7. a recovered autosave with Python nodes opens untrusted;
+8. no global "always trust" preference yet (no settings file);
+9. the console's `h` includes the mean field, and the nodes of an
+   untrusted document stay skipped in the console's builds;
+10. a build is killed only when it has run 10 s and a newer build of the
+    same system is asked for;
+11. a classical texture is handed over by reference to the result (a
+    `from_result` Field), and a reader of a stale result is flagged, not
+    marked stale (section 11);
+12. project files keep the results, not the converged mean-field
+    Hamiltonian (section 11);
+13. sweeps are a calculation kind collecting numbers (section 11);
+14. overlays are chosen from a menu, as detaching is a button (a tab
+    dropped on another cannot be driven offscreen);
+15. a new classical system starts in a supercell its usual order fits in;
+16. the k-space canvas stores the vertices where they are drawn and the
+    engine names them; typed labels take the nearest image;
+17. painting a Field bakes its values into the sites (undo restores it);
+18. the engine always runs jax in double precision, and so do exported
+    scripts with classical spins (pyqula's precision otherwise depends on
+    what was imported before: worth fixing upstream);
+19. not built: the Ising temperature scan and the spiral wavevector of
+    the classical tensors, the automatic switch to sparse storage (KPM
+    now exists; `is_sparse` stays the user's), the calculations of
+    section 5 still missing (QPI, entanglement spectrum, RPA and magnons,
+    transport, the real-space Chern density against energy).
 
 **Phase 5 — polish.** Undo everywhere, keyboard shortcuts, theming (light and
 dark), tooltips and formulas (reuse quantum-lattice's), user guide, example

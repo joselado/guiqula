@@ -50,6 +50,29 @@ def describe(g):
             "image_bonds": np.array(image_bonds, dtype=np.int64).reshape(-1, 5)}
 
 
+def kspace(g, nk=60):
+    """What the Brillouin-zone canvas draws (decision 13.9), or None for a
+    finite geometry: pyqula's reciprocal vectors (rows, a_i . b_j =
+    delta_ij, no 2 pi), the matrix taking the Cartesian mesh coordinates of
+    pyqula's Fermi surface and Berry maps to reduced k (its k2K generator),
+    the high-symmetry points pyqula names for this geometry (reduced), and
+    its default path (reduced points)."""
+    from guiqula.registry import kpaths
+    if int(g.dimensionality) == 0:
+        return None
+    g = g.copy()
+    g.update_reciprocal()
+    reciprocal = np.array([g.b1, g.b2, g.b3], dtype=float)
+    k2K = None                   # pyqula defines it in two and three dimensions
+    if int(g.dimensionality) > 1:
+        to_reduced = g.get_k2K_generator()
+        k2K = np.column_stack([np.asarray(to_reduced(np.eye(3)[i]), dtype=float).real
+                               for i in range(3)])
+    special = kpaths.special_points(g)
+    default = np.asarray(g.get_kpath(None, nk=nk), dtype=float).reshape(-1, 3)
+    return {"reciprocal": reciprocal, "k2K": k2K, "special": special, "default_path": default}
+
+
 HAMILTONIAN_LIMIT = 20000     # sites; above this the Hamiltonian view is not computed
 
 

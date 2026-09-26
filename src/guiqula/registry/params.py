@@ -296,3 +296,33 @@ class CodeParam(Param):
             raise ParamError(f"{self.name}: syntax error in line {error.lineno}: "
                              f"{error.msg}") from None
         return value
+
+
+class KPathParam(Param):
+    """A path through the Brillouin zone: None (pyqula's default path of the
+    geometry) or its vertices, each a high-symmetry label pyqula knows
+    (kpointstk.labels: G, K, M, X, ...) or reduced coordinates [k1, k2, k3]
+    (in units of the reciprocal lattice vectors). The Brillouin-zone canvas
+    edits it (decision 13.9)."""
+    type_name = "kpath"
+
+    def __init__(self, name="kpath", default=None, label="k-path", doc=""):
+        super().__init__(name, default, label, doc)
+
+    def normalize(self, value):
+        if value is None:
+            return None
+        if not isinstance(value, (list, tuple)) or len(value) < 2:
+            raise ParamError(f"{self.name}: a k-path has two vertices or more (or is null: "
+                             f"the default path)")
+        out = []
+        for vertex in value:
+            if isinstance(vertex, str) and vertex.strip():
+                out.append(vertex.strip())
+            elif isinstance(vertex, (list, tuple)) and len(vertex) in (2, 3):
+                point = [_number(self.name, c, float, None, None) for c in vertex]
+                out.append(point + [0.0] * (3 - len(point)))
+            else:
+                raise ParamError(f"{self.name}: a vertex is a label (G, K, M, ...) or [k1, k2, "
+                                 f"k3] in reciprocal lattice units, not {vertex!r}")
+        return out

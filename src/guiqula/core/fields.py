@@ -14,7 +14,17 @@ A Field is stored in the Document as plain JSON:
   A piecewise Field names regions by id; the pipeline resolves the ids to
   the regions' selections (which is what enters the stage key, never the
   ids) and hands the engine and the exporter a ``regions`` map {id:
-  selection}. Profile, interpolated and painted are phase 4, part 4.
+  selection}.
+- ``{"kind": "profile", "name": "gaussian", "params": {...}}``: a named
+  shape with its parameters (PROFILES: gaussian, step, disk, plane wave,
+  Aubry-Andre, domain wall), which is an expression once its numbers are
+  filled in, and compiles, exports and previews as one;
+- ``{"kind": "interpolated", "points": [[x, y, value], ...], "length":
+  2.0}``: control points, smoothed with Gaussian weights of that length
+  (interpolated_field);
+- ``{"kind": "painted", "sites": [[x, y, z, value], ...], "tol": 0.1,
+  "default": 0.0}``: values painted on sites, by position, and the default
+  elsewhere (painted_field; the structure canvas has a brush).
 - ``{"kind": "from_result", "calculation": "c2", "array":
   "magnetization", "component": 2, "scale": 1.0, "tol": 0.1}``: the value
   of an array of another calculation's result at the site nearest to the
@@ -40,8 +50,26 @@ import numbers
 from guiqula.core import regions as region_tools
 from guiqula.core.expressions import Expression, ExpressionError
 
-LATER_KINDS = ("profile", "interpolated", "painted")
+LATER_KINDS = ()
 RESULT_KEYS = ("kind", "calculation", "array", "component", "scale", "tol")
+# name: (parameters with their defaults, template); numbers go in parenthesized
+PROFILES = {
+    "gaussian": ({"amplitude": 1.0, "x0": 0.0, "y0": 0.0, "width": 2.0},
+                 "{amplitude}*exp(-((x - {x0})**2 + (y - {y0})**2)/(2*{width}**2))"),
+    "step": ({"amplitude": 1.0, "position": 0.0, "angle": 0.0, "smoothing": 0.5},
+             "{amplitude}*0.5*(1 + tanh((x*cos({angle}) + y*sin({angle}) - {position})"
+             "/{smoothing}))"),
+    "disk": ({"amplitude": 1.0, "x0": 0.0, "y0": 0.0, "radius": 5.0, "smoothing": 0.5},
+             "{amplitude}*0.5*(1 - tanh((sqrt((x - {x0})**2 + (y - {y0})**2) - {radius})"
+             "/{smoothing}))"),
+    "plane_wave": ({"amplitude": 1.0, "kx": 1.0, "ky": 0.0, "phase": 0.0},
+                   "{amplitude}*cos({kx}*x + {ky}*y + {phase})"),
+    "aubry_andre": ({"strength": 2.0, "beta": 0.6180339887, "phase": 0.0},
+                    "{strength}*cos(2*pi*{beta}*x + {phase})"),
+    "domain_wall": ({"amplitude": 1.0, "position": 0.0, "width": 2.0},
+                    "{amplitude}*tanh((x - {position})/{width})"),
+}
+POSITIVE = {"width", "smoothing", "radius"}     # profile parameters that must be positive
 
 
 class FieldError(ValueError):
@@ -54,7 +82,84 @@ def normalize(value):
         return _normalize_piecewise(value)
     if isinstance(value, dict) and value.get("kind") == "from_result":
         return _normalize_result(value)
+    if isinstance(value, dict) and value.get("kind") in NORMALIZERS:
+        return NORMALIZERS[value["kind"]](value)
     return _normalize_simple(value)
+
+
+def _finite(what, value):
+    if isinstance(value, bool) or not isinstance(value, numbers.Real) or \
+            not math.isfinite(float(value)):
+        raise FieldError(f"{what} must be a finite number, not {value!r}")
+    return float(value)
+
+
+def _normalize_profile(value):
+    extra = set(value) - {"kind", "name", "params"}
+    if extra:
+        raise FieldError(f"unknown keys {sorted(extra)} in a profile Field")
+    name = value.get("name")
+    if name not in PROFILES:
+        raise FieldError(f"unknown profile {name!r}; profiles: {sorted(PROFILES)}")
+    defaults = PROFILES[name][0]
+    given = value.get("params") or {}
+    unknown = set(given) - set(defaults)
+    if unknown:
+        raise FieldError(f"the {name} profile has no {sorted(unknown)}; it has {list(defaults)}")
+    params = {}
+    for key, default in defaults.items():
+        params[key] = _finite(f"{name} {key}", given.get(key, default))
+        if key in POSITIVE and not params[key] > 0:
+            raise FieldError(f"{name} {key} must be positive")
+    return {"kind": "profile", "name": name, "params": params}
+
+
+def profile_expression(value):
+    """The expression a normalized profile Field stands for."""
+    template = PROFILES[value["name"]][1]
+    return Expression(template.format(**{k: f"({v!r})" for k, v in
+                                         value["params"].items()})).source
+
+
+def _normalize_interpolated(value):
+    extra = set(value) - {"kind", "points", "length"}
+    if extra:
+        raise FieldError(f"unknown keys {sorted(extra)} in an interpolated Field")
+    points = value.get("points") or []
+    if not isinstance(points, (list, tuple)) or not points:
+        raise FieldError("an interpolated Field needs control points [x, y, value]")
+    out = []
+    for point in points:
+        if not isinstance(point, (list, tuple)) or len(point) != 3:
+            raise FieldError(f"a control point is [x, y, value], not {point!r}")
+        out.append([_finite("a control point", c) for c in point])
+    length = _finite("length", value.get("length", 2.0))
+    if not length > 0:
+        raise FieldError("the length of an interpolated Field must be positive")
+    return {"kind": "interpolated", "points": out, "length": length}
+
+
+def _normalize_painted(value):
+    extra = set(value) - {"kind", "sites", "tol", "default"}
+    if extra:
+        raise FieldError(f"unknown keys {sorted(extra)} in a painted Field")
+    sites = value.get("sites") or []
+    if not isinstance(sites, (list, tuple)):
+        raise FieldError("the sites of a painted Field are a list of [x, y, z, value]")
+    out = []
+    for site in sites:
+        if not isinstance(site, (list, tuple)) or len(site) != 4:
+            raise FieldError(f"a painted site is [x, y, z, value], not {site!r}")
+        out.append([_finite("a painted site", c) for c in site])
+    tol = _finite("tol", value.get("tol", 0.1))
+    if not tol > 0:
+        raise FieldError("tol must be positive")
+    return {"kind": "painted", "sites": out, "tol": tol,
+            "default": _finite("default", value.get("default", 0.0))}
+
+
+NORMALIZERS = {"profile": _normalize_profile, "interpolated": _normalize_interpolated,
+               "painted": _normalize_painted}
 
 
 def _normalize_result(value):
@@ -103,7 +208,7 @@ def _normalize_simple(value):
             return _normalize_simple(value["value"])
         if kind == "expression" and set(value) == {"kind", "expr"}:
             return _normalize_simple(str(value["expr"]))
-        if kind in ("piecewise", "from_result"):
+        if kind in ("piecewise", "from_result") or kind in NORMALIZERS:
             raise FieldError(f"a piecewise Field cannot hold a {kind} Field")
         if kind in LATER_KINDS:
             raise FieldError(f"{kind} Fields are not implemented yet (PLAN.md 3.8)")
@@ -203,6 +308,92 @@ def site_field(positions, values, tol, scale=1.0):
     return f
 
 
+def interpolated_field(points, length):
+    """A function of position: the values of control points [x, y, value]
+    averaged with Gaussian weights of the distance in the plane (an
+    interpolated Field; exported scripts define this same function)."""
+    import numpy as np
+    points = np.asarray(points, dtype=float).reshape(-1, 3)
+
+    def f(r):
+        d2 = (points[:, 0] - r[0]) ** 2 + (points[:, 1] - r[1]) ** 2
+        w = np.exp(-(d2 - d2.min()) / (2 * length ** 2))    # shifted: never all zero
+        return float(np.dot(w, points[:, 2]) / w.sum())
+    return f
+
+
+def painted_field(sites, tol, default=0.0):
+    """A function of position: the value painted on the site nearest to it,
+    when that site is closer than tol, else the default (a painted Field;
+    exported scripts define this same function)."""
+    import numpy as np
+    sites = np.asarray(sites, dtype=float).reshape(-1, 4)
+
+    def f(r):
+        if not len(sites):
+            return default
+        d = np.linalg.norm(sites[:, :3] - np.asarray(r, dtype=float), axis=1)
+        i = int(np.argmin(d))
+        return float(sites[i, 3]) if d[i] < tol else default
+    return f
+
+
+def paint(value, positions, indices, painted, regions=None, results=None):
+    """A painted Field: value (a scalar Field) with the sites at indices of
+    positions set to painted. A painted Field is extended; any other kind
+    becomes one that keeps its values: a constant as the default, an
+    expression (or another kind) baked into every site, 0 elsewhere."""
+    import numpy as np
+    value = normalize(value)
+    positions = np.asarray(positions, dtype=float).reshape(-1, 3)
+    if isinstance(value, dict) and value["kind"] == "painted":
+        sites, tol, default = [list(s) for s in value["sites"]], value["tol"], value["default"]
+    elif isinstance(value, float):
+        sites, tol, default = [], 0.1, value
+    else:
+        old = evaluate_positions(value, positions, regions, results)
+        sites = [list(map(float, r)) + [float(v)] for r, v in zip(positions, old)]
+        tol, default = 0.1, 0.0
+    for i in indices:
+        r = [float(c) for c in positions[int(i)]]
+        for site in sites:
+            if np.linalg.norm(np.array(site[:3]) - r) < tol:
+                site[3] = float(painted)
+                break
+        else:
+            sites.append(r + [float(painted)])
+    return {"kind": "painted", "sites": sites, "tol": tol, "default": default}
+
+
+HELPERS = {"from_result": site_field, "interpolated": interpolated_field,
+           "painted": painted_field}
+
+
+def helpers_of(value):
+    """The functions (of HELPERS) a Field's compiled form needs, for any
+    JSON value (a Field, a vector of them, a dict of parameters)."""
+    if isinstance(value, dict) and value.get("kind") in HELPERS:
+        return {HELPERS[value["kind"]]}
+    if isinstance(value, dict):
+        return {f for v in value.values() for f in helpers_of(v)}
+    if isinstance(value, (list, tuple)):
+        return {f for v in value for f in helpers_of(v)}
+    return set()
+
+
+def _array_function(value):
+    """The function of an interpolated or painted Field."""
+    if value["kind"] == "interpolated":
+        return interpolated_field(value["points"], value["length"])
+    return painted_field(value["sites"], value["tol"], value["default"])
+
+
+def _array_code(value):
+    if value["kind"] == "interpolated":
+        return f"interpolated_field({value['points']!r}, {value['length']!r})"
+    return f"painted_field({value['sites']!r}, {value['tol']!r}, {value['default']!r})"
+
+
 def _result_function(value, results):
     if results is None or value["calculation"] not in results:
         raise FieldError(f"the result of {value['calculation']} is not available")
@@ -281,6 +472,10 @@ def compile_scalar(value, weight=None, regions=None, results=None):
         return lambda r, c=value, w=weight: c * w(r)
     if isinstance(value, dict) and value["kind"] == "from_result":
         function = _result_function(value, results)
+    elif isinstance(value, dict) and value["kind"] == "profile":
+        function = Expression(profile_expression(value)).at
+    elif isinstance(value, dict) and value["kind"] in ("interpolated", "painted"):
+        function = _array_function(value)
     elif isinstance(value, dict):
         function = _piecewise_function(value, regions)
     else:
@@ -326,8 +521,11 @@ def code_scalar(value, weight_code=None, regions=None, results=None):
         if weight_code is None:
             return repr(value)
         return f"lambda r: {value!r} * ({weight_code})"
-    if isinstance(value, dict) and value["kind"] == "from_result":
-        function = _code_result(value, results)
+    if isinstance(value, dict) and value["kind"] == "profile":
+        value = profile_expression(value)            # an expression from here on
+    if isinstance(value, dict) and value["kind"] in ("from_result", "interpolated", "painted"):
+        function = _code_result(value, results) if value["kind"] == "from_result" else \
+            _array_code(value)
         if weight_code is None:
             return function
         return f"(lambda f: lambda r: f(r) * ({weight_code}))({function})"
@@ -358,6 +556,11 @@ def evaluate_positions(value, positions, regions=None, results=None):
         return _evaluate_simple(value, positions)
     if value["kind"] == "from_result":
         f = _result_function(value, results)
+        return np.array([f(r) for r in positions], dtype=float)
+    if value["kind"] == "profile":
+        return _evaluate_simple(profile_expression(value), positions)
+    if value["kind"] in ("interpolated", "painted"):
+        f = _array_function(value)
         return np.array([f(r) for r in positions], dtype=float)
     out = _evaluate_simple(value["default"], positions)
     for piece in value["pieces"]:

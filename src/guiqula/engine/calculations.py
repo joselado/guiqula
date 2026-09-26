@@ -98,6 +98,8 @@ def run_calculation(document, calc_id, cache=None, progress=None, trusted=True, 
     from pyqula import parallel
     arrays = {k: np.asarray(v) for k, v in arrays.items()}
     plot = ctx.notes.get("plot") or plot_spec(plan.spec, plan.params, arrays)
+    if ctx.notes.get("xticks"):            # the vertices of a k-path, named
+        plot["xticks"] = ctx.notes["xticks"]
     geometry = structure.describe(built.g) if plot["kind"] in STRUCTURE_PLOTS else None
     return Result(calculation=calc_id, kind=plan.kind, key=plan.key, params=plan.params,
                   arrays=arrays, plot=plot,

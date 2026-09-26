@@ -132,8 +132,12 @@ def _parts(plan, skipped=None):
             preamble += [line for line in stage.spec.preamble if line not in preamble]
     if preamble:
         head += preamble + [""]
-    if any(stage.applied and stage.results for stage in system.stages):
-        head += ["", inspect.getsource(fields.site_field).rstrip(), "", ""]
+    helpers = set()
+    for stage in system.stages:
+        if stage.applied and stage.params is not None:
+            helpers |= fields.helpers_of(stage.params)
+    for helper in sorted(helpers, key=lambda f: f.__name__):   # site_field, painted_field...
+        head += ["", inspect.getsource(helper).rstrip(), "", ""]
     lines = []
     for stage in system.stages:
         if stage.stage == "base":

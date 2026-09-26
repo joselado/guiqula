@@ -295,3 +295,47 @@ def test_geometry_change_reruns_bands_with_the_same_terms(window, qtbot, shot):
     settle(qtbot, window)
     assert session.status("c1") == "stale"                  # off: waits for Run
     assert window.view_state().get("auto_rerun") is None
+
+
+def test_new_field_kinds_and_the_brush(window, qtbot, shot):
+    """A profile Field from the f(r) panel, then painting on the Field
+    preview: the brush turns the Field into a painted one, a stroke is one
+    undo step, and the preview draws it."""
+    from guiqula.ui.forms import KINDS, PAINTED_KIND, PROFILE_KIND
+    fresh(qtbot, window)
+    session = window.session
+    term = session.do("add_term", system="s1", kind="onsite", params={"mu": 0.0})
+    window.select(term)
+    editor = window.properties.form.editors["mu"]
+    editor.open_panel()
+    editor._kind_chosen(KINDS.index(PROFILE_KIND))
+    value = session.document.find(term)[-1].params["mu"]
+    assert value["kind"] == "profile" and value["name"] == "gaussian"
+    editor = window.properties.form.editors["mu"]
+    edit = editor.profile_edits["width"][1]
+    edit.setText("0.8")
+    edit.editingFinished.emit()
+    assert session.document.find(term)[-1].params["mu"]["params"]["width"] == 0.8
+    editor = window.properties.form.editors["mu"]
+    editor._kind_chosen(KINDS.index(PAINTED_KIND))
+    assert session.document.find(term)[-1].params["mu"] == {
+        "kind": "painted", "sites": [], "tol": 0.1, "default": 0.0}
+    session.undo()
+    settle(qtbot, window)
+    window.preview_field(term, "mu")
+    assert window.structure.paint.isVisible()
+    depth = len(session.dispatcher._undo)
+    window.paint(0.5, point=[0.0, 0.0], radius=1.1, done=False)
+    window.paint(0.5, point=[2.0, 0.0], radius=0.6)
+    assert len(session.dispatcher._undo) == depth + 1            # one stroke, one step
+    value = session.document.find(term)[-1].params["mu"]
+    assert value["kind"] == "painted" and value["default"] == 0.0
+    painted = {tuple(np.round(s[:3], 6)): s[3] for s in value["sites"]}
+    assert painted[(1.0, 0.0, 0.0)] == 0.5                         # under the brush
+    assert len([v for v in painted.values() if v == 0.5]) >= 3
+    assert len(painted) == 8                                       # the gaussian was baked in
+    shot(window.structure, "painted")
+    session.undo()
+    assert session.document.find(term)[-1].params["mu"]["kind"] == "profile"
+    with pytest.raises(ValueError, match="choose the component"):
+        window.paint(1.0, point=[0, 0], entry="t1", param="m")

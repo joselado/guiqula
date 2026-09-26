@@ -2,13 +2,34 @@
 3.3) and names the plot kind that draws them (PLAN.md 3.4)."""
 from guiqula.registry import cost
 from guiqula.registry.base import entry
-from guiqula.registry.params import ChoiceParam, FloatParam, IntParam, SeedParam
+from guiqula.registry import kpaths
+from guiqula.registry.params import ChoiceParam, FloatParam, IntParam, KPathParam, SeedParam
+
+
+def _path(h, ctx):
+    """{"kpath": the k-points, "ticks": vertex indices} of a calculation's
+    k-path, or {} for pyqula's default path; the names of its vertices go
+    to the plot (the note "xticks")."""
+    import numpy as np
+    kpath = ctx.value("kpath")
+    if kpath is None:
+        return {}
+    g = h.geometry
+    b = np.array([g.b1, g.b2, g.b3])
+    ks, ticks = kpaths.path_points(b, kpaths.vertices_of(g, kpath), ctx.value("nk"))
+    names = kpaths.tick_names(b, g.dimensionality, kpath, kpaths.special_points(g))
+    ctx.note("xticks", [[int(i), name] for i, name in zip(ticks, names)])
+    return {"kpath": ks, "ticks": ticks}
 
 
 def _bands(h, ctx):
     import numpy as np
     nk, operator = ctx.value("nk"), ctx.value("operator")
-    kwargs = {"nk": nk, "write": False, "callback": ctx.progress_callback(nk)}
+    path = _path(h, ctx)
+    total = len(path["kpath"]) if path else nk
+    kwargs = {"nk": nk, "write": False, "callback": ctx.progress_callback(total)}
+    if path:
+        kwargs["kpath"] = path["kpath"]
     if operator is not None:
         kwargs["operator"] = operator
     out = h.get_bands(**kwargs)
@@ -16,35 +37,57 @@ def _bands(h, ctx):
     arrays = {"k": k_index, "energies": out[1].reshape(len(k_index), -1)}
     if operator is not None:
         arrays["weights"] = out[2].reshape(len(k_index), -1)
+    if path:
+        arrays["ticks"] = path["ticks"]
     return arrays
+
+
+def _path_script(ctx):
+    kpath = ctx.value("kpath")
+    return [] if kpath is None else kpaths.script(kpath, ctx.value("nk"))
 
 
 def _bands_script(ctx):
     operator = ctx.value("operator")
     op = "" if operator is None else f", operator={operator!r}"
-    lines = [f"out = h.get_bands(nk={ctx.code('nk')}{op}, write=False)",
-             "k = np.unique(out[0])",
-             "energies = out[1].reshape(len(k), -1)"]
+    path = ", kpath=ks" if ctx.value("kpath") is not None else ""
+    lines = _path_script(ctx) + [
+        f"out = h.get_bands(nk={ctx.code('nk')}{op}{path}, write=False)",
+        "k = np.unique(out[0])",
+        "energies = out[1].reshape(len(k), -1)"]
     if operator is None:
         lines.append("arrays = dict(k=k, energies=energies)")
     else:
         lines += ["weights = out[2].reshape(len(k), -1)",
                   "arrays = dict(k=k, energies=energies, weights=weights)"]
+    if ctx.value("kpath") is not None:
+        lines.append("arrays['ticks'] = ticks")
     return lines
 
 
-def _bands_plot(params):
+def _with_ticks(plot, params, arrays):
+    """A k-path's axis (its vertices become ticks: the engine adds them)."""
+    if params.get("kpath") is not None and "ticks" in arrays:
+        plot["xlabel"] = "k"
+    return plot
+
+
+def _bands_plot(params, arrays):
     plot = {"x": "k", "y": "energies", "xlabel": "k-path point", "ylabel": "energy"}
     if params.get("operator") is None:
-        return dict(plot, kind="lines")
-    return dict(plot, kind="colored_scatter", c="weights", clabel=params["operator"])
+        return _with_ticks(dict(plot, kind="lines"), params, arrays)
+    return _with_ticks(dict(plot, kind="colored_scatter", c="weights",
+                            clabel=params["operator"]), params, arrays)
 
 
 entry("calculation", "bands", "Band structure",
       IntParam("nk", 200, "k-points", "points along the k-path", minimum=2),
       ChoiceParam("operator", None, source="operators", optional=True, label="operator",
                   doc="colour the bands by this operator's expectation value"),
-      group="Spectral", doc="Bands along the default high-symmetry path of the geometry.",
+      KPathParam(doc="the vertices of the path (labels such as G, K, M, or reduced "
+                     "coordinates); empty: pyqula's default path. The k-space tab edits it."),
+      group="Spectral", doc="Bands along a path through the Brillouin zone (by default the "
+                           "high-symmetry path pyqula chooses for the geometry).",
       apply=_bands, script=_bands_script, plot=_bands_plot,
       cost=lambda p, size: p["nk"] * cost.diagonalization(size["dimension"])
       * (2 if p["operator"] else 1))
@@ -235,9 +278,15 @@ entry("calculation", "fermi_surface", "Fermi surface",
 
 def _spectral_function(h, ctx):
     from pyqula import kdos
+    path = _path(h, ctx)
+    extra = {"kpath": path["kpath"]} if path else {}
     out = kdos.kdos_bands(h, energies=_energies(ctx), delta=ctx.value("delta"),
-                          nk=ctx.value("nk"), mode=ctx.value("mode"), **_operator_kwarg(ctx))
-    return {"k": out[0], "energies": out[1], "weight": out[2]}
+                          nk=ctx.value("nk"), mode=ctx.value("mode"), **_operator_kwarg(ctx),
+                          **extra)
+    arrays = {"k": out[0], "energies": out[1], "weight": out[2]}
+    if path:
+        arrays["ticks"] = path["ticks"]
+    return arrays
 
 
 entry("calculation", "spectral_function", "Spectral function",
@@ -247,15 +296,20 @@ entry("calculation", "spectral_function", "Spectral function",
       ChoiceParam("mode", "ED", choices=("ED", "green"), label="method",
                   doc="ED: from the eigenstates; green: from the Green's function"),
       _operator(),
-      group="Spectral", doc="Momentum-resolved spectral function A(k, E) along the default "
-                           "k-path (pyqula's kdos.kdos_bands): broadened bands, weighted by "
-                           "an operator if one is chosen.",
-      modules=("kdos",), apply=_spectral_function, script=lambda ctx: [
+      KPathParam(doc="the vertices of the path (labels or reduced coordinates); empty: "
+                     "pyqula's default path"),
+      group="Spectral", doc="Momentum-resolved spectral function A(k, E) along a k-path "
+                           "(pyqula's kdos.kdos_bands): broadened bands, weighted by an "
+                           "operator if one is chosen.",
+      modules=("kdos",), apply=_spectral_function, script=lambda ctx: _path_script(ctx) + [
           f"out = kdos.kdos_bands(h, energies={_energies_code(ctx)}, delta={ctx.code('delta')}, "
-          f"nk={ctx.code('nk')}, mode={ctx.code('mode')}{_operator_code(ctx)})",
-          "arrays = dict(k=out[0], energies=out[1], weight=out[2])"],
-      plot={"kind": "heatmap", "x": "k", "y": "energies", "c": "weight",
-            "xlabel": "k-path point", "ylabel": "energy", "clabel": "A(k, E)"},
+          f"nk={ctx.code('nk')}, mode={ctx.code('mode')}{_operator_code(ctx)}"
+          + (", kpath=ks" if ctx.value("kpath") is not None else "") + ")",
+          "arrays = dict(k=out[0], energies=out[1], weight=out[2])"]
+      + (["arrays['ticks'] = ticks"] if ctx.value("kpath") is not None else []),
+      plot=lambda params, arrays: _with_ticks(
+          {"kind": "heatmap", "x": "k", "y": "energies", "c": "weight",
+           "xlabel": "k-path point", "ylabel": "energy", "clabel": "A(k, E)"}, params, arrays),
       cost=lambda p, size: p["nk"] * cost.diagonalization(size["dimension"])
       * (1 if p["mode"] == "ED" else p["ne"] / 3))
 

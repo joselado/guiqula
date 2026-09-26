@@ -27,8 +27,9 @@ def test_main_window_builds_without_workers(qtbot, shot):
                        (QToolBar, "geometryToolbar"), (QToolBar, "hamiltonianToolbar"),
                        (QToolBar, "calculateToolbar"), (QToolBar, "runToolbar")]:
         assert window.findChild(kind, name) is not None, name
-    # one tab per result, opened when a calculation is shown; the Structure tab stays
-    assert [window.viewport.tabText(i) for i in range(window.viewport.count())] == ["Structure"]
+    # one tab per result, opened when a calculation is shown; Structure and k-space stay
+    assert [window.viewport.tabText(i) for i in range(window.viewport.count())] == \
+        ["Structure", "k-space"]
     assert window.status_label.toolTip().startswith("pyqula: ")
     assert shot(window, "main_window").stat().st_size > 1000
 

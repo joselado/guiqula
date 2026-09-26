@@ -130,13 +130,31 @@ def test_geometry_op(pyqula, kind):
     assert np.allclose(g.a1, direct.a1) and np.allclose(g.a2, direct.a2)
 
 
+def _interpolated(points, length):
+    """Gaussian-weighted average of control points, written again here."""
+    points = np.array(points, dtype=float)
+
+    def f(r):
+        w = np.exp(-((points[:, 0] - r[0]) ** 2 + (points[:, 1] - r[1]) ** 2) / (2 * length ** 2))
+        return float(np.dot(w, points[:, 2]) / w.sum())
+    return f
+
+
 def tanh_profile(r):
     return 0.3 * np.tanh(r[0] / 4)
 
 
 TERM_CASES = {
     "onsite": [({"mu": 0.3}, lambda h: h.add_onsite(0.3)),
-               ({"mu": "0.2*x"}, lambda h: h.add_onsite(lambda r: 0.2 * r[0]))],
+               ({"mu": "0.2*x"}, lambda h: h.add_onsite(lambda r: 0.2 * r[0])),
+               ({"mu": {"kind": "profile", "name": "gaussian", "params": {"x0": 1.0}}},
+                lambda h: h.add_onsite(lambda r: np.exp(-((r[0] - 1) ** 2 + r[1] ** 2) / 8))),
+               ({"mu": {"kind": "interpolated", "points": [[0, 0, 0.5], [2, 0, -0.5]],
+                        "length": 1.0}},
+                lambda h: h.add_onsite(_interpolated([[0, 0, 0.5], [2, 0, -0.5]], 1.0))),
+               ({"mu": {"kind": "painted", "sites": [[-1.0, 0.0, 0.0, 0.7]], "default": 0.1}},
+                lambda h: h.add_onsite(lambda r: 0.7 if np.linalg.norm(
+                    np.asarray(r) - [-1.0, 0.0, 0.0]) < 0.1 else 0.1))],
     "sublattice_imbalance": [({"mass": 0.2}, lambda h: h.add_sublattice_imbalance(0.2)),
                              ({"mass": "0.1*y"}, lambda h: h.add_sublattice_imbalance(lambda r: 0.1 * r[1]))],
     "zeeman": [({"m": [0.1, 0.0, 0.2]}, lambda h: h.add_zeeman([0.1, 0.0, 0.2])),
@@ -398,14 +416,39 @@ def _energies(p):
     return np.linspace(p["emin"], p["emax"], p["ne"])
 
 
+def _direct_path(h, p):
+    """The k-points and vertex indices of a k-path, as the adapter makes them."""
+    from guiqula.registry import kpaths
+    g = h.geometry
+    return kpaths.path_points(np.array([g.b1, g.b2, g.b3]), kpaths.vertices_of(g, p["kpath"]),
+                              p["nk"])
+
+
 def _direct_bands(h, p):
     kwargs = {"nk": p["nk"]} if p["operator"] is None else {"nk": p["nk"],
                                                              "operator": p["operator"]}
+    ticks = None
+    if p["kpath"] is not None:
+        kwargs["kpath"], ticks = _direct_path(h, p)
     out = h.get_bands(write=False, **kwargs)
     nk = len(np.unique(out[0]))
     arrays = {"k": np.unique(out[0]), "energies": out[1].reshape(nk, -1)}
     if p["operator"] is not None:
         arrays["weights"] = out[2].reshape(nk, -1)
+    if ticks is not None:
+        arrays["ticks"] = ticks
+    return arrays
+
+
+def _direct_spectral(h, p):
+    extra, ticks = {}, None
+    if p["kpath"] is not None:
+        extra["kpath"], ticks = _direct_path(h, p)
+    arrays = dict(zip(("k", "energies", "weight"), pq("kdos").kdos_bands(
+        h, energies=_energies(p), delta=p["delta"], nk=p["nk"], mode=p["mode"], **_op(p),
+        **extra)))
+    if ticks is not None:
+        arrays["ticks"] = ticks
     return arrays
 
 
@@ -435,8 +478,7 @@ DIRECT = {
     "real_space_chern": lambda h, p: {"marker": pq("topology").real_space_chern(h)[1]},
     "fermi_surface": lambda h, p: dict(zip(("kx", "ky", "weight"), h.get_fermi_surface(
         e=p["energy"], nk=p["nk"], delta=p["delta"], write=False, **_op(p)))),
-    "spectral_function": lambda h, p: dict(zip(("k", "energies", "weight"), pq("kdos").kdos_bands(
-        h, energies=_energies(p), delta=p["delta"], nk=p["nk"], mode=p["mode"], **_op(p)))),
+    "spectral_function": _direct_spectral,
     "surface_spectral_function": lambda h, p: dict(zip(
         ("k", "energies", "surface", "bulk"), h.get_surface_kdos(
             energies=_energies(p), delta=p["delta"], nk=p["nk"], write=False, **_op(p)))),
@@ -476,7 +518,10 @@ def _seeded(p, run):
 
 # kind: [(params, test system, what the result must show)]
 CALC_CASES = {
-    "bands": [({"nk": 30}, "rashba", None), ({"nk": 30, "operator": "sz"}, "rashba", None)],
+    "bands": [({"nk": 30}, "rashba", None), ({"nk": 30, "operator": "sz"}, "rashba", None),
+              ({"nk": 20, "kpath": ["G", "K", "M", "G"]}, "haldane",   # neighbouring K and M
+               lambda a: list(a["ticks"]) == [0, 12, 18, 28]),     # |b|/sqrt3, /2sqrt3, /2
+              ({"nk": 20, "kpath": [[0, 0, 0], [0.5, 0, 0], [0.5, 0.5, 0]]}, "haldane", None)],
     "dos": [({"ne": 30, "nk": 8, "delta": 0.1}, "rashba", None),
             ({"ne": 15, "nk": 8, "delta": 0.1, "mode": "Green"}, "rashba", None),
             ({"ne": 30, "nk": 8, "delta": 0.1, "operator": "sublattice"}, "rashba", None),
@@ -489,7 +534,9 @@ CALC_CASES = {
     "fermi_surface": [({"energy": 0.5, "nk": 12, "delta": 0.1}, "rashba", None)],
     "spectral_function": [({"ne": 20, "nk": 12, "delta": 0.1}, "rashba", None),
                           ({"ne": 10, "nk": 6, "delta": 0.1, "mode": "green",
-                            "operator": "sz"}, "rashba", None)],
+                            "operator": "sz"}, "rashba", None),
+                          ({"ne": 10, "nk": 8, "delta": 0.1, "kpath": ["G", "M"]}, "rashba",
+                           None)],
     "surface_spectral_function": [({"ne": 10, "nk": 6, "delta": 0.05}, "haldane", None),
                                   ({"ne": 12, "delta": 0.05}, "chain", None)],
     "berry_curvature": [({"nk": 8}, "haldane", None)],

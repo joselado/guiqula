@@ -241,6 +241,7 @@ def main(conn, config):
                         kind=built.plan.kind, reports=built.reports,
                         upgraded_by=built.plan.upgraded_by, sites=len(built.g.r),
                         dimension=int(built.h.intra.shape[0]) if quantum else len(built.g.r),
+                        kspace=structure.kspace(built.g),
                         cache={"hits": cache.hits, "misses": cache.misses, "size": len(cache)})
         if kind == "sleep":
             steps = max(int(payload.get("seconds", 1.0) / 0.05), 1)

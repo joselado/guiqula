@@ -236,6 +236,11 @@ def draw(figure, result, title="", overlays=()):
     ax.set_title(title, fontsize=10)
     if plot.get("x") == "k" and plot["kind"] in ("lines", "colored_scatter"):
         ax.set_xlim(np.min(result.arrays["k"]), np.max(result.arrays["k"]))
+    if plot.get("xticks"):                  # the vertices of a k-path
+        positions = [float(i) for i, _ in plot["xticks"]]
+        ax.set_xticks(positions, [name for _, name in plot["xticks"]])
+        for position in positions:
+            ax.axvline(position, color="#9e9e9e", linewidth=0.6, zorder=0)
     return ax, points
 
 

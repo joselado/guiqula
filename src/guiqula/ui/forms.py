@@ -25,8 +25,8 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxL
 from guiqula.core import fields
 from guiqula.registry.params import (BoolParam, ChoiceParam, CodeParam, ConditionParam,
                                      FieldParam, FloatParam, FloatVectorParam, IntParam,
-                                     IntVectorParam, PositionsParam, SeedParam, TextParam,
-                                     VectorFieldParam)
+                                     IntVectorParam, KPathParam, PositionsParam, SeedParam,
+                                     TextParam, VectorFieldParam)
 
 INT_LIMIT = 2**31 - 1
 NONE_TEXT = "(none)"
@@ -49,6 +49,31 @@ def parse_field(text):
         return float(text)
     except ValueError:
         return text            # an expression; the registry parses it
+
+
+def parse_kpath(text):
+    """"G K M G" or "G (0.5, 0.5) G" -> a k-path; empty: None (the default)."""
+    import re
+    text = text.strip()
+    if not text:
+        return None
+    out = []
+    for match in re.finditer(r"\(([^)]*)\)|([A-Za-z][A-Za-z0-9']*)", text):
+        point, label = match.groups()
+        if label:
+            out.append(label)
+        else:
+            out.append([parse_float(c) for c in point.split(",") if c.strip()])
+    return out
+
+
+def format_kpath(value):
+    if value is None:
+        return ""
+    return " ".join(v if isinstance(v, str) else
+                    "(" + ", ".join(format_number(float(c)) for c in v[:2]) +
+                    (f", {format_number(float(v[2]))}" if len(v) > 2 and v[2] else "") + ")"
+                    for v in value)
 
 
 def parse_float(text):
@@ -119,14 +144,20 @@ class LineEditor(Editor):
 
 EXPRESSION_KIND, PIECEWISE_KIND = "number or f(x, y, z)", "one value per region"
 RESULT_KIND = "from a result"
-KINDS = (EXPRESSION_KIND, PIECEWISE_KIND, RESULT_KIND)
+PROFILE_KIND, INTERPOLATED_KIND, PAINTED_KIND = "a profile", "interpolated points", "painted"
+KINDS = (EXPRESSION_KIND, PIECEWISE_KIND, RESULT_KIND, PROFILE_KIND, INTERPOLATED_KIND,
+         PAINTED_KIND)
+MODES = {"piecewise": 1, "from_result": 2, "profile": 3, "interpolated": 4, "painted": 5}
 COMPONENTS = ((None, "the value"), (0, "x"), (1, "y"), (2, "z"))
 FIELD_BUTTON_TIPS = {
     "constant": "make this a function of the position: an expression, one value per region, "
                 "or a result of another system",
     "expression": "an expression of the position (bold); the panel explains what it may use",
     "piecewise": "one value per region (bold); the panel edits the values",
-    "from_result": "read from a result of another system, site by site (bold)"}
+    "from_result": "read from a result of another system, site by site (bold)",
+    "profile": "a named profile (bold); the panel edits its numbers",
+    "interpolated": "interpolated between control points (bold)",
+    "painted": "painted site by site (bold): the Paint tool of the Field preview"}
 
 
 def result_sources(session, system_id):
@@ -153,8 +184,17 @@ def result_sources(session, system_id):
 
 
 def _summary(value, regions):
-    """One line for a piecewise or a from_result Field."""
-    if value.get("kind") == "from_result":
+    """One line for a structured Field (piecewise, from a result, profile,
+    interpolated, painted)."""
+    kind = value.get("kind")
+    if kind == "profile":
+        return value["name"] + " " + ", ".join(f"{k} {format_number(v)}"
+                                               for k, v in value["params"].items())
+    if kind == "interpolated":
+        return f"{len(value['points'])} control points, length {format_number(value['length'])}"
+    if kind == "painted":
+        return f"{len(value['sites'])} sites painted, elsewhere {format_number(value['default'])}"
+    if kind == "from_result":
         component = "" if value["component"] is None else "[" + "xyz"[value["component"]] + "]"
         scale = "" if value["scale"] == 1.0 else f" × {format_number(value['scale'])}"
         return f"{value['calculation']}.{value['array']}{component}{scale}"
@@ -270,6 +310,9 @@ class FieldEditor(Editor):
             form.addWidget(QLabel(label), row, 0)
             form.addWidget(widget, row, 1)
         column.addWidget(self.result_box)
+        self._build_profile(column)
+        self._build_interpolated(column)
+        self._build_painted(column)
         self.no_results = QLabel("No result of another system drawn on the sites yet: run "
                                  "one there first (a texture, a density, an LDOS).")
         self.no_results.setWordWrap(True)
@@ -306,6 +349,119 @@ class FieldEditor(Editor):
         self.outer.addWidget(self.panel)
         self.panel.hide()
 
+    def _build_profile(self, column):
+        self.profile_box = QWidget()
+        grid = QGridLayout(self.profile_box)
+        grid.setContentsMargins(0, 0, 0, 0)
+        self.profile_name = QComboBox()
+        self.profile_name.setObjectName(f"fieldProfile_{self.name}")
+        self.profile_name.addItems(sorted(fields.PROFILES))
+        self.profile_name.activated.connect(lambda _: self._profile_edited(new_name=True))
+        grid.addWidget(QLabel("profile"), 0, 0)
+        grid.addWidget(self.profile_name, 0, 1)
+        self.profile_grid, self.profile_edits = grid, {}
+        column.addWidget(self.profile_box)
+
+    def _build_interpolated(self, column):
+        self.points_box = QWidget()
+        grid = QGridLayout(self.points_box)
+        grid.setContentsMargins(0, 0, 0, 0)
+        self.points = QPlainTextEdit()
+        self.points.setObjectName(f"fieldPoints_{self.name}")
+        self.points.setPlaceholderText("one control point per line: x, y, value")
+        self.points.setMaximumHeight(6 * self.points.fontMetrics().lineSpacing())
+        self.length = QLineEdit()
+        self.length.setObjectName(f"fieldLength_{self.name}")
+        self.length.setToolTip("the length over which the control points are smoothed")
+        apply = QPushButton("Apply")
+        apply.setObjectName(f"fieldPointsApply_{self.name}")
+        apply.clicked.connect(self._points_edited)
+        self.length.editingFinished.connect(self._points_edited)
+        grid.addWidget(self.points, 0, 0, 1, 3)
+        grid.addWidget(QLabel("length"), 1, 0)
+        grid.addWidget(self.length, 1, 1)
+        grid.addWidget(apply, 1, 2)
+        column.addWidget(self.points_box)
+
+    def _build_painted(self, column):
+        self.paint_box = QWidget()
+        grid = QGridLayout(self.paint_box)
+        grid.setContentsMargins(0, 0, 0, 0)
+        self.paint_info = QLabel("")
+        self.paint_info.setObjectName(f"fieldPaintInfo_{self.name}")
+        self.paint_info.setWordWrap(True)
+        self.paint_default = QLineEdit()
+        self.paint_default.setObjectName(f"fieldPaintDefault_{self.name}")
+        self.paint_default.editingFinished.connect(self._paint_edited)
+        clear = QPushButton("Clear")
+        clear.setObjectName(f"fieldPaintClear_{self.name}")
+        clear.setToolTip("forget the painted sites")
+        clear.clicked.connect(lambda: self._paint_edited(clear=True))
+        grid.addWidget(self.paint_info, 0, 0, 1, 3)
+        grid.addWidget(QLabel("elsewhere"), 1, 0)
+        grid.addWidget(self.paint_default, 1, 1)
+        grid.addWidget(clear, 1, 2)
+        column.addWidget(self.paint_box)
+
+    def _sync_profile(self):
+        value = self._value
+        self._quiet(self.profile_name, self.profile_name.setCurrentText, value["name"])
+        if set(self.profile_edits) != set(value["params"]):
+            for label, edit in self.profile_edits.values():
+                for widget in (label, edit):
+                    self.profile_grid.removeWidget(widget)
+                    widget.hide()
+                    widget.deleteLater()          # may run inside one of their own signals
+            self.profile_edits = {}
+            for row, name in enumerate(value["params"], 1):
+                label, edit = QLabel(name), QLineEdit()
+                edit.setObjectName(f"fieldProfile_{self.name}_{name}")
+                edit.editingFinished.connect(self._profile_edited)
+                self.profile_grid.addWidget(label, row, 0)
+                self.profile_grid.addWidget(edit, row, 1)
+                self.profile_edits[name] = (label, edit)
+        for name, (_, edit) in self.profile_edits.items():
+            self._quiet(edit, edit.setText, format_number(value["params"][name]))
+
+    def _profile_edited(self, new_name=False):
+        if self._mode() != 3:
+            return
+        if new_name:
+            value = {"kind": "profile", "name": self.profile_name.currentText(), "params": {}}
+        else:
+            try:
+                params = {name: parse_float(edit.text())
+                          for name, (_, edit) in self.profile_edits.items()}
+            except ValueError:
+                return
+            value = dict(self._value, params=params)
+        if value != self._value:
+            self._commit_draft(value)
+
+    def _points_edited(self):
+        if self._mode() != 4:
+            return
+        try:
+            points = [[parse_float(c) for c in line.replace(";", ",").split(",")]
+                      for line in self.points.toPlainText().splitlines() if line.strip()]
+            length = parse_float(self.length.text())
+        except ValueError:
+            return
+        value = {"kind": "interpolated", "points": points, "length": length}
+        if value != self._value:
+            self._commit_draft(value)
+
+    def _paint_edited(self, clear=False):
+        if self._mode() != 5:
+            return
+        try:
+            default = parse_float(self.paint_default.text())
+        except ValueError:
+            return
+        value = dict(self._value, default=default, **({"sites": []} if clear else {}))
+        if value != self._value:
+            self._commit_draft(value)
+
     def _toggle_panel(self, shown):
         self.panel.setVisible(shown)
         if shown:
@@ -316,9 +472,11 @@ class FieldEditor(Editor):
             self.button.setChecked(shown)
 
     def _mode(self):
-        """0: a number or an expression; 1: piecewise; 2: from a result."""
+        """The index in KINDS of the Field's kind: 0 a number or an
+        expression, 1 piecewise, 2 from a result, 3 profile, 4
+        interpolated, 5 painted."""
         if isinstance(self._value, dict):
-            return 2 if self._value.get("kind") == "from_result" else 1
+            return MODES.get(self._value.get("kind"), 1)
         return 0
 
     def _piecewise_shown(self):
@@ -331,8 +489,22 @@ class FieldEditor(Editor):
         self.help.setVisible(mode == 0)
         self.result_box.setVisible(mode == 2)
         self.no_results.setVisible(mode == 2 and not self.sources)
+        self.profile_box.setVisible(mode == 3)
+        self.points_box.setVisible(mode == 4)
+        self.paint_box.setVisible(mode == 5)
         if mode == 2:
             self._sync_result()
+        elif mode == 3:
+            self._sync_profile()
+        elif mode == 4:
+            self._quiet(self.points, self.points.setPlainText, "\n".join(
+                ", ".join(format_number(c) for c in p) for p in self._value["points"]))
+            self._quiet(self.length, self.length.setText, format_number(self._value["length"]))
+        elif mode == 5:
+            self.paint_info.setText(f"{len(self._value['sites'])} sites painted: paint more "
+                                    f"with the Paint tool of the Field preview (Structure tab)")
+            self._quiet(self.paint_default, self.paint_default.setText,
+                        format_number(self._value["default"]))
         self.pieces.setVisible(piecewise)
         self.add.setVisible(piecewise)
         self.add.setEnabled(bool(self.regions))
@@ -439,11 +611,19 @@ class FieldEditor(Editor):
         if index == mode:
             return
         simple = self._value if mode == 0 else \
-            self._value["default"] if mode == 1 else 0.0
+            self._value["default"] if mode in (1, 5) else 0.0
+        number = simple if isinstance(simple, float) else 0.0
         if index == 0:
             self._commit_draft(simple)
         elif index == 1:
             self._commit_draft({"kind": "piecewise", "default": simple, "pieces": []})
+        elif index == 3:
+            self._commit_draft({"kind": "profile", "name": "gaussian", "params": {}})
+        elif index == 4:
+            self._commit_draft({"kind": "interpolated", "points": [[0.0, 0.0, number]],
+                                "length": 2.0})
+        elif index == 5:
+            self._commit_draft({"kind": "painted", "sites": [], "tol": 0.1, "default": number})
         else:
             value = self._result_value()
             if value is None:              # nothing to read: say so, keep the value
@@ -474,7 +654,7 @@ class FieldEditor(Editor):
             return self._draft
         if self._mode() == 1:
             return self._read_pieces()
-        if self._mode() == 2:
+        if self._mode() >= 2:
             return self._value
         return parse_field(self.edit.text())
 
@@ -494,7 +674,8 @@ class FieldEditor(Editor):
         self.edit.setToolTip("edit it in the f(r) panel" if structured else "")
         kind = fields.kind_of(value) if value is not None else "constant"
         self.marker.setText({"constant": "", "expression": "f(r)", "piecewise": "per region",
-                             "from_result": "result"}[kind])
+                             "from_result": "result", "profile": "profile",
+                             "interpolated": "points", "painted": "painted"}[kind])
         if self.button is not None:
             self.marker.hide()                  # the button says it instead
             font = self.button.font()
@@ -759,6 +940,9 @@ def make_editor(param, names=None, regions=(), sources=()):
         return IntVectorEditor(param)
     if isinstance(param, CodeParam):
         return CodeEditor(param)
+    if isinstance(param, KPathParam):
+        return LineEditor(param, parse_kpath, format_kpath,
+                          "default path, or e.g. G K M G, (0.5, 0) for reduced coordinates")
     if isinstance(param, ConditionParam):
         return LineEditor(param, str.strip, str, "a condition on x, y, z, r")
     if isinstance(param, TextParam):

@@ -52,6 +52,7 @@ from guiqula.registry import cost, pipeline
 from guiqula.registry.params import VectorFieldParam
 from guiqula.ui.bars import MessageBar
 from guiqula.ui.console import ConsoleWidget
+from guiqula.ui.kspace import KSpaceView
 from guiqula.ui.sliders import SlidersPanel
 from guiqula.ui.jobpanel import JobPanel
 from guiqula.ui.outliner import Outliner, system_of
@@ -67,8 +68,9 @@ WORKSPACES = ("geometry", "hamiltonian", "calculate")
 # actions of the window itself: they change what is shown, not the Document
 WINDOW_ACTIONS = ("select", "workspace", "tool", "select_sites", "canvas_view", "preview",
                   "auto_rerun", "projection", "overlay", "slider", "set_slider",
-                  "remove_slider")
+                  "remove_slider", "paint")
 STRUCTURE_TAB = 0
+KSPACE_TAB = 1
 # a new classical system: its lattice, and a supercell the usual orders fit in
 CLASSICAL_STARTS = {"classical_spin": ("triangular_lattice", 3, "Classical spins"),
                     "lattice_gas": ("triangular_lattice", 6, "Lattice gas"),
@@ -145,12 +147,21 @@ class MainWindow(QMainWindow):
         self.structure.selection_changed.connect(self._selection_changed)
         self.structure.view_chosen.connect(self.set_canvas_view)
         self.structure.projection_chosen.connect(self.set_projection)
+        self.structure.paint_stroke.connect(self._paint_stroke)
         self.viewport = QTabWidget()
         self.viewport.setObjectName("viewport")
         self.viewport.setTabsClosable(True)
         self.viewport.addTab(self.structure, "Structure")
-        for side in (QTabBar.ButtonPosition.LeftSide, QTabBar.ButtonPosition.RightSide):
-            self.viewport.tabBar().setTabButton(STRUCTURE_TAB, side, None)   # always there
+        self.kspace_view = KSpaceView()
+        self.kspace_view.path_edited.connect(
+            lambda calc, vertices: self._do("set_param", entry=calc, name="kpath",
+                                            value=vertices))
+        self.kspace_view.calculation_chosen.connect(self._kpath_calculation_chosen)
+        self.kpath_calc = None         # the calculation whose k-path the k-space tab edits
+        self.viewport.addTab(self.kspace_view, "k-space")
+        for tab in (STRUCTURE_TAB, KSPACE_TAB):
+            for side in (QTabBar.ButtonPosition.LeftSide, QTabBar.ButtonPosition.RightSide):
+                self.viewport.tabBar().setTabButton(tab, side, None)    # always there
         self.viewport.tabCloseRequested.connect(self._close_tab)
         self.error_bar = MessageBar("errorBar")
         self.recovery_bar = MessageBar("recoveryBar")
@@ -536,6 +547,7 @@ class MainWindow(QMainWindow):
         dispatcher.register_action("auto_rerun", lambda enabled=True: self.set_auto_rerun(enabled))
         dispatcher.register_action("projection", lambda name: self.set_projection(name))
         dispatcher.register_action("overlay", self.overlay)
+        dispatcher.register_action("paint", self.paint)
         dispatcher.register_action("slider", self.add_slider)
         dispatcher.register_action("set_slider", self.set_slider)
         dispatcher.register_action("remove_slider", self.remove_slider)
@@ -695,6 +707,8 @@ class MainWindow(QMainWindow):
                 for calc, chosen in self.overlays.items():   # the views it is drawn over
                     if calc in self.plots and any(o[0] == job.label for o in chosen):
                         self._draw_result(calc)
+                if job.value is not None and job.value.kind == "fermi_surface":
+                    self._refresh_kspace()           # drawn under the zone
                 if job.label in self.plots:
                     self._draw_result(job.label)
                 if job.label == self.selected_calculation() and job.id not in self._auto_jobs:
@@ -811,6 +825,59 @@ class MainWindow(QMainWindow):
         self.field_preview = (entry, param)
         self.viewport.setCurrentIndex(STRUCTURE_TAB)
         return self.set_canvas_view("field")
+
+    def paint(self, value, indices=None, point=None, radius=0.6, entry=None, param=None,
+              component=None, done=True):
+        """Paint a Field (the one previewed, or entry and param): the sites
+        at indices, or within radius of point [x, y], take value; the Field
+        becomes a painted one. The strokes of one drag are one undo step
+        (done ends it). Returns the number of sites painted."""
+        if entry is None or param is None:
+            if self.field_preview is None:
+                raise ValueError("preview a Field first (its f(r) panel), or name entry and "
+                                 "param")
+            entry, param = self.field_preview
+        system, spec, params, _ = self._field_entry(entry, param)
+        declared = spec.param_map[param]
+        vector = isinstance(declared, VectorFieldParam)
+        if vector and component is None:
+            raise ValueError(f"{param} is a vector: choose the component to paint (x, y, z)")
+        if not getattr(declared, "native", True):
+            raise ValueError(f"{param} is constant only: it cannot be painted")
+        build = self.builds.get(system.id)
+        if build is None:
+            raise ValueError(f"{system.id} is not built yet")
+        positions = np.asarray(build["positions"])
+        if point is not None:
+            indices = [int(i) for i in np.nonzero(np.hypot(
+                positions[:, 0] - point[0], positions[:, 1] - point[1]) <= radius)[0]]
+        indices = list(indices or [])
+        if indices:
+            current = params.get(param, declared.default)
+            regions = {r.id: r.select for r in system.regions}
+            if vector:
+                new = list(current)
+                new[component] = fields.paint(current[component], positions, indices, value,
+                                              regions, self.session.result_refs())
+            else:
+                new = fields.paint(current, positions, indices, value, regions,
+                                   self.session.result_refs())
+            key = f"paint:{entry}:{param}:{component}"
+            if entry.endswith("/meanfield"):
+                self.session.do_merged(key, "set_meanfield", system=system.id,
+                                       params={param: new})
+            else:
+                self.session.do_merged(key, "set_param", entry=entry, name=param, value=new)
+        if done:
+            self.session.dispatcher.end_merge()
+        return len(indices)
+
+    def _paint_stroke(self, indices, finished):
+        value, _, component = self.structure.brush()
+        try:
+            self.paint(value, indices=indices, component=component, done=finished)
+        except (ValueError, KeyError, registry.RegistryError) as error:
+            self.message(f"paint: {error}", error=True)
 
     def _preview_requested(self, entry, param):
         """A Field editor is being looked at (debounced: typing redraws)."""
@@ -982,6 +1049,8 @@ class MainWindow(QMainWindow):
             tab = self.selected_calculation()
         if tab == "structure":
             self.viewport.setCurrentIndex(STRUCTURE_TAB)
+        elif tab == "kspace":
+            self.viewport.setCurrentIndex(KSPACE_TAB)
         elif isinstance(tab, str) and self.calc_box.findData(tab) >= 0:
             self.show_result(tab)
         sites = ui.get("sites")
@@ -1139,6 +1208,7 @@ class MainWindow(QMainWindow):
         overlays.update(extra)
         caption += f"\n{text}" if text else ""
         self.structure.show_structure(system, build, caption, **overlays)
+        self._refresh_kspace()
         pending = self._pending_sites
         if pending is not None and pending[0] == system and self.session.build_is_current(system):
             self._pending_sites = None
@@ -1147,6 +1217,65 @@ class MainWindow(QMainWindow):
                     build["positions"], pending[1], REGION_TOLERANCE))
             except (ValueError, TypeError):
                 pass
+
+    # ---- the k-space tab (13.9)
+    def _kpath_calculations(self, system):
+        """[(id, label)] of the calculations of a system that take a k-path."""
+        out = []
+        for calc in self.session.document.calculations:
+            try:
+                spec = registry.get("calculation", calc.kind)
+            except registry.RegistryError:
+                continue
+            if calc.system == system and "kpath" in spec.param_map:
+                out.append((calc.id, f"{calc.id} {calc.kind}"))
+        return out
+
+    def _kpath_calculation_chosen(self, calc):
+        self.kpath_calc = calc or None
+        self._refresh_kspace()
+
+    def _refresh_kspace(self):
+        system = self.current_system()
+        build = self.builds.get(system) if system else None
+        if build is None:
+            self.kspace_view.clear(f"{system}: building…" if system else "No system yet.")
+            return
+        if build.get("kspace") is None:
+            self.kspace_view.clear(f"{system} is finite: it has no Brillouin zone.")
+            return
+        kspace = dict(build["kspace"], dimensionality=build["dimensionality"])
+        calculations = self._kpath_calculations(system)
+        ids = [c for c, _ in calculations]
+        calc = self.kpath_calc if self.kpath_calc in ids else \
+            self.selected_calculation() if self.selected_calculation() in ids else \
+            (ids[0] if ids else None)
+        kpath = None
+        if calc is not None:
+            obj = self.session.document.calculation(calc)
+            try:
+                kpath = registry.get("calculation", obj.kind).normalize_params(
+                    obj.params)["kpath"]
+            except Exception:
+                kpath = None
+        surface = None
+        for other in self.session.document.calculations:
+            result = self.session.result(other.id)
+            if other.system == system and other.kind == "fermi_surface" and result is not None \
+                    and kspace.get("k2K") is not None:
+                mesh = np.column_stack([result.arrays["kx"], result.arrays["ky"],
+                                        np.zeros(len(result.arrays["kx"]))])
+                reduced = mesh @ np.asarray(kspace["k2K"]).T
+                surface = (reduced @ np.asarray(kspace["reciprocal"]))[:, :2], \
+                    np.asarray(result.arrays["weight"])
+        what = f"the path of {calc}" if calc else "no calculation with a k-path on " + system
+        caption = (f"{system} · Brillouin zone · {what}"
+                   + (" (pyqula's default: dashed)" if calc and kpath is None else "")
+                   + (" · Fermi surface underneath" if surface is not None else ""))
+        try:
+            self.kspace_view.show_kspace(kspace, calculations, calc, kpath, surface, caption)
+        except Exception as error:       # a path through a label this lattice lacks
+            self.kspace_view.clear(f"{system}: cannot draw the path of {calc}: {error}")
 
     def _update_status(self):
         system = self.current_system()
@@ -1268,8 +1397,10 @@ class MainWindow(QMainWindow):
         return self.result_view(calc) if calc is not None else None
 
     def current_tab(self):
-        """"structure", or the id of the calculation whose tab is shown."""
+        """"structure", "kspace", or the id of the calculation whose tab is shown."""
         widget = self.viewport.currentWidget()
+        if widget is self.kspace_view:
+            return "kspace"
         return widget.calc_id if isinstance(widget, PlotView) else "structure"
 
     def result_view(self, calc):
@@ -1304,7 +1435,10 @@ class MainWindow(QMainWindow):
             return
         index = self.viewport.indexOf(view)
         if index >= 0:
+            shown = self.viewport.currentIndex() == index
             self.viewport.removeTab(index)
+            if shown:                            # back to the structure, not to a neighbour
+                self.viewport.setCurrentIndex(STRUCTURE_TAB)
         view.hide()
         view.deleteLater()               # may run inside a signal of its own tab bar
         if dock is not None:
