@@ -1143,7 +1143,13 @@ say more):
     the classical tensors, the automatic switch to sparse storage (KPM
     now exists; `is_sparse` stays the user's), the calculations of
     section 5 still missing (QPI, entanglement spectrum, RPA and magnons,
-    transport, the real-space Chern density against energy).
+    transport, the real-space Chern density against energy); and the
+    arrays a `from_result` Field reads travel with every job (build, run,
+    console), which is nothing for a texture of a few hundred sites and
+    will matter for a large result.
+Items 18 and 19 are not decisions: 18 is a fact about pyqula worth
+fixing upstream, 19 lists what phase 4 left out. Items 11 to 13 settle
+three questions of section 11 once confirmed.
 
 **Phase 5 — polish.** Undo everywhere, keyboard shortcuts, theming (light and
 dark), tooltips and formulas (reuse quantum-lattice's), user guide, example
