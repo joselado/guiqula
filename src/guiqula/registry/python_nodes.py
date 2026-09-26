@@ -19,11 +19,15 @@ flags the node, with its line, and the stack carries on without it
   spec, PLAN.md 3.4); without one, numbers only are shown as a table and
   otherwise the second array is drawn against the first.
 
+In a classical system (decision 13.5) the term and the calculation see
+the classical model as ``model`` instead of ``h`` (a SpinModel,
+LatticeGas or LatticeIsing), and ``needs`` does not matter.
+
 The exported script holds the code as it is: it runs on the script's own
 ``g`` and ``h``.
 """
 from guiqula.core.results import PLOT_KINDS
-from guiqula.registry.base import entry
+from guiqula.registry.base import ALL_SYSTEMS, entry
 from guiqula.registry.params import ChoiceParam, CodeParam
 
 
@@ -84,9 +88,15 @@ TERM_CODE = """\
 NEEDS = {"nothing": (), "spin": ("spin",), "nambu": ("nambu",)}
 
 
-def _term(h, ctx):
-    namespace = run_code(ctx.value("code"), {"h": h, "g": h.geometry}, "python term")
-    return namespace["h"]
+def _names(obj):
+    """What a node sees: h of a quantum system, model of a classical one."""
+    name = "h" if hasattr(obj, "intra") else "model"
+    return name, {name: obj, "g": obj.geometry}
+
+
+def _term(obj, ctx):
+    name, namespace = _names(obj)
+    return run_code(ctx.value("code"), namespace, "python term")[name]
 
 
 entry("term", "python", "Python term",
@@ -98,7 +108,7 @@ entry("term", "python", "Python term",
       group="Python", doc="Python code that changes the Hamiltonian: any pyqula term that "
                           "has no entry of its own. It runs only in a trusted document.",
       requires=lambda params: NEEDS[params["needs"]], runs_code=True, apply=_term,
-      script=_code_lines)
+      script=_code_lines, systems=ALL_SYSTEMS)
 
 CALCULATION_CODE = """\
 # h: the Hamiltonian of the system; set arrays (a dict of arrays or numbers)
@@ -132,9 +142,9 @@ def check_plot(plot, arrays):
     return plot
 
 
-def _calculation(h, ctx):
+def _calculation(obj, ctx):
     import numpy as np
-    namespace = run_code(ctx.value("code"), {"h": h, "g": h.geometry}, "python calculation")
+    namespace = run_code(ctx.value("code"), _names(obj)[1], "python calculation")
     arrays = namespace.get("arrays")
     if not isinstance(arrays, dict) or not arrays:
         raise NodeError("the code must set arrays, a dict of arrays or numbers")
@@ -151,5 +161,5 @@ entry("calculation", "python", "Python calculation",
       group="Python", doc="Python code that computes anything pyqula can from the system's "
                           "Hamiltonian; the arrays it sets are the result. It runs only in a "
                           "trusted document.",
-      runs_code=True, apply=_calculation, script=_code_lines,
+      runs_code=True, apply=_calculation, script=_code_lines, systems=ALL_SYSTEMS,
       plot=lambda params: {"kind": "lines", "x": "x", "y": "y"})

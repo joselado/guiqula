@@ -13,11 +13,12 @@ from guiqula.registry.params import (ChoiceParam, ConditionParam, FieldParam, Pa
 
 
 class ApplyContext:
-    def __init__(self, spec, params, region=None, progress=None, regions=None):
+    def __init__(self, spec, params, region=None, progress=None, regions=None, results=None):
         self.spec = spec
         self.params = params
         self.weight = region_tools.compile_indicator(region) if region else None
         self.regions = regions or {}
+        self.results = results or {}
         self.notes = {}
         self._progress = progress
 
@@ -26,10 +27,10 @@ class ApplyContext:
         value = self.params[name]
         if isinstance(param, VectorFieldParam):
             return fields.compile_vector(value, self.weight if param.native else None,
-                                         self.regions)
+                                         self.regions, self.results)
         if isinstance(param, FieldParam):
             return fields.compile_scalar(value, self.weight if param.native else None,
-                                         self.regions)
+                                         self.regions, self.results)
         if isinstance(param, ConditionParam):
             return param.compile(value)
         if isinstance(param, ChoiceParam) and param.source and value is not None:

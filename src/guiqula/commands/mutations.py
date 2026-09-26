@@ -10,8 +10,9 @@ and is flagged by the pipeline planner.
 from guiqula.commands.dispatcher import CommandError, mutation
 from guiqula.core import fields as field_tools
 from guiqula.core import regions as region_tools
-from guiqula.core.document import (Base, Calculation, Construction, Entry, Geometry,
-                                   Hamiltonian, MeanField, Region, System, region_users)
+from guiqula.core.document import (CLASSICAL_KINDS, SYSTEM_KINDS, Base, Calculation,
+                                   Construction, Entry, Geometry, Hamiltonian, MeanField, Model,
+                                   Region, System, region_users, terms_of)
 from guiqula.registry import base as registry
 from guiqula.registry.params import ParamError
 
@@ -40,13 +41,24 @@ def _insert(items, item, index):
 
 # ---- systems
 @mutation
-def add_system(document, lattice="honeycomb_lattice", name="", lattice_params=None):
-    """Add a quantum system built on a base lattice; returns its id."""
+def add_system(document, lattice="honeycomb_lattice", name="", lattice_params=None,
+               kind="quantum", model_params=None):
+    """Add a system built on a base lattice; returns its id. kind: quantum
+    (a Hamiltonian) or a classical kind (classical_spin, lattice_gas,
+    ising: a model, set up with model_params)."""
+    if kind not in SYSTEM_KINDS:
+        raise CommandError(f"unknown system kind {kind!r}; kinds: {list(SYSTEM_KINDS)}")
     params = _normalize("lattice", lattice, lattice_params)
     system_id = document.new_id("system")
-    document.systems.append(System(id=system_id, name=name or system_id,
-                                   geometry=Geometry(base=Base(kind=lattice, params=params)),
-                                   hamiltonian=Hamiltonian()))
+    geometry = Geometry(base=Base(kind=lattice, params=params))
+    if kind in CLASSICAL_KINDS:
+        model = Model(kind=kind, params=_normalize("model", kind, model_params))
+        system = System(id=system_id, name=name or system_id, kind=kind, geometry=geometry,
+                        hamiltonian=None, model=model)
+    else:
+        system = System(id=system_id, name=name or system_id, geometry=geometry,
+                        hamiltonian=Hamiltonian())
+    document.systems.append(system)
     return system_id
 
 
@@ -87,6 +99,17 @@ def set_meanfield(document, system, enabled=None, params=None, kind=None):
 
 
 @mutation
+def set_model(document, system, params):
+    """Change the set-up parameters of a classical system's model (merged
+    into the stored ones, one undo step)."""
+    target = document.system(system)
+    if target.model is None:
+        raise CommandError(f"system {system!r} is {target.kind}: it has no classical model")
+    model = target.model
+    model.params = _normalize("model", model.kind, dict(model.params, **(params or {})))
+
+
+@mutation
 def rename(document, entry, name):
     family, _, _, _, obj = document.find(entry)
     if family not in ("system", "region"):
@@ -107,13 +130,17 @@ def add_geometry_op(document, system, kind, params=None, index=None, enabled=Tru
 
 @mutation
 def add_term(document, system, kind, params=None, region=None, index=None, enabled=True):
-    """Add a Hamiltonian term (at the end, or at index); returns its id."""
+    """Add a term to a system's Hamiltonian, or to its classical model (at
+    the end, or at index); returns its id."""
     target = document.system(system)
-    if target.hamiltonian is None:
-        raise CommandError(f"system {system!r} has no Hamiltonian")
-    term = Entry(id=document.new_id("term"), kind=kind, enabled=enabled,
-                 params=_normalize("term", kind, params), region=region)
-    _insert(target.hamiltonian.terms, term, index)
+    params = _normalize("term", kind, params)
+    spec = registry.get("term", kind)
+    if target.kind not in spec.systems:
+        raise CommandError(f"{spec.label} does not apply to a {target.kind} system; it is a "
+                           f"term of {', '.join(spec.systems)} systems")
+    term = Entry(id=document.new_id("term"), kind=kind, enabled=enabled, params=params,
+                 region=region)
+    _insert(terms_of(target), term, index)
     return term.id
 
 
@@ -154,9 +181,14 @@ def set_selection(document, entry, select):
 @mutation
 def add_calculation(document, system, kind, params=None):
     """Add a calculation on a system; returns its id."""
-    document.system(system)
+    target = document.system(system)
+    params = _normalize("calculation", kind, params)
+    spec = registry.get("calculation", kind)
+    if target.kind not in spec.systems:
+        raise CommandError(f"{spec.label} does not apply to a {target.kind} system; it is a "
+                           f"calculation of {', '.join(spec.systems)} systems")
     calc = Calculation(id=document.new_id("calculation"), system=system, kind=kind,
-                       params=_normalize("calculation", kind, params))
+                       params=params)
     document.calculations.append(calc)
     return calc.id
 
@@ -167,8 +199,7 @@ def remove(document, entry):
     used by a term, or a system used by a calculation, cannot be removed."""
     family, owner, items, index, obj = document.find(entry)
     if family == "region":
-        users = [t.id for t in owner.hamiltonian.terms if t.region == entry] \
-            if owner.hamiltonian else []
+        users = [t.id for t in terms_of(owner) if t.region == entry]
         users += [user for user, params in region_users(owner)
                   if entry in field_tools.regions_of(list(params.values())) and user not in users]
         if users:
@@ -200,12 +231,12 @@ def duplicate(document, entry):
     regions = {}
     for region in copy.regions:
         regions[region.id] = region.id = document.new_id("region")
+    for term in terms_of(copy):
+        term.id = document.new_id("term")
+        if term.region is not None:
+            term.region = regions[term.region]
+        term.params = _rename_regions(term.params, regions)
     if copy.hamiltonian is not None:
-        for term in copy.hamiltonian.terms:
-            term.id = document.new_id("term")
-            if term.region is not None:
-                term.region = regions[term.region]
-            term.params = _rename_regions(term.params, regions)
         block = copy.hamiltonian.meanfield
         block.params = _rename_regions(block.params, regions)
     return copy.id

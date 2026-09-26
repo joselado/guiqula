@@ -32,7 +32,10 @@ def panel(qapp, no_jobs):
                          ids=lambda s: f"{s.family}:{s.kind}")
 def test_every_entry_has_a_form(panel, spec):
     panel, session = panel
-    entry = session.do(FAMILIES[spec.family], system="s1", kind=spec.kind)
+    system = "s1"
+    if "quantum" not in spec.systems:             # a system of a kind it applies to
+        system = session.do("add_system", lattice="square_lattice", kind=spec.systems[0])
+    entry = session.do(FAMILIES[spec.family], system=system, kind=spec.kind)
     panel.show_item(session, entry)
     form = panel.form
     assert isinstance(form, EntryForm) and form.spec is spec

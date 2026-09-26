@@ -116,7 +116,7 @@ class Console:
         names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
         try:
             if names & {"g", "h"} and not self.built:
-                self._build(payload.get("trusted", False))
+                self._build(payload.get("trusted", False), payload.get("results"))
             echo = tree.body and isinstance(tree.body[-1], ast.Expr)
             body = ast.Module(body=tree.body[:-1] if echo else tree.body, type_ignores=[])
             exec(compile(body, "<console>", "exec"), self.namespace)
@@ -133,10 +133,10 @@ class Console:
             return {"ok": False, "error": f"{type(error).__name__}: {error}"}
         return {"ok": True, "error": None}
 
-    def _build(self, trusted):
+    def _build(self, trusted, results=None):
         if self.system is None:
             raise NameError("g and h need a system: the document has none")
-        built = self.build(self.namespace["doc"], self.system, trusted)
+        built = self.build(self.namespace["doc"], self.system, trusted, results)
         self.namespace["g"], self.namespace["h"] = built.g, built.h
         self.built = True
 
@@ -226,17 +226,21 @@ def main(conn, config):
                 state["cores"] = parallel.cores
             document = Document.from_json(payload["document"])
             return run_calculation(document, payload["calculation"], cache, progress,
-                                   trusted=payload.get("trusted", False))
+                                   trusted=payload.get("trusted", False),
+                                   results=payload.get("results"))
         if kind == "build":
             document = Document.from_json(payload["document"])
             built = build_system(document, payload["system"], cache, meanfield=False,
-                                 trusted=payload.get("trusted", False))
-            view = bool(payload.get("view"))
+                                 trusted=payload.get("trusted", False),
+                                 results=payload.get("results"))
+            quantum = hasattr(built.h, "intra")        # else a classical model
+            view = bool(payload.get("view")) and quantum
             return dict(structure.describe(built.g), view=view,
                         hamiltonian=structure.hamiltonian_view(built.h) if view else None,
                         system=payload["system"], key=built.key, mode=built.mode,
-                        reports=built.reports, upgraded_by=built.plan.upgraded_by,
-                        sites=len(built.g.r), dimension=int(built.h.intra.shape[0]),
+                        kind=built.plan.kind, reports=built.reports,
+                        upgraded_by=built.plan.upgraded_by, sites=len(built.g.r),
+                        dimension=int(built.h.intra.shape[0]) if quantum else len(built.g.r),
                         cache={"hits": cache.hits, "misses": cache.misses, "size": len(cache)})
         if kind == "sleep":
             steps = max(int(payload.get("seconds", 1.0) / 0.05), 1)
@@ -250,8 +254,9 @@ def main(conn, config):
             return request(job_id, payload["name"], payload.get("args"))
         if kind == "console":
             if not console:
-                console.append(Console(request, lambda document, system, trusted: build_system(
-                    document, system, cache, trusted=trusted)))
+                console.append(Console(request, lambda document, system, trusted, results:
+                                       build_system(document, system, cache, trusted=trusted,
+                                                    results=results)))
             return console[0].run(job_id, payload)
         raise ValueError(f"unknown job kind {kind!r}")
 

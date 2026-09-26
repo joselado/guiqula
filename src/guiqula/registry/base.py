@@ -16,7 +16,7 @@ from typing import Any, Callable
 
 from guiqula.registry.params import Param, ParamError, SeedParam
 
-FAMILIES = ("lattice", "geometry_op", "term", "meanfield", "calculation")
+FAMILIES = ("lattice", "geometry_op", "term", "meanfield", "model", "calculation")
 CATALOGUE = {family: {} for family in FAMILIES}
 
 
@@ -73,6 +73,7 @@ class EntrySpec:
     plot: dict | None = None         # calculations: plot kind and array mapping
     cost: Callable | None = None     # calculations: (params, size) -> seconds (registry/cost.py)
     modules: tuple = ()              # pyqula modules a custom script uses ("disorder")
+    preamble: tuple = ()             # lines an exported script runs once, after its imports
     regions: bool = True             # terms: whether a region may restrict it (a factor may not)
     runs_code: bool = False          # a Python node: runs only in a trusted document (13.7)
     extra: dict[str, Any] = field(default_factory=dict)
@@ -157,12 +158,18 @@ def _load_builtins():
     global _loaded
     if not _loaded:
         _loaded = True
-        from guiqula.registry import (calculations, geometry_ops, lattices, meanfield,  # noqa: F401
-                                      python_nodes, terms)
+        from guiqula.registry import (calculations, classical, geometry_ops,  # noqa: F401
+                                      lattices, meanfield, python_nodes, terms)
+
+
+ALL_SYSTEMS = ("quantum", "classical_spin", "lattice_gas", "ising")
 
 
 def entry(family, kind, label, *params, **meta):
-    """Declare and register an entry; returns the spec."""
+    """Declare and register an entry; returns the spec. Lattices and
+    geometry ops apply to every kind of system unless they say otherwise."""
+    if family in ("lattice", "geometry_op"):
+        meta.setdefault("systems", ALL_SYSTEMS)
     return register(EntrySpec(family=family, kind=kind, label=label, params=tuple(params), **meta))
 
 

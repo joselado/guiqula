@@ -25,9 +25,10 @@ a decision changes.
 
 Status (2026-09-26): phases 0 to 3 are done and the maintainer has answered the phase-3
 report (PLAN.md section 7 says what each phase built, what was left for later, and the
-answers). Phase 4 is under way in four parts (PLAN.md section 7): part 1 (the breadth of
-the quantum registry, the plot kinds, the 3D drawing) and part 2 (Python nodes, trust,
-console) are done; part 3 (classical systems, `from_result` Fields) is next, then part 4.
+answers). Phase 4 is under way in four parts (PLAN.md section 7): parts 1 (the breadth of
+the quantum registry, the plot kinds, the 3D drawing), 2 (Python nodes, trust, console) and
+3 (classical systems, `from_result` Fields) are done; part 4 (the remaining Fields, the
+Brillouin-zone canvas, sweeps, overlays, presets gallery, results in project files) is next.
 
 ## Code map
 
@@ -35,13 +36,16 @@ The flow is Document -> plan -> engine -> worker -> Result -> plot; everything g
 a `Session`.
 
 - `core/`: `document.py` (pydantic models; ids unique across the document; a quantum
-  system's Hamiltonian = construction, terms, mean-field block), `fields.py` and
-  `expressions.py` (Fields: constant, expression, piecewise over regions; the
+  system's Hamiltonian = construction, terms, mean-field block; a classical system's
+  `model` = the model entry's set-up and its terms; `terms_of(system)`), `fields.py` and
+  `expressions.py` (Fields: constant, expression, piecewise over regions, from_result; the
   AST-whitelisted expression evaluator), `regions.py`, `results.py` (the `Result` dataclass
   that crosses the process boundary; a result drawn on the atoms carries its geometry in
-  `structure`), `hashing.py`.
+  `structure`; `ResultRef`, what a from_result Field reads), `hashing.py`.
 - `registry/`: one declaration per lattice, op, term, mean field and calculation
-  (`lattices.py`, `geometry_ops.py`, `terms.py`, `meanfield.py`, `calculations.py`). A
+  (`lattices.py`, `geometry_ops.py`, `terms.py`, `meanfield.py`, `calculations.py`,
+  `classical.py` for the classical models, terms and calculations, `python_nodes.py`); an
+  entry's `systems` names the system kinds it applies to. A
   declarative `Call("h.add_zeeman", "m")` drives both the engine and the script export; a
   custom entry gives `apply` and `script`. `pipeline.py` plans a system without pyqula: the
   Hilbert-space pre-scan, invalid entries, region references resolved to selections, and

@@ -188,18 +188,21 @@ class JobManager:
         self._dispatch()
         return job
 
-    def run(self, document_json, calculation, cores=1, timeout=None, trusted=True):
-        """trusted: whether the document's Python nodes run (PLAN.md 13.7)."""
+    def run(self, document_json, calculation, cores=1, timeout=None, trusted=True, results=None):
+        """trusted: whether the document's Python nodes run (PLAN.md 13.7);
+        results: {calculation id: ResultRef} its from_result Fields read."""
         return self.submit("run", {"document": document_json, "calculation": calculation,
-                                   "cores": cores, "trusted": trusted}, "batch", timeout,
-                           label=calculation)
+                                   "cores": cores, "trusted": trusted, "results": results},
+                           "batch", timeout, label=calculation)
 
-    def build(self, document_json, system, timeout=None, view=False, trusted=True):
+    def build(self, document_json, system, timeout=None, view=False, trusted=True,
+              results=None):
         """view: include the Hamiltonian view (engine/structure.py)."""
         return self.submit("build", {"document": document_json, "system": system, "view": view,
-                                     "trusted": trusted}, "interactive", timeout, label=system)
+                                     "trusted": trusted, "results": results}, "interactive",
+                           timeout, label=system)
 
-    def console(self, code, document_json, system, trusted=True, timeout=None):
+    def console(self, code, document_json, system, trusted=True, timeout=None, results=None):
         """Run code in the console worker (started now if needed)."""
         if "console" not in self.workers:
             context = multiprocessing.get_context("spawn")
@@ -209,7 +212,8 @@ class JobManager:
             worker.start()
             self._emit("worker", worker.info())
         return self.submit("console", {"code": code, "document": document_json, "system": system,
-                                       "trusted": trusted}, "console", timeout, label="console")
+                                       "trusted": trusted, "results": results}, "console", timeout,
+                           label="console")
 
     def restart(self, role):
         """Kill and restart the workers of a role (their jobs are cancelled):

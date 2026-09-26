@@ -23,7 +23,7 @@ from guiqula.core.document import DocumentError
 from guiqula.registry import base as registry
 from guiqula.registry import cost
 from guiqula.ui import formulas
-from guiqula.ui.forms import format_number, make_editor
+from guiqula.ui.forms import format_number, make_editor, result_sources
 from guiqula.ui.outliner import system_of
 
 EVERYWHERE = "(everywhere)"
@@ -85,11 +85,13 @@ class Form(QWidget):
             self.update_values()
         return ok
 
-    def add_editors(self, params, values, send, regions=()):
+    def add_editors(self, params, values, send, regions=(), sources=()):
         """One editor per parameter; send(name, value) commits it. regions:
-        [(id, name)] the piecewise Fields can use."""
+        [(id, name)] the piecewise Fields can use; sources: the results a
+        from_result Field can read (forms.result_sources)."""
         for param in params:
-            editor = make_editor(param, getattr(self.session.jobs, "names", {}), regions)
+            editor = make_editor(param, getattr(self.session.jobs, "names", {}), regions,
+                                 sources)
             editor.set_value(values[param.name])
             editor.committed.connect(lambda p=param, e=editor: self._send(e, p, send))
             if hasattr(editor, "preview"):
@@ -279,10 +281,11 @@ class EntryForm(Form):
         if family == "calculation":
             self.rows.addRow("system", QLabel(obj.system))
         if spec is not None:
+            self.sources = result_sources(panel.session, owner.id) if family == "term" else []
             self.add_editors(spec.params, spec.normalize_params({}) | obj.params,
                              lambda name, value: self.commit("set_param", entry=entry_id,
                                                              name=name, value=value),
-                             _regions(owner) if family == "term" else ())
+                             _regions(owner) if family == "term" else (), self.sources)
         self.status = QLabel()
         self.status.setObjectName("entryStatus")
         self.status.setWordWrap(True)
@@ -292,7 +295,9 @@ class EntryForm(Form):
     def signature(self):
         found = self.session.document.find(self.item_id)
         regions = _regions(found[1]) if found[0] == "term" else ()
-        return (self.family, self.item_id, found[-1].kind, regions)
+        sources = tuple((calc, tuple(arrays)) for calc, _, arrays in
+                        result_sources(self.session, found[1].id)) if found[0] == "term" else ()
+        return (self.family, self.item_id, found[-1].kind, regions, sources)
 
     def update_values(self):
         obj = self.session.document.find(self.item_id)[-1]
@@ -315,6 +320,7 @@ class EntryForm(Form):
             return ""
         if stage.problem:
             return f"invalid, skipped: {stage.problem}"
+        notes = list(stage.warnings)
         build = session.builds.get(self.system_id)
         if build is not None and session.build_is_current(self.system_id):
             for report in build["reports"]:
@@ -322,8 +328,8 @@ class EntryForm(Form):
                     if report["status"] == "invalid":
                         return f"pyqula refused it, skipped: {report['message']}"
                     if report.get("mode"):
-                        return f"Hilbert space after it: {report['mode']}"
-        return ""
+                        notes.append(f"Hilbert space after it: {report['mode']}")
+        return "\n".join(notes)
 
     def _set_region(self, index):
         region = self.region.itemData(index)
@@ -495,6 +501,37 @@ class MeanFieldForm(Form):
         return text
 
 
+class ModelForm(Form):
+    """A classical system's model (decision 13.5), shown for the outliner
+    row <system>/model: its set-up parameters."""
+
+    def __init__(self, panel, item_id):
+        self.system_id = system_of(item_id)
+        model = panel.session.document.system(self.system_id).model
+        self.kind = model.kind
+        try:
+            spec = registry.get("model", model.kind)
+        except registry.RegistryError as error:
+            spec = None
+            super().__init__(panel, item_id, f"Model {model.kind}", str(error).strip("\"'"))
+        if spec is not None:
+            super().__init__(panel, item_id, spec.label,
+                             f"{self.system_id} · {spec.group}\n{spec.doc}")
+            self.add_editors(spec.params, spec.normalize_params({}) | model.params,
+                             lambda name, value: self.commit(
+                                 "set_model", system=self.system_id, params={name: value}))
+        self.update_values()
+
+    def signature(self):
+        return ("model", self.system_id, self.session.document.system(self.system_id).model.kind)
+
+    def update_values(self):
+        model = self.session.document.system(self.system_id).model
+        for name, editor in self.editors.items():
+            if name in model.params:
+                editor.set_value(model.params[name])
+
+
 class PropertiesPanel(QScrollArea):
     preview = Signal(str, str)        # entry (or <system>/meanfield), parameter name
 
@@ -526,6 +563,8 @@ class PropertiesPanel(QScrollArea):
             return EmptyForm(self)
         if item_id.endswith("/meanfield"):
             return MeanFieldForm(self, item_id)
+        if item_id.endswith("/model"):
+            return ModelForm(self, item_id)
         system = system_of(item_id)
         if system is not None:
             return SystemForm(self, system)

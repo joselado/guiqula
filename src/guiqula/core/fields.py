@@ -14,7 +14,19 @@ A Field is stored in the Document as plain JSON:
   A piecewise Field names regions by id; the pipeline resolves the ids to
   the regions' selections (which is what enters the stage key, never the
   ids) and hands the engine and the exporter a ``regions`` map {id:
-  selection}. Profile, interpolated, painted and from_result are phase 4.
+  selection}. Profile, interpolated and painted are phase 4, part 4.
+- ``{"kind": "from_result", "calculation": "c2", "array":
+  "magnetization", "component": 2, "scale": 1.0, "tol": 0.1}``: the value
+  of an array of another calculation's result at the site nearest to the
+  position (within tol, 0 elsewhere), times scale; component picks a
+  column of an array with one row per site (a vector per site). The
+  result must be drawn on the sites (it carries their positions) and
+  belong to another system, so that a classical texture can be the
+  exchange field of a quantum system (PLAN.md 3.8, section 5). What the
+  keys hash is the key of the result read, never the calculation's id:
+  running the source again makes the systems that read it stale. The
+  engine and the exporter get the results as {calculation id:
+  core.results.ResultRef}.
 
 A vector Field is a list of three scalar Fields, one per component.
 
@@ -28,7 +40,8 @@ import numbers
 from guiqula.core import regions as region_tools
 from guiqula.core.expressions import Expression, ExpressionError
 
-LATER_KINDS = ("profile", "interpolated", "painted", "from_result")
+LATER_KINDS = ("profile", "interpolated", "painted")
+RESULT_KEYS = ("kind", "calculation", "array", "component", "scale", "tol")
 
 
 class FieldError(ValueError):
@@ -39,7 +52,31 @@ def normalize(value):
     """Return the canonical JSON form of a scalar Field, or raise FieldError."""
     if isinstance(value, dict) and value.get("kind") == "piecewise":
         return _normalize_piecewise(value)
+    if isinstance(value, dict) and value.get("kind") == "from_result":
+        return _normalize_result(value)
     return _normalize_simple(value)
+
+
+def _normalize_result(value):
+    extra = set(value) - set(RESULT_KEYS)
+    if extra:
+        raise FieldError(f"unknown keys {sorted(extra)} in a from_result Field")
+    calculation, array = value.get("calculation"), value.get("array")
+    if not isinstance(calculation, str) or not calculation:
+        raise FieldError("a from_result Field names a calculation by id")
+    if not isinstance(array, str) or not array:
+        raise FieldError("a from_result Field names an array of the result")
+    component = value.get("component")
+    if component is not None and (isinstance(component, bool) or component not in (0, 1, 2)):
+        raise FieldError("component is 0, 1, 2 (x, y, z) or null")
+    try:
+        scale, tol = float(value.get("scale", 1.0)), float(value.get("tol", 0.1))
+    except (TypeError, ValueError):
+        raise FieldError("scale and tol are numbers") from None
+    if not math.isfinite(scale) or not tol > 0:
+        raise FieldError("scale is a finite number and tol a positive one")
+    return {"kind": "from_result", "calculation": calculation, "array": array,
+            "component": component, "scale": scale, "tol": tol}
 
 
 def _normalize_simple(value):
@@ -66,8 +103,8 @@ def _normalize_simple(value):
             return _normalize_simple(value["value"])
         if kind == "expression" and set(value) == {"kind", "expr"}:
             return _normalize_simple(str(value["expr"]))
-        if kind == "piecewise":
-            raise FieldError("a piecewise Field cannot hold another piecewise Field")
+        if kind in ("piecewise", "from_result"):
+            raise FieldError(f"a piecewise Field cannot hold a {kind} Field")
         if kind in LATER_KINDS:
             raise FieldError(f"{kind} Fields are not implemented yet (PLAN.md 3.8)")
         raise FieldError(f"unknown Field {value!r}")
@@ -107,6 +144,71 @@ def kind_of(value):
     if isinstance(value, dict):
         return value["kind"]
     return "constant" if isinstance(value, float) else "expression"
+
+
+def results_of(value):
+    """Ids of the calculations whose results a Field reads, for any JSON
+    value (a Field, a vector of them, a dict of parameters)."""
+    if isinstance(value, dict) and value.get("kind") == "from_result":
+        return [value.get("calculation")]
+    if isinstance(value, dict):
+        return [c for v in value.values() for c in results_of(v)]
+    if isinstance(value, (list, tuple)):
+        return [c for v in value for c in results_of(v)]
+    return []
+
+
+def resolve_results(value, keys):
+    """The Field with each calculation id replaced by the key of the result
+    it reads: what a stage key hashes (decision 14.9)."""
+    if isinstance(value, dict) and value.get("kind") == "from_result":
+        return dict({k: v for k, v in value.items() if k != "calculation"},
+                    result=keys[value["calculation"]])
+    if isinstance(value, list):
+        return [resolve_results(v, keys) for v in value]
+    return value
+
+
+def site_values(ref, array, component):
+    """The values per site a from_result Field reads from a ResultRef."""
+    import numpy as np
+    if ref.positions is None:
+        raise FieldError("the result is not drawn on the sites, it has no positions")
+    if array not in ref.arrays:
+        raise FieldError(f"the result has no array {array!r}; it has {sorted(ref.arrays)}")
+    values = np.asarray(ref.arrays[array], dtype=float)
+    n = len(ref.positions)
+    if component is not None:
+        if values.ndim != 2 or values.shape[0] != n or values.shape[1] <= component:
+            raise FieldError(f"{array} has no component {component} per site")
+        values = values[:, component]
+    if values.shape != (n,):
+        raise FieldError(f"{array} is not one number per site (shape {values.shape}); "
+                         f"choose a component")
+    return values
+
+
+def site_field(positions, values, tol, scale=1.0):
+    """A function of position: scale times the value of the site nearest to
+    it, when that site is closer than tol, else 0 (a from_result Field;
+    exported scripts define this same function)."""
+    import numpy as np
+    positions = np.asarray(positions, dtype=float).reshape(-1, 3)
+    values = np.asarray(values, dtype=float).reshape(-1)
+
+    def f(r):
+        d = np.linalg.norm(positions - np.asarray(r, dtype=float), axis=1)
+        i = int(np.argmin(d))
+        return scale * float(values[i]) if d[i] < tol else 0.0
+    return f
+
+
+def _result_function(value, results):
+    if results is None or value["calculation"] not in results:
+        raise FieldError(f"the result of {value['calculation']} is not available")
+    ref = results[value["calculation"]]
+    return site_field(ref.positions, site_values(ref, value["array"], value["component"]),
+                      value["tol"], value["scale"])
 
 
 def regions_of(value):
@@ -164,27 +266,32 @@ def _piecewise_function(value, regions):
     return f
 
 
-def compile_scalar(value, weight=None, regions=None):
+def compile_scalar(value, weight=None, regions=None, results=None):
     """A number, or a callable f(position) for pyqula.
 
     weight: optional callable of position multiplying the Field (the
     indicator of a region); a constant then becomes a callable too.
-    regions: {id: selection} for the regions a piecewise Field names.
+    regions: {id: selection} for the regions a piecewise Field names;
+    results: {calculation id: ResultRef} for the results it reads.
     """
     value = normalize(value)
     if isinstance(value, float):
         if weight is None:
             return value
         return lambda r, c=value, w=weight: c * w(r)
-    function = _piecewise_function(value, regions) if isinstance(value, dict) \
-        else Expression(value).at
+    if isinstance(value, dict) and value["kind"] == "from_result":
+        function = _result_function(value, results)
+    elif isinstance(value, dict):
+        function = _piecewise_function(value, regions)
+    else:
+        function = Expression(value).at
     if weight is None:
         return function
     return lambda r, f=function, w=weight: f(r) * w(r)
 
 
-def compile_vector(value, weight=None, regions=None):
-    return [compile_scalar(v, weight, regions) for v in normalize_vector(value)]
+def compile_vector(value, weight=None, regions=None, results=None):
+    return [compile_scalar(v, weight, regions, results) for v in normalize_vector(value)]
 
 
 def _code_simple(value):
@@ -202,21 +309,36 @@ def _code_body(value, regions):
     return body
 
 
-def code_scalar(value, weight_code=None, regions=None):
-    """Python source equivalent to compile_scalar (numpy imported as np)."""
+def _code_result(value, results):
+    """site_field(...) with the result's positions and values written out."""
+    ref = results[value["calculation"]]
+    values = site_values(ref, value["array"], value["component"])
+    positions = [[float(c) for c in p] for p in ref.positions]
+    return (f"site_field(np.array({positions!r}), np.array({[float(v) for v in values]!r}), "
+            f"{value['tol']!r}, {value['scale']!r})")
+
+
+def code_scalar(value, weight_code=None, regions=None, results=None):
+    """Python source equivalent to compile_scalar (numpy imported as np;
+    a from_result Field calls site_field, which the script defines)."""
     value = normalize(value)
     if isinstance(value, float):
         if weight_code is None:
             return repr(value)
         return f"lambda r: {value!r} * ({weight_code})"
+    if isinstance(value, dict) and value["kind"] == "from_result":
+        function = _code_result(value, results)
+        if weight_code is None:
+            return function
+        return f"(lambda f: lambda r: f(r) * ({weight_code}))({function})"
     body = _code_body(value, regions)
     if weight_code is None:
         return f"lambda r: {body}"
     return f"lambda r: ({body}) * ({weight_code})"
 
 
-def code_vector(value, weight_code=None, regions=None):
-    return "[" + ", ".join(code_scalar(v, weight_code, regions)
+def code_vector(value, weight_code=None, regions=None, results=None):
+    return "[" + ", ".join(code_scalar(v, weight_code, regions, results)
                            for v in normalize_vector(value)) + "]"
 
 
@@ -227,13 +349,16 @@ def _evaluate_simple(value, positions):
     return Expression(value).evaluate_positions(positions)
 
 
-def evaluate_positions(value, positions, regions=None):
+def evaluate_positions(value, positions, regions=None, results=None):
     """Evaluate a scalar Field on an (N, 3) array (canvas previews, tests)."""
     import numpy as np
     value = normalize(value)
     positions = np.asarray(positions, dtype=float).reshape(-1, 3)
     if not isinstance(value, dict):
         return _evaluate_simple(value, positions)
+    if value["kind"] == "from_result":
+        f = _result_function(value, results)
+        return np.array([f(r) for r in positions], dtype=float)
     out = _evaluate_simple(value["default"], positions)
     for piece in value["pieces"]:
         inside = region_tools.evaluate_positions(_selection(regions, piece["region"]), positions)

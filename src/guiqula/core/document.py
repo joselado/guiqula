@@ -5,10 +5,15 @@ A document holds systems and calculations. A system of kind ``quantum`` has
 a geometry stack (a base lattice and ordered ops), regions, and a
 Hamiltonian (construction, an ordered term stack, and the mean-field block
 that turns the terms into a self-consistent interacting Hamiltonian when it
-is enabled). The classical kinds
-(``classical_spin``, ``lattice_gas``, ``ising``) are reserved in the schema;
-they get their model stack in phase 4. Entry ids are unique across the
-document, so a command can name any entry by id alone.
+is enabled). A system of one of the classical kinds (``classical_spin``,
+``lattice_gas``, ``ising``, decision 13.5) has the same geometry stack and
+regions and, in place of the Hamiltonian, a ``model``: the classical model
+built on the geometry (its kind names a registry entry of the "model"
+family, whose parameters set it up: the filling, the initial
+magnetization, the seed of the random initial configuration) and its
+term stack. Entry ids are unique across the document, so a command can
+name any entry by id alone; terms_of(system) is a system's term stack,
+whatever its kind.
 
 Parameters are stored as plain JSON (``params``); their meaning and
 validation belong to the registry entry named by ``kind``.
@@ -17,7 +22,7 @@ import json
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from guiqula.core import fields as field_tools
 
@@ -27,6 +32,7 @@ SCHEMA_VERSION = 1
 _LEAF_LIST = re.compile(r'\[\s*((?:-?[\d.eE+-]+|"[^",\[\]{}]*"|true|false|null)'
                         r'(?:\s*,\s*(?:-?[\d.eE+-]+|"[^",\[\]{}]*"|true|false|null))*)\s*\]')
 SYSTEM_KINDS = ("quantum", "classical_spin", "lattice_gas", "ising")
+CLASSICAL_KINDS = SYSTEM_KINDS[1:]
 
 ID_PREFIX = {"system": "s", "op": "op", "term": "t", "region": "r", "calculation": "c"}
 
@@ -86,6 +92,15 @@ class Hamiltonian(_Model):
     meanfield: MeanField = Field(default_factory=MeanField)
 
 
+class Model(_Model):
+    """A classical system's model (decision 13.5): kind names a registry
+    entry of the "model" family (the same name as the system's kind),
+    whose params set the model up; terms is its stack."""
+    kind: str
+    params: dict[str, Any] = Field(default_factory=dict)
+    terms: list[Entry] = Field(default_factory=list)
+
+
 class System(_Model):
     id: str
     name: str = ""
@@ -93,6 +108,17 @@ class System(_Model):
     geometry: Geometry
     regions: list[Region] = Field(default_factory=list)
     hamiltonian: Hamiltonian | None = Field(default_factory=Hamiltonian)
+    model: Model | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _classical_has_no_hamiltonian(cls, data):
+        """A classical system written without a hamiltonian has none (the
+        field's default is a Hamiltonian, for the quantum systems)."""
+        if isinstance(data, dict) and data.get("kind") in CLASSICAL_KINDS \
+                and "hamiltonian" not in data:
+            data = dict(data, hamiltonian=None)
+        return data
 
 
 class Calculation(_Model):
@@ -161,10 +187,10 @@ class Document(_Model):
             for j, region in enumerate(system.regions):
                 if region.id == entry_id:
                     return "region", system, system.regions, j, region
-            if system.hamiltonian is not None:
-                for j, term in enumerate(system.hamiltonian.terms):
-                    if term.id == entry_id:
-                        return "term", system, system.hamiltonian.terms, j, term
+            terms = terms_of(system)
+            for j, term in enumerate(terms):
+                if term.id == entry_id:
+                    return "term", system, terms, j, term
         for i, calc in enumerate(self.calculations):
             if calc.id == entry_id:
                 return "calculation", None, self.calculations, i, calc
@@ -176,8 +202,7 @@ class Document(_Model):
             ids.append(system.id)
             ids += [op.id for op in system.geometry.ops]
             ids += [region.id for region in system.regions]
-            if system.hamiltonian is not None:
-                ids += [term.id for term in system.hamiltonian.terms]
+            ids += [term.id for term in terms_of(system)]
         ids += [calc.id for calc in self.calculations]
         return ids
 
@@ -189,13 +214,23 @@ class Document(_Model):
         return f"{prefix}{max(used, default=0) + 1}"
 
 
+def terms_of(system):
+    """A system's term stack: its Hamiltonian's, or its classical model's
+    (the list itself, so a mutation can change it)."""
+    if system.hamiltonian is not None:
+        return system.hamiltonian.terms
+    if system.model is not None:
+        return system.model.terms
+    return []
+
+
 def region_users(system):
     """(owner, params) of everything in a system whose parameters can name
     regions (piecewise Fields): the terms, then the mean field."""
-    if system.hamiltonian is None:
-        return []
-    users = [(term.id, term.params) for term in system.hamiltonian.terms]
-    return users + [(f"{system.id}/meanfield", system.hamiltonian.meanfield.params)]
+    users = [(term.id, term.params) for term in terms_of(system)]
+    if system.hamiltonian is not None:
+        users.append((f"{system.id}/meanfield", system.hamiltonian.meanfield.params))
+    return users
 
 
 def check(document):
@@ -206,20 +241,26 @@ def check(document):
         raise DocumentError(f"duplicate ids: {duplicates}")
     systems = {s.id: s for s in document.systems}
     for system in document.systems:
-        if system.kind == "quantum" and system.hamiltonian is None:
-            raise DocumentError(f"quantum system {system.id!r} has no hamiltonian")
+        if system.kind == "quantum" and (system.hamiltonian is None or system.model is not None):
+            raise DocumentError(f"quantum system {system.id!r} needs a hamiltonian and no model")
+        if system.kind in CLASSICAL_KINDS and (system.model is None
+                                               or system.hamiltonian is not None):
+            raise DocumentError(f"{system.kind} system {system.id!r} needs a model and no "
+                                f"hamiltonian")
+        if system.model is not None and system.model.kind != system.kind:
+            raise DocumentError(f"system {system.id!r} is {system.kind} but its model is "
+                                f"{system.model.kind}")
         regions = {r.id for r in system.regions}
-        if system.hamiltonian is not None:
-            for term in system.hamiltonian.terms:
-                if term.region is not None and term.region not in regions:
-                    raise DocumentError(f"term {term.id!r} refers to region {term.region!r}, "
-                                        f"which system {system.id!r} does not have")
-            for owner, params in region_users(system):
-                missing = [r for r in field_tools.regions_of(list(params.values()))
-                           if r not in regions]
-                if missing:
-                    raise DocumentError(f"{owner} has a piecewise Field over region "
-                                        f"{missing[0]!r}, which system {system.id!r} does not have")
+        for term in terms_of(system):
+            if term.region is not None and term.region not in regions:
+                raise DocumentError(f"term {term.id!r} refers to region {term.region!r}, "
+                                    f"which system {system.id!r} does not have")
+        for owner, params in region_users(system):
+            missing = [r for r in field_tools.regions_of(list(params.values()))
+                       if r not in regions]
+            if missing:
+                raise DocumentError(f"{owner} has a piecewise Field over region "
+                                    f"{missing[0]!r}, which system {system.id!r} does not have")
         for op in system.geometry.ops:
             if op.region is not None:
                 raise DocumentError(f"geometry op {op.id!r} cannot carry a region in phase 1")

@@ -372,6 +372,17 @@ def calc_system(name):
                                  clean=True)
         h = g.get_hamiltonian(has_spin=False)
         h.add_haldane(0.1)
+    elif name in ("spins", "gas", "ising"):      # classical systems: h is the model
+        kind, lattice, n, terms, setup = {
+            "spins": ("classical_spin", "triangular_lattice", 3, [("heisenberg", {})], {}),
+            "gas": ("lattice_gas", "triangular_lattice", 6,
+                    [("gas_interaction", {"J1": 1.0})], {"filling": 1 / 3}),
+            "ising": ("ising", "square_lattice", 6, [("ising_interaction", {})], {})}[name]
+        d, s, _ = classical(kind, lattice, n, terms, model_params=setup)
+        h = direct_model(kind, lattice, n, **setup)
+        for term, params in terms:
+            h.add_heisenberg(Jij=[1.0]) if term == "heisenberg" else \
+                h.add_interaction(Jij=[params.get("J1", 1.0)])
     elif name == "chain":          # one-dimensional, for the surface DOS at its end
         s = d.do("add_system", lattice="chain")
         d.do("set_construction", system=s, has_spin=False)
@@ -439,11 +450,29 @@ DIRECT = {
     "gap": lambda h, p: {"gap": h.get_gap()},
     "total_energy": lambda h, p: {"energy": h.get_total_energy(nk=p["nk"])},
     "python": lambda h, p: dict(zip(("k", "e"), h.get_bands(nk=20, write=False))),
+    "minimize_spins": lambda m, p: _seeded(p, lambda: (m.minimize_energy(tries=p["tries"]), {
+        "magnetization": m.magnetization, "local_energy": m.get_local_energy(),
+        "energy": m.energy()})[1]),
+    "anneal_gas": lambda m, p: _seeded(p, lambda: (lambda es: {
+        "occupation": m.den, "local_energy": m.get_local_energy(), "step": np.arange(len(es)),
+        "energy": es})(m.anneal(temps=np.geomspace(p["t_start"], p["t_end"], p["temperatures"]),
+                                ntries=p["ntries"]))),
+    "anneal_ising": lambda m, p: _seeded(p, lambda: (lambda es_ms: {
+        "spins": m.s, "local_energy": m.get_local_energy(), "local_field": m.get_local_field(),
+        "step": np.arange(len(es_ms[0])), "energy": es_ms[0], "magnetization": es_ms[1]})(
+        m.anneal(temps=np.geomspace(p["t_start"], p["t_end"], p["temperatures"]),
+                 ntries=p["ntries"]))),
     "optical_conductivity": lambda h, p: (lambda w, sigma: {
         "omega": w, "real": sigma[:, 0, 1].real, "imag": sigma[:, 0, 1].imag})(
         *h.get_optical_conductivity(energies=_energies(p), nk=p["nk"], T=p["T"],
                                     delta=p["delta"])),
 }
+
+def _seeded(p, run):
+    np.random.seed(p["seed"])
+    random.seed(p["seed"])
+    return run()
+
 
 # kind: [(params, test system, what the result must show)]
 CALC_CASES = {
@@ -474,6 +503,13 @@ CALC_CASES = {
     "optical_conductivity": [({"ne": 5, "nk": 6, "component": "xy"}, "haldane", None)],
     "python": [({"code": "k, e = h.get_bands(nk=20, write=False)\narrays = {'k': k, 'e': e}\n"},
                 "rashba", None)],
+    "minimize_spins": [({"tries": 3}, "spins", lambda a: abs(a["energy"] / 9 + 3) < 1e-3),
+                       ({"tries": 2, "show": "local energy"}, "spins", None)],
+    "anneal_gas": [({"ntries": 2000, "temperatures": 4}, "gas", None),
+                   ({"ntries": 500, "temperatures": 2, "show": "energy"}, "gas", None)],
+    "anneal_ising": [({"ntries": 2000, "temperatures": 4, "t_end": 0.1}, "ising",
+                      lambda a: abs(a["spins"].mean()) == 1.0),      # a ferromagnet orders
+                     ({"ntries": 500, "temperatures": 2, "show": "magnetization"}, "ising", None)],
 }
 PLOT_KINDS = {"ldos": "structure_scalar", "density": "structure_scalar",
               "magnetization": "structure_vector", "real_space_chern": "structure_scalar",
@@ -497,7 +533,7 @@ def test_calculation(pyqula, kind, case):
     if kind in PLOT_KINDS:
         assert result.plot["kind"] == PLOT_KINDS[kind]
     if result.plot["kind"].startswith("structure_"):       # drawn on the atoms it ran on
-        assert np.allclose(result.structure["positions"], h.geometry.r)
+        assert np.allclose(result.structure["positions"], np.asarray(h.geometry.r))
     else:
         assert result.structure is None
     if kind == "surface_spectral_function":                # a curve in 1D, a map in 2D
@@ -509,9 +545,115 @@ def test_calculation(pyqula, kind, case):
         assert check(result.arrays), result.arrays
 
 
+# ---- classical systems (decision 13.5)
+def classical(kind, lattice, n, terms=(), model_params=None, finite=False):
+    """A classical system through commands."""
+    d = Dispatcher()
+    s = d.do("add_system", lattice=lattice, kind=kind, model_params=model_params)
+    d.do("add_geometry_op", system=s, kind="supercell", params={"n": [n, n, 1]})
+    if finite:
+        d.do("add_geometry_op", system=s, kind="finite")
+    ids = [d.do("add_term", system=s, kind=k, params=p) for k, p in terms]
+    return d, s, ids
+
+
+def direct_model(kind, lattice, n, seed=1, finite=False, **setup):
+    """The same model built directly, its random start drawn from seed."""
+    g = getattr(pq("geometry"), lattice)().get_supercell([n, n, 1])
+    if finite:
+        g.set_finite()
+    np.random.seed(seed)
+    random.seed(seed)
+    if kind == "classical_spin":
+        return pq("classicalspin").SpinModel(g)
+    if kind == "lattice_gas":
+        return pq("latticegas").LatticeGas(g, filling=setup.get("filling", 0.5))
+    return pq("latticeising").LatticeIsing(g, m=setup.get("m", 0.0))
+
+
+def assert_same_model(m1, m2):
+    assert type(m1) is type(m2)
+    for name in ("pairs", "j", "b", "mu", "den", "s", "theta", "phi"):
+        if hasattr(m2, name):
+            assert np.allclose(np.asarray(getattr(m1, name)), np.asarray(getattr(m2, name)),
+                               rtol=0, atol=1e-12), name
+
+
+MODEL_CASES = {
+    "classical_spin": ({}, "triangular_lattice"),
+    "lattice_gas": ({"filling": 0.25, "seed": 4}, "triangular_lattice"),
+    "ising": ({"m": 0.4, "seed": 9}, "square_lattice"),
+}
+
+
+@pytest.mark.parametrize("kind", sorted(MODEL_CASES))
+def test_model(pyqula, kind):
+    params, lattice = MODEL_CASES[kind]
+    d, s, _ = classical(kind, lattice, 4, model_params=params)
+    built = build_system(d.document, s)
+    assert built.mode == {"classical_spin": "classical spins", "lattice_gas": "lattice gas",
+                          "ising": "Ising"}[kind]
+    setup = {k: v for k, v in params.items() if k != "seed"}
+    assert_same_model(built.h, direct_model(kind, lattice, 4, params.get("seed", 1), **setup))
+
+
+def _tensor(model):
+    fun = pq("classicalspin").generating_functions(name="DM", J=0.3, v=np.array([0., 0., 1.]))
+    model.add_tensor(fun)
+
+
+# kind: (system kind, lattice, params, the same term applied directly)
+CLASSICAL_TERM_CASES = {
+    "heisenberg": [("classical_spin", "triangular_lattice", {"J1": 1.0, "J2": 0.2},
+                    lambda m: m.add_heisenberg(Jij=[1.0, 0.2], Jm=[1.0, 1.0, 1.0])),
+                   ("classical_spin", "triangular_lattice", {"J1": -1.0, "anisotropy": [1, 1, 0.5]},
+                    lambda m: m.add_heisenberg(Jij=[-1.0], Jm=[1.0, 1.0, 0.5]))],
+    "spin_field": [("classical_spin", "triangular_lattice", {"b": [0.1, 0, "0.2*tanh(x)"]},
+                    lambda m: setattr(m, "b", m.b + np.array(
+                        [[0.1, 0.0, 0.2 * np.tanh(r[0])] for r in m.geometry.r])))],
+    "spin_tensor": [("classical_spin", "triangular_lattice", {"coupling": "DM", "J": 0.3},
+                     _tensor)],
+    "gas_interaction": [("lattice_gas", "triangular_lattice", {"J1": 1.0, "J3": 0.5},
+                         lambda m: m.add_interaction(Jij=[1.0, 0.0, 0.5]))],
+    "chemical_potential": [("lattice_gas", "triangular_lattice", {"mu": "0.1*x"},
+                            lambda m: setattr(m, "mu", m.mu + np.array(
+                                [0.1 * r[0] for r in m.geometry.r])))],
+    "ising_interaction": [("ising", "square_lattice", {"J1": 1.0},
+                           lambda m: m.add_interaction(Jij=[1.0]))],
+    "ising_field": [("ising", "square_lattice", {"b": 0.3},
+                     lambda m: m.add_field(np.full(len(m.geometry.r), 0.3)))],
+}
+
+
+@pytest.mark.parametrize("kind, case", [(k, i) for k in sorted(CLASSICAL_TERM_CASES)
+                                        for i in range(len(CLASSICAL_TERM_CASES[k]))])
+def test_classical_term(pyqula, kind, case):
+    system_kind, lattice, params, direct_term = CLASSICAL_TERM_CASES[kind][case]
+    finite = kind == "spin_tensor"                 # every pair of sites: keep it finite
+    d, s, (t,) = classical(system_kind, lattice, 3, [(kind, params)], finite=finite)
+    built = build_system(d.document, s)
+    assert all(r["status"] == "ok" for r in built.reports), built.reports
+    direct = direct_model(system_kind, lattice, 3, finite=finite)
+    direct_term(direct)
+    assert_same_model(built.h, direct)
+
+
+def test_a_term_of_another_kind_is_refused():
+    d, s, _ = classical("ising", "square_lattice", 2)
+    with pytest.raises(Exception, match="does not apply to a ising system"):
+        d.do("add_term", system=s, kind="zeeman")
+    with pytest.raises(Exception, match="does not apply to a ising system"):
+        d.do("add_calculation", system=s, kind="bands")
+    q, qs, _ = system()
+    with pytest.raises(Exception, match="does not apply to a quantum system"):
+        q.do("add_term", system=qs, kind="heisenberg")
+
+
 def test_every_entry_has_a_case():
     covered = {"lattice": set(LATTICES), "geometry_op": set(OP_CASES),
-               "term": set(TERM_CASES), "meanfield": set(MEANFIELD_CASES),
+               "term": set(TERM_CASES) | set(CLASSICAL_TERM_CASES),
+               "meanfield": set(MEANFIELD_CASES), "model": set(MODEL_CASES),
                "calculation": set(CALC_CASES)}
+    assert set(covered) == set(registry.base.FAMILIES)
     for family, kinds in covered.items():
         assert kinds == set(registry.kinds(family)), family

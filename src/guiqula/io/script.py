@@ -7,7 +7,10 @@ cannot drift from what the GUI computes; the engine tests run exported
 scripts and compare their arrays. Disabled and invalid entries are written
 as comments, stochastic entries are preceded by their seeds, and the
 Hilbert space the engine fixed is passed to get_hamiltonian explicitly.
+A classical system's model is the variable ``model``.
 """
+import inspect
+
 import guiqula
 from guiqula.core import fields
 from guiqula.core import regions as region_tools
@@ -17,11 +20,12 @@ from guiqula.registry.params import ConditionParam, FieldParam, VectorFieldParam
 
 
 class ScriptContext:
-    def __init__(self, spec, params, region=None, regions=None):
+    def __init__(self, spec, params, region=None, regions=None, results=None):
         self.spec = spec
         self.params = params
         self.weight = region_tools.code_indicator(region) if region else None
         self.regions = regions or {}
+        self.results = results or {}
 
     def value(self, name):
         return self.params[name]
@@ -31,9 +35,9 @@ class ScriptContext:
         value = self.params[name]
         weight = self.weight if getattr(param, "native", False) else None
         if isinstance(param, VectorFieldParam):
-            return fields.code_vector(value, weight, self.regions)
+            return fields.code_vector(value, weight, self.regions, self.results)
         if isinstance(param, FieldParam):
-            return fields.code_scalar(value, weight, self.regions)
+            return fields.code_scalar(value, weight, self.regions, self.results)
         if isinstance(param, ConditionParam):
             return param.code(value)
         return repr(value)
@@ -80,15 +84,16 @@ def _comment(stage, why):
     return [f"# {stage.id} {stage.kind}: {why}"]
 
 
-def export_script(document, calc_id, skipped=None, trusted=True):
+def export_script(document, calc_id, skipped=None, trusted=True, results=None):
     """Source of a script that rebuilds the system of calculation calc_id,
     runs it and saves the arrays to result.npz. skipped: {entry id:
     message} of entries pyqula rejected at build time (from a Result's
     reports), written as comments like the ones the planner rejects.
     trusted: whether the Python nodes are written (else they are skipped,
-    as the engine skips them)."""
+    as the engine skips them); results: {calculation id: ResultRef} the
+    from_result Fields read, whose values the script holds."""
     skipped = dict(skipped or {})
-    plan = pipeline.plan_calculation(document, calc_id, trusted)
+    plan = pipeline.plan_calculation(document, calc_id, trusted, results)
     if plan.problem:
         raise ValueError(f"{calc_id}: {plan.problem}")
     system = plan.system
@@ -103,6 +108,14 @@ def export_script(document, calc_id, skipped=None, trusted=True):
              "import numpy as np",
              *_imports(system.stages, plan.spec),
              ""]
+    preamble = []
+    for stage in system.stages:
+        if stage.applied and stage.spec is not None:
+            preamble += [line for line in stage.spec.preamble if line not in preamble]
+    if preamble:
+        lines += preamble + [""]
+    if any(stage.applied and stage.results for stage in system.stages):
+        lines += ["", inspect.getsource(fields.site_field).rstrip(), "", ""]
     for stage in system.stages:
         if stage.stage == "base":
             lines.append(f"g = {call_code(stage.spec, ScriptContext(stage.spec, stage.params))}")
@@ -121,6 +134,14 @@ def export_script(document, calc_id, skipped=None, trusted=True):
             if c["nambu"]:
                 lines.append("h.turn_nambu()")
             continue
+        if stage.stage == "model":
+            seed = stage.spec.seed_param
+            if seed is not None:
+                s = stage.params[seed.name]
+                lines.append(f"np.random.seed({s}); random.seed({s})   # the initial "
+                             f"configuration is random")
+            lines.append(f"model = {call_code(stage.spec, ScriptContext(stage.spec, stage.params))}")
+            continue
         if not stage.enabled:
             if stage.stage != "meanfield":     # every system has one, disabled by default
                 lines += _comment(stage, "disabled")
@@ -128,7 +149,7 @@ def export_script(document, calc_id, skipped=None, trusted=True):
         if stage.problem or stage.id in skipped:
             lines += _comment(stage, f"skipped, {stage.problem or skipped[stage.id]}")
             continue
-        ctx = ScriptContext(stage.spec, stage.params, stage.region, stage.regions)
+        ctx = ScriptContext(stage.spec, stage.params, stage.region, stage.regions, stage.results)
         seed = stage.spec.seed_param
         if seed is not None:
             s = stage.params[seed.name]

@@ -17,7 +17,10 @@ content key. Execution:
   the non-interacting Hamiltonian;
 - the mean field (the last stage) runs only when asked for: the
   calculations ask, the interactive builds do not (``meanfield=False``),
-  and then report it as "deferred".
+  and then report it as "deferred";
+- a classical system builds its model from the geometry (the "model"
+  stage, seeded like a stochastic term) and applies its terms to copies of
+  the model; ``Built.h`` is then the model (it has ``geometry`` too).
 """
 import contextlib
 import io
@@ -66,6 +69,9 @@ class BuildCache:
 
 
 def mode_of(h):
+    """spinless, spinful or nambu; None for a classical model."""
+    if not hasattr(h, "intra"):
+        return None
     if getattr(h, "has_eh", False):
         return "nambu"
     return "spinful" if h.has_spin else "spinless"
@@ -137,7 +143,19 @@ def _apply_stage(stage, obj):
         record["mode"] = mode_of(h)
         return h, record
 
-    ctx = ApplyContext(stage.spec, stage.params, region=stage.region, regions=stage.regions)
+    if stage.stage == "model":
+        ctx = ApplyContext(stage.spec, stage.params)
+
+        def model():
+            _seed(stage)          # the initial configuration is random
+            return apply_call(stage.spec, ctx, g=obj.copy())   # pyqula's models touch g
+        try:
+            new, record["output"] = _run(model)
+        except Exception as error:
+            raise BuildError(f"model {stage.kind}: {type(error).__name__}: {error}") from None
+        return new, record
+    ctx = ApplyContext(stage.spec, stage.params, region=stage.region, regions=stage.regions,
+                       results=stage.results)
     if stage.stage == "meanfield":
         def solve():
             _seed(stage)
@@ -178,13 +196,25 @@ def _apply_stage(stage, obj):
     return new, record
 
 
-def build_system(document, system_id, cache=None, meanfield=True, trusted=True):
+def double_precision():
+    """Run jax in double precision. pyqula switches jax to it globally when
+    one of its jax modules is imported (the workers import one at start,
+    to list the jax solvers), and its classical spin energy is a jax
+    function: without this, the same model minimizes to another texture
+    depending on what was imported before."""
+    import jax
+    jax.config.update("jax_enable_x64", True)
+
+
+def build_system(document, system_id, cache=None, meanfield=True, trusted=True, results=None):
     """Build one system; returns a Built with the Hamiltonian and a report
     per stage: status "ok", "disabled", "invalid" (with the message) or,
     for a mean field left out with meanfield=False, "deferred". trusted:
-    whether Python nodes run (PLAN.md 13.7)."""
+    whether Python nodes run (PLAN.md 13.7); results: {calculation id:
+    ResultRef} the from_result Fields read."""
     vendoring.ensure_pyqula_on_path()
-    plan = pipeline.plan_system(document, system_id, trusted)
+    double_precision()
+    plan = pipeline.plan_system(document, system_id, trusted, results)
     if plan.problem:
         raise BuildError(plan.problem)
     stages = plan.stages if meanfield else [s for s in plan.stages if s.stage != "meanfield"]
@@ -221,8 +251,10 @@ def build_system(document, system_id, cache=None, meanfield=True, trusted=True):
             if record.get("notes"):
                 report["notes"] = record["notes"]
             mode = record.get("mode") or mode
-        if stage.stage in ("construction", "term", "meanfield"):
+        if stage.stage in ("construction", "term", "meanfield") and plan.kind == "quantum":
             report["mode"] = mode
+        if stage.warnings:
+            report["warnings"] = list(stage.warnings)
         reports.append(report)
     return Built(system_id=system_id, h=obj, plan=plan, reports=reports,
-                 mode=mode_of(obj), key=plan.key)
+                 mode=mode_of(obj) or plan.mode, key=plan.key)

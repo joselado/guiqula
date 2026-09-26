@@ -198,7 +198,8 @@ def test_every_calculation_exports(pyqula, repo, tmp_path):
 def test_every_entry_exports(pyqula, repo, tmp_path):
     """Every lattice, geometry op and term case of the engine tests, with
     the bands on top, exported and run: the script builds the same system."""
-    from .test_entries import LATTICES, OP_CASES, TERM_CASES, TERM_SYSTEMS, system
+    from .test_entries import (CLASSICAL_TERM_CASES, LATTICES, MODEL_CASES, OP_CASES,
+                               TERM_CASES, TERM_SYSTEMS, classical, system)
     documents = []
     for lattice in LATTICES:
         d, s, _ = system(lattice)
@@ -217,9 +218,21 @@ def test_every_entry_exports(pyqula, repo, tmp_path):
             if "tij" in options:
                 d.do("set_construction", system=s, tij=options["tij"])
             documents.append((f"term {kind} {params}", d, s))
+    for kind, (params, lattice) in sorted(MODEL_CASES.items()):
+        d, s, _ = classical(kind, lattice, 3, model_params=params)
+        documents.append((f"model {kind}", d, s))
+    for kind, cases in sorted(CLASSICAL_TERM_CASES.items()):
+        for system_kind, lattice, params, _ in cases:
+            d, s, _ = classical(system_kind, lattice, 3, [(kind, params)],
+                                finite=kind == "spin_tensor")
+            documents.append((f"term {kind} {params}", d, s))
+    cheap = {"quantum": ("bands", {"nk": 6}), "classical_spin": ("minimize_spins", {"tries": 1}),
+             "lattice_gas": ("anneal_gas", {"ntries": 200, "temperatures": 2}),
+             "ising": ("anneal_ising", {"ntries": 200, "temperatures": 2})}
     cases, sources = [], []
     for label, d, s in documents:
-        c = d.do("add_calculation", system=s, kind="bands", params={"nk": 6})
+        kind, params = cheap[d.document.system(s).kind]
+        c = d.do("add_calculation", system=s, kind=kind, params=params)
         result = run_calculation(d.document, c)
         assert result.skipped == [], label
         cases.append((label, result.arrays))

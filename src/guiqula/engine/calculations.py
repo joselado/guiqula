@@ -50,15 +50,16 @@ def plot_spec(spec, params, arrays):
     return plot(params)
 
 
-def run_calculation(document, calc_id, cache=None, progress=None, trusted=True):
+def run_calculation(document, calc_id, cache=None, progress=None, trusted=True, results=None):
     """Returns a Result; raises CalculationError or BuildError. trusted:
-    whether Python nodes run (PLAN.md 13.7)."""
+    whether Python nodes run (PLAN.md 13.7); results: {calculation id:
+    ResultRef} the from_result Fields read."""
     vendoring.ensure_pyqula_on_path()
-    plan = pipeline.plan_calculation(document, calc_id, trusted)
+    plan = pipeline.plan_calculation(document, calc_id, trusted, results)
     if plan.problem:
         raise CalculationError(f"{calc_id}: {plan.problem}")
     start = time.perf_counter()
-    built = build_system(document, plan.system_id, cache, trusted=trusted)
+    built = build_system(document, plan.system_id, cache, trusted=trusted, results=results)
     build_seconds = time.perf_counter() - start
     ctx = ApplyContext(plan.spec, plan.params, progress=progress)
     start = time.perf_counter()

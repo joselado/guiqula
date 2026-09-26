@@ -24,6 +24,10 @@ executes the plan) and the UI (which shows modes, flags and staleness).
   the results that it changes stale. The flag is the Session's, never the
   Document's (a file cannot trust itself); every planner call of the UI
   goes through the Session's helpers so that its keys match the workers'.
+- A classical system (decision 13.5) has, after its geometry, a "model"
+  stage (the model built on the geometry, seeded: its initial
+  configuration is random) and the model's terms; no construction, no
+  mean field; its mode is its kind.
 - The mean-field block is the last stage of a quantum system. It is
   expensive, so it runs with the calculations only: the interactive
   builds (canvas, outliner) stop before it and report it as deferred.
@@ -34,19 +38,21 @@ from dataclasses import dataclass, field
 
 from guiqula.core import fields
 from guiqula.core import regions as region_tools
-from guiqula.core.document import DocumentError
+from guiqula.core.document import DocumentError, terms_of
 from guiqula.core.hashing import content_hash
 from guiqula.registry import base as registry
 from guiqula.registry.params import FieldParam, ParamError
 
 MODES = ("spinless", "spinful", "nambu")
+KIND_LABELS = {"classical_spin": "classical spins", "lattice_gas": "lattice gas",
+               "ising": "Ising"}
 UNTRUSTED = ("Python code of a document opened from a file: it runs once the document is "
              "trusted")
 
 
 @dataclass
 class StagePlan:
-    stage: str                  # "base", "op", "construction", "term", "meanfield"
+    stage: str                  # "base", "op", "construction", "model", "term", "meanfield"
     id: str | None              # entry id (None for base and construction; <system>/meanfield)
     kind: str
     enabled: bool = True
@@ -57,6 +63,8 @@ class StagePlan:
     key: str = ""
     applied: bool = False       # enabled and valid: the engine runs it
     regions: dict = field(default_factory=dict)   # {id: selection} of its piecewise Fields
+    results: dict = field(default_factory=dict)   # {calculation id: ResultRef} it reads
+    warnings: list = field(default_factory=list)  # what is worth knowing (a stale result read)
 
     def describe(self):
         return {"stage": self.stage, "id": self.id, "kind": self.kind,
@@ -111,8 +119,7 @@ def code_entries(document):
     found = []
     for system in document.systems:
         items = [("geometry_op", op) for op in system.geometry.ops]
-        if system.hamiltonian is not None:
-            items += [("term", term) for term in system.hamiltonian.terms]
+        items += [("term", term) for term in terms_of(system)]
         found += [item.id for family, item in items if _runs_code(family, item.kind)]
     return found + [c.id for c in document.calculations if _runs_code("calculation", c.kind)]
 
@@ -140,21 +147,92 @@ def _field_regions(spec, params, regions):
     return out, None
 
 
-def _hashed(params, selections):
-    """Parameters as a key hashes them: region ids replaced by selections."""
-    if not selections:
-        return params
-    return {name: fields.resolve_regions(value, selections) for name, value in params.items()}
+def _hashed(params, selections, results=None):
+    """Parameters as a key hashes them: region ids replaced by selections,
+    calculation ids by the keys of the results read."""
+    if selections:
+        params = {name: fields.resolve_regions(value, selections) for name, value in params.items()}
+    if results:
+        keys = {calc: ref.key for calc, ref in results.items()}
+        params = {name: fields.resolve_results(value, keys) for name, value in params.items()}
+    return params
 
 
-def plan_system(document, system_id, trusted=True):
-    """The plan of a system; trusted: whether Python nodes may run."""
+def _reads(document, system):
+    """Ids of the systems whose results a system's Fields read."""
+    params = [term.params for term in terms_of(system)]
+    if system.hamiltonian is not None:
+        params.append(system.hamiltonian.meanfield.params)
+    out = set()
+    for calc_id in fields.results_of(params):
+        try:
+            out.add(document.calculation(calc_id).system)
+        except DocumentError:
+            pass
+    return out
+
+
+def _reaches(document, start, target):
+    """Whether system start reads, directly or through others, a result of
+    system target."""
+    seen, todo = set(), [start]
+    while todo:
+        current = todo.pop()
+        if current == target:
+            return True
+        if current in seen:
+            continue
+        seen.add(current)
+        try:
+            todo += list(_reads(document, document.system(current)))
+        except DocumentError:
+            pass
+    return False
+
+
+def _field_results(spec, params, document, system, results, trusted):
+    """({calculation id: ResultRef} of the results an entry's from_result
+    Fields read, problem or None, warnings)."""
+    values = [params[p.name] for p in spec.params if isinstance(p, FieldParam)]
+    wanted = fields.results_of(values)
+    out, warnings = {}, []
+    for calc_id in wanted:
+        try:
+            calc = document.calculation(calc_id)
+        except DocumentError:
+            return {}, f"calculation {calc_id!r} does not exist", []
+        if calc.system == system.id:
+            return {}, (f"{calc_id} runs on this system: a Field cannot read a result of its "
+                        f"own system"), []
+        if _reaches(document, calc.system, system.id):
+            return {}, (f"{calc_id} runs on {calc.system}, which reads results of "
+                        f"{system.id}: the references go round in a circle"), []
+        ref = (results or {}).get(calc_id)
+        if ref is None:
+            return {}, f"a Field reads the result of {calc_id}: run {calc_id} first", []
+        out[calc_id] = ref
+        try:
+            if ref.key != calculation_key(document, calc_id, trusted, results):
+                warnings.append(f"reads a stale result of {calc_id} (run {calc_id} again)")
+        except Exception:
+            pass
+    for value in values:
+        for component in value if isinstance(value, list) else [value]:
+            if isinstance(component, dict) and component.get("kind") == "from_result":
+                try:
+                    fields.site_values(out[component["calculation"]], component["array"],
+                                       component["component"])
+                except fields.FieldError as error:
+                    return {}, f"{component['calculation']}: {error}", []
+    return out, None, sorted(set(warnings))
+
+
+def plan_system(document, system_id, trusted=True, results=None):
+    """The plan of a system; trusted: whether Python nodes may run;
+    results: {calculation id: core.results.ResultRef} of the results the
+    from_result Fields may read."""
     system = document.system(system_id)
     plan = SystemPlan(system_id=system.id, kind=system.kind)
-    if system.kind != "quantum":
-        plan.problem = f"{system.kind} systems arrive in phase 4"
-        return plan
-
     base = system.geometry.base
     spec, params, problem = _check_entry("lattice", base.kind, base.params, system.kind)
     stage = StagePlan("base", None, base.kind, True, spec, params, None, problem)
@@ -178,7 +256,7 @@ def plan_system(document, system_id, trusted=True):
 
     regions = {r.id: r for r in system.regions}
     term_stages = []
-    for term in system.hamiltonian.terms:
+    for term in terms_of(system):
         spec, params, problem = _check_entry("term", term.kind, term.params, system.kind,
                                              trusted)
         select = None
@@ -197,21 +275,29 @@ def plan_system(document, system_id, trusted=True):
                     select = region_tools.normalize(regions[term.region].select)
                 except region_tools.RegionError as error:
                     problem = f"region {term.region!r}: {error}"
-        selections = {}
+        selections, refs, warnings = {}, {}, []
         if problem is None:
             selections, problem = _field_regions(spec, params, regions)
+        if problem is None:
+            refs, problem, warnings = _field_results(spec, params, document, system, results,
+                                                     trusted)
         stage = StagePlan("term", term.id, term.kind, term.enabled, spec, params, select, problem,
-                          regions=selections)
+                          regions=selections, results=refs, warnings=warnings)
         stage.applied = term.enabled and problem is None
         term_stages.append(stage)
 
+    if system.model is not None:
+        return _plan_classical(plan, system, key, term_stages)
     block = system.hamiltonian.meanfield
     spec, params, problem = _check_entry("meanfield", block.kind, block.params, system.kind)
-    selections = {}
+    selections, refs, warnings = {}, {}, []
     if problem is None:
         selections, problem = _field_regions(spec, params, regions)
+    if problem is None:
+        refs, problem, warnings = _field_results(spec, params, document, system, results, trusted)
     meanfield = StagePlan("meanfield", f"{system.id}/meanfield", block.kind, block.enabled, spec,
-                          params, None, problem, regions=selections)
+                          params, None, problem, regions=selections, results=refs,
+                          warnings=warnings)
     meanfield.applied = block.enabled and problem is None
     term_stages.append(meanfield)
 
@@ -233,7 +319,31 @@ def plan_system(document, system_id, trusted=True):
     for stage in term_stages:
         if stage.applied:
             key = content_hash({"prev": key, "stage": stage.stage, "kind": stage.kind,
-                                "params": _hashed(stage.params, stage.regions),
+                                "params": _hashed(stage.params, stage.regions, stage.results),
+                                "region": stage.region})
+        stage.key = key
+        plan.stages.append(stage)
+    return plan
+
+
+def _plan_classical(plan, system, key, term_stages):
+    """The model stage and the terms of a classical system."""
+    model = system.model
+    spec, params, problem = _check_entry("model", model.kind, model.params, system.kind)
+    stage = StagePlan("model", f"{system.id}/model", model.kind, True, spec, params, None,
+                      problem)
+    if problem:
+        plan.problem = f"model: {problem}"
+    stage.applied = problem is None
+    key = content_hash({"prev": key, "stage": "model", "kind": model.kind,
+                        "params": params if params is not None else model.params})
+    stage.key = key
+    plan.stages.append(stage)
+    plan.mode = KIND_LABELS.get(system.kind, system.kind)
+    for stage in term_stages:
+        if stage.applied:
+            key = content_hash({"prev": key, "stage": stage.stage, "kind": stage.kind,
+                                "params": _hashed(stage.params, stage.regions, stage.results),
                                 "region": stage.region})
         stage.key = key
         plan.stages.append(stage)
@@ -252,11 +362,11 @@ class CalculationPlan:
     system: SystemPlan | None = None
 
 
-def plan_calculation(document, calc_id, trusted=True):
+def plan_calculation(document, calc_id, trusted=True, results=None):
     calc = document.calculation(calc_id)
     plan = CalculationPlan(calc.id, calc.kind, calc.system)
     try:
-        plan.system = plan_system(document, calc.system, trusted)
+        plan.system = plan_system(document, calc.system, trusted, results)
     except DocumentError as error:
         plan.problem = str(error)
         return plan
@@ -271,5 +381,15 @@ def plan_calculation(document, calc_id, trusted=True):
     return plan
 
 
-def calculation_key(document, calc_id, trusted=True):
-    return plan_calculation(document, calc_id, trusted).key
+def calculation_key(document, calc_id, trusted=True, results=None):
+    return plan_calculation(document, calc_id, trusted, results).key
+
+
+def result_references(document):
+    """Ids of the calculations whose results the document's Fields read."""
+    params = []
+    for system in document.systems:
+        params += [term.params for term in terms_of(system)]
+        if system.hamiltonian is not None:
+            params.append(system.hamiltonian.meanfield.params)
+    return sorted(set(fields.results_of(params)))

@@ -7,8 +7,10 @@ sends the value as a command and shows the refusal.
 
 Fields (term parameters, PLAN.md 3.8) are edited as text: a number, or an
 expression of x, y, z, r. The f(r) button next to a Field opens its panel:
-the kind (a number or an expression, or one value per region) and, per
-region, a value for each region plus the default. A Field editor emits
+the kind (a number or an expression, one value per region, or a result
+read site by site) and, per region, a value for each region plus the
+default; for a result, the calculation (of another system, drawn on the
+sites), its array, the component and a scale. A Field editor emits
 preview when the user looks at it (focus, typing, the panel), with the
 value being typed when it parses, so the window can draw the Field on the
 structure before anything runs. Constant-only parameters (the pyqula call
@@ -116,14 +118,46 @@ class LineEditor(Editor):
 
 
 EXPRESSION_KIND, PIECEWISE_KIND = "number or f(x, y, z)", "one value per region"
+RESULT_KIND = "from a result"
+KINDS = (EXPRESSION_KIND, PIECEWISE_KIND, RESULT_KIND)
+COMPONENTS = ((None, "the value"), (0, "x"), (1, "y"), (2, "z"))
 FIELD_BUTTON_TIPS = {
-    "constant": "make this a function of the position: an expression, or one value per region",
+    "constant": "make this a function of the position: an expression, one value per region, "
+                "or a result of another system",
     "expression": "an expression of the position (bold); the panel explains what it may use",
-    "piecewise": "one value per region (bold); the panel edits the values"}
+    "piecewise": "one value per region (bold); the panel edits the values",
+    "from_result": "read from a result of another system, site by site (bold)"}
+
+
+def result_sources(session, system_id):
+    """[(calculation id, label, {array: components or None})] a from_result
+    Field of system_id can read: results of other systems drawn on the sites,
+    and their arrays with one value (None) or a few (2, 3) per site."""
+    import numpy as np
+    out = []
+    for calc in session.document.calculations:
+        result = session.result(calc.id)
+        if calc.system == system_id or result is None or result.structure is None:
+            continue
+        n = len(result.structure["positions"])
+        arrays = {}
+        for name, value in result.arrays.items():
+            shape = np.shape(value)
+            if shape == (n,):
+                arrays[name] = None
+            elif len(shape) == 2 and shape[0] == n and shape[1] in (2, 3):
+                arrays[name] = shape[1]
+        if arrays:
+            out.append((calc.id, f"{calc.id} {calc.kind} on {calc.system}", arrays))
+    return out
 
 
 def _summary(value, regions):
-    """One line for a piecewise Field."""
+    """One line for a piecewise or a from_result Field."""
+    if value.get("kind") == "from_result":
+        component = "" if value["component"] is None else "[" + "xyz"[value["component"]] + "]"
+        scale = "" if value["scale"] == 1.0 else f" × {format_number(value['scale'])}"
+        return f"{value['calculation']}.{value['array']}{component}{scale}"
     names = dict(regions)
     parts = [f"{names.get(p['region'], p['region']) or p['region']}: {format_field(p['value'])}"
              for p in value["pieces"]]
@@ -160,10 +194,11 @@ class FieldEditor(Editor):
 
     preview = Signal()
 
-    def __init__(self, param, regions=(), suffix="", parent=None):
+    def __init__(self, param, regions=(), suffix="", parent=None, sources=()):
         super().__init__(param, parent)
         self.name = param.name + suffix
         self.regions = list(regions)            # [(id, name)] of the system
+        self.sources = list(sources)            # result_sources(): what it may read
         self.edit = QLineEdit()
         self.edit.setObjectName(f"edit_{self.name}")
         self.edit.setPlaceholderText("a constant" if not param.native else "number or f(x, y, z)")
@@ -209,9 +244,37 @@ class FieldEditor(Editor):
         column.setContentsMargins(6, 4, 6, 4)
         self.kind = QComboBox()
         self.kind.setObjectName(f"fieldKindBox_{self.name}")
-        self.kind.addItems([EXPRESSION_KIND, PIECEWISE_KIND])
+        self.kind.addItems(list(KINDS))
         self.kind.activated.connect(self._kind_chosen)
         column.addWidget(self.kind)
+        self.result_box = QWidget()
+        form = QGridLayout(self.result_box)
+        form.setContentsMargins(0, 0, 0, 0)
+        self.result_calc, self.result_array = QComboBox(), QComboBox()
+        self.result_component, self.result_scale = QComboBox(), QLineEdit()
+        for widget, what in ((self.result_calc, "Calc"), (self.result_array, "Array"),
+                             (self.result_component, "Component"), (self.result_scale, "Scale")):
+            widget.setObjectName(f"fieldResult{what}_{self.name}")
+        for source in self.sources:
+            self.result_calc.addItem(source[1], source[0])
+        for component, label in COMPONENTS:
+            self.result_component.addItem(label, component)
+        self.result_calc.activated.connect(lambda _: self._result_edited(new_calc=True))
+        self.result_array.activated.connect(lambda _: self._result_edited(new_array=True))
+        self.result_component.activated.connect(lambda _: self._result_edited())
+        self.result_scale.editingFinished.connect(self._result_edited)
+        for row, (label, widget) in enumerate((("result", self.result_calc),
+                                               ("array", self.result_array),
+                                               ("component", self.result_component),
+                                               ("times", self.result_scale))):
+            form.addWidget(QLabel(label), row, 0)
+            form.addWidget(widget, row, 1)
+        column.addWidget(self.result_box)
+        self.no_results = QLabel("No result of another system drawn on the sites yet: run "
+                                 "one there first (a texture, a density, an LDOS).")
+        self.no_results.setWordWrap(True)
+        self.no_results.setObjectName(f"fieldNoResults_{self.name}")
+        column.addWidget(self.no_results)
         self.help = QLabel(FIELD_HELP)
         self.help.setWordWrap(True)
         self.help.setObjectName(f"fieldHelp_{self.name}")
@@ -252,13 +315,24 @@ class FieldEditor(Editor):
         if self.button is not None:
             self.button.setChecked(shown)
 
+    def _mode(self):
+        """0: a number or an expression; 1: piecewise; 2: from a result."""
+        if isinstance(self._value, dict):
+            return 2 if self._value.get("kind") == "from_result" else 1
+        return 0
+
     def _piecewise_shown(self):
-        return isinstance(self._value, dict)
+        return self._mode() == 1
 
     def _sync_panel(self):
-        piecewise = self._piecewise_shown()
-        self._quiet(self.kind, self.kind.setCurrentIndex, 1 if piecewise else 0)
-        self.help.setVisible(not piecewise)
+        mode = self._mode()
+        piecewise = mode == 1
+        self._quiet(self.kind, self.kind.setCurrentIndex, mode)
+        self.help.setVisible(mode == 0)
+        self.result_box.setVisible(mode == 2)
+        self.no_results.setVisible(mode == 2 and not self.sources)
+        if mode == 2:
+            self._sync_result()
         self.pieces.setVisible(piecewise)
         self.add.setVisible(piecewise)
         self.add.setEnabled(bool(self.regions))
@@ -284,6 +358,56 @@ class FieldEditor(Editor):
                 index = row.region.findData(piece["region"])
             self._quiet(row.region, row.region.setCurrentIndex, index)
             self._quiet(row.value, row.value.setText, format_field(piece["value"]))
+
+    def _source(self, calc):
+        return next((s for s in self.sources if s[0] == calc), None)
+
+    def _sync_result(self):
+        value = self._value
+        index = self.result_calc.findData(value["calculation"])
+        if index < 0:                          # a result this form does not list (yet)
+            self._quiet(self.result_calc, self.result_calc.addItem, value["calculation"],
+                        value["calculation"])
+            index = self.result_calc.findData(value["calculation"])
+        self._quiet(self.result_calc, self.result_calc.setCurrentIndex, index)
+        source = self._source(value["calculation"])
+        self.result_array.blockSignals(True)
+        self.result_array.clear()
+        for name in (source[2] if source else {value["array"]: None}):
+            self.result_array.addItem(name, name)
+        self.result_array.setCurrentIndex(max(self.result_array.findData(value["array"]), 0))
+        self.result_array.blockSignals(False)
+        self._quiet(self.result_component, self.result_component.setCurrentIndex,
+                    max(self.result_component.findData(value["component"]), 0))
+        self._quiet(self.result_scale, self.result_scale.setText, format_number(value["scale"]))
+
+    def _result_value(self, calc=None):
+        """A from_result Field reading calc (first array, first component)."""
+        source = self._source(calc) if calc else (self.sources[0] if self.sources else None)
+        if source is None:
+            return None
+        array, components = next(iter(source[2].items()))
+        return {"kind": "from_result", "calculation": source[0], "array": array,
+                "component": None if components is None else 0, "scale": 1.0, "tol": 0.1}
+
+    def _result_edited(self, new_calc=False, new_array=False):
+        if self._mode() != 2:
+            return
+        if new_calc:
+            value = self._result_value(self.result_calc.currentData())
+        else:
+            value = dict(self._value, array=self.result_array.currentData(),
+                         component=self.result_component.currentData())
+            if new_array:
+                source = self._source(value["calculation"])
+                components = source[2].get(value["array"]) if source else None
+                value["component"] = None if components is None else 0
+            try:
+                value["scale"] = parse_float(self.result_scale.text())
+            except ValueError:
+                pass
+        if value is not None and value != self._value:
+            self._commit_draft(value)
 
     # ---- edits
     def _look(self):
@@ -311,13 +435,22 @@ class FieldEditor(Editor):
         self._draft = None
 
     def _kind_chosen(self, index):
-        piecewise = index == 1
-        if piecewise == self._piecewise_shown():
+        mode = self._mode()
+        if index == mode:
             return
-        if piecewise:
-            self._commit_draft({"kind": "piecewise", "default": self._value, "pieces": []})
+        simple = self._value if mode == 0 else \
+            self._value["default"] if mode == 1 else 0.0
+        if index == 0:
+            self._commit_draft(simple)
+        elif index == 1:
+            self._commit_draft({"kind": "piecewise", "default": simple, "pieces": []})
         else:
-            self._commit_draft(self._value["default"])
+            value = self._result_value()
+            if value is None:              # nothing to read: say so, keep the value
+                self._quiet(self.kind, self.kind.setCurrentIndex, mode)
+                self.no_results.show()
+                return
+            self._commit_draft(value)
 
     def add_piece(self):
         if not self._piecewise_shown() or not self.regions:
@@ -339,8 +472,10 @@ class FieldEditor(Editor):
     def value(self):
         if self._draft is not None:
             return self._draft
-        if self._piecewise_shown():
+        if self._mode() == 1:
             return self._read_pieces()
+        if self._mode() == 2:
+            return self._value
         return parse_field(self.edit.text())
 
     def live_value(self):
@@ -352,13 +487,14 @@ class FieldEditor(Editor):
 
     def set_value(self, value):
         self._value = value
-        piecewise = isinstance(value, dict)
-        self._shown = _summary(value, self.regions) if piecewise else format_field(value)
+        structured = isinstance(value, dict)
+        self._shown = _summary(value, self.regions) if structured else format_field(value)
         self._quiet(self.edit, self.edit.setText, self._shown)
-        self.edit.setReadOnly(piecewise)
-        self.edit.setToolTip("edit the values per region in the f(r) panel" if piecewise else "")
+        self.edit.setReadOnly(structured)
+        self.edit.setToolTip("edit it in the f(r) panel" if structured else "")
         kind = fields.kind_of(value) if value is not None else "constant"
-        self.marker.setText({"constant": "", "expression": "f(r)", "piecewise": "per region"}[kind])
+        self.marker.setText({"constant": "", "expression": "f(r)", "piecewise": "per region",
+                             "from_result": "result"}[kind])
         if self.button is not None:
             self.marker.hide()                  # the button says it instead
             font = self.button.font()
@@ -366,7 +502,7 @@ class FieldEditor(Editor):
             self.button.setFont(font)
             self.button.setToolTip(FIELD_BUTTON_TIPS[kind])
             self._sync_panel()
-            if piecewise and not self.button.isChecked():
+            if structured and not self.button.isChecked():
                 self.open_panel()
 
 
@@ -375,13 +511,13 @@ class VectorFieldEditor(Editor):
 
     preview = Signal()
 
-    def __init__(self, param, regions=(), parent=None):
+    def __init__(self, param, regions=(), parent=None, sources=()):
         super().__init__(param, parent)
         self.components = []
         grid = QGridLayout()
         grid.setContentsMargins(0, 0, 0, 0)
         for i, axis in enumerate("xyz"[:param.length]):
-            editor = FieldEditor(param, regions, suffix=f"_{axis}")
+            editor = FieldEditor(param, regions, suffix=f"_{axis}", sources=sources)
             editor.edit.setPlaceholderText(axis)
             editor.setToolTip(f"{param.doc}, {axis} component\n\n{FIELD_HELP}")
             editor.committed.connect(self.committed)
@@ -598,13 +734,14 @@ class PositionsEditor(Editor):
         self.clear.setEnabled(bool(n))
 
 
-def make_editor(param, names=None, regions=()):
+def make_editor(param, names=None, regions=(), sources=()):
     """The editor for a registry parameter (subclasses first); regions:
-    [(id, name)] a piecewise Field can use."""
+    [(id, name)] a piecewise Field can use; sources: result_sources() a
+    from_result Field can read."""
     if isinstance(param, VectorFieldParam):
-        return VectorFieldEditor(param, regions)
+        return VectorFieldEditor(param, regions, sources=sources)
     if isinstance(param, FieldParam):
-        return FieldEditor(param, regions)
+        return FieldEditor(param, regions, sources=sources)
     if isinstance(param, IntParam) and param.optional:
         integer = not isinstance(param, FloatParam)
         return LineEditor(param, lambda t: parse_optional(t, integer),

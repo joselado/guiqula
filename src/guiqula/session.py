@@ -29,7 +29,8 @@ import time
 from pathlib import Path
 
 from guiqula.commands import CommandError, Dispatcher
-from guiqula.core.document import Document
+from guiqula.core.document import Document, terms_of
+from guiqula.core.results import ResultRef
 from guiqula.io import autosave as autosave_files
 from guiqula.io import project
 from guiqula.io import results as result_files
@@ -50,6 +51,18 @@ def _project_path(path_or_name):
     """Where Save writes back to after opening this: None for a preset."""
     resolved = project.resolve(path_or_name)
     return None if resolved.parent == project.PRESETS else resolved
+
+
+def _arrays_read(value, out):
+    """Collect {calculation: set of array names} the from_result Fields read."""
+    if isinstance(value, dict) and value.get("kind") == "from_result":
+        out.setdefault(value["calculation"], set()).add(value.get("array"))
+    elif isinstance(value, dict):
+        for v in value.values():
+            _arrays_read(v, out)
+    elif isinstance(value, (list, tuple)):
+        for v in value:
+            _arrays_read(v, out)
 
 
 def trusted_on_open(path_or_name, document):
@@ -136,15 +149,33 @@ class Session:
         unsubscribe = self.dispatcher.subscribe(lambda event: listener("document", event))
         return lambda: (self._listeners.remove(listener), unsubscribe())
 
-    # ---- planning with the Session's trust (the keys must match the workers')
+    # ---- planning with the Session's trust and results (the keys must match the workers')
+    def result_refs(self):
+        """{calculation id: ResultRef} of the results the Document's
+        from_result Fields read (only the arrays they read)."""
+        document = self.document
+        wanted = pipeline.result_references(document)
+        if not wanted:
+            return {}
+        arrays = {}
+        for system in document.systems:
+            params = [t.params for t in terms_of(system)]
+            if system.hamiltonian is not None:
+                params.append(system.hamiltonian.meanfield.params)
+            _arrays_read(params, arrays)
+        return {calc: ResultRef.of(self.results[calc], arrays.get(calc))
+                for calc in wanted if calc in self.results}
+
     def plan_system(self, system):
-        return pipeline.plan_system(self.document, system, self.trusted)
+        return pipeline.plan_system(self.document, system, self.trusted, self.result_refs())
 
     def plan_calculation(self, calculation):
-        return pipeline.plan_calculation(self.document, calculation, self.trusted)
+        return pipeline.plan_calculation(self.document, calculation, self.trusted,
+                                         self.result_refs())
 
     def calculation_key(self, calculation):
-        return pipeline.calculation_key(self.document, calculation, self.trusted)
+        return pipeline.calculation_key(self.document, calculation, self.trusted,
+                                        self.result_refs())
 
     def code_entries(self):
         """Ids of the Document's Python nodes."""
@@ -177,7 +208,7 @@ class Session:
         for it and returns the finished Job)."""
         self.document.calculation(calculation)
         job = self.jobs.run(self.document.to_json(), calculation, cores=cores,
-                            trusted=self.trusted)
+                            trusted=self.trusted, results=self.result_refs())
         self.calc_jobs[calculation] = job
         if wait:
             self.jobs.wait(job, timeout)
@@ -193,7 +224,8 @@ class Session:
         self.document.system(system)
         self.jobs.supersede("build", system)
         self._stop_stuck_build(system)
-        job = self.jobs.build(self.document.to_json(), system, view=view, trusted=self.trusted)
+        job = self.jobs.build(self.document.to_json(), system, view=view, trusted=self.trusted,
+                              results=self.result_refs())
         if wait:
             self.jobs.wait(job, timeout)
         return job
@@ -227,7 +259,8 @@ class Session:
         """The cost guard (PLAN.md 13.12): the rough duration of a
         calculation from the latest build of its system, or None."""
         try:
-            return cost.estimate(self.document, calculation, self.builds, self.trusted)
+            return cost.estimate(self.document, calculation, self.builds, self.trusted,
+                                 self.result_refs())
         except Exception:
             return None
 
@@ -240,7 +273,8 @@ class Session:
             system = self.document.systems[0].id
         if system is not None:
             self.document.system(system)
-        job = self.jobs.console(code, self.document.to_json(), system, trusted=self.trusted)
+        job = self.jobs.console(code, self.document.to_json(), system, trusted=self.trusted,
+                                results=self.result_refs())
         if wait:
             self.jobs.wait(job, timeout)
         return job
@@ -409,7 +443,8 @@ class Session:
     def _action_export_script(self, calculation, path=None):
         result = self.results.get(calculation)
         skipped = {r["id"]: r["message"] for r in result.skipped} if result else None
-        source = export_script(self.document, calculation, skipped, self.trusted)
+        source = export_script(self.document, calculation, skipped, self.trusted,
+                               self.result_refs())
         if path is None:
             return source
         Path(path).write_text(source)

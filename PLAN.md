@@ -973,6 +973,71 @@ itself subject to trust (it is code the user types), but the nodes of an
 untrusted document stay skipped in the console's builds too; a build
 stuck longer than 10 s is killed only when a newer build of the same
 system is requested.
+**Part 3 done 2026-09-26.** Built: classical systems (decision 13.5,
+`registry/classical.py`). The Document's `System.model` (a `Model`: the
+kind of a registry entry of the new "model" family, its set-up
+parameters, its term stack) replaces the Hamiltonian of a system of kind
+`classical_spin`, `lattice_gas` or `ising`; `terms_of(system)` is a
+system's term stack whatever its kind, so ids, regions, duplicate,
+remove, move and undo work alike. The plan of a classical system is base,
+ops, the model stage (pyqula's `SpinModel`, `LatticeGas` or
+`LatticeIsing` built on a copy of the geometry, seeded: the initial
+configuration is random) and the terms; its mode is its kind; no mean
+field, no Hamiltonian view. Terms: Heisenberg shells J1..J3 with an
+anisotropy, a magnetic field, the exchange tensors of
+`generating_functions` (Dzyaloshinskii-Moriya, dipolar, RKKY on a TI
+surface, ZZ, XYZ; within the cell or with the neighbouring cells in 2D)
+for spins; interaction shells and a chemical potential for the lattice
+gas; interaction shells and a field for the Ising model; the Python term
+(it sees `model`). Couplings between shells are constant-only Fields, a
+field or a chemical potential is a Field evaluated on every site. Calculations:
+minimizing the spins (the texture as arrows, or the local energy), and
+annealing the lattice gas or the Ising model over a geometric cooling
+schedule (the configuration, the local energy or field, or the energy
+and the magnetization along the anneal), seeded; the Python calculation.
+Lattices and geometry ops apply to every kind. Commands: `add_system`
+takes a `kind` (and `model_params`), `set_model`; `add_term` and
+`add_calculation` refuse an entry of another kind. The window: New
+classical system (on the usual lattice, in a supercell the usual orders
+fit in), a Model branch in the outliner with its set-up row and form, the
+term and calculation palettes and their search boxes offering the
+entries of the current system's kind, the middle workspace tab reading
+Model. `from_result` Fields (PLAN.md 3.8): a Field reads an array of
+another system's result site by site (the nearest site within `tol`,
+times `scale`, a component of a vector per site); the key of the entry
+hashes the key of the result read (`ResultRef`), so running the source
+again makes the reader stale, while a source that is merely stale leaves
+the reader's key alone and flags it ("reads a stale result"); a Field
+may not read its own system, nor go round in a circle through others,
+and needs the result to have run and to be drawn on the sites. The
+Session hands the results read (only the arrays read) to every job and
+plans with them; the exported script defines `site_field` and holds the
+values. The Field editor offers "from a result" (the calculation, the
+array, the component, a scale); the preview draws it. Tests:
+`tests/core/test_classical_document.py`, the classical cases in
+`tests/engine/test_entries.py` and in the export tests,
+`tests/engine/test_from_result.py` (a classical texture as the exchange
+field of a quantum ladder, equal to pyqula's own `add_zeeman` with the
+array, and its exported script), `tests/ui/test_classical_ui.py`.
+Decisions for the maintainer (section 11 had them open): the texture is
+handed over by reference to the result (not a copied array), and a
+reader of a stale result is flagged, not marked stale itself (its key
+follows the data it read); the Ising temperature scan and the spiral
+wavevector of `add_tensor_2d` wait for the sweeps of part 4. Facts
+learned: `LatticeGas` and `LatticeIsing` set `g.nrep` on the geometry
+they are given and draw their initial configuration, and their Monte
+Carlo moves, from numpy's global generator in plain Python (so a seed
+reproduces them); `SpinModel.minimize_energy` draws its random starting
+angles the same way; pyqula's first-neighbour couplings of the classical
+models go through `get_hamiltonian(tij=...)`, so a shell list is read as
+first, second, third neighbours; the classical spin energy is a jax
+function, and pyqula's jax modules switch jax to double precision
+globally when they are imported (`jax.config.update("jax_enable_x64",
+True)` at import time), so the same pyqula script minimizes to another
+(degenerate) texture depending on what it imported before: the engine
+now always runs jax in double precision (the workers did already, since
+they list the jax solvers at start) and an exported script with classical
+spins switches it on too (an entry's `preamble`). Worth fixing in pyqula.
 
 **Phase 5 — polish.** Undo everywhere, keyboard shortcuts, theming (light and
 dark), tooltips and formulas (reuse quantum-lattice's), user guide, example

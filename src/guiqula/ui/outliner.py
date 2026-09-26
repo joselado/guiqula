@@ -41,7 +41,8 @@ def drop_index(old, target, below):
 
 def list_heads(family, system):
     """Rows a drop onto means "to the top of the list" for this family."""
-    return {"op": {f"{system}/geometry", f"{system}/base"}, "term": {f"{system}/hamiltonian"},
+    return {"op": {f"{system}/geometry", f"{system}/base"},
+            "term": {f"{system}/hamiltonian", f"{system}/model_stack", f"{system}/model"},
             "region": {f"{system}/regions"}, "calculation": {"calculations"}}[family]
 
 
@@ -222,6 +223,10 @@ class Outliner(QTreeWidget):
                     text = INVALID + str(error)
             self._add(regions, region.id, [f"{region.id}  {region.name}", text], movable=True)
 
+        if system.model is not None:
+            self._add_model(hamiltonian_parent=top, system=system, stages=stages,
+                            runtime=runtime, plan=plan)
+            return
         if system.hamiltonian is None:
             return
         mode = plan.mode + (f" (upgraded by {', '.join(plan.upgraded_by)})"
@@ -234,6 +239,19 @@ class Outliner(QTreeWidget):
                 status += f" · in {term.region}"
             self._add_entry(hamiltonian, term, "term", stages[term.id], report, status.strip())
         self._add_meanfield(session, hamiltonian, system, stages[f"{system.id}/meanfield"])
+
+    def _add_model(self, hamiltonian_parent, system, stages, runtime, plan):
+        """A classical system's Model branch: its set-up row and its terms."""
+        model = system.model
+        branch = self._add(hamiltonian_parent, f"{system.id}/model_stack", ["Model", plan.mode])
+        stage = stages.get(f"{system.id}/model")
+        setup = _summary(model.params) or "set-up"
+        item = self._add(branch, f"{system.id}/model", [_label("model", model.kind), setup])
+        if stage is not None and stage.problem:
+            self._mark_invalid(item, stage.problem)
+        for term in model.terms:
+            status = f"in {term.region}" if term.region else ""
+            self._add_entry(branch, term, "term", stages[term.id], runtime.get(term.id), status)
 
     def _add_meanfield(self, session, parent, system, stage):
         block = system.hamiltonian.meanfield
@@ -266,6 +284,9 @@ class Outliner(QTreeWidget):
         message = stage.problem
         if report is not None and report["status"] == "invalid":
             message = report["message"]
+        if stage.warnings and not message and entry.enabled:
+            item.setText(1, (status + " · " if status else "") + "⚠ " + stage.warnings[0])
+            item.setToolTip(1, "\n".join(stage.warnings))
         if not entry.enabled:
             for column in (0, 1):
                 item.setForeground(column, QBrush(QColor(theme.DISABLED)))

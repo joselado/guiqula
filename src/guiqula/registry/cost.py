@@ -47,11 +47,11 @@ def meanfield_iterations(params):
     return guess if limit is None else min(limit, guess)
 
 
-def estimate(document, calc_id, builds, trusted=True):
+def estimate(document, calc_id, builds, trusted=True, results=None):
     """{"seconds", "dimension", "sites", "dense_limit", "meanfield"} for a
     calculation, or None when its system is not built (or the calculation
     cannot run). meanfield: the seconds of the mean field in the total."""
-    plan = pipeline.plan_calculation(document, calc_id, trusted)
+    plan = pipeline.plan_calculation(document, calc_id, trusted, results)
     build = builds.get(plan.system_id)
     if plan.problem or build is None or plan.spec is None or plan.spec.cost is None:
         return None

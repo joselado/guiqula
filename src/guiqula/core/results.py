@@ -16,6 +16,23 @@ PLOT_KINDS = ("lines", "colored_scatter", "heatmap", "structure_scalar", "struct
 
 
 @dataclass
+class ResultRef:
+    """What a from_result Field reads of a result (PLAN.md 3.8): the key of
+    the result (which enters the keys downstream), the positions of the
+    sites it was computed on, and the arrays (only those read, when it
+    crosses to a worker)."""
+    key: str
+    positions: object            # (N, 3) array, or None: the result is not per site
+    arrays: dict
+
+    @classmethod
+    def of(cls, result, names=None):
+        positions = None if result.structure is None else result.structure["positions"]
+        arrays = {k: v for k, v in result.arrays.items() if names is None or k in names}
+        return cls(result.key, positions, arrays)
+
+
+@dataclass
 class Result:
     calculation: str            # calculation id
     kind: str                   # calculation kind

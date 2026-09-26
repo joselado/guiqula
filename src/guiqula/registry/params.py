@@ -51,7 +51,7 @@ class FieldParam(Param):
 
     def _check_bounds(self, value):
         constants = [value] if fields.is_constant(value) else []
-        if isinstance(value, dict):          # piecewise
+        if isinstance(value, dict) and value.get("kind") == "piecewise":
             constants = [v for v in [value["default"]] + [p["value"] for p in value["pieces"]]
                          if fields.is_constant(v)]
         for constant in constants:

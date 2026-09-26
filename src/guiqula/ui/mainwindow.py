@@ -48,7 +48,7 @@ from guiqula.core import fields
 from guiqula.core import regions as region_tools
 from guiqula.io import crashreport, project
 from guiqula.registry import base as registry
-from guiqula.registry import cost
+from guiqula.registry import cost, pipeline
 from guiqula.registry.params import VectorFieldParam
 from guiqula.ui.bars import MessageBar
 from guiqula.ui.console import ConsoleWidget
@@ -67,6 +67,10 @@ WORKSPACES = ("geometry", "hamiltonian", "calculate")
 WINDOW_ACTIONS = ("select", "workspace", "tool", "select_sites", "canvas_view", "preview",
                   "auto_rerun", "projection")
 STRUCTURE_TAB = 0
+# a new classical system: its lattice, and a supercell the usual orders fit in
+CLASSICAL_STARTS = {"classical_spin": ("triangular_lattice", 3, "Classical spins"),
+                    "lattice_gas": ("triangular_lattice", 6, "Lattice gas"),
+                    "ising": ("square_lattice", 8, "Ising model")}
 REGION_TOLERANCE = 0.05      # positions regions made from a canvas selection
 AUTO_RERUN_SECONDS = 3.0     # stale results re-run automatically when cheaper than this
 CANVAS_VIEW_OF = {"geometry": "structure", "hamiltonian": "hamiltonian"}
@@ -225,6 +229,13 @@ class MainWindow(QMainWindow):
         button.setText(text)
         button.setObjectName(name)
         button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self._fill_menu(button, entries, handler, prefix)
+        bar.addWidget(button)
+        return button
+
+    def _fill_menu(self, button, entries, handler, prefix):
+        """(Re)fill a menu button with registry entries by group."""
+        old = button.menu()
         menu = QMenu(button)
         group = None
         for spec in entries:
@@ -236,8 +247,8 @@ class MainWindow(QMainWindow):
             action.setToolTip(spec.doc)
             action.triggered.connect(lambda checked=False, k=spec.kind: handler(k))
         button.setMenu(menu)
-        bar.addWidget(button)
-        return button
+        if old is not None:
+            old.deleteLater()
 
     def _toolbar(self, title, name):
         bar = QToolBar(title)
@@ -275,6 +286,19 @@ class MainWindow(QMainWindow):
         geometry = self._toolbar("Geometry", "geometryToolbar")
         self._menu_button(geometry, "New system", "newSystemButton", _grouped("lattice"),
                           self.new_system, "newSystem")
+        classical = QToolButton()
+        classical.setText("New classical system")
+        classical.setObjectName("newClassicalButton")
+        classical.setToolTip("classical spins, a lattice gas or an Ising model on a lattice "
+                             "(decision 13.5)")
+        classical.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        menu = QMenu(classical)
+        for kind, (_, _, label) in CLASSICAL_STARTS.items():
+            action = menu.addAction(label)
+            action.setObjectName(f"newClassical_{kind}")
+            action.triggered.connect(lambda checked=False, k=kind: self.new_classical_system(k))
+        classical.setMenu(menu)
+        geometry.addWidget(classical)
         self._menu_button(geometry, "Add op", "addOpButton", _grouped("geometry_op"),
                           self.add_op, "addOp")
         self._search_box(geometry, "geometry_op", self.add_op, "opSearch", "find an op")
@@ -325,8 +349,9 @@ class MainWindow(QMainWindow):
         self.palettes["geometry"] = geometry
 
         hamiltonian = self._toolbar("Hamiltonian", "hamiltonianToolbar")
-        self._menu_button(hamiltonian, "Add term", "addTermButton", _grouped("term"),
-                          self.add_term, "addTerm")
+        self._palette_kind = "quantum"      # the system kind the palettes offer entries for
+        self.term_button = self._menu_button(hamiltonian, "Add term", "addTermButton",
+                                             self._offered("term"), self.add_term, "addTerm")
         self.term_search = self._search_box(hamiltonian, "term", self.add_term, "termSearch",
                                             "find a term")
         hamiltonian.addSeparator()
@@ -339,10 +364,11 @@ class MainWindow(QMainWindow):
         self.palettes["hamiltonian"] = hamiltonian
 
         calculate = self._toolbar("Calculate", "calculateToolbar")
-        self._menu_button(calculate, "Add calculation", "addCalculationButton",
-                          _grouped("calculation"), self.add_calculation, "addCalc")
-        self._search_box(calculate, "calculation", self.add_calculation, "calculationSearch",
-                         "find a calculation")
+        self.calc_button = self._menu_button(calculate, "Add calculation", "addCalculationButton",
+                                             self._offered("calculation"), self.add_calculation,
+                                             "addCalc")
+        self.calc_search = self._search_box(calculate, "calculation", self.add_calculation,
+                                            "calculationSearch", "find a calculation")
         self.palettes["calculate"] = calculate
 
     def _search_box(self, bar, family, handler, name, placeholder):
@@ -353,7 +379,7 @@ class MainWindow(QMainWindow):
         edit.setPlaceholderText(placeholder)
         edit.setClearButtonEnabled(True)
         edit.setMaximumWidth(220)
-        completer = QCompleter([f"{spec.label} ({spec.group})" for spec in _grouped(family)],
+        completer = QCompleter([f"{spec.label} ({spec.group})" for spec in self._offered(family)],
                                edit)
         completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         completer.setFilterMode(Qt.MatchFlag.MatchContains)
@@ -369,13 +395,38 @@ class MainWindow(QMainWindow):
         if not text.strip() or (self._searched[0] == text and now - self._searched[1] < 0.5):
             return None                  # Enter and the completion both fire for one choice
         self._searched = (text, now)
-        matches = search_entries(family, text)
+        matches = [spec for spec in search_entries(family, text)
+                   if self._palette_kind in spec.systems]
         if not matches:
             self.message(f"no {family.replace('_', ' ')} matches {text.strip()!r}", error=True)
             return None
         handler(matches[0].kind)
         QTimer.singleShot(0, edit.clear)
         return matches[0].kind
+
+    def _offered(self, family):
+        """The entries of a family the palettes offer for the current kind
+        of system (a classical system has its own terms and calculations)."""
+        kind = getattr(self, "_palette_kind", "quantum")
+        return [spec for spec in _grouped(family) if kind in spec.systems]
+
+    def _update_palettes(self):
+        """Follow the kind of the current system: the term and calculation
+        palettes, their search boxes, the Hamiltonian tab (Model for a
+        classical system) and the mean-field button."""
+        system = self.current_system()
+        kind = self.session.document.system(system).kind if system else "quantum"
+        self.workspace_tabs.setTabText(1, "Hamiltonian" if kind == "quantum" else "Model")
+        self.meanfield_button.setEnabled(kind == "quantum" and system is not None)
+        if kind == self._palette_kind:
+            return
+        self._palette_kind = kind
+        self._fill_menu(self.term_button, self._offered("term"), self.add_term, "addTerm")
+        self._fill_menu(self.calc_button, self._offered("calculation"), self.add_calculation,
+                        "addCalc")
+        for edit, family in ((self.term_search, "term"), (self.calc_search, "calculation")):
+            edit.completer().model().setStringList(
+                [f"{spec.label} ({spec.group})" for spec in self._offered(family)])
 
     def _action(self, menu, text, slot, shortcut=None, name=None):
         action = QAction(text, self)
@@ -614,6 +665,8 @@ class MainWindow(QMainWindow):
             self.outliner.refresh(self.session)
             self.properties.refresh()
             if job.status == "done" and job.kind == "run":
+                if job.label in pipeline.result_references(self.session.document):
+                    self.build_timer.start(0)      # the systems that read it change
                 if job.label in self.plots:
                     self._draw_result(job.label)
                 if job.label == self.selected_calculation() and job.id not in self._auto_jobs:
@@ -679,6 +732,7 @@ class MainWindow(QMainWindow):
             self.viewport.setCurrentIndex(STRUCTURE_TAB)
         self._refresh_structure()
         self._update_status()
+        self._update_palettes()
         return entry
 
     def set_workspace(self, name):
@@ -776,18 +830,19 @@ class MainWindow(QMainWindow):
             value = live if live is not None else value
         positions = build["positions"]
         regions = {r.id: r.select for r in system.regions}
+        results = self.session.result_refs()
         weight = np.ones(len(positions))
         if region is not None and param.native:
             weight = region_tools.evaluate_positions(region.select, positions).astype(float)
         label = f"{entry} {param.label}"
         try:
             if isinstance(param, VectorFieldParam):
-                vectors = np.stack([fields.evaluate_positions(v, positions, regions)
+                vectors = np.stack([fields.evaluate_positions(v, positions, regions, results)
                                     for v in value], axis=1) * weight[:, None]
                 overlays = {"arrows": {"vectors": vectors, "label": label}}
                 size = np.linalg.norm(vectors, axis=1)
                 return overlays, f"{label}: |value| from {size.min():.4g} to {size.max():.4g}"
-            values = fields.evaluate_positions(value, positions, regions) * weight
+            values = fields.evaluate_positions(value, positions, regions, results) * weight
         except Exception as error:
             return {}, f"{label}: {error}"
         return ({"site_values": {"values": values, "label": label}},
@@ -795,6 +850,8 @@ class MainWindow(QMainWindow):
 
     def _hamiltonian_overlay(self, build):
         view = build.get("hamiltonian")
+        if build.get("kind", "quantum") != "quantum":
+            return {}, "a classical system has no Hamiltonian to show (its terms are in the model)"
         if not build.get("view"):
             return {}, "computing the Hamiltonian view…"
         if view is None:
@@ -1084,6 +1141,16 @@ class MainWindow(QMainWindow):
     def new_system(self, lattice):
         return self._do_and_select("add_system", lattice=lattice)
 
+    def new_classical_system(self, kind):
+        """A classical system on its usual lattice, in a supercell."""
+        lattice, n, label = CLASSICAL_STARTS[kind]
+        ok, system = self._do("add_system", lattice=lattice, kind=kind, name=label)
+        if not ok:
+            return None
+        self._do("add_geometry_op", system=system, kind="supercell", params={"n": [n, n, 1]})
+        self.select(system)
+        return system
+
     def _target_system(self):
         system = self.current_system()
         if system is None:
@@ -1340,8 +1407,12 @@ class MainWindow(QMainWindow):
 
     def show_meanfield(self):
         system = self._target_system()
-        if system is not None:
-            self.select(f"{system}/meanfield")
+        if system is None:
+            return
+        if self.session.document.system(system).kind != "quantum":
+            self.message(f"{system} is a classical system: it has no mean field", error=True)
+            return
+        self.select(f"{system}/meanfield")
 
     def cancel_selected(self):
         calc = self.selected_calculation()
@@ -1444,7 +1515,10 @@ class MainWindow(QMainWindow):
         self.redo_action.setEnabled(has and self.session.dispatcher.can_redo())
         self.run_button.setEnabled(has and self.calc_box.count() > 0)
         self.add_region_button.setEnabled(has and bool(self.session.document.systems))
-        self.meanfield_button.setEnabled(has and bool(self.session.document.systems))
+        if has:
+            self._update_palettes()
+        else:
+            self.meanfield_button.setEnabled(False)
         self._selection_changed(len(self.structure.selected()))
 
     # ---- commands and messages
