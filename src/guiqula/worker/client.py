@@ -105,7 +105,12 @@ class _Worker:
         self._cleanup()
 
     def stop(self, timeout=2.0):
+        """Ask an idle worker to quit; kill one that is busy or still
+        starting (it would not read the request until it is done)."""
         if self.process is None:
+            return
+        if not self.ready or self.job is not None:
+            self.kill()
             return
         with contextlib.suppress(OSError, BrokenPipeError):
             self.conn.send((P.QUIT,))

@@ -7,9 +7,8 @@ for every later design discussion; update it when a decision changes.
 
 Status: **all decisions in sections 12 and 13 made on 2026-09-26 (only 13.13 is
 still open); the plan review of the same day is in section 14 (decided items)
-and at the end of section 11 (items still open).** Phase 0 was done on
-2026-09-26 (section 7); phase 1 is next and waits on the open review items at
-the end of section 11.
+and at the end of section 11 (items still open).** Phases 0 and 1 were done
+on 2026-09-26 (section 7); phase 2 is next.
 
 ## 1. Requirements (as stated by the maintainer)
 
@@ -619,6 +618,25 @@ Zeeman + Rashba → bands entirely through the command API, in the worker, and
 the arrays equal a direct pyqula script; the exported script runs and
 reproduces them; undo restores the previous Document; offscreen, cancelling a
 running job leaves the window usable and the worker respawns.
+**Done 2026-09-26**, acceptance tests in `tests/worker/test_session.py` and
+`tests/ui/test_window_session.py`. Built: 6 lattices (chain, square,
+honeycomb, triangular, kagome, Lieb), 3 ops (supercell, ribbon, remove atoms
+by position), 6 terms (onsite, sublattice imbalance, Zeeman, Rashba, Haldane,
+Anderson disorder with seed), bands (with operator) and DOS (ED, Green).
+Fields `constant` and `expression` (engine and export; the editor is phase 3),
+regions by expression or positions restricting any term whose pyqula call
+takes a function of position. Beyond the plan: `registry/pipeline.py` (the
+pyqula-free planning half of the engine: mode pre-scan, invalid entries,
+keys, staleness), `session.py` (the one object every client drives), `guiqula
+run` and `guiqula script` on the command line, presets as package data loaded
+by name, a read-only document tree in the window fed by the interactive
+worker's builds. Facts learned: `add_rashba` also turns a Hamiltonian
+spinful; `add_haldane` on a square lattice does not raise; pyqula passes
+callbacks (progress) into its own pool processes, so the worker's pipe only
+accepts messages from the worker process itself; KPM DOS draws random
+vectors, so it waits for a seed parameter; `get_hamiltonian(tij=[1.0])` takes
+the multicell path, so the engine passes `tij` only when it differs from
+pyqula's default.
 
 **Phase 2 — UI shell and geometry workspace.** Main window with outliner,
 viewport, properties, log; plain Qt theme; structure canvas with pan/zoom,
@@ -823,6 +841,8 @@ onward are features (placement per phase at the end of section 7).
    wall-clock with interpreter start, none of pyqula, jax, numba, numpy or
    matplotlib loaded; importing pyqula alone takes 0.7 s.
    `tests/ui/test_startup.py` asserts the module set and a 2 s budget.
+   Phase 1: 0.63 s to a shown window, now with matplotlib and numpy for the
+   plot tab; the workers are started after the window is shown.
 
 16. **Teaching use.** A preset gallery, one-click export of figure plus data plus
    script, and presets with locked parameters, for use in courses.

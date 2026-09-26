@@ -5,10 +5,11 @@ import json
 HEAVY = {"pyqula", "jax", "jaxlib", "numba"}
 
 # Measured on the development machine on 2026-09-26 (PLAN.md 13.15), warm
-# file cache, offscreen: 0.23 s from the first guiqula import to a shown
-# window, 0.3 s wall-clock including interpreter start. The budget leaves
-# room for a cold cache and for matplotlib, which the phase-1 window adds;
-# importing pyqula alone costs 0.7 s. The module check is the sharp part.
+# file cache, offscreen, from the first guiqula import to a shown window:
+# 0.23 s for the phase-0 placeholder, 0.63 s for the phase-1 window, which
+# imports matplotlib and numpy for its plot tab. Importing pyqula alone
+# costs 0.7 s. The budget leaves room for a cold cache; the module check is
+# the sharp part. Workers start after the window is shown (ui/app.py).
 BUDGET_SECONDS = 2.0
 
 PROBE = """

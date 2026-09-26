@@ -22,10 +22,34 @@ a thin UI already in phase 1, invalid entries are skipped and flagged; the revie
 still open are at the end of section 11). Read it before designing anything; update it when
 a decision changes.
 
-Status: phase 0 (bootstrap) done on 2026-09-26: packaging, the pyqula path shim, the Qt
-environment fixes, the offscreen test harness, the startup check, a placeholder main window
-and a `tools/drive.py` stub. Phase 1 is next; the review items it depends on are still open
-(end of PLAN.md section 11).
+Status (2026-09-26): phases 0 and 1 are done (PLAN.md section 7 says what each built).
+Phase 2 (UI shell, geometry workspace, autosave and recovery) is next.
+
+## Code map
+
+The flow is Document -> plan -> engine -> worker -> Result -> plot; everything goes through
+a `Session`.
+
+- `core/`: `document.py` (pydantic models; ids unique across the document), `fields.py` and
+  `expressions.py` (Fields; the AST-whitelisted expression evaluator), `regions.py`,
+  `results.py` (the `Result` dataclass that crosses the process boundary), `hashing.py`.
+- `registry/`: one declaration per lattice, op, term and calculation (`lattices.py`,
+  `geometry_ops.py`, `terms.py`, `calculations.py`). A declarative `Call("h.add_zeeman", "m")`
+  drives both the engine and the script export; a custom entry gives `apply` and `script`.
+  `pipeline.py` plans a system without pyqula: the Hilbert-space pre-scan, invalid entries,
+  and the stage and calculation keys (staleness). Adding a term = one `entry(...)` call plus
+  its case in `tests/engine/test_entries.py` (a completeness test fails otherwise).
+- `commands/`: `Dispatcher` (mutations with snapshot undo, actions journaled only);
+  `mutations.py` lists every mutation. Command arguments are JSON.
+- `engine/`: `build.py` executes a plan (per-stage cache handing out copies, skip on error,
+  seeds), `calculations.py` runs an adapter and returns a `Result`.
+- `worker/`: `process.py` (the worker, imports the engine inside `main()` only), `client.py`
+  (`JobManager`: interactive and batch workers, cancel, respawn, timeouts), `protocol.py`.
+- `session.py`: dispatcher + job manager + results; the object tests, `guiqula run`,
+  `tools/drive.py` and the window drive. `io/`: project files, presets
+  (`src/guiqula/presets/*.json`, loadable by name), script export, result files.
+- `ui/`: the phase-1 window (`mainwindow.py`, `jobpanel.py`, `plots.py`, `doctree.py`); it
+  polls the session from a `QTimer` and starts the workers after it is shown.
 
 ## Hard rules
 
@@ -109,21 +133,31 @@ Nothing is installed: pytest puts `src/` on the path (`pyproject.toml`), and `to
 does it itself. Keep this section in sync with what exists.
 
 ```bash
-python -m pytest                       # everything (offscreen Qt; about 7 s)
+python -m pytest                       # everything (offscreen Qt, worker processes; ~2.5 min)
 python -m pytest -m "not slow"         # skip the wheel build
-python -m pytest tests/ui -k startup   # one area / one test
-PYTHONPATH=src python -m guiqula       # start the program (--offscreen, --version)
-python tools/drive.py --shot out.png   # drive the window headlessly; --widget NAME,
-                                       # --list-widgets, --python CODE (see --help)
+python -m pytest tests/core            # pure Python, under a second
+python -m pytest tests/engine -k zeeman  # one area / one test
+PYTHONPATH=src python -m guiqula [preset|file]         # the window (--offscreen, --version)
+PYTHONPATH=src python -m guiqula run honeycomb_zeeman_rashba --calc c1 --out out --script
+PYTHONPATH=src python -m guiqula script honeycomb_zeeman_rashba --calc c1   # print the script
+python tools/drive.py honeycomb_zeeman_rashba --run c1 --shot bands.png    # drive the window
+python tools/drive.py preset --do '{"do": "add_term", "system": "s1", "kind": "haldane"}' \
+    --run c1 --widget plotView --shot plot.png     # also --commands FILE, --python CODE,
+                                                   # --list-widgets, --no-warm (see --help)
 tools/update_vendor.sh                 # refresh vendor/ from upstream pyqula
 ```
+
+`drive.py` prints a JSON report last (document outline, jobs, result summaries, log tail,
+screenshot path); a `--do` object names a mutation or an action with `"do"`. In Python,
+`Session("honeycomb_zeeman_rashba", warm=False)` gives the same API: `do(...)`, `act(...)`,
+`run_calculation(calc, wait=True)`, `result(calc)`, `status(calc)`, `undo()`, `close()`.
 
 Every test runs with its own `tmp_path` as the cwd (autouse fixture in `tests/conftest.py`),
 so pyqula's `.OUT` files never reach the repository. The `shot(widget, name)` fixture saves
 screenshots to `ui_dump/<test id>/` (gitignored) for inspection with the Read tool; the
-`run_python(code)` fixture runs code in a fresh interpreter that sees `src/`.
-`tools/drive.py preset.guiqula --run bands` (documents and calculations) arrives in phase 1
-with the command API; until then those arguments exit with status 2.
+`run_python(code)` fixture runs code in a fresh interpreter that sees `src/`. Tests that
+start workers share one `Session`/`JobManager` per module and pass `warm=False`; the first
+numba compile of a code path costs seconds once per machine (`NUMBA_CACHE_DIR`).
 
 Do not pipe pytest output through `tail`/`grep` without `set -o pipefail`: the pipe hides
 pytest's exit status (a lesson recorded in pyqula's own notes).

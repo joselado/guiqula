@@ -1,6 +1,7 @@
 """QApplication setup and the entry point of the graphical program."""
 import sys
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from guiqula import env
@@ -23,14 +24,16 @@ def create_application(argv=None):
 
 
 def build_main_window():
-    """Create (but do not show) the main window."""
+    """Create (but do not show) the main window, without workers."""
     create_application()
     return MainWindow()
 
 
-def run(argv=None):
-    """Show the main window and run the event loop; return the exit code."""
+def run(argv=None, document=None):
+    """Show the main window, start the workers once it is visible, and run
+    the event loop; return the exit code."""
     app = create_application(argv)
     window = build_main_window()
     window.show()
+    QTimer.singleShot(0, lambda: window.start_session(document))
     return app.exec()
