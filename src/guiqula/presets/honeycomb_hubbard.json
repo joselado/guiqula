@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "systems": [
+    {
+      "id": "s1",
+      "name": "Hubbard model on the honeycomb lattice",
+      "kind": "quantum",
+      "geometry": {
+        "base": {
+          "kind": "honeycomb_lattice",
+          "params": {}
+        },
+        "ops": []
+      },
+      "regions": [],
+      "hamiltonian": {
+        "construction": {
+          "has_spin": true,
+          "nambu": false,
+          "tij": [1.0],
+          "is_sparse": false
+        },
+        "terms": [],
+        "meanfield": {
+          "enabled": true,
+          "kind": "interactions",
+          "params": {
+            "U": 3.0,
+            "mf": "antiferro",
+            "nk": 6,
+            "mix": 0.5
+          }
+        }
+      }
+    }
+  ],
+  "calculations": [
+    {
+      "id": "c1",
+      "system": "s1",
+      "kind": "bands",
+      "params": {
+        "nk": 200,
+        "operator": "sz"
+      }
+    },
+    {
+      "id": "c2",
+      "system": "s1",
+      "kind": "dos",
+      "params": {
+        "emin": -4.0,
+        "emax": 4.0,
+        "ne": 400,
+        "delta": 0.05,
+        "nk": 30,
+        "mode": "ED",
+        "operator": null
+      }
+    }
+  ],
+  "ui": {}
+}

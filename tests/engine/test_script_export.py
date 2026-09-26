@@ -33,8 +33,14 @@ def assert_reproduces(document, calc_id, repo, tmp_path):
     return result
 
 
-def test_preset_bands(pyqula, repo, tmp_path):
-    assert_reproduces(project.load("honeycomb_zeeman_rashba"), "c1", repo, tmp_path)
+@pytest.mark.parametrize("preset", project.presets())
+def test_preset_bands(pyqula, repo, tmp_path, preset):
+    result = assert_reproduces(project.load(preset), "c1", repo, tmp_path)
+    assert result.skipped == []
+    if preset == "honeycomb_hubbard":        # the Neel state opens a gap at half filling
+        energies = result.arrays["energies"]
+        assert result.meanfield["total_energy"] < 0
+        assert energies[energies > 0].min() - energies[energies < 0].max() > 0.5
 
 
 def test_everything_at_once(pyqula, repo, tmp_path):

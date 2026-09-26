@@ -98,7 +98,7 @@ def main(conn, config):
     state = {"cores": 1}
     if config.get("warm"):
         with contextlib.redirect_stdout(open(os.devnull, "w")):
-            _warm_up()
+            _warm_up(config["role"])
     pipe.send(P.READY, {"pid": os.getpid(), "role": config["role"], "names": _names()})
 
     def handle(job_id, kind, payload):
@@ -172,12 +172,15 @@ def _names():
     return {source: source_names(source) for source in SOURCES}
 
 
-def _warm_up():
+def _warm_up(role):
     """Compile the numba kernels of the common paths before the first job
     (PLAN.md 3.3); with NUMBA_CACHE_DIR set this is fast after the first
-    run on a machine."""
+    run on a machine. The mean field only in the batch workers: the
+    interactive one never runs it (about 5 s even with the cache)."""
     from pyqula import geometry
     h = geometry.honeycomb_lattice().get_hamiltonian()
     h.get_bands(nk=4, write=False)
     h.get_bands(nk=4, operator="sz", write=False)
     h.get_dos(nk=2, energies=[0.0], write=False)
+    if role == "batch":
+        h.get_mean_field_hamiltonian(U=1.0, mf="ferro", nk=2, maxite=2)

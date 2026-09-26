@@ -48,7 +48,9 @@ def test_save_load(tmp_path, suffix):
 
 
 def test_presets_load_by_name():
-    assert "honeycomb_zeeman_rashba" in project.presets()
+    assert {"honeycomb_zeeman_rashba", "honeycomb_hubbard"} <= set(project.presets())
+    for name in project.presets():
+        assert project.load(name).systems
     document = project.load("honeycomb_zeeman_rashba")
     assert [t.kind for t in document.systems[0].hamiltonian.terms] == ["zeeman", "rashba"]
     with pytest.raises(DocumentError, match="no such preset"):

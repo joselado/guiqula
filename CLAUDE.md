@@ -23,28 +23,36 @@ a thin UI already in phase 1, invalid entries are skipped and flagged; the revie
 still open are at the end of section 11). Read it before designing anything; update it when
 a decision changes.
 
-Status (2026-09-26): phases 0, 1 and 2 are done (PLAN.md section 7 says what each built
-and what was left for later). Phase 3 (Hamiltonian workspace, `f(r)` editor, results) is next.
+Status (2026-09-26): phases 0 to 3 are done (PLAN.md section 7 says what each built, what
+was left for later, and the phase-3 decisions awaiting the maintainer's confirmation).
+Phase 4 (breadth: Python nodes, console, more ops/terms/calculations, classical systems) is
+next.
 
 ## Code map
 
 The flow is Document -> plan -> engine -> worker -> Result -> plot; everything goes through
 a `Session`.
 
-- `core/`: `document.py` (pydantic models; ids unique across the document), `fields.py` and
-  `expressions.py` (Fields; the AST-whitelisted expression evaluator), `regions.py`,
-  `results.py` (the `Result` dataclass that crosses the process boundary), `hashing.py`.
-- `registry/`: one declaration per lattice, op, term and calculation (`lattices.py`,
-  `geometry_ops.py`, `terms.py`, `calculations.py`). A declarative `Call("h.add_zeeman", "m")`
-  drives both the engine and the script export; a custom entry gives `apply` and `script`.
-  `pipeline.py` plans a system without pyqula: the Hilbert-space pre-scan, invalid entries,
-  and the stage and calculation keys (staleness). Adding a term = one `entry(...)` call plus
-  its case in `tests/engine/test_entries.py` (a completeness test fails otherwise).
+- `core/`: `document.py` (pydantic models; ids unique across the document; a quantum
+  system's Hamiltonian = construction, terms, mean-field block), `fields.py` and
+  `expressions.py` (Fields: constant, expression, piecewise over regions; the
+  AST-whitelisted expression evaluator), `regions.py`, `results.py` (the `Result` dataclass
+  that crosses the process boundary), `hashing.py`.
+- `registry/`: one declaration per lattice, op, term, mean field and calculation
+  (`lattices.py`, `geometry_ops.py`, `terms.py`, `meanfield.py`, `calculations.py`). A
+  declarative `Call("h.add_zeeman", "m")` drives both the engine and the script export; a
+  custom entry gives `apply` and `script`. `pipeline.py` plans a system without pyqula: the
+  Hilbert-space pre-scan, invalid entries, region references resolved to selections, and
+  the stage and calculation keys (staleness); the mean field is the last stage. `cost.py`
+  estimates durations (the cost guard). Adding a term = one `entry(...)` call plus its case
+  in `tests/engine/test_entries.py` (a completeness test fails otherwise).
 - `commands/`: `Dispatcher` (mutations with snapshot undo, actions journaled only);
   `mutations.py` lists every mutation. Command arguments are JSON.
 - `engine/`: `build.py` executes a plan (per-stage cache handing out copies, skip on error,
-  seeds), `calculations.py` runs an adapter and returns a `Result`, `structure.py` gives the
-  canvas its arrays (positions, lattice, sublattice, pyqula's first-neighbour bonds).
+  seeds; `meanfield=False` for the interactive builds, which defer the mean field),
+  `calculations.py` runs an adapter and returns a `Result`, `structure.py` gives the canvas
+  its arrays (positions, lattice, sublattice, pyqula's first-neighbour bonds, and the
+  Hamiltonian view: onsite, exchange, pairing, every hopping's amplitude and phase).
 - `worker/`: `process.py` (the worker, imports the engine inside `main()` only), `client.py`
   (`JobManager`: interactive and batch workers, cancel, respawn, timeouts), `protocol.py`.
 - `session.py`: dispatcher + job manager + results + the latest build of each system
@@ -52,12 +60,14 @@ a `Session`.
   `poll()`. The object tests, `guiqula run`, `tools/drive.py` and the window drive.
 - `io/`: project files, presets (`src/guiqula/presets/*.json`, loadable by name), script
   export, result files, `autosave.py` (autosave and recovery), `crashreport.py`.
-- `ui/`: `mainwindow.py` (workspaces, palettes from the registry, docks, bars; the window's
-  own dispatcher actions `select`, `workspace`, `tool`, `select_sites`,
-  `region_from_selection`, `remove_selected`), `outliner.py`, `properties.py` + `forms.py`
-  (forms from the parameter declarations), `formulas.py` (mathtext images), `structure.py`
-  (canvas and selection tools), `plots.py`, `jobpanel.py`, `bars.py`, `errors.py` (exception
-  hook), `theme.py`. The window saves its view state as the Document's `ui` block (not a
+- `ui/`: `mainwindow.py` (workspaces, palettes with search boxes from the registry, docks,
+  bars, one result view per calculation, the cost guard, auto re-run; the window's own
+  dispatcher actions `select`, `workspace`, `tool`, `select_sites`, `region_from_selection`,
+  `remove_selected`, `canvas_view`, `preview`, `auto_rerun`), `outliner.py`,
+  `properties.py` + `forms.py` (forms from the parameter declarations; the `f(r)` Field
+  editor), `formulas.py` (mathtext images), `structure.py` (canvas, its three views and
+  selection tools), `plots.py` (`PlotView` per calculation, `plot_<id>`), `jobpanel.py`,
+  `bars.py`, `errors.py` (exception hook), `theme.py`. The window saves its view state as the Document's `ui` block (not a
   Command, not an unsaved change) and restores it on open and recovery. The window
   polls the session from a `QTimer` and starts the workers after it is shown; a form or tree
   rebuilt from inside one of its own signals must be deleted later (PLAN.md phase 2 facts).
@@ -144,7 +154,7 @@ Nothing is installed: pytest puts `src/` on the path (`pyproject.toml`), and `to
 does it itself. Keep this section in sync with what exists.
 
 ```bash
-python -m pytest                       # everything (offscreen Qt, worker processes; 2-3 min)
+python -m pytest                       # everything (offscreen Qt, worker processes; 3-5 min)
 python -m pytest -m "not slow"         # skip the wheel build
 python -m pytest tests/core            # pure Python, under a second
 python -m pytest tests/engine -k zeeman  # one area / one test
@@ -153,19 +163,25 @@ PYTHONPATH=src python -m guiqula run honeycomb_zeeman_rashba --calc c1 --out out
 PYTHONPATH=src python -m guiqula script honeycomb_zeeman_rashba --calc c1   # print the script
 python tools/drive.py honeycomb_zeeman_rashba --run c1 --shot bands.png    # drive the window
 python tools/drive.py preset --do '{"do": "add_term", "system": "s1", "kind": "haldane"}' \
-    --run c1 --widget plotView --shot plot.png     # also --commands FILE, --python CODE,
+    --run c1 --widget plot_c1 --shot plot.png      # also --commands FILE, --python CODE,
                                                    # --list-widgets, --no-warm (see --help)
 python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "select_sites", "box": [0.9, -2, 2.1, 2]}' \
     --do '{"do": "remove_selected"}' --widget structureView --shot sculpted.png
 python tools/drive.py --recover --shot recovered.png   # unsaved work of a killed session
                                                    # (--hold SECONDS keeps the window running)
+python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "canvas_view", "name": "hamiltonian"}' \
+    --widget structureView --shot hview.png        # the Hamiltonian view (13.8)
+python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "preview", "entry": "t1", "param": "m"}' \
+    --widget structureView --shot field.png        # a Field on the structure
+python tools/drive.py honeycomb_hubbard --run c1 --widget plot_c1 --shot hubbard.png   # mean field
 tools/update_vendor.sh                 # refresh vendor/ from upstream pyqula
 ```
 
 `drive.py` prints a JSON report last (document outline, builds, jobs, result summaries,
-selection, log tail, screenshot path); a `--do` object names a mutation or an action with
-`"do"`, and the driver waits for the rebuild after each one. Autosaves and crash reports go to
-the user data directory, or to `$GUIQULA_DATA_DIR` (the test suite sets it). In Python,
+canvas view, tab shown, open result views, selection, log tail, screenshot path); a `--do`
+object names a mutation or an action with `"do"`, and the driver waits for the rebuild after
+each one. Autosaves and crash reports go to the user data directory, or to
+`$GUIQULA_DATA_DIR` (the test suite sets it). In Python,
 `Session("honeycomb_zeeman_rashba", warm=False)` gives the same API: `do(...)`, `act(...)`,
 `run_calculation(calc, wait=True)`, `result(calc)`, `status(calc)`, `undo()`, `close()`.
 

@@ -8,8 +8,8 @@ for every later design discussion; update it when a decision changes.
 Status: **all decisions in sections 12 and 13 made on 2026-09-26 (13.13, in-app
 help from pyqula's documentation, decided after phase 1, with open design
 points in section 11); the plan review of the same day is in section 14
-(decided items) and at the end of section 11 (items still open).** Phases 0, 1 and 2 were
-done on 2026-09-26 (section 7); phase 3 is next.
+(decided items) and at the end of section 11 (items still open).** Phases 0 to 3 were
+done on 2026-09-26 (section 7); phase 4 is next.
 
 ## 1. Requirements (as stated by the maintainer)
 
@@ -154,7 +154,8 @@ with its ordered stacks, plus a list of calculations and their results:
           {"id": "t2", "kind": "rashba", "enabled": true, "params": {"c": 0.1}},
           {"id": "t3", "kind": "python", "enabled": true, "params": {"code": "h.add_kane_mele(0.05)"}}
         ],
-        "meanfield": {"enabled": false, "U": 2.0, "V1": 0.0, "filling": 0.5, "mf": "random", "solver": "linear_mixing"}
+        "meanfield": {"enabled": false, "kind": "interactions",
+                      "params": {"U": 2.0, "V1": 0.0, "filling": 0.5, "mf": "random", "seed": 1}}
       }
     },
     {
@@ -439,6 +440,18 @@ is phase 3.
 Phase 3 delivers `constant`, `expression` and `piecewise`; phase 4 adds
 `profile`, `interpolated`, `painted` and `from_result`.
 
+A `piecewise` Field (phase 3) is `{"kind": "piecewise", "default": F,
+"pieces": [{"region": "r1", "value": F}, ...]}` with each F a constant or
+an expression (no nesting). Where regions overlap, the later piece wins,
+as a later term does in the stack. It names regions by id, but ids never
+enter keys (14.9): the planner resolves them to the regions' selections
+and hashes those, so editing a region's selection makes the results
+stale and renaming or duplicating it does not. A missing region is
+refused by the command (the Document check), a broken one flags the entry;
+`remove` refuses a region a piecewise Field uses, and duplicating a system
+remaps the ids. Script export writes nested conditional expressions over
+the regions' indicators.
+
 ## 4. The user interface
 
 One window, one document, three workspaces switched by tabs in the header
@@ -533,6 +546,8 @@ One window, one document, three workspaces switched by tabs in the header
   field, python.
 - **Mean field**: U, V1, V2, J1..J3, filling or Fermi energy, initial guess
   from `get_guess_names()`, solver, mixing, max iterations, temperature.
+  (Phase 3 built all but the solver, which only pyqula's jax engine
+  offers: the numpy engine always mixes linearly.)
 - **Classical systems** (decision 13.5), built on `classicalspin.SpinModel`,
   `latticegas.LatticeGas` and `latticeising.LatticeIsing`, which take a
   `Geometry` and are otherwise independent of the quantum Hamiltonian. They
@@ -726,6 +741,74 @@ panel with cancel, result tabs with interactive matplotlib, stale marking on
 upstream edits, mean-field block. Acceptance: change the geometry after
 setting terms and the bands re-run on the new geometry with the same terms;
 cancelling a running job leaves the UI usable.
+**Done 2026-09-26**, acceptance tests
+`test_geometry_change_reruns_bands_with_the_same_terms`
+(`tests/ui/test_hamiltonian_workspace.py`: the re-run result equals an
+engine run of the changed Document, every term applied) and, from phase 1,
+`test_cancel_running_job_keeps_window_usable`. Built: piecewise Fields
+(3.8) in the core, the planner, the engine and the exporter; the `f(r)`
+button and panel next to every Field that takes a function of position
+(a number or an expression with its help, or one value per region plus
+the default), one editor per component for vectors; the Field preview on
+the structure canvas (the value being typed, restricted to the term's
+region: colours for a scalar, in-plane arrows and z dots for a vector);
+the Hamiltonian view of 13.8 (atoms by onsite energy, every hopping of
+`get_multihopping()` with a width by |t| and a colour by phase, exchange
+as arrows and dots; the arrays come with every interactive build,
+`engine/structure.hamiltonian_view`, from sparse block reductions, up to
+20,000 sites), with a Show box choosing among sites and bonds, Hamiltonian
+and Field preview, and the workspaces choosing the first two; the
+mean-field block (`Hamiltonian.meanfield` = enabled, kind, params, checked
+by a registry entry of the new `meanfield` family: U as a Field, V1..V3
+and J1..J3 constant-only, filling or chemical potential, the guess from
+`meanfield.get_guess_names()`, seed, k-mesh, mixing, tolerance,
+iterations, temperature; `set_meanfield`; an outliner row with its
+checkbox and the converged energy; a form; a toolbar button), the last
+stage of the plan, entering the mode pre-scan (it needs spin), run only
+with the calculations: the interactive builds stop before it and report it
+as deferred; one closable tab per calculation's result (`plot_<id>`) with
+Save data, Detach into a floating dock and back (a button: dragging a tab
+out is not offered), a readout of the data point under the mouse, and
+"(stale)" in the tab; search boxes with completion on the op, term and
+calculation palettes; the cost guard of 13.12 (`registry/cost.py`: an
+order-of-magnitude duration from the build's Hilbert dimension, counting
+dense diagonalizations for bands, DOS and the mean field, calibrated on
+this machine at 2e-9 N³ s; shown in the status bar; a non-modal bar asks
+before a run estimated above a minute; a note in the system's form above
+pyqula's dense limit); opt-in automatic re-run of stale results estimated
+under 3 s (Run menu, saved with the view state; it never pulls the
+viewport to a result); terms Kane-Mele, antiferromagnetism and s-wave
+pairing (the first term that upgrades to Nambu); the preset
+`honeycomb_hubbard`; the batch workers warm the mean-field kernels too.
+Decisions taken while building, for the maintainer to confirm: a mean
+field that does not converge fails the calculation instead of being
+skipped (14.3's skip semantics would hand the calculation the bare
+Hamiltonian); the interactive builds are stamped with the system's full
+key, mean field included, so that their reports are never stale (a
+mean-field edit costs them a cache hit); `is_sparse` stays a plain
+boolean: 13.12's automatic switch to sparse above `limits.densedimension`
+waits for calculations that use sparse matrices (KPM, arpack), since
+bands and the ED DOS diagonalize densely anyway. Left for later: the
+Hamiltonian view shows the Hamiltonian before the mean field (the
+converged magnetization belongs to the structure-vector plots of phase
+4); the preview of a bond Field (Rashba, Haldane) shows its values at the
+sites, not at the bond midpoints pyqula evaluates it at; persisting
+mean-field results in projects (section 11); the cost model knows only
+dense diagonalizations. Facts learned: `get_mean_field_hamiltonian`
+returns None when the loop does not converge (the entry turns that into an
+error) and routes spinful Hamiltonians to `VJinteraction`, which takes U
+as a callable of position but V1..V3 and J1..J3 as numbers; its `T` and
+`maxite` defaults are sentinels, so the entry passes the numpy engine's
+values (mix 0.1, maxite 1000, T 1e-7) explicitly and the exported script
+states them; the `antiferro` guess needs a sublattice (square lattices
+without one raise); `add_swave` takes a callable, makes the Hamiltonian
+spinful and then Nambu, with the per-site order (e↑, e↓, h↓, h↑) and the
+singlet pairing at (4i, 4i+2); `add_antiferromagnetism` reads any list as
+per-site values (and refuses one of another length), so a vector cannot be
+given as a list and its entry takes a scalar Field (along z); a mean-field call takes 2 to 5 s the first
+time in a process even with numba's cache warm; matplotlib truncates
+synthetic mouse events to whole pixels; a `QTabWidget` tab loses its
+close button with `setTabButton(index, side, None)`.
 
 **Phase 4 — breadth and freedom.** Python nodes with the trust prompt,
 embedded console, the rest of the geometry ops and terms, first-wave
