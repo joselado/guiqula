@@ -17,8 +17,8 @@ phase 6), the architecture (headless core + command API + worker process + Qt vi
 layout, the phased plan, and section 13's further decisions (several systems per document,
 regions, headless runner, classical spin/lattice-gas/Ising systems as their own system kinds,
 plain Qt theme, trust prompt for Python nodes, in-app help rendered from pyqula's own
-documentation), and
-section 14's review decisions of the same day (the console is a remote REPL in the worker,
+documentation, whose open design points are at the end of section 11), and section 14's
+review decisions of the same day (the console is a remote REPL in the worker,
 a thin UI already in phase 1, invalid entries are skipped and flagged; the review items
 still open are at the end of section 11). Read it before designing anything; update it when
 a decision changes.

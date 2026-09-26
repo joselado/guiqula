@@ -6,8 +6,9 @@ framework decision, the architecture, and the phased plan. It is the reference
 for every later design discussion; update it when a decision changes.
 
 Status: **all decisions in sections 12 and 13 made on 2026-09-26 (13.13, in-app
-help from pyqula's documentation, decided after phase 1); the plan review of the same day is in section 14 (decided items)
-and at the end of section 11 (items still open).** Phases 0 and 1 were done
+help from pyqula's documentation, decided after phase 1, with open design
+points in section 11); the plan review of the same day is in section 14
+(decided items) and at the end of section 11 (items still open).** Phases 0 and 1 were done
 on 2026-09-26 (section 7); phase 2 is next.
 
 ## 1. Requirements (as stated by the maintainer)
@@ -745,6 +746,52 @@ supersede quantum-lattice; both can coexist.
     batch worker running that job, whose cache is lost; the interactive
     worker's cache survives.
 
+- In-app help (13.13): open points found by the code review of the decision
+  (2026-09-26, after phase 1), numbered as reported to the maintainer. None
+  affects phase 1 code; settle them when phase 5 is designed.
+  1. Docstrings: the UI process never imports pyqula (13.15), and pyqula
+     sets many docstrings only at import time (`helptk.get_docstring`, 14
+     methods in `hamiltonians.py` and one in `geometry.py`, e.g.
+     `set_filling`, `get_ldos`), so
+     parsing the source misses them. Candidates: extract the text when
+     `tools/update_vendor.sh` refreshes the copy, or ask the worker.
+  2. Packaging: `vendor/pyqula_user_guide.md` is not in the wheel. Shipping
+     it needs a packaging change, since `vendor/pyqula` must stay an exact
+     copy of upstream and `guiqula/_vendor` is not a package.
+  3. Coverage: the guide has no section for many entries (the lattice
+     constructors including `lieb_lattice`, `bulk2ribbon`, Anderson
+     disorder), and custom entries (bands, DOS, remove_atoms) have no single
+     pyqula call whose docstring could be shown; where a docstring exists it
+     is often one line (`add_zeeman`) or missing (`get_dos`,
+     `bulk2ribbon`). The plan needs a rule for these, consistent with "not
+     written again in guiqula", and for guiqula-only concepts (Fields,
+     regions, Python nodes).
+  4. Math: the guide is LaTeX-heavy (`$$` blocks, `pmatrix`), and
+     PySide6-Essentials has no QtWebEngine, so a MathJax view would work on
+     the development machine (the Addons wheel is installed) but not for a
+     pip install. Candidates: matplotlib mathtext per equation, or images
+     rendered at refresh time.
+  5. Refresh workflow: the anchor test runs in pytest, not in
+     `update_vendor.sh`, so an upstream section rename makes the refresh
+     commit red, and fixing the anchor means editing the registry, which
+     "commit a refresh on its own" (CLAUDE.md) forbids. Decide which rule
+     gives: the script runs the anchor test, or anchor fixes may join the
+     refresh commit.
+  6. Stale text: PLAN.md still says help and tooltips are written in
+     guiqula or reused from quantum-lattice in the phase 5 description
+     (section 7), section 4 ("tooltips and formula images can be reused"),
+     section 9 ("tooltips with physics") and the 3.2 example (hand-written
+     `doc=`). Every registry entry has a hand-written `doc` and `formula`
+     whose role next to pyqula's text is undecided, and 3.2 lists no anchor
+     field.
+  7. Smaller points: "anchor" is undefined, and a naive heading scan picks up
+     `#` comment lines in the guide's code blocks (some duplicated); the
+     refresh script copies the guide with a bare `cp` after the package
+     rsync, so a moved upstream guide leaves a mixed copy and an outdated
+     VENDOR.md; with `GUIQULA_PYQULA_PATH` set, the help and the running code
+     come from different pyqula versions; section 4's layout has no place
+     for a help panel.
+
 ## 12. Decisions (made by the maintainer, 2026-09-26)
 
 1. **Framework**: PySide6.
@@ -843,7 +890,9 @@ onward are features (placement per phase at the end of section 7).
    vendored copy refreshes the help; a test checks that every anchor a
    registry entry names exists in the vendored guide, so a renamed upstream
    section fails at refresh time. The guide ships with the package next to
-   the vendored pyqula. Phase 5.
+   the vendored pyqula. Phase 5. The code review of this decision found
+   design points it leaves open; they are listed at the end of section 11
+   and must be settled before phase 5 builds the help.
 
 14. **Crash reports.** On an unexpected error, write a bundle with log,
    traceback, Document snapshot and versions to the user data directory and
