@@ -1,0 +1,81 @@
+"""The dispatcher: mutations with undo, actions with a journal (PLAN.md 3.5,
+decision 14.7)."""
+import pytest
+
+from guiqula.commands import CommandError, Dispatcher
+
+
+def test_undo_redo_and_journal():
+    d = Dispatcher()
+    events = []
+    d.subscribe(events.append)
+    s = d.do("add_system", lattice="honeycomb_lattice")
+    t = d.do("add_term", system=s, kind="rashba")
+    snapshot = d.document.to_json()
+    d.do("set_param", entry=t, name="c", value=0.3)
+    d.undo()
+    assert d.document.to_json() == snapshot
+    d.redo()
+    assert d.document.find(t)[-1].params == {"c": 0.3}
+    assert [e["type"] for e in events] == ["mutation", "mutation", "mutation", "undo", "redo"]
+    assert [e["type"] for e in d.journal] == [e["type"] for e in events]
+
+
+def test_refused_command_changes_nothing():
+    d = Dispatcher()
+    s = d.do("add_system")
+    snapshot = d.document.to_json()
+    for name, args in [("add_term", dict(system=s, kind="zeeman", params={"m": [0, 0]})),
+                       ("add_term", dict(system=s, kind="nope")),
+                       ("set_param", dict(entry=s, name="nope", value=1)),
+                       ("add_term", dict(system="s9", kind="onsite")),
+                       ("add_term", dict(system=s, kind="onsite", region="r1")),
+                       ("add_system", dict(lattice="nope")),
+                       ("nope", {})]:
+        with pytest.raises(CommandError):
+            d.do(name, **args)
+    assert d.document.to_json() == snapshot and not d.can_redo()
+
+
+def test_references_are_protected():
+    d = Dispatcher()
+    s = d.do("add_system")
+    r = d.do("add_region", system=s, select={"kind": "expression", "expr": "x > 0"})
+    t = d.do("add_term", system=s, kind="onsite", region=r)
+    d.do("add_calculation", system=s, kind="dos")
+    with pytest.raises(CommandError, match="used by"):
+        d.do("remove", entry=r)
+    with pytest.raises(CommandError, match="used by calculations"):
+        d.do("remove", entry=s)
+    d.do("set_region", entry=t, region=None)
+    d.do("remove", entry=r)
+
+
+def test_move_and_enable():
+    d = Dispatcher()
+    s = d.do("add_system")
+    t1 = d.do("add_term", system=s, kind="onsite")
+    t2 = d.do("add_term", system=s, kind="rashba")
+    d.do("move", entry=t2, index=0)
+    assert [t.id for t in d.document.system(s).hamiltonian.terms] == [t2, t1]
+    d.do("set_enabled", entry=t1, enabled=False)
+    assert d.document.find(t1)[-1].enabled is False
+
+
+def test_actions_are_journaled_not_undoable():
+    d = Dispatcher()
+    calls = []
+    d.register_action("ping", lambda value: calls.append(value) or value * 2)
+    assert d.act("ping", value=21) == 42
+    assert calls == [21] and not d.can_undo()
+    assert d.journal[-1]["type"] == "action" and d.journal[-1]["result"] == 42
+    assert d.run("add_system") == "s1"               # run() routes both kinds
+    with pytest.raises(CommandError, match="JSON"):
+        d.act("ping", value=object())
+
+
+def test_introspection_lists_signatures():
+    d = Dispatcher()
+    assert d.mutations()["set_param"] == ["entry", "name", "value"]
+    d.register_action("run_calculation", lambda calculation, wait=False: None)
+    assert d.actions()["run_calculation"] == ["calculation", "wait=False"]

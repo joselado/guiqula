@@ -1,0 +1,29 @@
+"""Results of calculations (PLAN.md 3.4): plain data that crosses the
+worker boundary by pickling and is drawn in the UI process."""
+from dataclasses import dataclass, field
+
+
+@dataclass
+class Result:
+    calculation: str            # calculation id
+    kind: str                   # calculation kind
+    key: str                    # calculation key at run time (staleness)
+    params: dict                # normalized parameters used
+    arrays: dict                # name -> numpy array
+    plot: dict                  # plot kind and which arrays to draw
+    reports: list = field(default_factory=list)   # per-entry build reports
+    mode: str = ""              # Hilbert space the Hamiltonian was built in
+    document: str = ""          # JSON snapshot of the Document that was run
+    meta: dict = field(default_factory=dict)      # timing, pyqula provenance, cores
+
+    @property
+    def skipped(self):
+        """Entries flagged invalid and skipped while building (decision 14.3)."""
+        return [r for r in self.reports if r["status"] == "invalid"]
+
+    def summary(self):
+        return {"calculation": self.calculation, "kind": self.kind, "key": self.key,
+                "arrays": {k: list(getattr(v, "shape", ())) for k, v in self.arrays.items()},
+                "plot": self.plot["kind"], "mode": self.mode,
+                "skipped": [r["id"] for r in self.skipped],
+                "seconds": self.meta.get("seconds")}

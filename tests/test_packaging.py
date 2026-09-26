@@ -46,6 +46,7 @@ def test_wheel_ships_vendored_pyqula(repo, tmp_path, run_python):
 
     assert "guiqula/__init__.py" in names
     assert "guiqula/ui/app.py" in names
+    assert "guiqula/presets/honeycomb_zeeman_rashba.json" in names
     assert "guiqula/_vendor/pyqula/__init__.py" in names
     assert "guiqula/_vendor/pyqula/htk/__init__.py" in names
     assert "guiqula/_vendor/pyqula/datasets/bands_TaS2.txt" in names

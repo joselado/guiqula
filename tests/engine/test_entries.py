@@ -1,0 +1,159 @@
+"""Every registry entry against a direct pyqula call (CLAUDE.md hard rule).
+
+Each case builds a small document through the command API, runs it through
+the engine in this process, and compares with the same pyqula calls written
+by hand. test_every_entry_has_a_case keeps the list complete."""
+import random
+
+import numpy as np
+import pytest
+
+from guiqula import registry
+from guiqula.commands import Dispatcher
+from guiqula.engine.build import build_system
+from guiqula.engine.calculations import run_calculation
+
+from .conftest import assert_same_hamiltonian
+
+LATTICES = registry.kinds("lattice")
+
+
+def system(lattice="honeycomb_lattice", ops=(), terms=(), has_spin=True):
+    d = Dispatcher()
+    s = d.do("add_system", lattice=lattice)
+    d.do("set_construction", system=s, has_spin=has_spin)
+    for kind, params in ops:
+        d.do("add_geometry_op", system=s, kind=kind, params=params)
+    ids = [d.do("add_term", system=s, kind=kind, params=params) for kind, params in terms]
+    return d, s, ids
+
+
+@pytest.mark.parametrize("lattice", LATTICES)
+def test_lattice(pyqula, lattice):
+    from pyqula import geometry
+    d, s, _ = system(lattice)
+    g = build_system(d.document, s).g
+    direct = getattr(geometry, lattice)()
+    assert np.allclose(g.r, direct.r) and g.dimensionality == direct.dimensionality
+
+
+def positions_equal(g1, g2):
+    a = np.array(sorted(map(tuple, np.round(g1.r, 8))))
+    b = np.array(sorted(map(tuple, np.round(g2.r, 8))))
+    return a.shape == b.shape and np.allclose(a, b)
+
+
+OP_CASES = {
+    "supercell": ({"n": [2, 3, 1]}, lambda g: g.get_supercell([2, 3, 1])),
+    "ribbon": ({"n": 3}, lambda g: __import__("pyqula.ribbon").ribbon.bulk2ribbon(g, n=3, boundary=[1, 0])),
+    "remove_atoms": (None, None),        # built on a supercell, below
+}
+
+
+@pytest.mark.parametrize("kind", sorted(OP_CASES))
+def test_geometry_op(pyqula, kind):
+    from pyqula import geometry
+    params, direct_op = OP_CASES[kind]
+    if kind == "remove_atoms":
+        d, s, _ = system(ops=[("supercell", {"n": [2, 2, 1]})])
+        g_sc = geometry.honeycomb_lattice().get_supercell([2, 2, 1])
+        params = {"positions": [list(map(float, g_sc.r[3]))], "tol": 0.1}
+        d.do("add_geometry_op", system=s, kind="remove_atoms", params=params)
+        direct = g_sc.remove([3])
+    else:
+        d, s, _ = system(ops=[(kind, params)])
+        direct = direct_op(geometry.honeycomb_lattice())
+    g = build_system(d.document, s).g
+    assert positions_equal(g, direct) and g.dimensionality == direct.dimensionality
+
+
+def tanh_profile(r):
+    return 0.3 * np.tanh(r[0] / 4)
+
+
+TERM_CASES = {
+    "onsite": [({"mu": 0.3}, lambda h: h.add_onsite(0.3)),
+               ({"mu": "0.2*x"}, lambda h: h.add_onsite(lambda r: 0.2 * r[0]))],
+    "sublattice_imbalance": [({"mass": 0.2}, lambda h: h.add_sublattice_imbalance(0.2)),
+                             ({"mass": "0.1*y"}, lambda h: h.add_sublattice_imbalance(lambda r: 0.1 * r[1]))],
+    "zeeman": [({"m": [0.1, 0.0, 0.2]}, lambda h: h.add_zeeman([0.1, 0.0, 0.2])),
+               ({"m": [0, 0, "0.3*tanh(x/4)"]}, lambda h: h.add_zeeman([0.0, 0.0, tanh_profile]))],
+    "rashba": [({"c": 0.1}, lambda h: h.add_rashba(0.1)),
+               ({"c": "0.1*cos(x)"}, lambda h: h.add_rashba(lambda r: 0.1 * np.cos(r[0])))],
+    "haldane": [({"t": 0.05}, lambda h: h.add_haldane(0.05)),
+                ({"t": "0.05*exp(-r)"}, lambda h: h.add_haldane(lambda r: 0.05 * np.exp(-np.linalg.norm(r))))],
+    "anderson_disorder": [({"w": 0.5, "p": 1.0, "seed": 7}, None)],
+}
+
+
+@pytest.mark.parametrize("kind, case", [(k, i) for k in sorted(TERM_CASES)
+                                        for i in range(len(TERM_CASES[k]))])
+def test_term(pyqula, kind, case):
+    from pyqula import disorder, geometry
+    params, direct_term = TERM_CASES[kind][case]
+    d, s, _ = system(ops=[("supercell", {"n": [2, 2, 1]})], terms=[(kind, params)])
+    built = build_system(d.document, s)
+    assert [r["status"] for r in built.reports] == ["ok"] * len(built.reports)
+    h = geometry.honeycomb_lattice().get_supercell([2, 2, 1]).get_hamiltonian(has_spin=True)
+    if kind == "anderson_disorder":
+        np.random.seed(7)
+        random.seed(7)
+        disorder.anderson(h, w=0.5, p=1.0)
+    else:
+        direct_term(h)
+    assert_same_hamiltonian(built.h, h)
+
+
+def test_region_restricts_a_field(pyqula):
+    from pyqula import geometry
+    d, s, (t,) = system(ops=[("supercell", {"n": [3, 3, 1]})], terms=[("onsite", {"mu": 0.4})])
+    r = d.do("add_region", system=s, select={"kind": "expression", "expr": "x > 1"})
+    d.do("set_region", entry=t, region=r)
+    h = geometry.honeycomb_lattice().get_supercell([3, 3, 1]).get_hamiltonian(has_spin=True)
+    h.add_onsite(lambda r: 0.4 * float(r[0] > 1))
+    assert_same_hamiltonian(build_system(d.document, s).h, h)
+
+
+CALC_CASES = {
+    "bands": [{"nk": 30}, {"nk": 30, "operator": "sz"}],
+    "dos": [{"ne": 30, "nk": 8, "delta": 0.1}, {"ne": 15, "nk": 8, "delta": 0.1, "mode": "Green"},
+            {"ne": 30, "nk": 8, "delta": 0.1, "operator": "sublattice"}],
+}
+
+
+@pytest.mark.parametrize("kind, case", [(k, i) for k in sorted(CALC_CASES)
+                                        for i in range(len(CALC_CASES[k]))])
+def test_calculation(pyqula, kind, case):
+    from pyqula import geometry
+    params = CALC_CASES[kind][case]
+    d, s, _ = system(terms=[("rashba", {"c": 0.2}), ("sublattice_imbalance", {"mass": 0.1})])
+    c = d.do("add_calculation", system=s, kind=kind, params=params)
+    progress = []
+    result = run_calculation(d.document, c, progress=lambda f, text: progress.append(f))
+    h = geometry.honeycomb_lattice().get_hamiltonian(has_spin=True)
+    h.add_rashba(0.2)
+    h.add_sublattice_imbalance(0.1)
+    if kind == "bands":
+        out = h.get_bands(write=False, **params)
+        nk = len(np.unique(out[0]))
+        assert np.allclose(result.arrays["energies"], out[1].reshape(nk, -1), rtol=0, atol=1e-12)
+        if "operator" in params:
+            assert np.allclose(result.arrays["weights"], out[2].reshape(nk, -1), rtol=0, atol=1e-12)
+            assert result.plot["kind"] == "colored_scatter"
+        assert progress and progress[-1] == pytest.approx(1.0)
+    else:
+        p = dict(registry.get("calculation", "dos").normalize_params(params))
+        kwargs = dict(energies=np.linspace(p["emin"], p["emax"], p["ne"]), delta=p["delta"],
+                      nk=p["nk"], mode=p["mode"], write=False)
+        if p["operator"]:
+            kwargs["operator"] = p["operator"]
+        es, ds = h.get_dos(**kwargs)
+        assert np.allclose(result.arrays["energies"], es) and np.allclose(result.arrays["dos"], ds,
+                                                                          rtol=0, atol=1e-12)
+
+
+def test_every_entry_has_a_case():
+    covered = {"lattice": set(LATTICES), "geometry_op": set(OP_CASES),
+               "term": set(TERM_CASES), "calculation": set(CALC_CASES)}
+    for family, kinds in covered.items():
+        assert kinds == set(registry.kinds(family)), family

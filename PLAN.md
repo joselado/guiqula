@@ -376,7 +376,7 @@ a callable of position inside the worker:
 | Field kind | what the user gives | pyqula side |
 |---|---|---|
 | `constant` | a number | the number |
-| `expression` | `0.3*tanh(x/4)`, with `x,y,z,r,np` and the lattice constants in scope | `lambda r: ...` |
+| `expression` | `0.3*tanh(x/4)`, with `x, y, z`, `r` (distance from the origin), `pi` and a whitelist of numpy functions (also as `np.<name>`) in scope | `lambda r: ...` |
 | `piecewise` | one value per region (13.2) plus a default; regions may overlap with a stated precedence | callable testing region membership by position |
 | `profile` | a named preset with parameters: pyqula's `potentials` (commensurate potential, impurity, edge potential, stacking potential, skyrmion and vortex harmonics, Fibonacci and Thue-Morse chains, Aubry-André), plus radial/linear/step/Gaussian/random | the `potentials` function or a small built-in |
 | `interpolated` | control points placed on the canvas, or an array/file on a grid | `potentials.interpolate2d` / `array2potential` |
@@ -412,6 +412,15 @@ which still has to be checked for bond terms that mix with existing
 hoppings), or the parameter is constant-only and the form says so. `rashba.py:97` calls a position-dependent strength once
 per bond from Python, so a compiled Field must be cheap per call (a compiled
 numpy expression or an array lookup, never a re-parse).
+
+Expressions are evaluated by the AST-whitelisted evaluator of decision
+14.8 (`core/expressions.py`). In an expression `r` is the distance from
+the origin, not the position vector: subscripts are not allowed, so the
+coordinates are `x, y, z` (phase 1 choice, 2026-09-26). Script export
+writes `x` as `r[0]` and `r` as `np.linalg.norm(r)` inside `lambda r:`.
+The lattice constants are not in scope yet. The engine and the exporter
+accept `constant` and `expression` from phase 1; the UI editor for them
+is phase 3.
 
 Phase 3 delivers `constant`, `expression` and `piecewise`; phase 4 adds
 `profile`, `interpolated`, `painted` and `from_result`.
@@ -701,28 +710,15 @@ supersede quantum-lattice; both can coexist.
 - How a classical texture is handed to a quantum system's exchange term
   (result reference in the Document, or a copied array), and how staleness
   propagates across that link.
-- Raised in the 2026-09-26 review (section 14) and not yet decided, with the
-  recommendation made there:
-  - (review 7) a dedicated *interactive* worker for builds and canvas
-    previews, separate from the batch job workers, so a running calculation
-    never blocks a geometry edit or a Field preview; recommended, from
-    phase 1.
+- Raised in the 2026-09-26 review (section 14) and not yet decided (review
+  items 7, 9, 10, 13 and 14 were decided the same day, section 14 items 6
+  to 10):
   - (review 8) the build cache lives in worker memory and a cancel kills the
     worker, so every cancel discards it; accept the loss (builds are cheap),
     or keep the cache in the interactive worker and only kill batch workers.
-  - (review 9) `run_calculation` is listed as an undoable Command, but running
-    is not sensibly undoable; recommended to split *mutations* (undo stack)
-    from *actions* (journal only) in the dispatcher from phase 1.
-  - (review 10) evaluate expressions with an AST-whitelisted numpy evaluator
-    so they are data and only Python nodes need the 13.7 trust prompt;
-    recommended (shared presets then open without a prompt, and Field
-    evaluation is vectorised).
-  - (review 13) `from_result` Fields make the Document a DAG across systems
-    and calculations; recommended to make the engine's hashing DAG-aware in
-    phase 1 rather than retrofitting it.
-  - (review 14) pyqula's `parallel.set_cores` pool forks inside the calling
-    process; a daemonic guiqula worker could not start it. Verify in phase 1
-    that the worker is non-daemonic and cleans up explicitly on exit.
+    With review 7 adopted, phase 1 does the latter: a cancel kills only the
+    batch worker running that job, whose cache is lost; the interactive
+    worker's cache survives.
 
 ## 12. Decisions (made by the maintainer, 2026-09-26)
 
@@ -837,7 +833,8 @@ A read-through of this document against the vendored pyqula before phase 0.
 Items keep the numbers of that review so they can be referred to. The
 maintainer's answers are recorded here; the verified facts were folded into
 sections 3.1, 3.3, 3.8, 6, 7 and 8; the items without an answer yet are at
-the end of section 11.
+the end of section 11. Items 6 to 10 were answered after phase 0 ("7 9 10 13
+14 ok as your recommendation").
 
 1. **Console as a remote REPL** (review item 6; resolves section 4 against
    13.15). The embedded console executes in the worker process, where `g`,
@@ -859,3 +856,26 @@ the end of section 11.
    entries and `h.copy()` before replaying a cached prefix (3.3); one adapter
    per calculation for pyqula's mixed return conventions (3.3); the per-term
    list of which pyqula calls accept a callable of position (3.8).
+6. **Interactive worker** (review item 7). Builds, canvas previews and Field
+   previews run in a dedicated interactive worker process, separate from the
+   batch workers that run calculations, so a running calculation never
+   blocks an edit. From phase 1.
+7. **Mutations and actions** (review item 9). The dispatcher keeps two kinds
+   of operation: *mutations* change the Document and go on the undo stack;
+   *actions* (run or cancel a calculation, save, export) are journaled but
+   not undoable. From phase 1.
+8. **Expressions are data** (review item 10). Field expressions are
+   evaluated by an AST-whitelisted numpy evaluator (arithmetic, comparisons,
+   a fixed set of numpy functions, the position variables; no attributes
+   other than `np.<whitelisted function>`, no subscripts, no calls to
+   anything else), so they need no trust prompt; only Python nodes do
+   (13.7). Shared presets with expressions open without a prompt.
+9. **DAG-aware hashing** (review item 13). The content hash of every
+   pipeline entry includes the hashes of what it references (regions now;
+   other systems and results once `from_result` Fields exist), so staleness
+   propagates along references across systems and calculations. From
+   phase 1.
+10. **Non-daemonic worker** (review item 14). Workers are started
+    non-daemonic, so pyqula's own process pool (`parallel.set_cores`) can
+    start inside them, and are shut down explicitly on exit; a phase-1 test
+    runs a parallel pyqula call inside the worker.

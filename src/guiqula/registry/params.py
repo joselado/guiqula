@@ -1,0 +1,191 @@
+"""Parameter types of registry entries (PLAN.md 3.2).
+
+Each parameter normalizes a JSON value (filling the default, checking the
+type) and says how the engine and the script exporter turn it into what
+pyqula takes. Term parameters that are numbers are Fields (PLAN.md 3.8):
+FieldParam and VectorFieldParam. ``native=False`` marks a pyqula argument
+that does not accept a function of position; such a Field must be constant,
+and the form says so.
+"""
+import math
+import numbers
+
+from guiqula.core import fields
+
+
+class ParamError(ValueError):
+    pass
+
+
+class Param:
+    type_name = "param"
+
+    def __init__(self, name, default, label=None, doc=""):
+        self.name = name
+        self.default = default
+        self.label = label or name
+        self.doc = doc
+
+    def normalize(self, value):
+        return value
+
+    def describe(self):
+        return {"name": self.name, "type": self.type_name, "default": self.default,
+                "label": self.label, "doc": self.doc}
+
+    def __repr__(self):
+        return f"{type(self).__name__}({self.name!r})"
+
+
+class FieldParam(Param):
+    """A scalar Field (constant or expression of position)."""
+    type_name = "field"
+
+    def __init__(self, name, default=0.0, label=None, doc="", native=True):
+        super().__init__(name, default, label, doc)
+        self.native = native
+
+    def normalize(self, value):
+        try:
+            value = fields.normalize(value)
+        except fields.FieldError as error:
+            raise ParamError(f"{self.name}: {error}") from None
+        if not self.native and not fields.is_constant(value):
+            raise ParamError(f"{self.name}: this parameter must be a constant; the pyqula call "
+                             f"behind it does not take a function of position")
+        return value
+
+    def describe(self):
+        return dict(super().describe(), native=self.native)
+
+
+class VectorFieldParam(FieldParam):
+    """A vector Field: one scalar Field per component."""
+    type_name = "vector_field"
+
+    def __init__(self, name, default=(0.0, 0.0, 0.0), label=None, doc="", native=True, length=3):
+        super().__init__(name, list(default), label, doc, native)
+        self.length = length
+
+    def normalize(self, value):
+        try:
+            value = fields.normalize_vector(value, self.length)
+        except fields.FieldError as error:
+            raise ParamError(f"{self.name}: {error}") from None
+        if not self.native and not all(fields.is_constant(v) for v in value):
+            raise ParamError(f"{self.name}: this parameter must be constant")
+        return value
+
+
+def _number(name, value, kind, minimum, maximum):
+    if isinstance(value, bool) or not isinstance(value, numbers.Real):
+        raise ParamError(f"{name}: expected a number, got {value!r}")
+    if kind is int:
+        if float(value) != int(value):
+            raise ParamError(f"{name}: expected an integer, got {value!r}")
+        value = int(value)
+    else:
+        value = float(value)
+        if not math.isfinite(value):
+            raise ParamError(f"{name}: {value} is not finite")
+    if minimum is not None and value < minimum:
+        raise ParamError(f"{name}: must be at least {minimum}, got {value}")
+    if maximum is not None and value > maximum:
+        raise ParamError(f"{name}: must be at most {maximum}, got {value}")
+    return value
+
+
+class IntParam(Param):
+    type_name = "int"
+
+    def __init__(self, name, default, label=None, doc="", minimum=None, maximum=None):
+        super().__init__(name, default, label, doc)
+        self.minimum, self.maximum = minimum, maximum
+
+    def normalize(self, value):
+        return _number(self.name, value, int, self.minimum, self.maximum)
+
+
+class FloatParam(IntParam):
+    """A plain number: for calculation settings, never for term parameters."""
+    type_name = "float"
+
+    def normalize(self, value):
+        return _number(self.name, value, float, self.minimum, self.maximum)
+
+
+class SeedParam(IntParam):
+    """Seed of a stochastic entry; the engine seeds numpy with it right
+    before applying the entry (PLAN.md 3.3)."""
+    type_name = "seed"
+
+    def __init__(self, name="seed", default=1, label="seed", doc="random seed"):
+        super().__init__(name, default, label, doc, minimum=0, maximum=2**32 - 1)
+
+
+class IntVectorParam(Param):
+    type_name = "int_vector"
+
+    def __init__(self, name, default, label=None, doc="", minimum=None):
+        super().__init__(name, list(default), label, doc)
+        self.length = len(default)
+        self.minimum = minimum
+
+    def normalize(self, value):
+        if not isinstance(value, (list, tuple)) or len(value) != self.length:
+            raise ParamError(f"{self.name}: expected a list of {self.length} integers")
+        return [_number(self.name, v, int, self.minimum, None) for v in value]
+
+
+class BoolParam(Param):
+    type_name = "bool"
+
+    def normalize(self, value):
+        if not isinstance(value, bool):
+            raise ParamError(f"{self.name}: expected true or false")
+        return value
+
+
+class ChoiceParam(Param):
+    """One of a set of names. With ``source``, the names come from pyqula
+    itself (e.g. "operators": operatorlist.get_operator_names()) and are
+    checked by the engine, which may import pyqula; here only the type is
+    checked. ``optional`` allows null."""
+    type_name = "choice"
+
+    def __init__(self, name, default, choices=None, source=None, optional=False, label=None, doc=""):
+        super().__init__(name, default, label, doc)
+        self.choices = tuple(choices) if choices else None
+        self.source = source
+        self.optional = optional
+
+    def normalize(self, value):
+        if value is None and self.optional:
+            return None
+        if not isinstance(value, str):
+            raise ParamError(f"{self.name}: expected a name, got {value!r}")
+        if self.choices is not None and value not in self.choices:
+            raise ParamError(f"{self.name}: {value!r} is not one of {list(self.choices)}")
+        return value
+
+    def describe(self):
+        return dict(super().describe(), choices=self.choices, source=self.source,
+                    optional=self.optional)
+
+
+class PositionsParam(Param):
+    """A list of [x, y, z] positions."""
+    type_name = "positions"
+
+    def __init__(self, name="positions", default=(), label=None, doc=""):
+        super().__init__(name, list(default), label, doc)
+
+    def normalize(self, value):
+        if not isinstance(value, (list, tuple)):
+            raise ParamError(f"{self.name}: expected a list of [x, y, z]")
+        out = []
+        for p in value:
+            if not isinstance(p, (list, tuple)) or len(p) != 3:
+                raise ParamError(f"{self.name}: every position is [x, y, z], got {p!r}")
+            out.append([_number(self.name, c, float, None, None) for c in p])
+        return out
