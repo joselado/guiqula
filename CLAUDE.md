@@ -23,8 +23,9 @@ a thin UI already in phase 1, invalid entries are skipped and flagged; the revie
 still open are at the end of section 11). Read it before designing anything; update it when
 a decision changes.
 
-Status (2026-09-26): phases 0 to 3 are done (PLAN.md section 7 says what each built, what
-was left for later, and the phase-3 decisions awaiting the maintainer's confirmation).
+Status (2026-09-26): phases 0 to 3 are done and the maintainer has answered the phase-3
+report (PLAN.md section 7 says what each phase built, what was left for later, and the
+answers).
 Phase 4 (breadth: Python nodes, console, more ops/terms/calculations, classical systems) is
 next.
 
