@@ -40,7 +40,9 @@ def run_calculation(document, calc_id, cache=None, progress=None):
     plan = pipeline.plan_calculation(document, calc_id)
     if plan.problem:
         raise CalculationError(f"{calc_id}: {plan.problem}")
+    start = time.perf_counter()
     built = build_system(document, plan.system_id, cache)
+    build_seconds = time.perf_counter() - start
     ctx = ApplyContext(plan.spec, plan.params, progress=progress)
     start = time.perf_counter()
     try:
@@ -53,5 +55,6 @@ def run_calculation(document, calc_id, cache=None, progress=None):
     return Result(calculation=calc_id, kind=plan.kind, key=plan.key, params=plan.params,
                   arrays={k: np.asarray(v) for k, v in arrays.items()}, plot=plot,
                   reports=built.reports, mode=built.mode, document=document.to_json(),
-                  meta={"seconds": seconds, "cores": parallel.cores,
+                  meta={"seconds": seconds, "build_seconds": build_seconds,
+                        "cores": parallel.cores,
                         "guiqula": guiqula.__version__, "pyqula": provenance()})

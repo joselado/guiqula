@@ -132,23 +132,22 @@ def test_piecewise_fields_resolve_regions():
 
 
 def test_meanfield_stage():
-    """The mean field is the last stage; it needs spin, and the builds of
-    the canvas stop before it (preview_key)."""
+    """The mean field is the last stage and needs spin."""
     d, s, op, t1, t2, c = pipeline_doc()
     d.do("set_enabled", entry=t2, enabled=False)         # no Zeeman: spinless
     plan = pipeline.plan_system(d.document, s)
     stage = plan.meanfield
     assert stage.id == f"{s}/meanfield" and not stage.applied and plan.mode == "spinless"
-    assert plan.preview_key == plan.key
+    assert plan.stages[-1] is stage and stage.key == plan.stage(t2).key
     key = pipeline.calculation_key(d.document, c)
     d.do("set_meanfield", system=s, enabled=True, params={"U": 2.0})
     plan = pipeline.plan_system(d.document, s)
     assert plan.meanfield.applied and plan.mode == "spinful"
     assert plan.upgraded_by == [f"{s}/meanfield"]
-    assert plan.preview_key != plan.key and pipeline.calculation_key(d.document, c) != key
-    preview = plan.preview_key
+    assert pipeline.calculation_key(d.document, c) != key
+    before = plan.key
     d.do("set_meanfield", system=s, params={"U": 3.0})
-    assert pipeline.plan_system(d.document, s).preview_key == preview    # no rebuild needed
+    assert pipeline.plan_system(d.document, s).key != before
     assert d.document.system(s).hamiltonian.meanfield.params["U"] == 3.0
     d.do("set_meanfield", system=s, enabled=False)
     assert pipeline.calculation_key(d.document, c) == key               # disabled == absent

@@ -30,7 +30,7 @@ def test_list_widgets(repo, tmp_path):
     result = drive(repo, tmp_path, "--no-session", "--list-widgets")
     assert result.returncode == 0, result.stderr
     for name in ("MainWindow (MainWindow)", "outliner (Outliner)", "properties (PropertiesPanel)", "runButton (QPushButton)",
-                 "jobPanel (JobPanel)", "plotView (PlotView)"):
+                 "jobPanel (JobPanel)", "canvasView (QComboBox)"):
         assert name in result.stdout, name
 
 
@@ -44,13 +44,13 @@ def test_document_commands_run_and_shot(repo, tmp_path):
     result = drive(repo, tmp_path, "honeycomb_zeeman_rashba", "--no-warm",
                    "--do", json.dumps({"do": "set_param", "entry": "c2", "name": "ne", "value": 50}),
                    "--do", json.dumps({"do": "add_term", "system": "s1", "kind": "onsite"}),
-                   "--run", "c2", "--widget", "plotView", "--shot", "dos.png",
+                   "--run", "c2", "--widget", "plot_c2", "--shot", "dos.png",
                    "--python", "print('terms', len(session.document.systems[0].hamiltonian.terms))")
     assert result.returncode == 0, result.stderr
     report = report_of(result)
     assert report["commands"][1] == {"do": "add_term", "result": "t3"}
     assert report["results"]["c2"]["arrays"]["dos"] == [50]
-    assert report["jobs"][0]["status"] == "done" and report["widget"] == "plotView"
+    assert report["jobs"][0]["status"] == "done" and report["widget"] == "plot_c2"
     assert "terms 3" in result.stdout
     assert (tmp_path / "dos.png").read_bytes().startswith(PNG_MAGIC)
 

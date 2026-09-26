@@ -5,13 +5,19 @@ ValueError when the text is not even a number), and emits committed when
 the user finishes an edit. Validation proper is the registry's: the panel
 sends the value as a command and shows the refusal.
 
-Fields (term parameters) are edited as text: a number, or an expression of
-x, y, z, r (PLAN.md 3.8). The f(r) editor with profiles and regions is
-phase 3.
+Fields (term parameters, PLAN.md 3.8) are edited as text: a number, or an
+expression of x, y, z, r. The f(r) button next to a Field opens its panel:
+the kind (a number or an expression, or one value per region) and, per
+region, a value for each region plus the default. A Field editor emits
+preview when the user looks at it (focus, typing, the panel), with the
+value being typed when it parses, so the window can draw the Field on the
+structure before anything runs. Constant-only parameters (the pyqula call
+behind them takes no function of position) have no f(r) button.
 """
-from PySide6.QtCore import Signal
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit,
-                               QPushButton, QSpinBox, QWidget)
+from PySide6.QtCore import QEvent, Signal
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
+                               QLineEdit, QPushButton, QSpinBox, QToolButton, QVBoxLayout,
+                               QWidget)
 
 from guiqula.core import fields
 from guiqula.registry.params import (BoolParam, ChoiceParam, FieldParam, FloatParam, IntParam,
@@ -53,8 +59,12 @@ class Editor(QWidget):
     def __init__(self, param, parent=None):
         super().__init__(parent)
         self.param = param
-        self.layout_ = QHBoxLayout(self)
+        self.outer = QVBoxLayout(self)
+        self.outer.setContentsMargins(0, 0, 0, 0)
+        self.outer.setSpacing(2)
+        self.layout_ = QHBoxLayout()
         self.layout_.setContentsMargins(0, 0, 0, 0)
+        self.outer.addLayout(self.layout_)
         self.setToolTip(param.doc)
 
     def _quiet(self, widget, setter, value):
@@ -90,48 +100,296 @@ class LineEditor(Editor):
         self._quiet(self.edit, self.edit.setText, self._shown)
 
 
-class FieldEditor(LineEditor):
-    def __init__(self, param, parent=None):
-        super().__init__(param, parse_field, format_field,
-                         "a constant" if not param.native else "number or f(x, y, z)", parent)
+EXPRESSION_KIND, PIECEWISE_KIND = "number or f(x, y, z)", "one value per region"
+FIELD_BUTTON_TIPS = {
+    "constant": "make this a function of the position: an expression, or one value per region",
+    "expression": "an expression of the position (bold); the panel explains what it may use",
+    "piecewise": "one value per region (bold); the panel edits the values"}
+
+
+def _summary(value, regions):
+    """One line for a piecewise Field."""
+    names = dict(regions)
+    parts = [f"{names.get(p['region'], p['region']) or p['region']}: {format_field(p['value'])}"
+             for p in value["pieces"]]
+    return "; ".join([f"elsewhere {format_field(value['default'])}"] + parts)
+
+
+class _PieceRow:
+    def __init__(self, editor, index):
+        name = editor.name
+        self.region = QComboBox()
+        self.region.setObjectName(f"pieceRegion_{name}_{index}")
+        for region_id, label in editor.regions:
+            self.region.addItem(f"{region_id}  {label}" if label != region_id else region_id,
+                                region_id)
+        self.value = QLineEdit()
+        self.value.setObjectName(f"pieceValue_{name}_{index}")
+        self.value.setPlaceholderText("number or f(x, y, z)")
+        self.remove = QToolButton()
+        self.remove.setText("×")
+        self.remove.setToolTip("remove this region's value")
+        self.remove.setObjectName(f"pieceRemove_{name}_{index}")
+        self.region.activated.connect(lambda _: editor._edited())
+        self.value.editingFinished.connect(editor._piece_finished)
+        self.value.textEdited.connect(lambda _: editor._look())
+        self.remove.clicked.connect(lambda: editor.remove_piece(index))
+        editor.install(self.value)
+
+    def widgets(self):
+        return (self.region, self.value, self.remove)
+
+
+class FieldEditor(Editor):
+    """A scalar Field with its f(r) panel."""
+
+    preview = Signal()
+
+    def __init__(self, param, regions=(), suffix="", parent=None):
+        super().__init__(param, parent)
+        self.name = param.name + suffix
+        self.regions = list(regions)            # [(id, name)] of the system
+        self.edit = QLineEdit()
+        self.edit.setObjectName(f"edit_{self.name}")
+        self.edit.setPlaceholderText("a constant" if not param.native else "number or f(x, y, z)")
+        self.edit.editingFinished.connect(self._finished)
+        self.edit.textEdited.connect(lambda _: self._look())
+        self.install(self.edit)
         self.marker = QLabel("")
-        self.marker.setObjectName(f"fieldKind_{param.name}")
+        self.marker.setObjectName(f"fieldKind_{self.name}")
         self.marker.setMinimumWidth(28)
+        self.layout_.addWidget(self.edit, 1)
         self.layout_.addWidget(self.marker)
+        self.button = None
+        self.rows = []
+        self._value = None
+        self._shown = None
+        self._draft = None
         self.setToolTip(param.doc + ("\n\n" + FIELD_HELP if param.native else
                                      "\n\nConstant only: the pyqula call behind it does not "
                                      "take a function of position."))
+        if param.native:
+            self.button = QToolButton()
+            self.button.setText("f(r)")
+            self.button.setCheckable(True)
+            self.button.setObjectName(f"fieldButton_{self.name}")
+            self.button.toggled.connect(self._toggle_panel)
+            self.layout_.addWidget(self.button)
+            self._build_panel()
+
+    def install(self, widget):
+        widget.installEventFilter(self)
+
+    def eventFilter(self, watched, event):
+        if event.type() == QEvent.Type.FocusIn:
+            self._look()
+        return False
+
+    # ---- the panel
+    def _build_panel(self):
+        self.panel = QFrame()
+        self.panel.setObjectName(f"fieldPanel_{self.name}")
+        self.panel.setFrameShape(QFrame.Shape.StyledPanel)
+        column = QVBoxLayout(self.panel)
+        column.setContentsMargins(6, 4, 6, 4)
+        self.kind = QComboBox()
+        self.kind.setObjectName(f"fieldKindBox_{self.name}")
+        self.kind.addItems([EXPRESSION_KIND, PIECEWISE_KIND])
+        self.kind.activated.connect(self._kind_chosen)
+        column.addWidget(self.kind)
+        self.help = QLabel(FIELD_HELP)
+        self.help.setWordWrap(True)
+        self.help.setObjectName(f"fieldHelp_{self.name}")
+        column.addWidget(self.help)
+        self.pieces = QWidget()
+        grid = QGridLayout(self.pieces)
+        grid.setContentsMargins(0, 0, 0, 0)
+        self.grid = grid
+        grid.addWidget(QLabel("elsewhere"), 0, 0)
+        self.default = QLineEdit()
+        self.default.setObjectName(f"pieceDefault_{self.name}")
+        self.default.setToolTip("the value on the sites in none of the regions")
+        self.default.editingFinished.connect(self._piece_finished)
+        self.default.textEdited.connect(lambda _: self._look())
+        self.install(self.default)
+        grid.addWidget(self.default, 0, 1, 1, 2)
+        self.add = QPushButton("Add a region")
+        self.add.setObjectName(f"pieceAdd_{self.name}")
+        self.add.clicked.connect(self.add_piece)
+        self.no_regions = QLabel("This system has no region yet: make one on the Geometry "
+                                 "toolbar (Add region, or Region from selection).")
+        self.no_regions.setWordWrap(True)
+        column.addWidget(self.pieces)
+        column.addWidget(self.add)
+        column.addWidget(self.no_regions)
+        self.order = QLabel("Where regions overlap, the lower one wins.")
+        self.order.setObjectName(f"pieceOrder_{self.name}")
+        column.addWidget(self.order)
+        self.outer.addWidget(self.panel)
+        self.panel.hide()
+
+    def _toggle_panel(self, shown):
+        self.panel.setVisible(shown)
+        if shown:
+            self._look()
+
+    def open_panel(self, shown=True):
+        if self.button is not None:
+            self.button.setChecked(shown)
+
+    def _piecewise_shown(self):
+        return isinstance(self._value, dict)
+
+    def _sync_panel(self):
+        piecewise = self._piecewise_shown()
+        self._quiet(self.kind, self.kind.setCurrentIndex, 1 if piecewise else 0)
+        self.help.setVisible(not piecewise)
+        self.pieces.setVisible(piecewise)
+        self.add.setVisible(piecewise)
+        self.add.setEnabled(bool(self.regions))
+        self.no_regions.setVisible(piecewise and not self.regions)
+        self.order.setVisible(piecewise and len(self._value["pieces"]) > 1 if piecewise else False)
+        pieces = self._value["pieces"] if piecewise else []
+        if len(pieces) != len(self.rows):
+            for row in self.rows:
+                for widget in row.widgets():
+                    self.grid.removeWidget(widget)
+                    widget.hide()
+                    widget.deleteLater()        # may run inside one of their own signals
+            self.rows = [_PieceRow(self, i) for i in range(len(pieces))]
+            for i, row in enumerate(self.rows):
+                for column, widget in enumerate(row.widgets()):
+                    self.grid.addWidget(widget, i + 1, column)
+        if piecewise:
+            self._quiet(self.default, self.default.setText, format_field(self._value["default"]))
+        for row, piece in zip(self.rows, pieces):
+            index = row.region.findData(piece["region"])
+            if index < 0:                       # a region this form does not list
+                self._quiet(row.region, row.region.addItem, piece["region"], piece["region"])
+                index = row.region.findData(piece["region"])
+            self._quiet(row.region, row.region.setCurrentIndex, index)
+            self._quiet(row.value, row.value.setText, format_field(piece["value"]))
+
+    # ---- edits
+    def _look(self):
+        self.preview.emit()
+
+    def _finished(self):
+        if not self._piecewise_shown() and self.edit.text() != self._shown:
+            self.committed.emit()
+
+    def _piece_finished(self):
+        if self._piecewise_shown() and self._read_pieces() != self._value:
+            self._edited()
+
+    def _edited(self):
+        self.committed.emit()
+
+    def _read_pieces(self):
+        return {"kind": "piecewise", "default": parse_field(self.default.text()),
+                "pieces": [{"region": row.region.currentData(),
+                            "value": parse_field(row.value.text())} for row in self.rows]}
+
+    def _commit_draft(self, value):
+        self._draft = value
+        self.committed.emit()
+        self._draft = None
+
+    def _kind_chosen(self, index):
+        piecewise = index == 1
+        if piecewise == self._piecewise_shown():
+            return
+        if piecewise:
+            self._commit_draft({"kind": "piecewise", "default": self._value, "pieces": []})
+        else:
+            self._commit_draft(self._value["default"])
+
+    def add_piece(self):
+        if not self._piecewise_shown() or not self.regions:
+            return
+        used = {p["region"] for p in self._value["pieces"]}
+        region = next((r for r, _ in self.regions if r not in used), self.regions[0][0])
+        value = self._read_pieces()
+        value["pieces"].append({"region": region, "value": value["default"]})
+        self._commit_draft(value)
+
+    def remove_piece(self, index):
+        if not self._piecewise_shown():
+            return
+        value = self._read_pieces()
+        del value["pieces"][index]
+        self._commit_draft(value)
+
+    # ---- the value
+    def value(self):
+        if self._draft is not None:
+            return self._draft
+        if self._piecewise_shown():
+            return self._read_pieces()
+        return parse_field(self.edit.text())
+
+    def live_value(self):
+        """What is being typed, if it is a valid Field, else None."""
+        try:
+            return fields.normalize(self.value())
+        except (fields.FieldError, ValueError, TypeError, KeyError):
+            return None
 
     def set_value(self, value):
-        super().set_value(value)
-        self.marker.setText("" if fields.is_constant(value) else "f(r)")
+        self._value = value
+        piecewise = isinstance(value, dict)
+        self._shown = _summary(value, self.regions) if piecewise else format_field(value)
+        self._quiet(self.edit, self.edit.setText, self._shown)
+        self.edit.setReadOnly(piecewise)
+        self.edit.setToolTip("edit the values per region in the f(r) panel" if piecewise else "")
+        kind = fields.kind_of(value) if value is not None else "constant"
+        self.marker.setText({"constant": "", "expression": "f(r)", "piecewise": "per region"}[kind])
+        if self.button is not None:
+            self.marker.hide()                  # the button says it instead
+            font = self.button.font()
+            font.setBold(kind != "constant")
+            self.button.setFont(font)
+            self.button.setToolTip(FIELD_BUTTON_TIPS[kind])
+            self._sync_panel()
+            if piecewise and not self.button.isChecked():
+                self.open_panel()
 
 
 class VectorFieldEditor(Editor):
-    def __init__(self, param, parent=None):
-        super().__init__(param, parent)
-        self.edits = []
-        for i, axis in enumerate("xyz"[:param.length]):
-            edit = QLineEdit()
-            edit.setObjectName(f"edit_{param.name}_{axis}")
-            edit.setPlaceholderText(axis)
-            edit.setToolTip(f"{param.doc}, {axis} component\n\n{FIELD_HELP}")
-            edit.editingFinished.connect(self._finished)
-            self.layout_.addWidget(edit)
-            self.edits.append(edit)
-        self._shown = None
+    """One Field editor per component."""
 
-    def _finished(self):
-        if [e.text() for e in self.edits] != self._shown:
-            self.committed.emit()
+    preview = Signal()
+
+    def __init__(self, param, regions=(), parent=None):
+        super().__init__(param, parent)
+        self.components = []
+        grid = QGridLayout()
+        grid.setContentsMargins(0, 0, 0, 0)
+        for i, axis in enumerate("xyz"[:param.length]):
+            editor = FieldEditor(param, regions, suffix=f"_{axis}")
+            editor.edit.setPlaceholderText(axis)
+            editor.setToolTip(f"{param.doc}, {axis} component\n\n{FIELD_HELP}")
+            editor.committed.connect(self.committed)
+            editor.preview.connect(self.preview)
+            grid.addWidget(QLabel(axis), i, 0)
+            grid.addWidget(editor, i, 1)
+            self.components.append(editor)
+        self.layout_.addLayout(grid, 1)
+
+    @property
+    def edits(self):
+        return [editor.edit for editor in self.components]
 
     def value(self):
-        return [parse_field(e.text()) for e in self.edits]
+        return [editor.value() for editor in self.components]
+
+    def live_value(self):
+        values = [editor.live_value() for editor in self.components]
+        return None if any(v is None for v in values) else values
 
     def set_value(self, value):
-        self._shown = [format_field(v) for v in value]
-        for edit, text in zip(self.edits, self._shown):
-            self._quiet(edit, edit.setText, text)
+        for editor, v in zip(self.components, value):
+            editor.set_value(v)
 
 
 class IntEditor(Editor):
@@ -253,12 +511,13 @@ class PositionsEditor(Editor):
         self.clear.setEnabled(bool(n))
 
 
-def make_editor(param, names=None):
-    """The editor for a registry parameter (subclasses first)."""
+def make_editor(param, names=None, regions=()):
+    """The editor for a registry parameter (subclasses first); regions:
+    [(id, name)] a piecewise Field can use."""
     if isinstance(param, VectorFieldParam):
-        return VectorFieldEditor(param)
+        return VectorFieldEditor(param, regions)
     if isinstance(param, FieldParam):
-        return FieldEditor(param)
+        return FieldEditor(param, regions)
     if isinstance(param, SeedParam):
         return LineEditor(param, lambda t: int(parse_float(t)) if parse_float(t).is_integer()
                           else parse_float(t), str)

@@ -8,8 +8,12 @@ After a document change the panel refreshes: if the selected entry still
 has the same shape (same kind, same regions to choose from) the values are
 updated in place, so an editor in use is never destroyed under the mouse;
 otherwise the form is rebuilt.
+
+When the user looks at a Field (focus, typing, its f(r) panel), the panel
+emits preview(entry, parameter); the window draws that Field on the
+structure, with live_value(parameter) while it is being typed.
 """
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QGroupBox, QLabel, QLineEdit,
                                QPushButton, QScrollArea, QVBoxLayout, QWidget)
@@ -17,13 +21,18 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QGroupBox, QLa
 from guiqula.core import regions as region_tools
 from guiqula.core.document import DocumentError
 from guiqula.registry import base as registry
-from guiqula.registry import pipeline
+from guiqula.registry import cost, pipeline
 from guiqula.ui import formulas
 from guiqula.ui.forms import format_number, make_editor
 from guiqula.ui.outliner import system_of
 
 EVERYWHERE = "(everywhere)"
 FAMILY = {"op": "geometry_op", "term": "term", "calculation": "calculation"}
+
+
+def _regions(system):
+    """[(id, name)] of a system's regions, for piecewise Fields."""
+    return tuple((r.id, r.name) for r in system.regions)
 
 
 def _quiet(widget, setter, value):
@@ -76,14 +85,36 @@ class Form(QWidget):
             self.update_values()
         return ok
 
-    def add_editors(self, params, values, send):
-        """One editor per parameter; send(name, value) commits it."""
+    def add_editors(self, params, values, send, regions=()):
+        """One editor per parameter; send(name, value) commits it. regions:
+        [(id, name)] the piecewise Fields can use."""
         for param in params:
-            editor = make_editor(param, getattr(self.session.jobs, "names", {}))
+            editor = make_editor(param, getattr(self.session.jobs, "names", {}), regions)
             editor.set_value(values[param.name])
             editor.committed.connect(lambda p=param, e=editor: self._send(e, p, send))
+            if hasattr(editor, "preview"):
+                editor.preview.connect(lambda p=param: self.panel.preview.emit(self.item_id,
+                                                                               p.name))
             self.rows.addRow(param.label, editor)
             self.editors[param.name] = editor
+
+    def live_value(self, name):
+        editor = self.editors.get(name)
+        return editor.live_value() if editor is not None and hasattr(editor, "live_value") \
+            else None
+
+    def _formula(self, tex):
+        label = QLabel()
+        label.setObjectName("formulaImage")
+        label.setToolTip(tex)
+        label.setContentsMargins(0, 6, 0, 6)
+        color = self.palette().color(QPalette.ColorRole.WindowText).name()
+        try:
+            label.setPixmap(formulas.pixmap(tex, color, self.devicePixelRatioF()))
+        except formulas.FormulaError as error:
+            label.setText(f"formula: {tex}")
+            label.setToolTip(str(error))
+        return label
 
     def _send(self, editor, param, send):
         try:
@@ -182,6 +213,9 @@ class SystemForm(Form):
                 f"Hilbert dimension {build['dimension']}")
         if plan.upgraded_by:
             text += f"\n{plan.mode} because of {', '.join(plan.upgraded_by)}"
+        if build["dimension"] > cost.DENSE_DIMENSION:
+            text += (f"\nabove pyqula's dense limit ({cost.DENSE_DIMENSION}): full "
+                     f"diagonalizations will be slow; consider sparse storage")
         return text + ("" if session.build_is_current(system_id) else "\n(updating…)")
 
     def _rename(self):
@@ -245,29 +279,17 @@ class EntryForm(Form):
         if spec is not None:
             self.add_editors(spec.params, spec.normalize_params({}) | obj.params,
                              lambda name, value: self.commit("set_param", entry=entry_id,
-                                                             name=name, value=value))
+                                                             name=name, value=value),
+                             _regions(owner) if family == "term" else ())
         self.status = QLabel()
         self.status.setObjectName("entryStatus")
         self.status.setWordWrap(True)
         self.layout().insertWidget(self.layout().count() - 2, self.status)
         self.update_values()
 
-    def _formula(self, tex):
-        label = QLabel()
-        label.setObjectName("formulaImage")
-        label.setToolTip(tex)
-        label.setContentsMargins(0, 6, 0, 6)
-        color = self.palette().color(QPalette.ColorRole.WindowText).name()
-        try:
-            label.setPixmap(formulas.pixmap(tex, color, self.devicePixelRatioF()))
-        except formulas.FormulaError as error:
-            label.setText(f"formula: {tex}")
-            label.setToolTip(str(error))
-        return label
-
     def signature(self):
         found = self.session.document.find(self.item_id)
-        regions = tuple(r.id for r in found[1].regions) if found[0] == "term" else ()
+        regions = _regions(found[1]) if found[0] == "term" else ()
         return (self.family, self.item_id, found[-1].kind, regions)
 
     def update_values(self):
@@ -402,7 +424,78 @@ class RegionForm(Form):
                         select=dict(region.select, tol=tol))
 
 
+class MeanFieldForm(Form):
+    """The mean-field block of a system (PLAN.md section 5), shown for the
+    outliner row <system>/meanfield."""
+
+    def __init__(self, panel, item_id):
+        self.system_id = system_of(item_id)
+        system = panel.session.document.system(self.system_id)
+        block = system.hamiltonian.meanfield
+        self.kind = block.kind
+        try:
+            spec = registry.get("meanfield", block.kind)
+        except registry.RegistryError as error:
+            spec = None
+            super().__init__(panel, item_id, f"Mean field {block.kind}", str(error).strip("\"'"))
+        if spec is not None:
+            super().__init__(panel, item_id, spec.label,
+                             f"{self.system_id} · {spec.group}\n{spec.doc}")
+            if spec.formula:
+                self.layout().insertWidget(2, self._formula(spec.formula))
+        self.enabled = QCheckBox("enabled")
+        self.enabled.setObjectName("check_enabled")
+        self.enabled.toggled.connect(lambda v: self.commit("set_meanfield", system=self.system_id,
+                                                           enabled=v))
+        self.rows.addRow("", self.enabled)
+        if spec is not None:
+            self.add_editors(spec.params, spec.normalize_params({}) | block.params,
+                             lambda name, value: self.commit(
+                                 "set_meanfield", system=self.system_id, params={name: value}),
+                             _regions(system))
+        self.status = QLabel()
+        self.status.setObjectName("meanfieldStatus")
+        self.status.setWordWrap(True)
+        self.layout().insertWidget(self.layout().count() - 2, self.status)
+        self.update_values()
+
+    def signature(self):
+        system = self.session.document.system(self.system_id)
+        return ("meanfield", self.system_id, system.hamiltonian.meanfield.kind, _regions(system))
+
+    def update_values(self):
+        block = self.session.document.system(self.system_id).hamiltonian.meanfield
+        _quiet(self.enabled, self.enabled.setChecked, block.enabled)
+        for name, editor in self.editors.items():
+            if name in block.params:
+                editor.set_value(block.params[name])
+        self.status.setText(self._status())
+
+    def _status(self):
+        session = self.session
+        try:
+            stage = pipeline.plan_system(session.document, self.system_id).meanfield
+        except (KeyError, DocumentError):
+            return ""
+        if not stage.enabled:
+            return "off: the calculations use the Hamiltonian of the terms"
+        if stage.problem:
+            return f"invalid, skipped: {stage.problem}"
+        text = (f"runs with every calculation on {self.system_id}, not while editing (the "
+                f"structure shows the Hamiltonian before it)")
+        for calc in session.document.calculations:
+            result = session.result(calc.id)
+            if calc.system == self.system_id and result is not None and result.meanfield \
+                    and not session.is_stale(calc.id):
+                energy = result.meanfield.get("total_energy")
+                text += f"\nconverged for {calc.id}: total energy {energy:.6g}"
+                break
+        return text
+
+
 class PropertiesPanel(QScrollArea):
+    preview = Signal(str, str)        # entry (or <system>/meanfield), parameter name
+
     def __init__(self, run, parent=None):
         super().__init__(parent)
         self.setObjectName("properties")
@@ -429,6 +522,8 @@ class PropertiesPanel(QScrollArea):
         document = self.session.document
         if not item_id or item_id == "calculations":
             return EmptyForm(self)
+        if item_id.endswith("/meanfield"):
+            return MeanFieldForm(self, item_id)
         system = system_of(item_id)
         if system is not None:
             return SystemForm(self, system)

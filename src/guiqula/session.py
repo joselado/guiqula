@@ -162,13 +162,13 @@ class Session:
         return [self.build(system.id, wait=False) for system in self.document.systems]
 
     def build_is_current(self, system):
-        """Whether builds[system] was built from the current Document (the
-        builds stop before the mean field, which runs with calculations)."""
+        """Whether builds[system] was built from the current Document (it
+        stops before the mean field, which runs with the calculations)."""
         build = self.builds.get(system)
         if build is None:
             return False
         try:
-            return build["key"] == pipeline.plan_system(self.document, system).preview_key
+            return build["key"] == pipeline.plan_system(self.document, system).key
         except Exception:
             return False
 

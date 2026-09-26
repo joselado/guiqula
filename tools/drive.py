@@ -10,17 +10,20 @@ Examples:
         --do '{"do": "remove_selected"}' --widget structureView --shot sculpted.png
     python tools/drive.py --recover --shot recovered.png
     python tools/drive.py project.guiqula --do '{"do": "set_param", "entry": "t2",
-        "name": "c", "value": 0.3}' --run c1 --widget plotView --shot plot.png
+        "name": "c", "value": 0.3}' --run c1 --widget plot_c1 --shot plot.png
     python tools/drive.py --list-widgets
     python tools/drive.py preset --python "print(session.document.to_json())"
 
 A --do object names a mutation or an action with "do" and gives its
 arguments as the other keys; --commands FILE holds a JSON list of them.
 Window actions work too: select, workspace, tool, select_sites,
-region_from_selection, remove_selected. After each command the driver
+region_from_selection, remove_selected, canvas_view (structure, hamiltonian,
+field), preview (a term's Field on the structure), auto_rerun. Every
+calculation's result has its own view, plot_<calculation id>. After each command the driver
 waits for the rebuild of the geometry, so a selection sees the new sites.
 The report printed last is JSON: the document outline, the builds, job and
-result summaries, the selection, the end of the log, and the screenshot.
+result summaries, the selection, the canvas view, the tab shown and the
+open result views, the end of the log, and the screenshot.
 """
 import argparse
 import json
@@ -169,6 +172,9 @@ def main(argv=None):
             report["build_errors"] = dict(session.build_errors)
             report["selected"] = window.selected
             report["workspace"] = window.workspace
+            report["canvas_view"] = window.canvas_view
+            report["tab"] = window.current_tab()
+            report["result_views"] = list(window.plots)
             report["selection"] = len(window.structure.selected())
             report["modified"] = session.modified
             report["jobs"] = [j.summary() for j in session.jobs.jobs.values() if j.kind != "build"]

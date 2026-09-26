@@ -89,5 +89,5 @@ entry("meanfield", "interactions", "Mean-field interactions",
           "guess and iterates until the mean field is self-consistent. Runs with the "
           "calculations, not while editing.",
       requires=("spin",), apply=_apply, script=_script,
-      cost=lambda p, size: cost.meanfield_iterations(p) * cost.kmesh(p["nk"], size["dimensionality"])
-      * cost.diagonalization(size["dimension"]))
+      cost=lambda p, size: cost.meanfield_iterations(p)
+      * cost.kmesh(p["nk"], size["dimensionality"]) * cost.diagonalization(size["dimension"]))

@@ -13,8 +13,9 @@ rebuilt from the Document after the move command.
 
 Items carry the id of what they show: an entry id (s1, op2, t3, r1, c2),
 or ``<system>/base``, ``<system>/geometry``, ``<system>/regions``,
-``<system>/hamiltonian`` for the rows of a system that are not entries, and
-``calculations``.
+``<system>/hamiltonian``, ``<system>/meanfield`` for the rows of a system
+that are not entries, and ``calculations``. The mean-field row closes the
+Hamiltonian's list, with its own checkbox (set_meanfield).
 """
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QBrush, QColor, QKeySequence
@@ -223,6 +224,28 @@ class Outliner(QTreeWidget):
             if term.region:
                 status += f" · in {term.region}"
             self._add_entry(hamiltonian, term, "term", stages[term.id], report, status.strip())
+        self._add_meanfield(session, hamiltonian, system, stages[f"{system.id}/meanfield"])
+
+    def _add_meanfield(self, session, parent, system, stage):
+        block = system.hamiltonian.meanfield
+        status = "runs with the calculations"
+        for calc in session.document.calculations:
+            result = session.result(calc.id)
+            if calc.system == system.id and result is not None and result.meanfield \
+                    and not session.is_stale(calc.id):
+                status = f"E = {result.meanfield.get('total_energy', float('nan')):.6g}"
+                break
+        item = self._add(parent, f"{system.id}/meanfield", ["Mean field", status],
+                         tooltip=_label("meanfield", block.kind))
+        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+        item.setCheckState(0, Qt.CheckState.Checked if block.enabled else Qt.CheckState.Unchecked)
+        if not block.enabled:
+            for column in (0, 1):
+                item.setForeground(column, QBrush(QColor(theme.DISABLED)))
+            item.setText(1, "off")
+        elif stage.problem:
+            self._mark_invalid(item, stage.problem)
+        return item
 
     def _add_entry(self, parent, entry, family, stage, report, status):
         item = self._add(parent, entry.id, [f"{entry.id}  {_label(family, entry.kind)}", status],
@@ -280,10 +303,14 @@ class Outliner(QTreeWidget):
     def _item_changed(self, item, column):
         if self._refreshing or column != 0 or not item.flags() & Qt.ItemFlag.ItemIsUserCheckable:
             return
-        args = {"entry": item.data(0, ID_ROLE),
-                "enabled": item.checkState(0) == Qt.CheckState.Checked}
+        item_id = item.data(0, ID_ROLE)
+        enabled = item.checkState(0) == Qt.CheckState.Checked
+        if item_id.endswith("/meanfield"):
+            name, args = "set_meanfield", {"system": system_of(item_id), "enabled": enabled}
+        else:
+            name, args = "set_enabled", {"entry": item_id, "enabled": enabled}
         # the command rebuilds the tree, which deletes this item: not inside its own signal
-        QTimer.singleShot(0, lambda: self.command.emit("set_enabled", args))
+        QTimer.singleShot(0, lambda: self.command.emit(name, args))
 
     def _family(self, item_id):
         if self._session is None or not item_id or "/" in item_id or item_id == "calculations":

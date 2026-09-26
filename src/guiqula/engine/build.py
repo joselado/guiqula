@@ -214,4 +214,4 @@ def build_system(document, system_id, cache=None, meanfield=True):
             report["mode"] = mode
         reports.append(report)
     return Built(system_id=system_id, h=obj, plan=plan, reports=reports,
-                 mode=mode_of(obj), key=plan.key if meanfield else plan.preview_key)
+                 mode=mode_of(obj), key=plan.key)

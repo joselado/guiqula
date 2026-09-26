@@ -20,8 +20,9 @@ executes the plan) and the UI (which shows modes, flags and staleness).
   differs from the current one is stale.
 - The mean-field block is the last stage of a quantum system. It is
   expensive, so it runs with the calculations only: the interactive
-  builds (canvas, outliner) stop before it and are stamped with
-  ``preview_key``, the key of the stage before it.
+  builds (canvas, outliner) stop before it and report it as deferred.
+  They are still stamped with the system's full key, since their reports
+  describe the whole plan (a mean-field edit costs them a cache hit).
 """
 from dataclasses import dataclass, field
 
@@ -67,13 +68,6 @@ class SystemPlan:
     @property
     def key(self):
         return self.stages[-1].key if self.stages else ""
-
-    @property
-    def preview_key(self):
-        """The key of what the interactive builds build: everything but
-        the mean field."""
-        stages = [s for s in self.stages if s.stage != "meanfield"]
-        return stages[-1].key if stages else ""
 
     @property
     def meanfield(self):

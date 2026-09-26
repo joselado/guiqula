@@ -110,12 +110,12 @@ def test_select_action_drives_properties_and_viewport(window, qtbot):
     assert window.session.act("select", entry="t2") == "t2"
     form = window.properties.form
     assert isinstance(form, EntryForm) and form.title.text() == "Rashba spin-orbit coupling"
-    assert window.outliner.current_id() == "t2" and window.viewport.currentIndex() == 0
+    assert window.outliner.current_id() == "t2" and window.current_tab() == "structure"
     assert "Hilbert space after it: spinful" in form.status.text()
     formula = form.findChild(QLabel, "formulaImage")        # rendered, not LaTeX source
     assert not formula.pixmap().isNull() and "sigma" in formula.toolTip()
     window.session.act("select", entry="c2")
-    assert window.viewport.currentIndex() == 1 and window.selected_calculation() == "c2"
+    assert window.current_tab() == "c2" and window.selected_calculation() == "c2"
     window.session.act("select", entry="s1/base")
     assert isinstance(window.properties.form, SystemForm)
     assert window.properties.form.lattice.currentData() == "honeycomb_lattice"
@@ -162,7 +162,7 @@ def test_palettes_add_and_select(window, qtbot):
     menu_action(window, "addTermButton", "addTerm_haldane").trigger()
     assert window.session.document.find(window.selected)[-1].kind == "haldane"
     menu_action(window, "addCalculationButton", "addCalc_dos").trigger()
-    assert window.selected == "c3" and window.viewport.currentIndex() == 1
+    assert window.selected == "c3" and window.current_tab() == "c3"
     menu_action(window, "newSystemButton", "newSystem_kagome_lattice").trigger()
     assert window.selected == "s2" and isinstance(window.properties.form, SystemForm)
     form = window.properties.form

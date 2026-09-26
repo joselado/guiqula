@@ -5,6 +5,15 @@ cell and the neighbouring cells faded, and overlays for what the selected
 entry touches (a region's sites, the positions a removal op deletes).
 Drawn in the xy plane.
 
+Three views (VIEWS), chosen with the box on the canvas toolbar: the sites
+and bonds; the Hamiltonian (13.8: atoms coloured by onsite energy, every
+hopping drawn with a width following its amplitude and a colour following
+its phase, exchange fields as arrows for the in-plane part and dots inside
+the atoms for the z part); and a Field preview (PLAN.md 3.8: a scalar
+Field colours the atoms, a vector Field draws the same arrows and dots). A
+colour bar is drawn only for values that vary. The window computes what to draw;
+the pure functions below turn build arrays into artists.
+
 Site selection (PLAN.md 13.2): the pick tool selects the atom under a
 click (shift adds, ctrl toggles, a click on nothing clears), the box and
 lasso tools select what they enclose; the mouse wheel zooms, and the
@@ -22,8 +31,9 @@ from matplotlib.figure import Figure
 from matplotlib.patches import Polygon
 from matplotlib.path import Path
 from matplotlib.widgets import LassoSelector, RectangleSelector
+from matplotlib import cm, colors as mcolors
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from guiqula.ui import theme
 
@@ -33,7 +43,10 @@ PICK_RADIUS = 0.5        # a click selects the nearest site within this distance
 SAME_SITE = 1e-3         # positions closer than this are the same site
 TOOLS = ("pick", "box", "lasso")
 MODES = ("replace", "add", "toggle", "remove")
+VIEWS = {"structure": "Sites and bonds", "hamiltonian": "Hamiltonian", "field": "Field preview"}
 SELECTION_ZORDER = 6
+VALUE_MAP = "coolwarm"       # site values, symmetric about zero
+PHASE_MAP = "twilight"       # hopping phases, cyclic
 
 
 # ---- selection geometry (pure numpy)
@@ -145,6 +158,44 @@ def bond_segments(build):
     return np.array(segments).reshape(-1, 2, 2)
 
 
+def hopping_segments(build, view):
+    """Segments (K, 2, 2) of the hoppings of a Hamiltonian view that touch
+    the central cell, with their amplitude and phase (the mirrored copy of
+    a bond to a neighbouring cell carries the conjugate phase)."""
+    r = np.asarray(build["positions"])[:, :2]
+    lattice = np.asarray(build["lattice"])[:, :2]
+    rows = np.asarray(view["hoppings"]).reshape(-1, 5)
+    amplitude, phase = np.asarray(view["amplitude"]), np.asarray(view["phase"])
+    i, j, cells = rows[:, 0], rows[:, 1], rows[:, 2:5]
+    shift = cells @ lattice if len(rows) else np.zeros((0, 2))
+    segments = np.stack([r[i], r[j] + shift], axis=1) if len(rows) else np.zeros((0, 2, 2))
+    image = np.any(cells != 0, axis=1)
+    mirrored = np.stack([r[j[image]], r[i[image]] - shift[image]], axis=1)
+    return (np.concatenate([segments, mirrored]).reshape(-1, 2, 2),
+            np.concatenate([amplitude, amplitude[image]]),
+            np.concatenate([phase, -phase[image]]))
+
+
+def varies(values, tol=1e-9):
+    values = np.asarray(values, dtype=float)
+    return len(values) > 0 and float(values.max() - values.min()) > tol
+
+
+def value_colors(values, symmetric=True, cmap=VALUE_MAP):
+    """Colours of site values and the mappable for a colour bar; symmetric:
+    a colour scale centred at zero."""
+    values = np.asarray(values, dtype=float)
+    limit = float(np.max(np.abs(values))) if len(values) else 0.0
+    if symmetric:
+        limit = limit if limit > 1e-12 else 1.0
+        norm = mcolors.Normalize(-limit, limit)
+    else:
+        low, high = (float(values.min()), float(values.max())) if len(values) else (0.0, 1.0)
+        norm = mcolors.Normalize(low, high if high > low else low + 1.0)
+    mappable = cm.ScalarMappable(norm=norm, cmap=cmap)
+    return [mcolors.to_hex(c) for c in mappable.to_rgba(values)], mappable
+
+
 def cell_outline(build):
     """Corners of the unit cell (2D: a parallelogram around the sites), or
     None for a finite or one-dimensional system."""
@@ -156,31 +207,79 @@ def cell_outline(build):
     return np.array([corner, corner + a1, corner + a1 + a2, corner + a2])
 
 
-def draw_structure(ax, build, highlight=None, selected=None, removed=None, images=True):
+def draw_structure(ax, build, highlight=None, selected=None, removed=None, images=True,
+                   site_values=None, arrows=None, hoppings=None):
     """Draw a build summary on a matplotlib Axes. highlight: boolean mask of
-    sites (a region), selected: site indices, removed: (M, 3) positions.
-    Only the central cell sets the view; the neighbouring cells show at its
-    border. Returns the collection of the selection rings."""
+    sites (a region), selected: site indices, removed: (M, 3) positions;
+    site_values: {"values": (N,), "label"} colours the atoms; arrows:
+    {"vectors": (N, 3), "label"} draws the in-plane part at the sites,
+    coloured by the z part; hoppings: a Hamiltonian view, whose hoppings
+    replace the first-neighbour bonds. Only the central cell sets the view;
+    the neighbouring cells show at its border. Returns the collection of
+    the selection rings."""
     r = np.asarray(build["positions"])
     xy = r[:, :2]
     n = len(r)
     colors = site_colors(build)
+    bars = []
+
+    def colorbar(mappable, label, horizontal=False):
+        if horizontal:
+            ax.figure.colorbar(mappable, ax=ax, label=label, orientation="horizontal",
+                               shrink=0.6, pad=0.1, aspect=40)
+        else:                     # a second vertical bar goes to the left
+            ax.figure.colorbar(mappable, ax=ax, label=label, shrink=0.7, pad=0.02 if not bars
+                               else 0.08, location="right" if not bars else "left")
+            bars.append(label)
+    if site_values is not None:
+        colors, mappable = value_colors(site_values["values"])
+        if varies(site_values["values"]):
+            colorbar(mappable, site_values.get("label", ""))
     lattice = np.asarray(build["lattice"])[:, :2]
-    central = bond_segments(build)
+    if hoppings is not None:
+        central, amplitude, phase = hopping_segments(build, hoppings)
+        top = float(amplitude.max()) if len(amplitude) else 1.0
+        widths = 0.4 + 3.6 * amplitude / (top if top > 0 else 1.0)
+        phase_map = cm.ScalarMappable(norm=mcolors.Normalize(-np.pi, np.pi), cmap=PHASE_MAP)
+        bond_colors = phase_map.to_rgba(phase)
+        if len(phase) and np.any(np.abs(phase) > 1e-6):
+            colorbar(phase_map, "hopping phase", horizontal=True)
+    else:
+        central = bond_segments(build)
+        widths, bond_colors = 1.2, theme.BOND
     cells = image_cells(build["dimensionality"]) if images and n <= IMAGE_LIMIT else []
     if cells:
         shifts = np.array([c @ lattice for c in cells])
         faded = (central[None, :, :, :] + shifts[:, None, None, :]).reshape(-1, 2, 2)
-        ax.add_collection(LineCollection(faded, colors=theme.BOND, linewidths=0.8, alpha=0.25,
-                                         zorder=1), autolim=False)
+        faded_colors = bond_colors if isinstance(bond_colors, str) else \
+            np.tile(bond_colors, (len(cells), 1))
+        faded_widths = widths if np.isscalar(widths) else np.tile(widths, len(cells)) * 0.7
+        ax.add_collection(LineCollection(faded, colors=faded_colors, linewidths=faded_widths,
+                                         alpha=0.25, zorder=1), autolim=False)
         ghosts = (xy[None, :, :] + shifts[:, None, :]).reshape(-1, 2)
         circles(ax, ghosts, RADIUS, 2, facecolors=colors * len(cells), alpha=0.2,
                 linewidths=0)
     if len(central):
-        ax.add_collection(LineCollection(central, colors=theme.BOND, linewidths=1.2, zorder=3),
-                          autolim=False)
+        if hoppings is not None:        # an outline, so that pale phase colours stay visible
+            ax.add_collection(LineCollection(central, colors=theme.BOND, alpha=0.6,
+                                             linewidths=np.asarray(widths) + 1.2, zorder=3),
+                              autolim=False)
+        ax.add_collection(LineCollection(central, colors=bond_colors, linewidths=widths,
+                                         zorder=3), autolim=False)
     circles(ax, xy, RADIUS, 4, autolim=True, facecolors=colors, edgecolors="white",
             linewidths=0.5)
+    if arrows is not None:
+        vectors = np.asarray(arrows["vectors"], dtype=float).reshape(-1, 3)
+        if varies(vectors[:, 2]) or np.any(np.abs(vectors[:, 2]) > 1e-12):
+            dots, mappable = value_colors(vectors[:, 2])
+            circles(ax, xy, 0.5 * RADIUS, 5, facecolors=dots, edgecolors="#1e1e1e",
+                    linewidths=0.4)
+            colorbar(mappable, f"{arrows.get('label', '')}, z (dots)")
+        longest = float(np.max(np.linalg.norm(vectors[:, :2], axis=1))) if n else 0.0
+        if longest > 1e-12:
+            ax.quiver(xy[:, 0], xy[:, 1], vectors[:, 0], vectors[:, 1], angles="xy",
+                      scale_units="xy", scale=longest / 0.8, pivot="middle", width=0.006,
+                      color="#1e1e1e", zorder=8)
     outline = cell_outline(build)
     if outline is not None:
         ax.add_patch(Polygon(outline, closed=True, fill=False, edgecolor=theme.CELL,
@@ -209,6 +308,7 @@ class StructureView(QWidget):
     and the site-selection tools."""
 
     selection_changed = Signal(int)          # number of selected sites
+    view_chosen = Signal(str)                # a key of VIEWS, chosen by the user
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -218,12 +318,25 @@ class StructureView(QWidget):
         self.canvas.setObjectName("structureCanvas")
         self.toolbar = NavigationToolbar2QT(self.canvas, self)
         self.toolbar.setObjectName("structureToolbar")
+        self.view_box = QComboBox()
+        self.view_box.setObjectName("canvasView")
+        self.view_box.setToolTip("what the canvas shows: the geometry, what the Hamiltonian "
+                                 "puts on it, or the Field being edited")
+        for key, text in VIEWS.items():
+            self.view_box.addItem(text, key)
+        self.view_box.activated.connect(
+            lambda i: self.view_chosen.emit(self.view_box.itemData(i)))
         self.caption = QLabel("No system yet: add one from the Geometry toolbar.")
         self.caption.setObjectName("structureCaption")
         self.caption.setWordWrap(True)
+        self.caption.setMinimumHeight(3 * self.caption.fontMetrics().lineSpacing())
+        top = QHBoxLayout()
+        top.addWidget(self.toolbar, 1)
+        top.addWidget(QLabel("Show"))
+        top.addWidget(self.view_box)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
-        layout.addWidget(self.toolbar)
+        layout.addLayout(top)
         layout.addWidget(self.canvas, 1)
         layout.addWidget(self.caption)
         self.system_id = None
@@ -238,6 +351,14 @@ class StructureView(QWidget):
         self.canvas.mpl_connect("scroll_event", self._on_scroll)
 
     # ---- drawing
+    def set_view(self, view):
+        """Show which view is drawn (the window decides and redraws)."""
+        index = self.view_box.findData(view)
+        if index >= 0 and index != self.view_box.currentIndex():
+            self.view_box.blockSignals(True)
+            self.view_box.setCurrentIndex(index)
+            self.view_box.blockSignals(False)
+
     def show_structure(self, system_id, build, caption="", **overlays):
         """Redraw; keeps the zoom when the same geometry is shown again,
         and the selection when its sites are still there."""

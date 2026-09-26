@@ -1,8 +1,17 @@
 """The main window (PLAN.md section 4): one document, three workspaces
 (Geometry, Hamiltonian, Calculate) that change the palette toolbar and
 the emphasis, not the data; the outliner on the left, the viewport (the
-Structure tab and the Result tab) in the centre, the properties form and
-the jobs on the right, the log at the bottom, and the status bar.
+Structure tab and one closable tab per calculation's result, which can be
+detached into floating docks) in the centre, the properties form and the
+jobs on the right, the log at the bottom, and the status bar.
+
+The structure canvas has three views: the sites and bonds (the Geometry
+workspace), the Hamiltonian (13.8, the Hamiltonian workspace), and the
+preview of the Field being edited (PLAN.md 3.8), which a Field editor
+selects when the user looks at it. The cost guard (13.12) shows the rough
+duration of the selected calculation in the status bar and asks, in a
+non-modal bar, before running one that takes minutes; stale results of
+cheap calculations can be re-run automatically (opt-in, Run menu).
 
 The window is a client of a Session: every change goes through the
 dispatcher. The selected item, the workspace, the canvas tool and the site
@@ -25,18 +34,22 @@ import time
 import traceback
 from pathlib import Path
 
+import numpy as np
 from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
-from PySide6.QtWidgets import (QButtonGroup, QComboBox, QDockWidget, QFileDialog, QLabel,
-                               QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QPushButton,
-                               QTabBar, QTabWidget, QToolBar, QToolButton, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QButtonGroup, QComboBox, QCompleter, QDockWidget, QFileDialog,
+                               QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox,
+                               QPlainTextEdit, QPushButton, QTabBar, QTabWidget, QToolBar,
+                               QToolButton, QVBoxLayout, QWidget)
 
 import guiqula
 from guiqula import vendoring
+from guiqula.core import fields
 from guiqula.core import regions as region_tools
 from guiqula.io import crashreport, project
 from guiqula.registry import base as registry
-from guiqula.registry import pipeline
+from guiqula.registry import cost, pipeline
+from guiqula.registry.params import VectorFieldParam
 from guiqula.ui.bars import MessageBar
 from guiqula.ui.jobpanel import JobPanel
 from guiqula.ui.outliner import Outliner, system_of
@@ -47,16 +60,35 @@ from guiqula.ui.structure import StructureView
 
 POLL_MS = 30
 BUILD_DELAY_MS = 150
+PREVIEW_DELAY_MS = 120
 WORKSPACES = ("geometry", "hamiltonian", "calculate")
 # actions of the window itself: they change what is shown, not the Document
-WINDOW_ACTIONS = ("select", "workspace", "tool", "select_sites")
-STRUCTURE_TAB, RESULT_TAB = 0, 1
+WINDOW_ACTIONS = ("select", "workspace", "tool", "select_sites", "canvas_view", "preview",
+                  "auto_rerun")
+STRUCTURE_TAB = 0
 REGION_TOLERANCE = 0.05      # positions regions made from a canvas selection
+AUTO_RERUN_SECONDS = 3.0     # stale results re-run automatically when cheaper than this
+CANVAS_VIEW_OF = {"geometry": "structure", "hamiltonian": "hamiltonian"}
 
 
 def _grouped(family):
     """Registry entries sorted by group, then label."""
     return sorted(registry.entries(family), key=lambda s: (s.group, s.label))
+
+
+def search_entries(family, text):
+    """Registry entries whose label, kind, group or doc contain the text
+    (case-insensitive); an exact label (or "label (group)") first."""
+    text = text.strip().lower()
+    if not text:
+        return []
+    found = []
+    for spec in _grouped(family):
+        exact = text in (spec.label.lower(), f"{spec.label} ({spec.group})".lower(), spec.kind)
+        words = " ".join((spec.label, spec.kind, spec.group, spec.doc)).lower()
+        if exact or text in words:
+            found.append((not exact, spec))
+    return [spec for _, spec in sorted(found, key=lambda item: item[0])]
 
 
 class MainWindow(QMainWindow):
@@ -75,20 +107,33 @@ class MainWindow(QMainWindow):
         self._unsubscribe = None
         self._last_crash_text = None
         self._pending_sites = None     # (system, positions) to select once it is built
+        self.plots = {}                # calculation id -> PlotView (a tab or a floating dock)
+        self.plot_docks = {}           # calculation id -> QDockWidget of a detached view
+        self.canvas_view = "structure"
+        self.field_preview = None      # (entry, parameter) the field view draws
+        self.auto_rerun = False
+        self._auto_keys = {}           # calculation id -> key it was last re-run for
+        self._auto_jobs = set()        # ids of the jobs the auto re-run started
+        self._searched = (None, 0.0)   # (text, time) of the last palette search
 
         self.outliner = Outliner()
         self.outliner.selected.connect(self.select)
         self.outliner.command.connect(self._outliner_command)
         self.properties = PropertiesPanel(self._do)
+        self.properties.preview.connect(self._preview_requested)
         self.structure = StructureView()
         self.structure.selection_changed.connect(self._selection_changed)
-        self.plot = PlotView()
+        self.structure.view_chosen.connect(self.set_canvas_view)
         self.viewport = QTabWidget()
         self.viewport.setObjectName("viewport")
+        self.viewport.setTabsClosable(True)
         self.viewport.addTab(self.structure, "Structure")
-        self.viewport.addTab(self.plot, "Result")
+        for side in (QTabBar.ButtonPosition.LeftSide, QTabBar.ButtonPosition.RightSide):
+            self.viewport.tabBar().setTabButton(STRUCTURE_TAB, side, None)   # always there
+        self.viewport.tabCloseRequested.connect(self._close_tab)
         self.error_bar = MessageBar("errorBar")
         self.recovery_bar = MessageBar("recoveryBar")
+        self.cost_bar = MessageBar("costBar")
         central = QWidget()
         central.setObjectName("central")
         column = QVBoxLayout(central)
@@ -96,6 +141,7 @@ class MainWindow(QMainWindow):
         column.setSpacing(0)
         column.addWidget(self.recovery_bar)
         column.addWidget(self.error_bar)
+        column.addWidget(self.cost_bar)
         column.addWidget(self.viewport, 1)
         self.setCentralWidget(central)
 
@@ -135,6 +181,9 @@ class MainWindow(QMainWindow):
         self.build_timer = QTimer(self)
         self.build_timer.setSingleShot(True)
         self.build_timer.timeout.connect(self._request_builds)
+        self.preview_timer = QTimer(self)
+        self.preview_timer.setSingleShot(True)
+        self.preview_timer.timeout.connect(self._refresh_structure)
         self.set_workspace("geometry")
         self._update_actions()
 
@@ -186,7 +235,7 @@ class MainWindow(QMainWindow):
         self.calc_box = QComboBox()
         self.calc_box.setObjectName("calculationBox")
         self.calc_box.setMinimumWidth(240)
-        self.calc_box.currentIndexChanged.connect(self._show_selected_result)
+        self.calc_box.currentIndexChanged.connect(self._calculation_chosen)
         run.addWidget(self.calc_box)
         self.run_button = QPushButton("Run")
         self.run_button.setObjectName("runButton")
@@ -204,6 +253,7 @@ class MainWindow(QMainWindow):
                           self.new_system, "newSystem")
         self._menu_button(geometry, "Add op", "addOpButton", _grouped("geometry_op"),
                           self.add_op, "addOp")
+        self._search_box(geometry, "geometry_op", self.add_op, "opSearch", "find an op")
         self.add_region_button = QPushButton("Add region")
         self.add_region_button.setObjectName("addRegionButton")
         self.add_region_button.setToolTip("a region of the current system, by expression")
@@ -253,12 +303,55 @@ class MainWindow(QMainWindow):
         hamiltonian = self._toolbar("Hamiltonian", "hamiltonianToolbar")
         self._menu_button(hamiltonian, "Add term", "addTermButton", _grouped("term"),
                           self.add_term, "addTerm")
+        self.term_search = self._search_box(hamiltonian, "term", self.add_term, "termSearch",
+                                            "find a term")
+        hamiltonian.addSeparator()
+        self.meanfield_button = QPushButton("Mean field")
+        self.meanfield_button.setObjectName("meanfieldButton")
+        self.meanfield_button.setToolTip("interactions solved self-consistently after the "
+                                         "terms (the mean-field block of the current system)")
+        self.meanfield_button.clicked.connect(self.show_meanfield)
+        hamiltonian.addWidget(self.meanfield_button)
         self.palettes["hamiltonian"] = hamiltonian
 
         calculate = self._toolbar("Calculate", "calculateToolbar")
         self._menu_button(calculate, "Add calculation", "addCalculationButton",
                           _grouped("calculation"), self.add_calculation, "addCalc")
+        self._search_box(calculate, "calculation", self.add_calculation, "calculationSearch",
+                         "find a calculation")
         self.palettes["calculate"] = calculate
+
+    def _search_box(self, bar, family, handler, name, placeholder):
+        """A line with completion over a family's entries; Enter (or a
+        completion) adds the best match with handler(kind)."""
+        edit = QLineEdit()
+        edit.setObjectName(name)
+        edit.setPlaceholderText(placeholder)
+        edit.setClearButtonEnabled(True)
+        edit.setMaximumWidth(220)
+        completer = QCompleter([f"{spec.label} ({spec.group})" for spec in _grouped(family)],
+                               edit)
+        completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        edit.setCompleter(completer)
+        completer.activated.connect(lambda text: self.add_searched(edit, family, handler, text))
+        edit.returnPressed.connect(lambda: self.add_searched(edit, family, handler, edit.text()))
+        bar.addWidget(edit)
+        return edit
+
+    def add_searched(self, edit, family, handler, text):
+        """Add the best match of a palette search; returns its kind or None."""
+        now = time.monotonic()
+        if not text.strip() or (self._searched[0] == text and now - self._searched[1] < 0.5):
+            return None                  # Enter and the completion both fire for one choice
+        self._searched = (text, now)
+        matches = search_entries(family, text)
+        if not matches:
+            self.message(f"no {family.replace('_', ' ')} matches {text.strip()!r}", error=True)
+            return None
+        handler(matches[0].kind)
+        QTimer.singleShot(0, edit.clear)
+        return matches[0].kind
 
     def _action(self, menu, text, slot, shortcut=None, name=None):
         action = QAction(text, self)
@@ -298,6 +391,14 @@ class MainWindow(QMainWindow):
         run = self.menuBar().addMenu("&Run")
         self._action(run, "&Run calculation", self.run_selected, "F5", "runAction")
         self._action(run, "&Cancel", self.cancel_selected, "Esc", "cancelAction")
+        run.addSeparator()
+        self.auto_rerun_action = self._action(
+            run, "Re-run cheap results &automatically", lambda: self.set_auto_rerun(
+                self.auto_rerun_action.isChecked()), name="autoRerunAction")
+        self.auto_rerun_action.setCheckable(True)
+        self.auto_rerun_action.setToolTip(f"a stale result is computed again as soon as the "
+                                          f"geometry is rebuilt, when it takes less than "
+                                          f"{AUTO_RERUN_SECONDS:g} s")
         help_menu = self.menuBar().addMenu("&Help")
         self._action(help_menu, "&About", lambda: self.message(
             f"guiqula {guiqula.__version__}, {vendoring.describe()}"))
@@ -328,6 +429,10 @@ class MainWindow(QMainWindow):
         dispatcher.register_action("select_sites", self.select_sites)
         dispatcher.register_action("region_from_selection", self.region_from_selection)
         dispatcher.register_action("remove_selected", self.remove_selected)
+        dispatcher.register_action("canvas_view", lambda name: self.set_canvas_view(name))
+        dispatcher.register_action("preview", lambda entry, param: self.preview_field(entry,
+                                                                                      param))
+        dispatcher.register_action("auto_rerun", lambda enabled=True: self.set_auto_rerun(enabled))
         session.view_state = self.view_state
         self.timer.start(POLL_MS)
         self._document_changed()
@@ -397,7 +502,7 @@ class MainWindow(QMainWindow):
             self.properties.refresh()
         self._refresh_structure()
         self._update_actions()
-        self._show_selected_result()
+        self._refresh_results()
         self._update_status()
         self.build_timer.start(BUILD_DELAY_MS)
         self._update_title()
@@ -446,6 +551,7 @@ class MainWindow(QMainWindow):
                 if system == self.current_system():
                     self._refresh_structure()
                 self._update_status()
+                self._rerun_stale()
             elif job.status == "failed":
                 self.message(f"{system} cannot be built: {job.error}", error=True)
                 self.outliner.refresh(self.session)
@@ -463,9 +569,12 @@ class MainWindow(QMainWindow):
                 self.message(f"{job.id} {job.label} {job.status}")
             self.outliner.refresh(self.session)
             self.properties.refresh()
-            if job.status == "done" and job.label == self.selected_calculation():
-                self._show_selected_result()
-                self.viewport.setCurrentIndex(RESULT_TAB)
+            if job.status == "done" and job.kind == "run":
+                if job.label in self.plots:
+                    self._draw_result(job.label)
+                if job.label == self.selected_calculation() and job.id not in self._auto_jobs:
+                    self.show_result(job.label)      # an automatic re-run never steals the view
+            self._auto_jobs.discard(job.id)
         elif job.kind == "run":
             self.outliner.update_calculation(self.session, job.label)   # queued, progress
         self.jobs.update_workers(self.session.jobs.status())
@@ -488,7 +597,7 @@ class MainWindow(QMainWindow):
             family = self.session.document.find(entry)[0]
         if family == "calculation":
             self.select_calculation(entry)
-            self.viewport.setCurrentIndex(RESULT_TAB)
+            self.show_result(entry)
         elif entry and entry != "calculations":
             self.viewport.setCurrentIndex(STRUCTURE_TAB)
         self._refresh_structure()
@@ -506,15 +615,128 @@ class MainWindow(QMainWindow):
             self.workspace_tabs.blockSignals(False)
         for key, bar in self.palettes.items():
             bar.setVisible(key == name)
-        self.viewport.setCurrentIndex(RESULT_TAB if name == "calculate" else STRUCTURE_TAB)
+        if name in CANVAS_VIEW_OF and self.canvas_view != CANVAS_VIEW_OF[name]:
+            self.set_canvas_view(CANVAS_VIEW_OF[name])
+        calc = self.selected_calculation()
+        if name == "calculate" and calc is not None:
+            self.show_result(calc)
+        else:
+            self.viewport.setCurrentIndex(STRUCTURE_TAB)
         return name
+
+    # ---- the canvas views and the Field preview
+    def set_canvas_view(self, name):
+        """What the structure canvas shows: structure, hamiltonian or field."""
+        if name not in structure_tools.VIEWS:
+            raise ValueError(f"unknown view {name!r}; views: {list(structure_tools.VIEWS)}")
+        self.canvas_view = name
+        self.structure.set_view(name)
+        if self.session is not None:
+            self._refresh_structure()
+        return name
+
+    def preview_field(self, entry, param):
+        """Draw a Field of a term (or of a mean field, <system>/meanfield) on
+        the structure; the canvas switches to the field view."""
+        self._field_entry(entry, param)          # raises for a wrong entry or parameter
+        self.field_preview = (entry, param)
+        self.viewport.setCurrentIndex(STRUCTURE_TAB)
+        return self.set_canvas_view("field")
+
+    def _preview_requested(self, entry, param):
+        """A Field editor is being looked at (debounced: typing redraws)."""
+        self.field_preview = (entry, param)
+        if self.canvas_view != "field":
+            self.canvas_view = "field"
+            self.structure.set_view("field")
+        self.preview_timer.start(PREVIEW_DELAY_MS)
+
+    def _field_entry(self, entry, param):
+        """(system, spec, params, restricting region or None) of a Field."""
+        document = self.session.document
+        if entry.endswith("/meanfield"):
+            system = document.system(system_of(entry))
+            block = system.hamiltonian.meanfield
+            spec, params, region = registry.get("meanfield", block.kind), block.params, None
+        else:
+            family, system, _, _, obj = document.find(entry)
+            if family != "term":
+                raise ValueError(f"{entry!r} is a {family}; Fields are parameters of terms "
+                                 f"and of the mean field")
+            spec, params = registry.get("term", obj.kind), obj.params
+            region = next((r for r in system.regions if r.id == obj.region), None)
+        if param not in spec.param_map or not hasattr(spec.param_map[param], "native"):
+            fields_of = [p.name for p in spec.params if hasattr(p, "native")]
+            raise ValueError(f"{entry} has no Field {param!r}; its Fields: {fields_of}")
+        return system, spec, params, region
+
+    def _field_overlay(self, system_id, build):
+        """(overlays, caption) of the field view."""
+        if self.field_preview is None:
+            return {}, "click into a Field of a term (its f(r) panel) to preview it here"
+        entry, name = self.field_preview
+        try:
+            system, spec, params, region = self._field_entry(entry, name)
+        except (ValueError, KeyError, registry.RegistryError) as error:
+            return {}, str(error).strip("\"'")
+        if system.id != system_id:
+            return {}, f"{entry} belongs to {system.id}"
+        param = spec.param_map[name]
+        value = params.get(name, param.default)
+        form = self.properties.form
+        if form is not None and getattr(form, "item_id", None) == entry:
+            live = form.live_value(name)
+            value = live if live is not None else value
+        positions = build["positions"]
+        regions = {r.id: r.select for r in system.regions}
+        weight = np.ones(len(positions))
+        if region is not None and param.native:
+            weight = region_tools.evaluate_positions(region.select, positions).astype(float)
+        label = f"{entry} {param.label}"
+        try:
+            if isinstance(param, VectorFieldParam):
+                vectors = np.stack([fields.evaluate_positions(v, positions, regions)
+                                    for v in value], axis=1) * weight[:, None]
+                overlays = {"arrows": {"vectors": vectors, "label": label}}
+                size = np.linalg.norm(vectors, axis=1)
+                return overlays, f"{label}: |value| from {size.min():.4g} to {size.max():.4g}"
+            values = fields.evaluate_positions(value, positions, regions) * weight
+        except Exception as error:
+            return {}, f"{label}: {error}"
+        return ({"site_values": {"values": values, "label": label}},
+                f"{label}: from {values.min():.4g} to {values.max():.4g}")
+
+    def _hamiltonian_overlay(self, build):
+        view = build.get("hamiltonian")
+        if view is None:
+            return {}, "the Hamiltonian view is not computed for this many sites"
+        overlays = {"site_values": {"values": view["onsite"], "label": "onsite energy"},
+                    "hoppings": view}
+        parts = [f"onsite {np.min(view['onsite']):.3g} to {np.max(view['onsite']):.3g}"]
+        if len(view["amplitude"]):
+            parts.append(f"|t| up to {np.max(view['amplitude']):.3g}")
+        if len(view["spin"]) and np.max(view["spin"]) > 1e-9:
+            parts.append(f"spin-dependent hopping up to {np.max(view['spin']):.3g}")
+        exchange = view.get("exchange")
+        if exchange is not None and np.max(np.abs(exchange)) > 1e-12:
+            overlays["arrows"] = {"vectors": exchange, "label": "exchange field"}
+            parts.append(f"exchange up to {np.max(np.linalg.norm(exchange, axis=1)):.3g} "
+                         f"(arrows: in-plane part)")
+        pairing = view.get("pairing")
+        if pairing is not None:
+            parts.append(f"pairing up to {np.max(pairing):.3g}")
+        return overlays, "Hamiltonian before the mean field: " + ", ".join(parts)
 
     # ---- view state, saved with the project
     def view_state(self):
         """What the window shows, as the Document's ui block."""
         state = {"workspace": self.workspace, "selected": self.selected,
-                 "tool": self.structure.tool,
-                 "tab": "result" if self.viewport.currentIndex() == RESULT_TAB else "structure"}
+                 "tool": self.structure.tool, "tab": self.current_tab(),
+                 "canvas_view": self.canvas_view, "results": list(self.plots)}
+        if self.auto_rerun:
+            state["auto_rerun"] = True
+        if self.field_preview is not None:
+            state["preview"] = list(self.field_preview)
         if self.selected_calculation():
             state["calculation"] = self.selected_calculation()
         if self.structure.system_id is not None and len(self.structure.selected()):
@@ -530,16 +752,38 @@ class MainWindow(QMainWindow):
         and selects nothing."""
         ui = ui if isinstance(ui, dict) else {}
         self._pending_sites = None
+        for calc in list(self.plots):
+            self.close_result(calc)
+        self.field_preview = None
+        preview = ui.get("preview")
+        if isinstance(preview, list) and len(preview) == 2 and all(isinstance(p, str)
+                                                                   for p in preview):
+            try:
+                self._field_entry(*preview)
+                self.field_preview = tuple(preview)
+            except Exception:
+                pass
+        self.set_auto_rerun(ui.get("auto_rerun") is True)
         if ui.get("workspace") in WORKSPACES:
             self.set_workspace(ui["workspace"])
+        if ui.get("canvas_view") in structure_tools.VIEWS:
+            self.set_canvas_view(ui["canvas_view"])
         if ui.get("tool") in structure_tools.TOOLS:
             self.set_tool(ui["tool"])
         if isinstance(ui.get("calculation"), str) and self.calc_box.findData(ui["calculation"]) >= 0:
             self.select_calculation(ui["calculation"])
         selected = ui.get("selected", "")
         self.select(selected if isinstance(selected, str) and self._exists(selected) else "")
-        if ui.get("tab") in ("structure", "result"):
-            self.viewport.setCurrentIndex(RESULT_TAB if ui["tab"] == "result" else STRUCTURE_TAB)
+        for calc in ui.get("results", []) if isinstance(ui.get("results"), list) else []:
+            if isinstance(calc, str) and self.calc_box.findData(calc) >= 0:
+                self.result_view(calc)
+        tab = ui.get("tab")
+        if tab == "result" and self.selected_calculation():           # before phase 3
+            tab = self.selected_calculation()
+        if tab == "structure":
+            self.viewport.setCurrentIndex(STRUCTURE_TAB)
+        elif isinstance(tab, str) and self.calc_box.findData(tab) >= 0:
+            self.show_result(tab)
         sites = ui.get("sites")
         if isinstance(sites, dict) and isinstance(sites.get("positions"), list):
             self._pending_sites = (sites.get("system"), sites["positions"])
@@ -685,7 +929,16 @@ class MainWindow(QMainWindow):
             caption += f" · the latest change cannot be built: {error}"
         elif not self.session.build_is_current(system):
             caption += " · updating…"
-        self.structure.show_structure(system, build, caption, **self._overlays(system, build))
+        overlays = self._overlays(system, build)
+        if self.canvas_view == "hamiltonian":
+            extra, text = self._hamiltonian_overlay(build)
+        elif self.canvas_view == "field":
+            extra, text = self._field_overlay(system, build)
+        else:
+            extra, text = {}, ""
+        overlays.update(extra)
+        caption += f"\n{text}" if text else ""
+        self.structure.show_structure(system, build, caption, **overlays)
         pending = self._pending_sites
         if pending is not None and pending[0] == system and self.session.build_is_current(system):
             self._pending_sites = None
@@ -704,9 +957,15 @@ class MainWindow(QMainWindow):
         if build is None:
             self.status_label.setText(f"{system}: building…")
             return
-        self.status_label.setText(
-            f"{system} · {build['dimensionality']}D · {build['sites']} sites · {build['mode']} · "
-            f"dimension {build['dimension']}")
+        text = (f"{system} · {build['dimensionality']}D · {build['sites']} sites · "
+                f"{build['mode']} · dimension {build['dimension']}")
+        calc = self.selected_calculation()
+        estimate = self.session.estimate(calc) if calc else None
+        if estimate is not None:
+            text += f" · {calc}: {cost.describe(estimate['seconds'])}"
+            if estimate["meanfield"]:
+                text += " with the mean field"
+        self.status_label.setText(text)
 
     def _update_autosave_label(self):
         saver = self.session.autosaver if self.session is not None else None
@@ -757,6 +1016,9 @@ class MainWindow(QMainWindow):
         return self._do_and_select("add_region", system=system, select=select, name=name)
 
     def _outliner_command(self, name, args):
+        if name == "run_calculation":                 # its context menu: the cost guard too
+            self.run_guarded(args["calculation"])
+            return
         ok, out = self._do(name, **args)
         if ok and name == "duplicate":
             self.select(out)
@@ -781,32 +1043,211 @@ class MainWindow(QMainWindow):
             raise KeyError(calc_id)
         self.calc_box.setCurrentIndex(index)
 
-    def _show_selected_result(self):
+    def _calculation_chosen(self, index):
+        """The calculation box changed: follow it when a result is shown."""
         calc = self.selected_calculation()
-        if self.session is None or calc is None:
-            self.plot.clear("No calculation in this document: add one from the Calculate "
-                            "toolbar.")
+        if calc is not None and self.current_tab() != "structure":
+            self.show_result(calc)
+        self._update_status()
+
+    # ---- result views: one tab (or floating dock) per calculation
+    @property
+    def plot(self):
+        """The result view of the selected calculation (made on first use)."""
+        calc = self.selected_calculation()
+        return self.result_view(calc) if calc is not None else None
+
+    def current_tab(self):
+        """"structure", or the id of the calculation whose tab is shown."""
+        widget = self.viewport.currentWidget()
+        return widget.calc_id if isinstance(widget, PlotView) else "structure"
+
+    def result_view(self, calc):
+        """The PlotView of a calculation, made (as a tab) if needed."""
+        view = self.plots.get(calc)
+        if view is None:
+            self.session.document.calculation(calc)
+            view = PlotView(calc)
+            view.save_requested.connect(self.save_result_dialog)
+            view.detach_requested.connect(self.toggle_detached)
+            self.plots[calc] = view
+            self.viewport.addTab(view, calc)
+            self._draw_result(calc)
+        return view
+
+    def show_result(self, calc):
+        """Bring a calculation's result view forward (its tab, or its dock)."""
+        view = self.result_view(calc)
+        dock = self.plot_docks.get(calc)
+        if dock is not None:
+            dock.show()
+            dock.raise_()
+        else:
+            self.viewport.setCurrentWidget(view)
+        return calc
+
+    def close_result(self, calc):
+        view = self.plots.pop(calc, None)
+        dock = self.plot_docks.pop(calc, None)
+        if view is None:
             return
+        index = self.viewport.indexOf(view)
+        if index >= 0:
+            self.viewport.removeTab(index)
+        view.hide()
+        view.deleteLater()               # may run inside a signal of its own tab bar
+        if dock is not None:
+            dock.hide()
+            dock.deleteLater()
+
+    def _close_tab(self, index):
+        widget = self.viewport.widget(index)
+        if isinstance(widget, PlotView):
+            self.close_result(widget.calc_id)
+
+    def toggle_detached(self, calc):
+        """Move a result view into a floating dock, or back into its tab."""
+        view = self.plots[calc]
+        dock = self.plot_docks.pop(calc, None)
+        if dock is not None:
+            dock.setWidget(None)
+            view.setParent(None)
+            dock.hide()
+            dock.deleteLater()
+            self.viewport.addTab(view, self._tab_text(calc))
+            self.viewport.setCurrentWidget(view)
+            view.set_detached(False)
+            return False
+        self.viewport.removeTab(self.viewport.indexOf(view))
+        dock = QDockWidget(f"Result {calc}", self)
+        dock.setObjectName(f"resultDock_{calc}")
+        dock.setWidget(view)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+        dock.setFloating(True)
+        dock.resize(640, 480)
+        dock.show()
+        view.show()
+        view.set_detached(True)
+        self.plot_docks[calc] = dock
+        return True
+
+    def _tab_text(self, calc):
+        try:
+            kind = self.session.document.calculation(calc).kind
+        except Exception:
+            return calc
+        return f"{calc} {kind}" + (" (stale)" if self.session.is_stale(calc) else "")
+
+    def _draw_result(self, calc):
+        """Draw a calculation's latest result into its view, unless the view
+        already shows exactly that (a redraw would lose the zoom)."""
+        view = self.plots[calc]
         result = self.session.result(calc)
+        stale = self.session.is_stale(calc) if result is not None else False
+        index = self.viewport.indexOf(view)
+        if index >= 0:
+            self.viewport.setTabText(index, self._tab_text(calc))
+        dock = self.plot_docks.get(calc)
+        if dock is not None:
+            dock.setWindowTitle(f"Result {self._tab_text(calc)}")
         if result is None:
-            self.plot.clear(f"{calc}: no result yet; press Run (F5).")
+            if view.result is not None or not view.caption.text().startswith(calc):
+                view.clear(f"{calc}: no result yet; press Run (F5).")
             return
-        stale = self.session.is_stale(calc)
+        if view.result is result and view.stale == stale:
+            return
         title = f"{calc} · {result.kind} · {result.mode}" + (" · STALE" if stale else "")
         notes = [f"{result.meta.get('seconds', 0):.2f} s"]
+        if result.meta.get("build_seconds", 0) >= 0.05:
+            notes[0] += f" after {result.meta['build_seconds']:.2f} s of building"
+        if result.meanfield:
+            notes.append(f"mean-field total energy {result.meanfield.get('total_energy', 0):.6g}")
         if result.skipped:
             notes.append("skipped: " + ", ".join(f"{r['id']} ({r['message']})"
                                                  for r in result.skipped))
         if stale:
             notes.append("the document changed since this result was computed; run again")
-        self.plot.show_result(result, title, " · ".join(notes))
+        view.show_result(result, title, " · ".join(notes), stale=stale)
+
+    def _refresh_results(self):
+        """After a document change: close the views of removed calculations,
+        mark stale results."""
+        present = {c.id for c in self.session.document.calculations}
+        for calc in list(self.plots):
+            if calc not in present:
+                self.close_result(calc)
+            else:
+                self._draw_result(calc)
+
+    def save_result_dialog(self, calc):
+        path, _ = QFileDialog.getSaveFileName(self, f"Save the data of {calc}", f"{calc}.npz",
+                                              "arrays and metadata (*.npz)")
+        if path:
+            self._act("save_result", calculation=calc, path=path)
 
     def run_selected(self):
+        """Run the selected calculation (the Run button, F5)."""
         calc = self.selected_calculation()
         if calc is None:
             self.message("no calculation to run", error=True)
-            return
-        self._act("run_calculation", calculation=calc)
+            return None
+        return self.run_guarded(calc)
+
+    def run_guarded(self, calc, confirmed=False):
+        """Run a calculation; one that would take longer than cost.SLOW
+        asks first, in the cost bar (non-modal)."""
+        estimate = self.session.estimate(calc)
+        if not confirmed and estimate is not None and estimate["seconds"] > cost.SLOW:
+            extra = " including the mean field" if estimate["meanfield"] else ""
+            self.cost_bar.show_message(
+                f"{calc} will take {cost.describe(estimate['seconds'])}{extra} (Hilbert space "
+                f"dimension {estimate['dimension']}). Run it anyway?",
+                [("Run anyway", lambda: self.run_guarded(calc, confirmed=True),
+                  "runAnywayButton"),
+                 ("Cancel", self.cost_bar.dismiss, "costCancelButton")])
+            return None
+        self.cost_bar.dismiss()
+        return self._act("run_calculation", calculation=calc)
+
+    def set_auto_rerun(self, enabled=True):
+        """Re-run stale results automatically when they are cheap (opt-in)."""
+        self.auto_rerun = bool(enabled)
+        self.auto_rerun_action.setChecked(self.auto_rerun)
+        if self.auto_rerun and self.session is not None:
+            self._rerun_stale()
+        return self.auto_rerun
+
+    def _rerun_stale(self):
+        """Run again the stale results whose system is built from the
+        current Document and whose estimate is below AUTO_RERUN_SECONDS;
+        a calculation is re-run once per key, so a failure does not loop."""
+        if not self.auto_rerun or self.session is None:
+            return []
+        started = []
+        for calc in self.session.document.calculations:
+            if calc.id not in self.session.results or not self.session.is_stale(calc.id) \
+                    or not self.session.build_is_current(calc.system):
+                continue
+            try:
+                key = pipeline.calculation_key(self.session.document, calc.id)
+            except Exception:
+                continue
+            estimate = self.session.estimate(calc.id)
+            if self._auto_keys.get(calc.id) == key or estimate is None \
+                    or estimate["seconds"] > AUTO_RERUN_SECONDS:
+                continue
+            self._auto_keys[calc.id] = key
+            self.session.jobs.supersede("run", calc.id)
+            job = self._act("run_calculation", calculation=calc.id)
+            if job is not None:
+                self._auto_jobs.add(job["id"])
+                started.append(calc.id)
+        return started
+
+    def show_meanfield(self):
+        system = self._target_system()
+        if system is not None:
+            self.select(f"{system}/meanfield")
 
     def cancel_selected(self):
         calc = self.selected_calculation()
@@ -893,6 +1334,7 @@ class MainWindow(QMainWindow):
         self.redo_action.setEnabled(has and self.session.dispatcher.can_redo())
         self.run_button.setEnabled(has and self.calc_box.count() > 0)
         self.add_region_button.setEnabled(has and bool(self.session.document.systems))
+        self.meanfield_button.setEnabled(has and bool(self.session.document.systems))
         self._selection_changed(len(self.structure.selected()))
 
     # ---- commands and messages
