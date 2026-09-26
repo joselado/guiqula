@@ -25,7 +25,7 @@ def test_window_screenshot_without_session(repo, tmp_path):
 def test_list_widgets(repo, tmp_path):
     result = drive(repo, tmp_path, "--no-session", "--list-widgets")
     assert result.returncode == 0, result.stderr
-    for name in ("MainWindow (MainWindow)", "documentTree (DocumentTree)", "runButton (QPushButton)",
+    for name in ("MainWindow (MainWindow)", "outliner (Outliner)", "properties (PropertiesPanel)", "runButton (QPushButton)",
                  "jobPanel (JobPanel)", "plotView (PlotView)"):
         assert name in result.stdout, name
 

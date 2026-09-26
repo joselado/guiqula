@@ -58,6 +58,11 @@ def pyqula_direct(tmp_path_factory):
     return out[0], out[1].reshape(100, -1), out[2].reshape(100, -1)
 
 
+def test_ready_reports_pyqula_names(manager):
+    manager.wait_ready(120)
+    assert "sz" in manager.names["operators"] and "sublattice" in manager.names["operators"]
+
+
 def test_build_summary(manager):
     job = manager.wait(manager.build(project.load("honeycomb_zeeman_rashba").to_json(), "s1"), 120)
     assert job.status == "done", job.error

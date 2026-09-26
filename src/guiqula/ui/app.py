@@ -5,6 +5,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from guiqula import env
+from guiqula.ui import errors, theme
 from guiqula.ui.mainwindow import MainWindow
 
 
@@ -19,21 +20,23 @@ def create_application(argv=None):
         env.configure_qt()
         app = QApplication(list(argv) if argv is not None else sys.argv[:1])
         app.setApplicationName("guiqula")
-        app.setStyle("Fusion")   # plain Qt look (decision 13.6)
+        theme.apply(app)     # plain Qt look (decision 13.6)
     return app
 
 
-def build_main_window():
-    """Create (but do not show) the main window, without workers."""
+def build_main_window(**options):
+    """Create (but do not show) the main window, without workers. Built
+    this way (tests, tools/drive.py) it never asks before closing."""
     create_application()
-    return MainWindow()
+    return MainWindow(**options)
 
 
 def run(argv=None, document=None):
     """Show the main window, start the workers once it is visible, and run
     the event loop; return the exit code."""
     app = create_application(argv)
-    window = build_main_window()
+    window = build_main_window(ask_before_close=True)
+    errors.install(window)
     window.show()
     QTimer.singleShot(0, lambda: window.start_session(document))
     return app.exec()

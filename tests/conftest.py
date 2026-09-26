@@ -69,3 +69,31 @@ def run_python(tmp_path):
                               capture_output=True, text=True, timeout=timeout)
 
     return run
+
+
+class NoJobs:
+    """The part of JobManager a Session uses, for tests that run nothing."""
+    names = {}
+
+    def subscribe(self, listener):
+        return lambda: None
+
+    def poll(self, timeout=0.0):
+        return 0
+
+    def status(self):
+        return []
+
+    def supersede(self, kind, label):
+        return []
+
+    def build(self, document_json, system, timeout=None):
+        raise RuntimeError("NoJobs runs nothing")
+
+    def shutdown(self):
+        pass
+
+
+@pytest.fixture
+def no_jobs():
+    return NoJobs()

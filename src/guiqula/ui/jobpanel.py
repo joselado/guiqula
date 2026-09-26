@@ -18,7 +18,14 @@ class JobPanel(QWidget):
         self.table.setHorizontalHeaderLabels(COLUMNS)
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header = self.table.horizontalHeader()
+        for column, mode in ((0, QHeaderView.ResizeMode.ResizeToContents),
+                             (1, QHeaderView.ResizeMode.Stretch),
+                             (2, QHeaderView.ResizeMode.ResizeToContents),
+                             (3, QHeaderView.ResizeMode.Fixed),
+                             (4, QHeaderView.ResizeMode.ResizeToContents)):
+            header.setSectionResizeMode(column, mode)
+        self.table.setColumnWidth(3, 70)
         self.workers = QLabel("workers: starting")
         self.workers.setObjectName("workerStatus")
         layout = QVBoxLayout(self)

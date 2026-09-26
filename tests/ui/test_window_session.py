@@ -1,4 +1,4 @@
-"""The phase-1 window driven offscreen (PLAN.md section 7, decision 14.2):
+"""The window driven offscreen through its job panel (PLAN.md section 7, decision 14.2):
 run through the Run button, progress, cancel a running job through the job
 panel, the worker respawns and the window stays usable."""
 import pytest
@@ -24,8 +24,9 @@ def test_preset_is_shown_and_built(window, qtbot):
     assert window.calc_box.count() == 2
     wait_for(qtbot, lambda: "s1" in window.builds, 120_000)
     assert window.builds["s1"]["mode"] == "spinful" and window.builds["s1"]["sites"] == 8
-    texts = [window.tree.topLevelItem(0).child(1).child(i).text(0) for i in range(2)]
-    assert texts == ["● t1  zeeman", "● t2  rashba"]
+    texts = [window.outliner.item(t).text(0) for t in ("t1", "t2")]
+    assert texts == ["t1  Zeeman / exchange field", "t2  Rashba spin-orbit coupling"]
+    assert window.outliner.item("t1").text(1) == "→ spinful"
     assert "8 sites" in window.status_label.text()
 
 
@@ -87,10 +88,8 @@ def test_invalid_entry_is_flagged_in_the_tree(window, qtbot):
     t = session.do("add_term", system=s, kind="sublattice_imbalance")
 
     def flagged():
-        top = [window.tree.topLevelItem(i) for i in range(window.tree.topLevelItemCount())]
-        items = [c for item in top for h in range(item.childCount())
-                 for c in [item.child(h).child(i) for i in range(item.child(h).childCount())]]
-        return any(i.text(0).startswith(f"✗ {t}") and "sublattice" in i.text(1) for i in items)
+        item = window.outliner.item(t)
+        return item.text(0).startswith(f"✗ {t}") and "sublattice" in item.text(1)
     wait_for(qtbot, flagged, 120_000)
 
 

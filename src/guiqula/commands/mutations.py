@@ -159,6 +159,34 @@ def remove(document, entry):
 
 
 @mutation
+def duplicate(document, entry):
+    """Copy an op, term, region or calculation (placed right after the
+    original), or a whole system with fresh ids for everything in it (its
+    terms keep pointing at the copies of its regions); returns the new id."""
+    family, _, items, index, obj = document.find(entry)
+    copy = obj.model_copy(deep=True)
+    items.insert(index + 1, copy)          # new ids are allocated with the copy in place
+    if family != "system":
+        copy.id = document.new_id(family)
+        if family == "region":
+            copy.name = f"{obj.name} (copy)"
+        return copy.id
+    copy.id = document.new_id("system")
+    copy.name = f"{obj.name or obj.id} (copy)"
+    for op in copy.geometry.ops:
+        op.id = document.new_id("op")
+    regions = {}
+    for region in copy.regions:
+        regions[region.id] = region.id = document.new_id("region")
+    if copy.hamiltonian is not None:
+        for term in copy.hamiltonian.terms:
+            term.id = document.new_id("term")
+            if term.region is not None:
+                term.region = regions[term.region]
+    return copy.id
+
+
+@mutation
 def move(document, entry, index):
     """Move an op, term, region or calculation to a new position in its list."""
     family, _, items, old, obj = document.find(entry)

@@ -260,8 +260,9 @@ class Session:
         document, info = autosave_files.read(path)
         source = Path(info["source"]) if info.get("source") else None
         self._replace_document(document, source, None)
-        if self.autosaver is not None:
+        if self.autosaver is not None:     # claimed at once: not offered again meanwhile
             self.autosaver.adopt(path)
+            self.autosaver.write(self.document, self.path, self.modified)
         return {"path": str(path), "source": info.get("source"),
                 "systems": [s.id for s in document.systems]}
 

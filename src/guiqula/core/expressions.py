@@ -80,7 +80,8 @@ def _check(node, source, depth=0):
             isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)
             and func.value.id == "np" and func.attr in FUNCTIONS)
         if not is_function:
-            raise ExpressionError("only the whitelisted functions can be called: "
+            called = ast.unparse(func)
+            raise ExpressionError(f"{called}() cannot be called; the functions are: "
                                   + ", ".join(sorted(FUNCTIONS)))
         for arg in node.args:
             if isinstance(arg, ast.Starred):

@@ -66,12 +66,15 @@ def widget_tree(widget, depth=0):
     return lines
 
 
-def settle(app, session, timeout):
-    """Process events until no job is pending (builds and runs)."""
+def settle(app, window, session, timeout):
+    """Process events until no job is pending (builds and runs), including
+    the build the window schedules shortly after a document change."""
     deadline = time.monotonic() + timeout
     while True:
         app.processEvents()
-        if session is None or all(j.done for j in session.jobs.jobs.values()):
+        pending = session is not None and (
+            window.build_timer.isActive() or not all(j.done for j in session.jobs.jobs.values()))
+        if not pending:
             app.processEvents()
             return True
         if time.monotonic() > deadline:
@@ -132,7 +135,7 @@ def main(argv=None):
                 time.sleep(0.02)
             if job.status != "done":
                 status = 1
-        settle(app, session, args.timeout)
+        settle(app, window, session, args.timeout)
         for code in args.python:
             exec(code, {"app": app, "window": window, "session": session})
             app.processEvents()

@@ -62,6 +62,32 @@ def test_move_and_enable():
     assert d.document.find(t1)[-1].enabled is False
 
 
+def test_duplicate():
+    d = Dispatcher()
+    s = d.do("add_system", name="flake")
+    op = d.do("add_geometry_op", system=s, kind="supercell", params={"n": [2, 2, 1]})
+    d.do("add_geometry_op", system=s, kind="ribbon")
+    r = d.do("add_region", system=s, select={"kind": "expression", "expr": "x > 0"}, name="right")
+    t = d.do("add_term", system=s, kind="onsite", params={"mu": 0.3}, region=r)
+    c = d.do("add_calculation", system=s, kind="dos")
+    op2 = d.do("duplicate", entry=op)
+    assert [o.id for o in d.document.system(s).geometry.ops] == [op, op2, "op2"]
+    assert d.document.find(op2)[-1].params == {"n": [2, 2, 1]}
+    r2 = d.do("duplicate", entry=r)
+    assert d.document.find(r2)[-1].name == "right (copy)"
+    c2 = d.do("duplicate", entry=c)
+    assert d.document.find(c2)[-1].system == s
+    s2 = d.do("duplicate", entry=s)
+    copy = d.document.system(s2)
+    assert copy.name == "flake (copy)" and d.document.systems[1] is copy
+    ids = d.document.all_ids()
+    assert len(ids) == len(set(ids))
+    term = copy.hamiltonian.terms[0]
+    assert term.id != t and term.region == copy.regions[0].id != r
+    d.undo()
+    assert [x.id for x in d.document.systems] == [s]
+
+
 def test_actions_are_journaled_not_undoable():
     d = Dispatcher()
     calls = []

@@ -2,12 +2,13 @@
 process never loads pyqula, jax or numba; those live in the worker."""
 import json
 
-HEAVY = {"pyqula", "jax", "jaxlib", "numba"}
+HEAVY = {"pyqula", "jax", "jaxlib", "numba", "scipy"}   # scipy: the worker finds the bonds
 
 # Measured on the development machine on 2026-09-26 (PLAN.md 13.15), warm
 # file cache, offscreen, from the first guiqula import to a shown window:
 # 0.23 s for the phase-0 placeholder, 0.63 s for the phase-1 window, which
-# imports matplotlib and numpy for its plot tab. Importing pyqula alone
+# imports matplotlib and numpy for its plot tab; 0.68 s for the phase-2
+# shell (outliner, properties, structure canvas). Importing pyqula alone
 # costs 0.7 s. The budget leaves room for a cold cache; the module check is
 # the sharp part. Workers start after the window is shown (ui/app.py).
 BUDGET_SECONDS = 2.0

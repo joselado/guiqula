@@ -12,18 +12,6 @@ from guiqula.io import autosave, project
 from guiqula.session import Session
 
 
-class NoJobs:
-    """The part of JobManager a Session uses when nothing runs."""
-    def subscribe(self, listener):
-        return lambda: None
-
-    def poll(self, timeout=0.0):
-        return 0
-
-    def shutdown(self):
-        pass
-
-
 class Clock:
     def __init__(self):
         self.now = 0.0
@@ -47,6 +35,17 @@ def dead_pid():
 def session(document=None, clock=None, **options):
     saver = autosave.Autosaver(clock=clock) if clock else options.pop("autosave", False)
     return Session(document, jobs=NoJobs(), autosave=saver, **options)
+
+
+class NoJobs:
+    def subscribe(self, listener):
+        return lambda: None
+
+    def poll(self, timeout=0.0):
+        return 0
+
+    def shutdown(self):
+        pass
 
 
 def test_debounce(data_dir):

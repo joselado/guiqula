@@ -157,6 +157,7 @@ class JobManager:
             self.workers["interactive"] = [_Worker("interactive", warm, context)]
         self.queues = {role: deque() for role in self.workers}
         self.jobs = {}
+        self.names = {}          # name lists from pyqula (worker READY), e.g. "operators"
         self._ids = itertools.count(1)
         self._listeners = []
         self.closed = False
@@ -340,6 +341,7 @@ class JobManager:
         tag = message[0]
         if tag == P.READY:
             worker.ready = True
+            self.names.update(message[1].get("names", {}))
             self._emit("worker", worker.info())
             return
         job = self.jobs.get(message[1])

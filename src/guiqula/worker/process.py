@@ -99,7 +99,7 @@ def main(conn, config):
     if config.get("warm"):
         with contextlib.redirect_stdout(open(os.devnull, "w")):
             _warm_up()
-    pipe.send(P.READY, {"pid": os.getpid(), "role": config["role"]})
+    pipe.send(P.READY, {"pid": os.getpid(), "role": config["role"], "names": _names()})
 
     def handle(job_id, kind, payload):
         last = [0.0]
@@ -162,6 +162,13 @@ def main(conn, config):
     if state["cores"] > 1:
         parallel.set_cores(1)
     sys.exit(0)
+
+
+def _names():
+    """The name lists pyqula itself provides (CLAUDE.md), for the forms of
+    the UI process, which cannot import pyqula."""
+    from pyqula import operatorlist
+    return {"operators": list(operatorlist.get_operator_names())}
 
 
 def _warm_up():
