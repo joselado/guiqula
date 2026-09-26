@@ -77,6 +77,7 @@ def test_select_action_drives_properties_and_viewport(window, qtbot):
     assert window.properties.form.lattice.currentData() == "honeycomb_lattice"
     assert "8 sites" in window.properties.form.info.text()
     assert not window.session.dispatcher.can_undo()          # selection is not undoable
+    assert not window.build_timer.isActive()                 # nor a reason to rebuild
     with pytest.raises(ValueError, match="nothing called"):
         window.session.act("select", entry="t99")
 

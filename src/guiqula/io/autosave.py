@@ -35,6 +35,8 @@ def autosave_dir():
 
 def pid_alive(pid):
     """Whether a process with this pid runs on this machine."""
+    if pid <= 0:            # os.kill(-1, 0) would signal every process we may signal
+        return False
     if pid == os.getpid():
         return True
     if os.name == "nt":      # os.kill(pid, 0) would terminate the process on Windows

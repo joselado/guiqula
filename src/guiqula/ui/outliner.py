@@ -222,20 +222,31 @@ class Outliner(QTreeWidget):
             item.setForeground(column, QBrush(QColor(theme.ERROR)))
             item.setToolTip(column, message)
 
-    def _add_calculation(self, session, parent, calc):
-        status = session.status(calc.id)
-        job = session.calc_jobs.get(calc.id)
+    @staticmethod
+    def _calculation_status(session, calc_id):
+        status = session.status(calc_id)
+        job = session.calc_jobs.get(calc_id)
         if job is not None and status == "running":
             status = f"running {job.progress:.0%}"
         elif job is not None and status == "failed":
             status = f"failed: {job.error}"
+        return status, job.error if job is not None and job.error else None
+
+    def _add_calculation(self, session, parent, calc):
+        status, error = self._calculation_status(session, calc.id)
         item = self._add(parent, calc.id,
                          [f"{calc.id}  {_label('calculation', calc.kind)} on {calc.system}", status],
-                         tooltip=job.error if job is not None and job.error else None)
+                         tooltip=error)
         if status.startswith("failed"):
             item.setForeground(1, QBrush(QColor(theme.ERROR)))
         elif status == "stale":
             item.setForeground(1, QBrush(QColor(theme.DISABLED)))
+
+    def update_calculation(self, session, calc_id):
+        """Only the status of one calculation (progress arrives often)."""
+        item = self._items.get(calc_id)
+        if item is not None:
+            item.setText(1, self._calculation_status(session, calc_id)[0])
 
     # ---- interaction
     def _current_changed(self, current, previous):

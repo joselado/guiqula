@@ -182,8 +182,8 @@ class Session:
         """Forget results and builds of entries that no longer exist: ids
         are reused after a removal, and a new c1 must not show the old
         c1's result."""
-        if self.autosaver is not None:
-            self.autosaver.changed()
+        if self.autosaver is not None and (event["type"] != "action" or event["name"] == "save"):
+            self.autosaver.changed()        # save: the file now records no unsaved changes
         if event["type"] == "reset":
             self.builds.clear()
             self.build_errors.clear()

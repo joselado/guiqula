@@ -374,7 +374,12 @@ class MainWindow(QMainWindow):
                 self.message(f"{payload['role']} worker restarted (pid {payload['pid']})")
 
     def _document_changed(self, event=None):
-        if event is not None and event["type"] == "action" and event["name"] in WINDOW_ACTIONS:
+        if event is not None and event["type"] == "action":
+            # actions do not change the Document (new, load and recover reset it, and
+            # region_from_selection and remove_selected announce their mutation): only
+            # the title (save clears the asterisk) and the buttons can change
+            self._update_title()
+            self._update_actions()
             return
         if self.selected and not self._exists(self.selected):
             self.selected = ""
@@ -390,6 +395,9 @@ class MainWindow(QMainWindow):
         self._show_selected_result()
         self._update_status()
         self.build_timer.start(BUILD_DELAY_MS)
+        self._update_title()
+
+    def _update_title(self):
         path = self.session.path
         title = f"guiqula — {path.name}" if path else "guiqula"
         self.setWindowTitle(title + (" *" if self.session.modified else ""))
@@ -415,8 +423,12 @@ class MainWindow(QMainWindow):
     def _request_builds(self):
         """Ask the interactive worker to build every system (geometry for
         the canvas, modes, entries pyqula rejects); requests coalesce."""
-        if self.session is not None:
+        if self.session is None:
+            return
+        try:
             self.session.build_all()
+        except Exception as error:
+            self.message(f"could not ask for a build: {error}", error=True)
 
     def _job_changed(self, job):
         if job.kind == "build":
@@ -447,8 +459,8 @@ class MainWindow(QMainWindow):
             if job.status == "done" and job.label == self.selected_calculation():
                 self._show_selected_result()
                 self.viewport.setCurrentIndex(RESULT_TAB)
-        elif job.status == "running":
-            self.outliner.refresh(self.session)
+        elif job.kind == "run":
+            self.outliner.update_calculation(self.session, job.label)   # queued, progress
         self.jobs.update_workers(self.session.jobs.status())
 
     # ---- selection and workspaces

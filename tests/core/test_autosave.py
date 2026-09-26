@@ -68,6 +68,13 @@ def test_debounce(data_dir):
     last = json.loads(saver.path.read_text())
     assert last["document"]["systems"][0]["name"] == "n11" and last["modified"]
     assert last["pid"] == os.getpid() and not saver.pending
+    s.act("list_recoverable")                       # actions change nothing to save...
+    assert not saver.pending
+    s.act("save", path=str(data_dir / "p.json"))    # ...except save: now nothing is unsaved
+    assert saver.pending
+    clock.now += 1.0
+    s.poll()
+    assert not json.loads(saver.path.read_text())["modified"]
     s.close()                                       # a clean close removes the file
     assert not saver.path.exists()
 
