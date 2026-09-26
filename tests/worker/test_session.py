@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 import numpy as np
 import pytest
@@ -146,3 +147,40 @@ def test_builds_coalesce_and_are_kept_per_system(session):
     session.do("remove", entry="c2")
     session.do("remove", entry="s1")
     assert session.builds == {}
+
+
+def test_console(session):
+    """The Python console runs in its own worker (decision 14.1): doc, g
+    and h of the system, variables that persist, echo of a final
+    expression, tracebacks from the console's own code, do() through the
+    dispatcher (undoable), and an interrupt that resets the namespace."""
+    session.act("load", path="honeycomb_zeeman_rashba")
+    out = session.act("console", code="n = len(g.r)\nn * 10", timeout=300)
+    assert out["status"] == "done" and out["value"]["ok"], out
+    assert out["output"] == ["80"]
+    out = session.act("console", code="print(n, h.has_spin, doc.systems[0].id)")
+    assert out["output"] == ["8 True s1"]
+    out = session.act("console", code="x = 1\n1 / 0")
+    assert out["value"]["ok"] is False and out["output"][0] == "Traceback (most recent call last):"
+    assert out["output"][-1] == "ZeroDivisionError: division by zero"
+    assert not any("process.py" in line for line in out["output"])   # the console's frames only
+    terms = len(session.document.system("s1").hamiltonian.terms)
+    out = session.act("console", code="t = do('add_term', system='s1', kind='onsite')\n"
+                                      "t, len(doc.systems[0].hamiltonian.terms)")
+    assert out["value"]["ok"], out
+    assert out["output"] == [repr(("t3", terms + 1))]
+    assert len(session.document.system("s1").hamiltonian.terms) == terms + 1
+    session.undo()                                                # the console's edit
+    assert len(session.document.system("s1").hamiltonian.terms) == terms
+    out = session.act("console", code="len(h.geometry.r), n")
+    assert out["output"] == ["(8, 8)"]
+    session.interrupt_console()
+    out = session.act("console", code="n", timeout=300)
+    assert out["value"]["ok"] is False and out["output"][-1].startswith("NameError")
+    job = session.console("import time\ntime.sleep(60)")
+    deadline = time.monotonic() + 60
+    while job.status != "running" and time.monotonic() < deadline:
+        session.poll(0.05)
+    session.interrupt_console()
+    assert job.status == "cancelled"
+    assert session.act("console", code="1 + 1", timeout=300)["output"] == ["2"]

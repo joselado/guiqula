@@ -18,6 +18,12 @@ executes the plan) and the UI (which shows modes, flags and staleness).
   or invalid entry does nothing, so its key is the key before it. The key
   of a calculation is what a result is stamped with; a result whose key
   differs from the current one is stale.
+- An entry that runs code from the document (a Python node, PLAN.md
+  13.7) is invalid while the document is not trusted: skipped like any
+  invalid entry and left out of the keys, so trusting the document makes
+  the results that it changes stale. The flag is the Session's, never the
+  Document's (a file cannot trust itself); every planner call of the UI
+  goes through the Session's helpers so that its keys match the workers'.
 - The mean-field block is the last stage of a quantum system. It is
   expensive, so it runs with the calculations only: the interactive
   builds (canvas, outliner) stop before it and report it as deferred.
@@ -34,6 +40,8 @@ from guiqula.registry import base as registry
 from guiqula.registry.params import FieldParam, ParamError
 
 MODES = ("spinless", "spinful", "nambu")
+UNTRUSTED = ("Python code of a document opened from a file: it runs once the document is "
+             "trusted")
 
 
 @dataclass
@@ -81,7 +89,7 @@ class SystemPlan:
         raise KeyError(entry_id)
 
 
-def _check_entry(family, entry_kind, params, system_kind):
+def _check_entry(family, entry_kind, params, system_kind, trusted=True):
     """Return (spec, normalized params, problem)."""
     try:
         spec = registry.get(family, entry_kind)
@@ -90,9 +98,30 @@ def _check_entry(family, entry_kind, params, system_kind):
     if system_kind not in spec.systems:
         return spec, None, f"{spec.label} does not apply to a {system_kind} system"
     try:
-        return spec, spec.normalize_params(params), None
+        params = spec.normalize_params(params)
     except ParamError as error:
         return spec, None, str(error)
+    if spec.runs_code and not trusted:
+        return spec, params, UNTRUSTED
+    return spec, params, None
+
+
+def code_entries(document):
+    """Ids of the entries that run code from the document (Python nodes)."""
+    found = []
+    for system in document.systems:
+        items = [("geometry_op", op) for op in system.geometry.ops]
+        if system.hamiltonian is not None:
+            items += [("term", term) for term in system.hamiltonian.terms]
+        found += [item.id for family, item in items if _runs_code(family, item.kind)]
+    return found + [c.id for c in document.calculations if _runs_code("calculation", c.kind)]
+
+
+def _runs_code(family, kind):
+    try:
+        return registry.get(family, kind).runs_code
+    except registry.RegistryError:
+        return False
 
 
 def _field_regions(spec, params, regions):
@@ -118,7 +147,8 @@ def _hashed(params, selections):
     return {name: fields.resolve_regions(value, selections) for name, value in params.items()}
 
 
-def plan_system(document, system_id):
+def plan_system(document, system_id, trusted=True):
+    """The plan of a system; trusted: whether Python nodes may run."""
     system = document.system(system_id)
     plan = SystemPlan(system_id=system.id, kind=system.kind)
     if system.kind != "quantum":
@@ -137,7 +167,8 @@ def plan_system(document, system_id):
     key = stage.key
 
     for op in system.geometry.ops:
-        spec, params, problem = _check_entry("geometry_op", op.kind, op.params, system.kind)
+        spec, params, problem = _check_entry("geometry_op", op.kind, op.params, system.kind,
+                                             trusted)
         stage = StagePlan("op", op.id, op.kind, op.enabled, spec, params, None, problem)
         stage.applied = op.enabled and problem is None
         if stage.applied:
@@ -148,7 +179,8 @@ def plan_system(document, system_id):
     regions = {r.id: r for r in system.regions}
     term_stages = []
     for term in system.hamiltonian.terms:
-        spec, params, problem = _check_entry("term", term.kind, term.params, system.kind)
+        spec, params, problem = _check_entry("term", term.kind, term.params, system.kind,
+                                             trusted)
         select = None
         if problem is None and term.region is not None:
             if term.region not in regions:
@@ -184,13 +216,13 @@ def plan_system(document, system_id):
     term_stages.append(meanfield)
 
     requested = system.hamiltonian.construction
-    needs = {req for s in term_stages if s.applied for req in s.spec.requires}
+    needs = {req for s in term_stages if s.applied for req in s.spec.requires_of(s.params)}
     nambu = requested.nambu or "nambu" in needs
     has_spin = requested.has_spin or nambu or "spin" in needs
     plan.mode = "nambu" if nambu else ("spinful" if has_spin else "spinless")
     plan.upgraded_by = [s.id for s in term_stages if s.applied and (
-        ("spin" in s.spec.requires and not requested.has_spin)
-        or ("nambu" in s.spec.requires and not requested.nambu))]
+        ("spin" in s.spec.requires_of(s.params) and not requested.has_spin)
+        or ("nambu" in s.spec.requires_of(s.params) and not requested.nambu))]
     plan.construction = {"has_spin": has_spin, "nambu": nambu, "tij": list(requested.tij),
                          "is_sparse": requested.is_sparse}
     stage = StagePlan("construction", None, "construction", True, None, plan.construction)
@@ -220,17 +252,17 @@ class CalculationPlan:
     system: SystemPlan | None = None
 
 
-def plan_calculation(document, calc_id):
+def plan_calculation(document, calc_id, trusted=True):
     calc = document.calculation(calc_id)
     plan = CalculationPlan(calc.id, calc.kind, calc.system)
     try:
-        plan.system = plan_system(document, calc.system)
+        plan.system = plan_system(document, calc.system, trusted)
     except DocumentError as error:
         plan.problem = str(error)
         return plan
     system_kind = plan.system.kind
     plan.spec, plan.params, plan.problem = _check_entry("calculation", calc.kind, calc.params,
-                                                        system_kind)
+                                                        system_kind, trusted)
     if plan.problem is None and plan.system.problem:
         plan.problem = plan.system.problem
     plan.key = content_hash({"stage": "calculation", "kind": calc.kind,
@@ -239,5 +271,5 @@ def plan_calculation(document, calc_id):
     return plan
 
 
-def calculation_key(document, calc_id):
-    return plan_calculation(document, calc_id).key
+def calculation_key(document, calc_id, trusted=True):
+    return plan_calculation(document, calc_id, trusted).key

@@ -277,3 +277,22 @@ class ConditionParam(Param):
     def code(value):
         from guiqula.core.expressions import Expression
         return f"lambda r: bool({Expression(value).to_python('r')})"
+
+
+class CodeParam(Param):
+    """Python source of a Python node (PLAN.md 3.1, 13.7). Normalizing only
+    checks the syntax; the code runs in the worker, and only in a trusted
+    document."""
+    type_name = "code"
+
+    def normalize(self, value):
+        import ast
+        if not isinstance(value, str):
+            raise ParamError(f"{self.name}: expected Python source text")
+        value = value.replace("\r\n", "\n").rstrip() + "\n"
+        try:
+            ast.parse(value)
+        except SyntaxError as error:
+            raise ParamError(f"{self.name}: syntax error in line {error.lineno}: "
+                             f"{error.msg}") from None
+        return value

@@ -161,9 +161,13 @@ def _apply_stage(stage, obj):
             return new
         if stage.spec.call:
             apply_call(stage.spec, ctx, h=work)
-        else:
-            stage.spec.apply(work, ctx)
-        return work
+            return work
+        new = stage.spec.apply(work, ctx)       # a term changes h, or returns a new one
+        if new is None:
+            return work
+        if not hasattr(new, "intra"):
+            raise TypeError(f"{stage.kind} returned {type(new).__name__}, not a Hamiltonian")
+        return new
     try:
         new, record["output"] = _run(step)
     except Exception as error:
@@ -174,12 +178,13 @@ def _apply_stage(stage, obj):
     return new, record
 
 
-def build_system(document, system_id, cache=None, meanfield=True):
+def build_system(document, system_id, cache=None, meanfield=True, trusted=True):
     """Build one system; returns a Built with the Hamiltonian and a report
     per stage: status "ok", "disabled", "invalid" (with the message) or,
-    for a mean field left out with meanfield=False, "deferred"."""
+    for a mean field left out with meanfield=False, "deferred". trusted:
+    whether Python nodes run (PLAN.md 13.7)."""
     vendoring.ensure_pyqula_on_path()
-    plan = pipeline.plan_system(document, system_id)
+    plan = pipeline.plan_system(document, system_id, trusted)
     if plan.problem:
         raise BuildError(plan.problem)
     stages = plan.stages if meanfield else [s for s in plan.stages if s.stage != "meanfield"]

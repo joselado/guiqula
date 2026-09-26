@@ -24,7 +24,6 @@ from PySide6.QtWidgets import (QAbstractItemView, QInputDialog, QMenu, QTreeWidg
 
 from guiqula.core import regions as region_tools
 from guiqula.registry import base as registry
-from guiqula.registry import pipeline
 from guiqula.ui import theme
 from guiqula.ui.plots import scalar_rows
 
@@ -58,10 +57,19 @@ def _label(family, kind):
         return kind
 
 
+def _code_summary(code):
+    """The first line of code that is not a comment, or "(comments only)"."""
+    lines = [line.strip() for line in code.splitlines()]
+    return next((line for line in lines if line and not line.startswith("#")),
+                "(comments only)")
+
+
 def _summary(params, limit=40):
     parts = []
     for name, value in params.items():
-        if isinstance(value, list) and value and isinstance(value[0], list):
+        if name == "code" and isinstance(value, str):
+            parts.append(_code_summary(value))
+        elif isinstance(value, list) and value and isinstance(value[0], list):
             parts.append(f"{len(value)} positions")
         elif isinstance(value, bool):
             parts.append(name if value else f"no {name}")
@@ -181,7 +189,7 @@ class Outliner(QTreeWidget):
         font.setBold(True)
         top.setFont(0, font)
         try:
-            plan = pipeline.plan_system(document, system.id)
+            plan = session.plan_system(system.id)
         except Exception as error:     # a broken document still displays
             self._add(top, f"{system.id}/problem", [INVALID + "cannot plan", str(error)])
             return
@@ -253,6 +261,8 @@ class Outliner(QTreeWidget):
                          movable=True)
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
         item.setCheckState(0, Qt.CheckState.Checked if entry.enabled else Qt.CheckState.Unchecked)
+        if isinstance(entry.params.get("code"), str):          # a Python node: its code
+            item.setToolTip(0, entry.params["code"].rstrip())
         message = stage.problem
         if report is not None and report["status"] == "invalid":
             message = report["message"]

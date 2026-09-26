@@ -1,5 +1,7 @@
 """The worker process (PLAN.md 3.3): builds systems and runs calculations
-with pyqula, one job at a time, each in its own scratch directory.
+with pyqula, one job at a time, each in its own scratch directory. The
+console worker (decision 14.1) runs the Python console instead: a
+namespace that lives as long as the process, see Console.
 
 Started with the ``spawn`` method and non-daemonic (decision 14.10), so
 pyqula's own process pool can start inside it. It makes itself the leader
@@ -24,6 +26,14 @@ import traceback
 from guiqula.worker import protocol as P
 
 PROGRESS_INTERVAL = 0.1   # seconds between progress messages
+
+
+class RequestError(RuntimeError):
+    """The UI process refused a request (the message says why)."""
+
+
+class Quit(Exception):
+    """The UI process asked the worker to stop while a job waited for a reply."""
 
 
 class _Pipe:
@@ -64,6 +74,88 @@ class _LogWriter:
         self.buffer = ""
 
 
+class Console:
+    """The Python console's interpreter (decision 14.1). Its namespace lives
+    as long as the worker: variables persist between commands, and an
+    interrupt (a kill) loses them. ``doc`` is the Document, ``g`` and ``h``
+    the geometry and Hamiltonian of the chosen system (built with the mean
+    field, as the calculations see them), rebuilt when the Document or the
+    system changed since the last command that used them; ``do(command,
+    **args)`` (and ``act``) runs a command of the window's dispatcher, so a
+    mutation is undoable there. The value of a final expression is echoed;
+    an error prints its traceback and the job still ends normally."""
+
+    def __init__(self, request, build):
+        import numpy as np
+        import pyqula
+        self.request, self.build = request, build
+        self.namespace = {"np": np, "pyqula": pyqula, "__name__": "__console__"}
+        self.document_json = self.system = None
+        self.built = False
+
+    def _set_document(self, document_json):
+        from guiqula.core.document import Document
+        if document_json != self.document_json:
+            self.document_json = document_json
+            self.namespace["doc"] = Document.from_json(document_json)
+            self.built = False
+
+    def run(self, job_id, payload):
+        import ast
+        code = payload["code"]
+        self._set_document(payload["document"])
+        if payload.get("system") != self.system:
+            self.system, self.built = payload.get("system"), False
+        self.namespace["do"] = self.namespace["act"] = \
+            lambda command, /, **args: self._do(job_id, command, args)
+        try:
+            tree = ast.parse(code, "<console>")
+        except SyntaxError as error:
+            print(f"SyntaxError: {error.msg} (line {error.lineno})")
+            return {"ok": False, "error": f"SyntaxError: {error.msg}"}
+        names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+        try:
+            if names & {"g", "h"} and not self.built:
+                self._build(payload.get("trusted", False))
+            echo = tree.body and isinstance(tree.body[-1], ast.Expr)
+            body = ast.Module(body=tree.body[:-1] if echo else tree.body, type_ignores=[])
+            exec(compile(body, "<console>", "exec"), self.namespace)
+            if echo:
+                value = eval(compile(ast.Expression(tree.body[-1].value), "<console>", "eval"),
+                             self.namespace)
+                if value is not None:
+                    self.namespace["_"] = value
+                    print(repr(value))
+        except Quit:
+            raise
+        except Exception as error:
+            print(self._traceback(error))
+            return {"ok": False, "error": f"{type(error).__name__}: {error}"}
+        return {"ok": True, "error": None}
+
+    def _build(self, trusted):
+        if self.system is None:
+            raise NameError("g and h need a system: the document has none")
+        built = self.build(self.namespace["doc"], self.system, trusted)
+        self.namespace["g"], self.namespace["h"] = built.g, built.h
+        self.built = True
+
+    def _do(self, job_id, command, args):
+        reply = self.request(job_id, "run", {"command": command, "args": args})
+        self._set_document(reply["document"])
+        return reply["value"]
+
+    @staticmethod
+    def _traceback(error):
+        """The traceback from the console's own code on (not the worker's)."""
+        frames = traceback.extract_tb(error.__traceback__)
+        start = next((i for i, f in enumerate(frames) if f.filename == "<console>"), 0)
+        lines = ["Traceback (most recent call last):"]
+        lines += [line.rstrip() for line in traceback.format_list(frames[start:])]
+        lines += [line.rstrip() for line in traceback.format_exception_only(type(error), error)]
+        return "\n".join(lines)
+
+
 def _watch_parent(parent_pid):
     while True:
         time.sleep(0.5)
@@ -101,6 +193,23 @@ def main(conn, config):
             _warm_up(config["role"])
     pipe.send(P.READY, {"pid": os.getpid(), "role": config["role"], "names": _names()})
 
+    def request(job_id, name, args=None):
+        """Ask the UI process something and wait for the answer (protocol
+        REQUEST/REPLY). Jobs are sent to idle workers only, so the next
+        message is the reply, or QUIT."""
+        pipe.send(P.REQUEST, job_id, name, dict(args or {}))
+        while True:
+            message = conn.recv()
+            if message[0] == P.QUIT:
+                raise Quit()
+            if message[0] == P.REPLY and message[1] == job_id:
+                _, _, ok, value = message
+                if not ok:
+                    raise RequestError(value)
+                return value
+
+    console = []          # the Console, made at the first console job
+
     def handle(job_id, kind, payload):
         last = [0.0]
 
@@ -116,10 +225,12 @@ def main(conn, config):
                 parallel.set_cores(cores)
                 state["cores"] = parallel.cores
             document = Document.from_json(payload["document"])
-            return run_calculation(document, payload["calculation"], cache, progress)
+            return run_calculation(document, payload["calculation"], cache, progress,
+                                   trusted=payload.get("trusted", False))
         if kind == "build":
             document = Document.from_json(payload["document"])
-            built = build_system(document, payload["system"], cache, meanfield=False)
+            built = build_system(document, payload["system"], cache, meanfield=False,
+                                 trusted=payload.get("trusted", False))
             view = bool(payload.get("view"))
             return dict(structure.describe(built.g), view=view,
                         hamiltonian=structure.hamiltonian_view(built.h) if view else None,
@@ -135,6 +246,13 @@ def main(conn, config):
             return {"slept": payload.get("seconds", 1.0), "pid": os.getpid()}
         if kind == "crash":
             os._exit(int(payload.get("code", 3)))
+        if kind == "request":
+            return request(job_id, payload["name"], payload.get("args"))
+        if kind == "console":
+            if not console:
+                console.append(Console(request, lambda document, system, trusted: build_system(
+                    document, system, cache, trusted=trusted)))
+            return console[0].run(job_id, payload)
         raise ValueError(f"unknown job kind {kind!r}")
 
     while True:
@@ -154,6 +272,8 @@ def main(conn, config):
                 value = handle(job_id, kind, payload)
             writer.flush()
             pipe.send(P.DONE, job_id, value)
+        except Quit:
+            break
         except Exception as error:
             writer.flush()
             pipe.send(P.FAILED, job_id, f"{type(error).__name__}: {error}",

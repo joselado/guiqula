@@ -171,3 +171,35 @@ def test_parallel_pool_runs_and_dies_with_a_cancel():
         while _group_members(pgid):
             assert time.monotonic() < deadline, f"left behind: {_group_members(pgid)}"
             time.sleep(0.1)
+
+
+def test_a_job_asks_the_ui_process(manager):
+    """REQUEST/REPLY (protocol.py): a job waits for the answer of the UI
+    process; a refusal reaches the job as an error; without a handler the
+    job fails with that message and the worker stays usable."""
+    asked = []
+
+    def handler(job, name, args):
+        asked.append((job.id, name, args))
+        if name == "refuse":
+            raise ValueError("not today")
+        return {"echo": args["x"] * 2}
+    manager.request_handler = handler
+    try:
+        job = manager.wait(manager.submit("request", {"name": "double", "args": {"x": 21}}), 60)
+        assert job.status == "done" and job.value == {"echo": 42}
+        assert asked == [(job.id, "double", {"x": 21})]
+        job = manager.wait(manager.submit("request", {"name": "refuse"}), 60)
+        assert job.status == "failed" and "not today" in job.error
+        manager.request_handler = None
+        job = manager.wait(manager.submit("request", {"name": "anything"}), 60)
+        assert job.status == "failed" and "nobody answers" in job.error
+        job = manager.wait(manager.submit("sleep", {"seconds": 0.05}), 60)
+        assert job.status == "done"
+    finally:
+        manager.request_handler = None
+
+
+def test_unknown_role_is_refused(manager):
+    with pytest.raises(ValueError, match="no 'nope' worker"):
+        manager.submit("sleep", {}, role="nope")

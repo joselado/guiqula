@@ -9,6 +9,13 @@ Document from poll() and deletes the autosave on a clean close()
 (guiqula.io.autosave); the ``recover`` action loads what a crashed session
 left behind.
 
+Trust (PLAN.md 13.7): ``trusted`` says whether the Document's Python
+nodes may run. A document built here, or a shipped preset, is trusted; one
+opened or recovered from a file that holds Python nodes is not, until the
+``trust`` action. The flag is the Session's, never the Document's, and
+every job carries it; plan_system, plan_calculation and calculation_key
+plan with it, so that the keys of the UI process match the workers'.
+
 The Document's ``ui`` block is view state (the window's workspace,
 selection, canvas selection): the window hands a ``view_state`` callable,
 whose dict is written into ``ui`` of what is saved and autosaved, and reads
@@ -18,6 +25,7 @@ never enters a key, and does not count as an unsaved change.
 Qt-free and pyqula-free: it runs in the UI process.
 """
 import json
+import time
 from pathlib import Path
 
 from guiqula.commands import CommandError, Dispatcher
@@ -28,6 +36,9 @@ from guiqula.io import results as result_files
 from guiqula.io.script import export_script
 from guiqula.registry import cost, pipeline
 from guiqula.worker.client import JobManager
+
+
+BUILD_PATIENCE = 10.0    # seconds: a build still running when a newer one is asked is killed
 
 
 def _content(document):
@@ -41,13 +52,22 @@ def _project_path(path_or_name):
     return None if resolved.parent == project.PRESETS else resolved
 
 
+def trusted_on_open(path_or_name, document):
+    """A shipped preset, or a file without Python nodes, is trusted."""
+    if project.resolve(path_or_name).parent == project.PRESETS:
+        return True
+    return not pipeline.code_entries(document)
+
+
 class Session:
     def __init__(self, document=None, batch=1, interactive=True, warm=True, timeout=None,
                  jobs=None, autosave=False):
         path = None
+        self.trusted = True      # whether Python nodes run (13.7): see trust
         if isinstance(document, (str, Path)):
             path = _project_path(document)
-            document = project.load(document)
+            source, document = document, project.load(document)
+            self.trusted = trusted_on_open(source, document)
         self.dispatcher = Dispatcher(document or Document())
         self.jobs = jobs if jobs is not None else JobManager(
             batch=batch, interactive=interactive, warm=warm, timeout=timeout)
@@ -57,15 +77,18 @@ class Session:
         self.build_errors = {}   # system id -> why the latest build failed
         self._build_times = {}   # system id -> submission time of the stored build
         self.path = path         # where the document was loaded from / saved to
+        self.build_patience = BUILD_PATIENCE
         self.view_state = None   # callable -> dict saved as the document's ui block (the window)
         self._saved_json = _content(self.document)
         self.autosaver = autosave if isinstance(autosave, autosave_files.Autosaver) else \
             autosave_files.Autosaver() if autosave else None
         self._listeners = []
         self.jobs.subscribe(self._on_job_event)
+        self.jobs.request_handler = self._on_request
         self.dispatcher.subscribe(self._on_document_event)
         for name in ("run_calculation", "cancel", "save", "load", "new", "export_script",
-                     "save_result", "recover", "list_recoverable", "discard_recovery"):
+                     "save_result", "recover", "list_recoverable", "discard_recovery",
+                     "trust", "console", "interrupt_console"):
             self.dispatcher.register_action(name, getattr(self, "_action_" + name))
 
     # ---- the command API
@@ -113,6 +136,20 @@ class Session:
         unsubscribe = self.dispatcher.subscribe(lambda event: listener("document", event))
         return lambda: (self._listeners.remove(listener), unsubscribe())
 
+    # ---- planning with the Session's trust (the keys must match the workers')
+    def plan_system(self, system):
+        return pipeline.plan_system(self.document, system, self.trusted)
+
+    def plan_calculation(self, calculation):
+        return pipeline.plan_calculation(self.document, calculation, self.trusted)
+
+    def calculation_key(self, calculation):
+        return pipeline.calculation_key(self.document, calculation, self.trusted)
+
+    def code_entries(self):
+        """Ids of the Document's Python nodes."""
+        return pipeline.code_entries(self.document)
+
     # ---- results
     def result(self, calculation):
         return self.results.get(calculation)
@@ -122,7 +159,7 @@ class Session:
         if result is None:
             return False
         try:
-            return result.key != pipeline.calculation_key(self.document, calculation)
+            return result.key != self.calculation_key(calculation)
         except Exception:
             return True
 
@@ -139,7 +176,8 @@ class Session:
         """Submit a calculation to a batch worker; returns the Job (or waits
         for it and returns the finished Job)."""
         self.document.calculation(calculation)
-        job = self.jobs.run(self.document.to_json(), calculation, cores=cores)
+        job = self.jobs.run(self.document.to_json(), calculation, cores=cores,
+                            trusted=self.trusted)
         self.calc_jobs[calculation] = job
         if wait:
             self.jobs.wait(job, timeout)
@@ -154,10 +192,22 @@ class Session:
         so a burst of edits costs one build, not one per edit."""
         self.document.system(system)
         self.jobs.supersede("build", system)
-        job = self.jobs.build(self.document.to_json(), system, view=view)
+        self._stop_stuck_build(system)
+        job = self.jobs.build(self.document.to_json(), system, view=view, trusted=self.trusted)
         if wait:
             self.jobs.wait(job, timeout)
         return job
+
+    def _stop_stuck_build(self, system):
+        """A build of this system that has run longer than build_patience
+        when a newer one is asked for is killed with the interactive worker
+        (whose cache goes with it): its result would be out of date, and
+        it may never end (a Python node in a loop)."""
+        now = time.time()
+        for job in list(self.jobs.jobs.values()):
+            if job.kind == "build" and job.label == system and job.status == "running" \
+                    and job.started and now - job.started > self.build_patience:
+                self.jobs.cancel(job)
 
     def build_all(self, view=False):
         return [self.build(system.id, wait=False, view=view) for system in self.document.systems]
@@ -169,7 +219,7 @@ class Session:
         if build is None:
             return False
         try:
-            return build["key"] == pipeline.plan_system(self.document, system).key
+            return build["key"] == self.plan_system(system).key
         except Exception:
             return False
 
@@ -177,9 +227,27 @@ class Session:
         """The cost guard (PLAN.md 13.12): the rough duration of a
         calculation from the latest build of its system, or None."""
         try:
-            return cost.estimate(self.document, calculation, self.builds)
+            return cost.estimate(self.document, calculation, self.builds, self.trusted)
         except Exception:
             return None
+
+    # ---- the Python console (decision 14.1)
+    def console(self, code, system=None, wait=False, timeout=None):
+        """Run code in the console worker: doc, g and h of a system (the
+        given one, else the first), do() for commands, np and pyqula. Its
+        output arrives as the job's log lines; returns the Job."""
+        if system is None and self.document.systems:
+            system = self.document.systems[0].id
+        if system is not None:
+            self.document.system(system)
+        job = self.jobs.console(code, self.document.to_json(), system, trusted=self.trusted)
+        if wait:
+            self.jobs.wait(job, timeout)
+        return job
+
+    def interrupt_console(self):
+        """Stop what the console runs; its namespace starts afresh."""
+        self.jobs.restart("console")
 
     def cancel(self, calculation_or_job):
         job = self.calc_jobs.get(calculation_or_job) or self.jobs.jobs.get(calculation_or_job)
@@ -233,6 +301,17 @@ class Session:
             for system in [s for s in table if s not in systems]:
                 del table[system]
 
+    def _on_request(self, job, name, args):
+        """A worker asks during a job (the console, decision 14.1): "run" a
+        dispatcher command (a mutation lands on the undo stack) and get its
+        result with the Document after it, or get the "document"."""
+        if name == "document":
+            return {"document": self.document.to_json()}
+        if name == "run":
+            value = self.dispatcher.run(args["command"], **args.get("args", {}))
+            return {"value": value, "document": self.document.to_json()}
+        raise CommandError(f"unknown request {name!r}")
+
     def _on_job_event(self, kind, payload):
         if kind == "job" and payload.kind == "run" and payload.status == "done":
             if any(c.id == payload.label for c in self.document.calculations):
@@ -253,9 +332,10 @@ class Session:
             self.build_errors[system] = job.error
         self.jobs.forget(job)
 
-    def _replace_document(self, document, path, saved_json):
+    def _replace_document(self, document, path, saved_json, trusted=True):
         """New, open, recover: a whole new Document (not undoable)."""
         self.path = path
+        self.trusted = trusted
         self._saved_json = saved_json
         self.results.clear()
         self.calc_jobs.clear()
@@ -276,7 +356,8 @@ class Session:
 
     def _action_load(self, path):
         document = project.load(path)
-        self._replace_document(document, _project_path(path), _content(document))
+        self._replace_document(document, _project_path(path), _content(document),
+                               trusted_on_open(path, document))
         return str(project.resolve(path))
 
     def _action_new(self):
@@ -294,12 +375,30 @@ class Session:
             path = candidates[0]["path"]
         document, info = autosave_files.read(path)
         source = Path(info["source"]) if info.get("source") else None
-        self._replace_document(document, source, None)
+        self._replace_document(document, source, None, not pipeline.code_entries(document))
         if self.autosaver is not None:     # claimed at once: not offered again meanwhile
             self.autosaver.adopt(path)
             self.autosaver.write(self.document_for_file(), self.path, self.modified)
         return {"path": str(path), "source": info.get("source"),
                 "systems": [s.id for s in document.systems]}
+
+    def _action_console(self, code, system=None, wait=True, timeout=None):
+        """Run console code; waiting (the default for drivers), the output
+        lines come back too."""
+        job = self.console(code, system, wait=wait, timeout=timeout)
+        out = {"job": job.id, "status": job.status}
+        if job.done:
+            out.update(output=list(job.log), value=job.value, error=job.error)
+        return out
+
+    def _action_interrupt_console(self):
+        self.interrupt_console()
+
+    def _action_trust(self, enabled=True):
+        """Let the Document's Python nodes run (or stop them): the builds and
+        the results they change become stale (PLAN.md 13.7)."""
+        self.trusted = bool(enabled)
+        return {"trusted": self.trusted, "code": self.code_entries()}
 
     def _action_list_recoverable(self, include_unmodified=False):
         return autosave_files.recoverable(include_unmodified=include_unmodified)
@@ -310,7 +409,7 @@ class Session:
     def _action_export_script(self, calculation, path=None):
         result = self.results.get(calculation)
         skipped = {r["id"]: r["message"] for r in result.skipped} if result else None
-        source = export_script(self.document, calculation, skipped)
+        source = export_script(self.document, calculation, skipped, self.trusted)
         if path is None:
             return source
         Path(path).write_text(source)

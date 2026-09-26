@@ -48,9 +48,10 @@ from guiqula.core import fields
 from guiqula.core import regions as region_tools
 from guiqula.io import crashreport, project
 from guiqula.registry import base as registry
-from guiqula.registry import cost, pipeline
+from guiqula.registry import cost
 from guiqula.registry.params import VectorFieldParam
 from guiqula.ui.bars import MessageBar
+from guiqula.ui.console import ConsoleWidget
 from guiqula.ui.jobpanel import JobPanel
 from guiqula.ui.outliner import Outliner, system_of
 from guiqula.ui.plots import PlotView
@@ -147,12 +148,14 @@ class MainWindow(QMainWindow):
         self.error_bar = MessageBar("errorBar")
         self.recovery_bar = MessageBar("recoveryBar")
         self.cost_bar = MessageBar("costBar")
+        self.trust_bar = MessageBar("trustBar")
         central = QWidget()
         central.setObjectName("central")
         column = QVBoxLayout(central)
         column.setContentsMargins(0, 0, 0, 0)
         column.setSpacing(0)
         column.addWidget(self.recovery_bar)
+        column.addWidget(self.trust_bar)
         column.addWidget(self.error_bar)
         column.addWidget(self.cost_bar)
         column.addWidget(self.viewport, 1)
@@ -164,6 +167,10 @@ class MainWindow(QMainWindow):
         self.log.setObjectName("log")
         self.log.setReadOnly(True)
         self.log.setMaximumBlockCount(5000)
+        self.console = ConsoleWidget()
+        self.console.run_requested.connect(self.run_console)
+        self.console.interrupt_requested.connect(self.interrupt_console)
+        self._console_lines = {}       # console job id -> log lines written so far
         outliner_dock = self._dock("Outliner", self.outliner, "outlinerDock",
                                    Qt.DockWidgetArea.LeftDockWidgetArea)
         properties_dock = self._dock("Properties", self.properties, "propertiesDock",
@@ -171,11 +178,15 @@ class MainWindow(QMainWindow):
         jobs_dock = self._dock("Jobs", self.jobs, "jobsDock", Qt.DockWidgetArea.RightDockWidgetArea)
         self.splitDockWidget(properties_dock, jobs_dock, Qt.Orientation.Vertical)
         log_dock = self._dock("Log", self.log, "logDock", Qt.DockWidgetArea.BottomDockWidgetArea)
+        console_dock = self._dock("Console", self.console, "consoleDock",
+                                  Qt.DockWidgetArea.BottomDockWidgetArea)
+        self.tabifyDockWidget(log_dock, console_dock)
+        log_dock.raise_()
         self.resizeDocks([outliner_dock, properties_dock], [320, 340], Qt.Orientation.Horizontal)
         self.resizeDocks([properties_dock, jobs_dock], [480, 180], Qt.Orientation.Vertical)
         self.resizeDocks([log_dock], [130], Qt.Orientation.Vertical)
         self.docks = {d.objectName(): d for d in (outliner_dock, properties_dock, jobs_dock,
-                                                  log_dock)}
+                                                  log_dock, console_dock)}
 
         self._build_toolbars()
         self._build_menus()
@@ -388,6 +399,13 @@ class MainWindow(QMainWindow):
         self._action(file_menu, "&Export pyqula script...", self.export_script)
         self._action(file_menu, "&Recover unsaved work...", self.offer_recovery,
                      name="recoverAction")
+        self.trust_action = self._action(
+            file_menu, "&Trust the Python code", lambda: self._act(
+                "trust", enabled=self.trust_action.isChecked()), name="trustAction")
+        self.trust_action.setCheckable(True)
+        self.trust_action.setToolTip("let the Python nodes of this document run in the "
+                                     "worker (a file with Python code is not trusted when "
+                                     "it is opened)")
         file_menu.addSeparator()
         self._action(file_menu, "&Quit", self.close, QKeySequence.StandardKey.Quit)
         edit = self.menuBar().addMenu("&Edit")
@@ -451,6 +469,7 @@ class MainWindow(QMainWindow):
         self.timer.start(POLL_MS)
         self._document_changed()
         self.apply_view_state(session.document.ui)
+        self._update_trust()
         self.offer_recovery(quiet=True)
 
     def closeEvent(self, event):
@@ -498,6 +517,9 @@ class MainWindow(QMainWindow):
                 self.message(f"{payload['role']} worker restarted (pid {payload['pid']})")
 
     def _document_changed(self, event=None):
+        if event is not None and event["type"] == "action" and event.get("name") == "trust":
+            event = None           # the plans change: refresh like after an edit
+            self._update_trust()
         if event is not None and event["type"] == "action":
             # actions do not change the Document (new, load and recover reset it, and
             # region_from_selection and remove_selected announce their mutation): only
@@ -522,6 +544,7 @@ class MainWindow(QMainWindow):
         self._update_title()
         if event is not None and event["type"] == "reset":      # new, open, recover
             self.apply_view_state(self.session.document.ui)
+            self._update_trust()
 
     def _update_title(self):
         path = self.session.path
@@ -557,6 +580,9 @@ class MainWindow(QMainWindow):
             self.message(f"could not ask for a build: {error}", error=True)
 
     def _job_changed(self, job):
+        if job.kind == "console":
+            self._console_job(job)
+            return
         if job.kind == "build":
             system = job.payload["system"]
             if job.status == "done" and self.builds.get(system) is job.value:
@@ -570,6 +596,10 @@ class MainWindow(QMainWindow):
                 self.message(f"{system} cannot be built: {job.error}", error=True)
                 self.outliner.refresh(self.session)
                 self._refresh_structure()
+            elif job.status == "cancelled" and job.started:
+                self.message(f"a build of {system} was stopped after "
+                             f"{job.finished - job.started:.0f} s: a newer one was asked for "
+                             f"(a Python node that never ends?)", error=True)
             self.jobs.update_workers(self.session.jobs.status())
             return
         self.jobs.update_job(job)
@@ -592,6 +622,39 @@ class MainWindow(QMainWindow):
         elif job.kind == "run":
             self.outliner.update_calculation(self.session, job.label)   # queued, progress
         self.jobs.update_workers(self.session.jobs.status())
+
+    # ---- the Python console (decision 14.1)
+    def run_console(self, code):
+        """Run console code on the current system (the console widget)."""
+        if self.session is None:
+            return None
+        system = self.current_system()
+        self.console.set_system(system)
+        try:
+            job = self.session.console(code, system=system)
+        except Exception as error:
+            self.console.write(f"{type(error).__name__}: {error}", error=True)
+            return None
+        self.console.set_busy(True)
+        return job.id
+
+    def interrupt_console(self):
+        self.session.interrupt_console()
+        self.console.write("interrupted: the console starts afresh", error=True)
+
+    def _console_job(self, job):
+        """Write a console job's new output lines, and how it ended."""
+        written = self._console_lines.get(job.id, 0)
+        for line in job.log[written:]:
+            self.console.write(line)
+        self._console_lines[job.id] = len(job.log)
+        if job.done:
+            self._console_lines.pop(job.id, None)
+            if job.status == "failed":
+                self.console.write(f"the console stopped: {job.error}", error=True)
+            busy = any(j.kind == "console" and not j.done
+                       for j in self.session.jobs.jobs.values())
+            self.console.set_busy(busy)
 
     # ---- selection and workspaces
     def select(self, entry=""):
@@ -1260,7 +1323,7 @@ class MainWindow(QMainWindow):
                     or not self.session.build_is_current(calc.system):
                 continue
             try:
-                key = pipeline.calculation_key(self.session.document, calc.id)
+                key = self.session.calculation_key(calc.id)
             except Exception:
                 continue
             estimate = self.session.estimate(calc.id)
@@ -1339,6 +1402,22 @@ class MainWindow(QMainWindow):
             f"{more}.",
             [("Recover", lambda: self.recover(entry["path"]), "recoverButton"),
              ("Discard", lambda: self._discard_recovery(entry["path"]), "discardRecoveryButton")])
+
+    def _update_trust(self):
+        """The trust bar: shown while the document holds Python code that
+        does not run (PLAN.md 13.7); non-modal, like the other bars."""
+        session = self.session
+        self.trust_action.setChecked(session.trusted)
+        code = session.code_entries()
+        if session.trusted or not code:
+            self.trust_bar.dismiss()
+            return
+        shown = ", ".join(code[:6]) + (f" and {len(code) - 6} more" if len(code) > 6 else "")
+        self.trust_bar.show_message(
+            f"This document holds Python code ({shown}). It came from a file, so the code "
+            f"does not run until you trust it; until then those entries are skipped.",
+            [("Trust and run", lambda: self._act("trust"), "trustButton"),
+             ("Show the code", lambda: self.select(code[0]), "showCodeButton")])
 
     def recover(self, path=None):
         info = self._act("recover", **({"path": path} if path else {}))

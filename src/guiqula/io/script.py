@@ -64,6 +64,9 @@ def _imports(stages, calc_spec):
     if calc_spec is not None:
         modules.update(calc_spec.modules)
     lines = []
+    if any(stage.applied and stage.spec is not None and stage.spec.runs_code
+           for stage in stages) or (calc_spec is not None and calc_spec.runs_code):
+        lines.append("import pyqula                      # the Python nodes may use it")
     plain = sorted(m for m in modules if "." not in m)
     if plain:
         lines.append(f"from pyqula import {', '.join(plain)}")
@@ -77,13 +80,15 @@ def _comment(stage, why):
     return [f"# {stage.id} {stage.kind}: {why}"]
 
 
-def export_script(document, calc_id, skipped=None):
+def export_script(document, calc_id, skipped=None, trusted=True):
     """Source of a script that rebuilds the system of calculation calc_id,
     runs it and saves the arrays to result.npz. skipped: {entry id:
     message} of entries pyqula rejected at build time (from a Result's
-    reports), written as comments like the ones the planner rejects."""
+    reports), written as comments like the ones the planner rejects.
+    trusted: whether the Python nodes are written (else they are skipped,
+    as the engine skips them)."""
     skipped = dict(skipped or {})
-    plan = pipeline.plan_calculation(document, calc_id)
+    plan = pipeline.plan_calculation(document, calc_id, trusted)
     if plan.problem:
         raise ValueError(f"{calc_id}: {plan.problem}")
     system = plan.system

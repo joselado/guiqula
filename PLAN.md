@@ -85,7 +85,9 @@ model. That is also what makes the Claude add-on (requirement 9) cheap.
   live updates. Not needed for phase 1; the canvas starts on matplotlib too.
 - **3D structures**: pyqtgraph.opengl first (light). pyvista/vtk are already
   installed here and can back an optional `[3d]` extra later; they are heavy
-  and need a working OpenGL stack, so they stay optional.
+  and need a working OpenGL stack, so they stay optional. (Phase 4 part 1
+  drew 3D with matplotlib's mplot3d instead, because Qt refuses OpenGL
+  widgets offscreen; a decision for the maintainer, section 7.)
 
 ## 3. Architecture: headless core, command API, Qt view
 
@@ -917,6 +919,60 @@ conductivity in a process compile numba kernels for about 10 s each;
 Qt prints "QOpenGLWidget is not supported on this platform" offscreen;
 without tight_layout (which renders) matplotlib autoscales the limits
 only at the first draw, so a readout needs a synchronous draw first.
+**Part 2 done 2026-09-26.** Built: Python nodes (`registry/python_nodes.py`):
+a geometry op, a term and a calculation whose parameter is Python source
+(`CodeParam`, syntax-checked by the command, never run by it), executed in
+the worker with `np` and `pyqula` in scope (op: `g`; term: `h` and `g`,
+either changed in place or rebound; calculation: `h`, `g`, and it sets
+`arrays` and may set `plot`, checked against the plot kinds). An error
+flags the node with the line of its code and the stack carries on
+(14.3); what it prints is kept with its report. A Python term declares
+the Hilbert space it needs (`needs`: nothing, spin, nambu), so the
+pre-scan fixes it before the first term (`EntrySpec.requires` may be a
+callable of the parameters). Trust (13.7): `EntrySpec.runs_code`; the
+planner takes `trusted` and plans a node of a document that is not
+trusted as invalid (skipped, out of the keys, so trusting makes its
+results stale); the flag is the Session's (`Session.trusted`, carried by
+every job; `Session.plan_system`, `plan_calculation`, `calculation_key`
+are the only planner calls of the UI, so its keys match the workers'). A
+document built in the program or a shipped preset is trusted; one opened
+or recovered from a file with Python nodes is not, until the `trust`
+action (the trust bar with Trust and run and Show the code, a checkable
+File menu entry, `--trust` for `guiqula run`, `guiqula script` and
+`tools/drive.py`); the exporter writes an untrusted node as a skipped
+comment. The code editor of a node (monospace, Apply or Ctrl+Return or
+focus-out); the outliner shows its code as the tooltip. A build still
+running `Session.build_patience` (10 s) after a newer one of the same
+system is asked for is killed with the interactive worker (whose cache
+goes with it; the next build redoes every stage), so a node stuck in a
+loop is stopped as soon as its code is changed. The protocol's REQUEST
+and REPLY: a job can ask the UI process during its run (the Session
+answers "run" a dispatcher command, or "document"); `JobManager.submit`
+refuses an unknown role. The console (14.1): a third worker role,
+`console`, started at the first command; its interpreter keeps a
+namespace for the life of the worker with `doc`, `g` and `h` of the
+selected system (built with the mean field, as the calculations see
+them; rebuilt when the Document or the system changed since the last
+command that used them), `do()`/`act()` for dispatcher commands
+(undoable), `np`, `pyqula`; a final expression is echoed; an error prints
+its traceback from the console's own code and the job still ends normally;
+Interrupt restarts the worker (the namespace is lost). `Session.console`,
+the `console` and `interrupt_console` actions (drivers get the output
+back), and the Console dock (tabbed with the Log: Enter runs, Shift+Enter
+adds a line, Up/Down history). Tests: `tests/engine/test_python_nodes.py`,
+the Python cases in `test_entries.py` and the export tests,
+`test_a_job_asks_the_ui_process` and `test_console` in `tests/worker`,
+`tests/ui/test_python_nodes_ui.py` (the trust bar, the code editor, a
+node stuck in a loop, the console dock).
+Decisions taken while building, for the maintainer to confirm: a
+recovered autosave with Python nodes opens untrusted even if the session
+that wrote it had trusted it (the autosave does not record trust); the
+global "always trust" preference of 13.7 is not built (no settings file
+yet); the console's `h` includes the mean field; the console is not
+itself subject to trust (it is code the user types), but the nodes of an
+untrusted document stay skipped in the console's builds too; a build
+stuck longer than 10 s is killed only when a newer build of the same
+system is requested.
 
 **Phase 5 — polish.** Undo everywhere, keyboard shortcuts, theming (light and
 dark), tooltips and formulas (reuse quantum-lattice's), user guide, example

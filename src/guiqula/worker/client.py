@@ -5,7 +5,10 @@ process): the UI calls poll() from a timer, headless code calls wait().
 
 Two roles (decision 14.6): the *interactive* worker builds systems for the
 canvas and the outliner, the *batch* workers (default one) run
-calculations, so a running calculation never blocks an edit. Cancelling a
+calculations, so a running calculation never blocks an edit. A third, the
+*console* worker, runs the Python console (decision 14.1); it is started
+at the first console command, so a session that never uses the console
+never pays for it, and restarting it resets the console's namespace. Cancelling a
 job kills only the worker running it, together with the pool pyqula may
 have started inside it; the other workers and their caches are untouched
 (the phase-1 reading of review item 8).
@@ -158,6 +161,7 @@ class JobManager:
         self.queues = {role: deque() for role in self.workers}
         self.jobs = {}
         self.names = {}          # name lists from pyqula (worker READY), e.g. "operators"
+        self.request_handler = None   # (job, name, args) -> value; raises to refuse
         self._ids = itertools.count(1)
         self._listeners = []
         self.closed = False
@@ -175,7 +179,7 @@ class JobManager:
         if kind not in P.KINDS:
             raise ValueError(f"unknown job kind {kind!r}")
         if role not in self.workers:
-            role = "batch"
+            raise ValueError(f"no {role!r} worker; roles: {sorted(self.workers)}")
         job = Job(f"j{next(self._ids)}", kind, role, payload,
                   timeout if timeout is not None else self.timeout, label)
         self.jobs[job.id] = job
@@ -184,14 +188,39 @@ class JobManager:
         self._dispatch()
         return job
 
-    def run(self, document_json, calculation, cores=1, timeout=None):
+    def run(self, document_json, calculation, cores=1, timeout=None, trusted=True):
+        """trusted: whether the document's Python nodes run (PLAN.md 13.7)."""
         return self.submit("run", {"document": document_json, "calculation": calculation,
-                                   "cores": cores}, "batch", timeout, label=calculation)
+                                   "cores": cores, "trusted": trusted}, "batch", timeout,
+                           label=calculation)
 
-    def build(self, document_json, system, timeout=None, view=False):
+    def build(self, document_json, system, timeout=None, view=False, trusted=True):
         """view: include the Hamiltonian view (engine/structure.py)."""
-        return self.submit("build", {"document": document_json, "system": system, "view": view},
-                           "interactive", timeout, label=system)
+        return self.submit("build", {"document": document_json, "system": system, "view": view,
+                                     "trusted": trusted}, "interactive", timeout, label=system)
+
+    def console(self, code, document_json, system, trusted=True, timeout=None):
+        """Run code in the console worker (started now if needed)."""
+        if "console" not in self.workers:
+            context = multiprocessing.get_context("spawn")
+            worker = _Worker("console", False, context)
+            self.workers["console"] = [worker]
+            self.queues["console"] = deque()
+            worker.start()
+            self._emit("worker", worker.info())
+        return self.submit("console", {"code": code, "document": document_json, "system": system,
+                                       "trusted": trusted}, "console", timeout, label="console")
+
+    def restart(self, role):
+        """Kill and restart the workers of a role (their jobs are cancelled):
+        for the console, an interrupt that also resets its namespace."""
+        for worker in self.workers.get(role, []):
+            job = worker.job
+            self._restart(worker)
+            if job is not None and not job.done:
+                self._finish(job, "cancelled")
+        for job in list(self.queues.get(role, [])):
+            self.cancel(job)
 
     def cancel(self, job):
         job = self.jobs[job] if isinstance(job, str) else job
@@ -338,6 +367,20 @@ class JobManager:
                         worker.job = None
                         queue.appendleft(job)
 
+    def _answer(self, worker, job_id, job, name, args):
+        """Reply to a worker's request with what request_handler returns
+        (or the error it raised)."""
+        try:
+            if self.request_handler is None:
+                raise RuntimeError("nobody answers requests from the workers")
+            if job is None or job.done:
+                raise RuntimeError("the job that asked is over")
+            reply = (P.REPLY, job_id, True, self.request_handler(job, name, args))
+        except Exception as error:
+            reply = (P.REPLY, job_id, False, f"{type(error).__name__}: {error}")
+        with contextlib.suppress(OSError, BrokenPipeError):
+            worker.conn.send(reply)
+
     def _handle(self, worker, message):
         tag = message[0]
         if tag == P.READY:
@@ -346,6 +389,9 @@ class JobManager:
             self._emit("worker", worker.info())
             return
         job = self.jobs.get(message[1])
+        if tag == P.REQUEST:
+            self._answer(worker, message[1], job, message[2], message[3])
+            return
         if job is None or job.done:
             return
         if tag == P.STARTED:

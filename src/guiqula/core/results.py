@@ -10,6 +10,10 @@ the calculation itself returns, which is what an exported script
 reproduces."""
 from dataclasses import dataclass, field
 
+# plot kinds the UI draws (ui/plots.py implements each once)
+PLOT_KINDS = ("lines", "colored_scatter", "heatmap", "structure_scalar", "structure_vector",
+              "scalar")
+
 
 @dataclass
 class Result:

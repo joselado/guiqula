@@ -3,7 +3,7 @@ drawn in the UI process from a Result's arrays.
 
 Kinds (the ``kind`` of a Result's plot spec, which also names the arrays):
 
-- ``lines``: y (one or more columns) against x;
+- ``lines``: y (one or more columns) against x (or against its index);
 - ``colored_scatter``: the same, points coloured by c (bands with an
   operator);
 - ``heatmap``: c on the points (x, y), given flat (one value per point, a
@@ -27,16 +27,18 @@ from matplotlib.figure import Figure
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QLabel, QToolButton, QVBoxLayout, QWidget
 
+from guiqula.core.results import PLOT_KINDS as KINDS  # noqa: F401 (the kinds drawn here)
 from guiqula.ui import structure as structure_tools
 
 READOUT_PIXELS = 12      # the readout names a data point this close to the mouse
-KINDS = ("lines", "colored_scatter", "heatmap", "structure_scalar", "structure_vector", "scalar")
 
 
 def _lines(ax, result):
+    """y against x, or against its index when the spec names no x."""
     arrays, plot = result.arrays, result.plot
-    x = np.asarray(arrays[plot["x"]])
-    y = np.asarray(arrays[plot["y"]]).reshape(len(x), -1)
+    y = np.asarray(arrays[plot["y"]])
+    x = np.asarray(arrays[plot["x"]]) if plot.get("x") else np.arange(len(y))
+    y = y.reshape(len(x), -1)
     ax.plot(x, y, color="C0", linewidth=1.2)
     return np.repeat(x[:, None], y.shape[1], axis=1).ravel(), y.ravel(), None
 

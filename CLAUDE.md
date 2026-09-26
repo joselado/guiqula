@@ -26,8 +26,8 @@ a decision changes.
 Status (2026-09-26): phases 0 to 3 are done and the maintainer has answered the phase-3
 report (PLAN.md section 7 says what each phase built, what was left for later, and the
 answers). Phase 4 is under way in four parts (PLAN.md section 7): part 1 (the breadth of
-the quantum registry, the plot kinds, the 3D drawing) is done; part 2 (Python nodes, trust
-prompt, console) is next, then the classical systems and the rest.
+the quantum registry, the plot kinds, the 3D drawing) and part 2 (Python nodes, trust,
+console) are done; part 3 (classical systems, `from_result` Fields) is next, then part 4.
 
 ## Code map
 
@@ -45,7 +45,10 @@ a `Session`.
   declarative `Call("h.add_zeeman", "m")` drives both the engine and the script export; a
   custom entry gives `apply` and `script`. `pipeline.py` plans a system without pyqula: the
   Hilbert-space pre-scan, invalid entries, region references resolved to selections, and
-  the stage and calculation keys (staleness); the mean field is the last stage. `cost.py`
+  the stage and calculation keys (staleness); the mean field is the last stage; an entry
+  that `runs_code` (the Python nodes, `python_nodes.py`) is invalid unless planned with
+  `trusted=True` (the Session's flag, never the Document's; the UI plans only through
+  `Session.plan_system`/`plan_calculation`/`calculation_key`). `cost.py`
   estimates durations (the cost guard). Adding a term = one `entry(...)` call plus its case
   in `tests/engine/test_entries.py` (a completeness test fails otherwise; the case is also
   exported and run by `tests/engine/test_script_export.py`). A custom script names the
@@ -58,11 +61,15 @@ a `Session`.
   `calculations.py` runs an adapter and returns a `Result`, `structure.py` gives the canvas
   its arrays (positions, lattice, sublattice, pyqula's first-neighbour bonds, and the
   Hamiltonian view: onsite, exchange, pairing, every hopping's amplitude and phase).
-- `worker/`: `process.py` (the worker, imports the engine inside `main()` only), `client.py`
-  (`JobManager`: interactive and batch workers, cancel, respawn, timeouts), `protocol.py`.
+- `worker/`: `process.py` (the worker, imports the engine inside `main()` only; its
+  `Console` is the Python console's interpreter), `client.py` (`JobManager`: interactive and
+  batch workers, the console worker started at its first command, cancel, respawn,
+  timeouts, `request_handler` answering a job's REQUEST), `protocol.py`.
 - `session.py`: dispatcher + job manager + results + the latest build of each system
-  (coalesced requests) + `modified`; with `autosave=True` (the window's) it autosaves from
-  `poll()`. The object tests, `guiqula run`, `tools/drive.py` and the window drive.
+  (coalesced requests; a stuck build is killed when a newer one is asked) + `modified` +
+  `trusted` + the console (`console(code)`); with `autosave=True` (the window's) it
+  autosaves from `poll()`. The object tests, `guiqula run`, `tools/drive.py` and the window
+  drive.
 - `io/`: project files, presets (`src/guiqula/presets/*.json`, loadable by name), script
   export, result files, `autosave.py` (autosave and recovery), `crashreport.py`.
 - `ui/`: `mainwindow.py` (workspaces, palettes with search boxes from the registry, docks,
@@ -74,7 +81,8 @@ a `Session`.
   selection tools, and the mplot3d drawing of geometries that are not flat), `plots.py`
   (`PlotView` per calculation, `plot_<id>`; lines, colored_scatter, heatmap,
   structure_scalar, structure_vector, scalar), `jobpanel.py`,
-  `bars.py`, `errors.py` (exception hook), `theme.py`. The window saves its view state as the Document's `ui` block (not a
+  `console.py` (the console dock), `bars.py` (recovery, error, cost and trust bars),
+  `errors.py` (exception hook), `theme.py`. The window saves its view state as the Document's `ui` block (not a
   Command, not an unsaved change) and restores it on open and recovery. The window
   polls the session from a `QTimer` and starts the workers after it is shown; a form or tree
   rebuilt from inside one of its own signals must be deleted later (PLAN.md phase 2 facts).
@@ -181,6 +189,9 @@ python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "canvas_view", "name"
 python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "preview", "entry": "t1", "param": "m"}' \
     --widget structureView --shot field.png        # a Field on the structure
 python tools/drive.py honeycomb_hubbard --run c1 --widget plot_c1 --shot hubbard.png   # mean field
+python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "console", "code": "h.get_gap()"}'
+                                                   # the console; its output is in the report
+python tools/drive.py project.guiqula --trust ...   # run the Python nodes of a file (13.7)
 tools/update_vendor.sh                 # refresh vendor/ from upstream pyqula
 ```
 

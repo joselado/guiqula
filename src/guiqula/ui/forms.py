@@ -14,15 +14,17 @@ value being typed when it parses, so the window can draw the Field on the
 structure before anything runs. Constant-only parameters (the pyqula call
 behind them takes no function of position) have no f(r) button.
 """
-from PySide6.QtCore import QEvent, Signal
+from PySide6.QtCore import QEvent, Qt, Signal
+from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
-                               QLineEdit, QPushButton, QSpinBox, QToolButton, QVBoxLayout,
-                               QWidget)
+                               QLineEdit, QPlainTextEdit, QPushButton, QSpinBox, QToolButton,
+                               QVBoxLayout, QWidget)
 
 from guiqula.core import fields
-from guiqula.registry.params import (BoolParam, ChoiceParam, ConditionParam, FieldParam,
-                                     FloatParam, FloatVectorParam, IntParam, IntVectorParam,
-                                     PositionsParam, SeedParam, TextParam, VectorFieldParam)
+from guiqula.registry.params import (BoolParam, ChoiceParam, CodeParam, ConditionParam,
+                                     FieldParam, FloatParam, FloatVectorParam, IntParam,
+                                     IntVectorParam, PositionsParam, SeedParam, TextParam,
+                                     VectorFieldParam)
 
 INT_LIMIT = 2**31 - 1
 NONE_TEXT = "(none)"
@@ -471,6 +473,51 @@ class FloatVectorEditor(Editor):
             self._quiet(edit, edit.setText, text)
 
 
+class CodeEditor(Editor):
+    """Python source of a Python node: a monospace text box, committed with
+    Apply (Ctrl+Return) or when the box loses the focus."""
+
+    def __init__(self, param, parent=None):
+        super().__init__(param, parent)
+        self.text = QPlainTextEdit()
+        self.text.setObjectName(f"code_{param.name}")
+        self.text.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+        self.text.setMinimumHeight(8 * self.text.fontMetrics().lineSpacing())
+        self.text.setTabChangesFocus(False)
+        self.text.installEventFilter(self)
+        self.apply = QPushButton("Apply")
+        self.apply.setObjectName(f"apply_{param.name}")
+        self.apply.setToolTip("send the code (Ctrl+Return); it runs in the worker, in a "
+                              "trusted document only")
+        self.apply.clicked.connect(self._finished)
+        self.layout_.addWidget(self.text, 1)
+        self.outer.addWidget(self.apply)
+        self._shown = None
+
+    def eventFilter(self, watched, event):
+        if watched is self.text:
+            if event.type() == QEvent.Type.FocusOut:
+                self._finished()
+            elif event.type() == QEvent.Type.KeyPress \
+                    and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) \
+                    and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                self._finished()
+                return True
+        return super().eventFilter(watched, event)
+
+    def _finished(self):
+        if self.text.toPlainText() != self._shown:
+            self.committed.emit()
+
+    def value(self):
+        return self.text.toPlainText()
+
+    def set_value(self, value):
+        self._shown = value
+        if self.text.toPlainText() != value:
+            self._quiet(self.text, self.text.setPlainText, value)
+
+
 class BoolEditor(Editor):
     def __init__(self, param, parent=None):
         super().__init__(param, parent)
@@ -573,6 +620,8 @@ def make_editor(param, names=None, regions=()):
         return FloatVectorEditor(param)
     if isinstance(param, IntVectorParam):
         return IntVectorEditor(param)
+    if isinstance(param, CodeParam):
+        return CodeEditor(param)
     if isinstance(param, ConditionParam):
         return LineEditor(param, str.strip, str, "a condition on x, y, z, r")
     if isinstance(param, TextParam):

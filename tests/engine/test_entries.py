@@ -112,6 +112,10 @@ OP_CASES = {
                lambda: in_place(honeycomb(4), "center")),
     "uniaxial_strain": ({"s": 0.07}, "honeycomb_lattice", [],
                         lambda: in_place(honeycomb(), "add_strain", 0.07)),
+    "python": ({"code": "from pyqula import sculpt\n"
+                        "g = sculpt.intersec(g, lambda r: r[0]**2 + r[1]**2 < 4)\n"},
+               "honeycomb_lattice", SUPERCELL4,
+               lambda: pq("sculpt").intersec(honeycomb(4), lambda r: r[0]**2 + r[1]**2 < 4)),
 }
 
 
@@ -176,6 +180,10 @@ TERM_CASES = {
                  lambda h: h.add_pairing(delta=lambda r: 0.1 * np.cos(r[0]), mode="triplet",
                                          d=lambda r: [1.0, 0.0, 0.5 * r[1]]))],
     "phase_disorder": [({"w": 0.3, "seed": 3}, None)],
+    "python": [({"code": "h.add_kane_mele(0.05)", "needs": "spin"},
+                lambda h: h.add_kane_mele(0.05)),
+               ({"code": "h = h.copy()   # a new object\nh.add_onsite(0.2)\n"},
+                lambda h: h.add_onsite(0.2))],
 }
 # terms tested on another system: construction and lattice
 TERM_SYSTEMS = {"phase_disorder": {"has_spin": False},
@@ -430,6 +438,7 @@ DIRECT = {
     "z2": lambda h, p: {"z2": pq("topology").z2_invariant(h, nk=p["nk"], nt=p["nt"])},
     "gap": lambda h, p: {"gap": h.get_gap()},
     "total_energy": lambda h, p: {"energy": h.get_total_energy(nk=p["nk"])},
+    "python": lambda h, p: dict(zip(("k", "e"), h.get_bands(nk=20, write=False))),
     "optical_conductivity": lambda h, p: (lambda w, sigma: {
         "omega": w, "real": sigma[:, 0, 1].real, "imag": sigma[:, 0, 1].imag})(
         *h.get_optical_conductivity(energies=_energies(p), nk=p["nk"], T=p["T"],
@@ -463,6 +472,8 @@ CALC_CASES = {
     "gap": [({}, "haldane", lambda a: a["gap"] > 0.5)],
     "total_energy": [({"nk": 8}, "rashba", None)],
     "optical_conductivity": [({"ne": 5, "nk": 6, "component": "xy"}, "haldane", None)],
+    "python": [({"code": "k, e = h.get_bands(nk=20, write=False)\narrays = {'k': k, 'e': e}\n"},
+                "rashba", None)],
 }
 PLOT_KINDS = {"ldos": "structure_scalar", "density": "structure_scalar",
               "magnetization": "structure_vector", "real_space_chern": "structure_scalar",

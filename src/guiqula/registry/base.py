@@ -64,7 +64,8 @@ class EntrySpec:
     group: str = ""
     doc: str = ""
     formula: str = ""
-    requires: tuple = ()             # "spin", "nambu": Hilbert space the entry needs
+    requires: tuple | Callable = ()  # "spin", "nambu": Hilbert space the entry needs, or a
+                                     # callable of the parameters (a Python term's choice)
     systems: tuple = ("quantum",)
     call: Call | None = None
     apply: Callable | None = None    # custom: (target, ctx) -> result
@@ -73,6 +74,7 @@ class EntrySpec:
     cost: Callable | None = None     # calculations: (params, size) -> seconds (registry/cost.py)
     modules: tuple = ()              # pyqula modules a custom script uses ("disorder")
     regions: bool = True             # terms: whether a region may restrict it (a factor may not)
+    runs_code: bool = False          # a Python node: runs only in a trusted document (13.7)
     extra: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
@@ -85,6 +87,10 @@ class EntrySpec:
         names = [p.name for p in self.params]
         if len(set(names)) != len(names):
             raise RegistryError(f"{self.kind}: duplicate parameter names")
+
+    def requires_of(self, params):
+        """The Hilbert space the entry needs with these parameters."""
+        return tuple(self.requires(params)) if callable(self.requires) else tuple(self.requires)
 
     @property
     def param_map(self):
@@ -111,7 +117,8 @@ class EntrySpec:
     def describe(self):
         return {"family": self.family, "kind": self.kind, "label": self.label,
                 "group": self.group, "doc": self.doc, "formula": self.formula,
-                "requires": list(self.requires), "systems": list(self.systems),
+                "requires": "per parameters" if callable(self.requires) else list(self.requires),
+                "systems": list(self.systems), "runs_code": self.runs_code,
                 "params": [p.describe() for p in self.params]}
 
 
@@ -151,7 +158,7 @@ def _load_builtins():
     if not _loaded:
         _loaded = True
         from guiqula.registry import (calculations, geometry_ops, lattices, meanfield,  # noqa: F401
-                                      terms)
+                                      python_nodes, terms)
 
 
 def entry(family, kind, label, *params, **meta):

@@ -50,6 +50,9 @@ def parse_args(argv):
     parser.add_argument("--cores", type=int, default=1)
     parser.add_argument("--timeout", type=float, default=600, help="seconds to wait for jobs")
     parser.add_argument("--no-warm", action="store_true", help="skip the numba warm-up")
+    parser.add_argument("--trust", action="store_true",
+                        help="let the document's Python nodes run (a file with Python code "
+                             "is not trusted otherwise; same as --do '{\"do\": \"trust\"}')")
     parser.add_argument("--no-session", action="store_true",
                         help="only the window, without workers or a document")
     parser.add_argument("--recover", action="store_true",
@@ -138,6 +141,8 @@ def main(argv=None):
             return 2
         if args.recover:
             report["recovered"] = session.act("recover")
+        if args.trust:
+            report["trusted"] = session.act("trust")
         settle(app, window, session, args.timeout, builds_only=True)
         for command in commands:
             command = dict(command)

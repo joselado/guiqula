@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QGroupBox, QLa
 from guiqula.core import regions as region_tools
 from guiqula.core.document import DocumentError
 from guiqula.registry import base as registry
-from guiqula.registry import cost, pipeline
+from guiqula.registry import cost
 from guiqula.ui import formulas
 from guiqula.ui.forms import format_number, make_editor
 from guiqula.ui.outliner import system_of
@@ -210,7 +210,7 @@ class SystemForm(Form):
         build = session.builds.get(system_id)
         if build is None:
             return "building…"
-        plan = pipeline.plan_system(session.document, system_id)
+        plan = session.plan_system(system_id)
         text = (f"{build['dimensionality']}D · {build['sites']} sites · {plan.mode} · "
                 f"Hilbert dimension {build['dimension']}")
         if plan.upgraded_by:
@@ -310,7 +310,7 @@ class EntryForm(Form):
         if self.family == "calculation":
             return f"result: {session.status(self.item_id)}"
         try:
-            stage = pipeline.plan_system(session.document, self.system_id).stage(self.item_id)
+            stage = session.plan_system(self.system_id).stage(self.item_id)
         except (KeyError, DocumentError):
             return ""
         if stage.problem:
@@ -476,7 +476,7 @@ class MeanFieldForm(Form):
     def _status(self):
         session = self.session
         try:
-            stage = pipeline.plan_system(session.document, self.system_id).meanfield
+            stage = session.plan_system(self.system_id).meanfield
         except (KeyError, DocumentError):
             return ""
         if not stage.enabled:

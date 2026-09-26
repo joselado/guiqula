@@ -4,6 +4,9 @@
     guiqula run DOCUMENT [--calc ID ...]  run calculations headlessly (PLAN.md 13.3)
     guiqula script DOCUMENT --calc ID     print the pyqula script of a calculation
 
+A file holding Python nodes is not trusted (PLAN.md 13.7): its nodes are
+skipped unless --trust is given, as in the window until it is trusted.
+
 The Qt application is imported only when the window is requested, so the
 headless commands never load Qt.
 """
@@ -38,15 +41,17 @@ def _run(argv):
     parser.add_argument("--cores", type=int, default=1, help="processes for pyqula's own pool")
     parser.add_argument("--timeout", type=float, default=None, help="seconds per calculation")
     parser.add_argument("--script", action="store_true", help="also write <calc>.py")
+    parser.add_argument("--trust", action="store_true", help="run the document's Python nodes")
     args = parser.parse_args(argv)
     from guiqula.io import project, results
-    from guiqula.session import Session
+    from guiqula.session import Session, trusted_on_open
     document = project.load(args.document)
     calcs = args.calc or [c.id for c in document.calculations]
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     failed = 0
     with Session(document, interactive=False, timeout=args.timeout) as session:
+        session.trusted = args.trust or trusted_on_open(args.document, document)
         jobs = {c: session.run_calculation(c, cores=args.cores) for c in calcs}
         for calc, job in jobs.items():
             session.jobs.wait(job)
@@ -70,10 +75,16 @@ def _script(argv):
                                      description="Print the pyqula script of a calculation.")
     parser.add_argument("document")
     parser.add_argument("--calc", required=True, metavar="ID")
+    parser.add_argument("--trust", action="store_true",
+                        help="write the document's Python nodes (else skipped, as the engine "
+                             "skips them in a document that is not trusted)")
     args = parser.parse_args(argv)
     from guiqula.io import project
     from guiqula.io.script import export_script
-    sys.stdout.write(export_script(project.load(args.document), args.calc))
+    from guiqula.session import trusted_on_open
+    document = project.load(args.document)
+    trusted = args.trust or trusted_on_open(args.document, document)
+    sys.stdout.write(export_script(document, args.calc, trusted=trusted))
     return 0
 
 
