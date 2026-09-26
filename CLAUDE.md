@@ -19,9 +19,13 @@ regions, headless runner, classical spin/lattice-gas/Ising systems as their own 
 plain Qt theme, trust prompt for Python nodes; only 13.13 in-app help is still open), and
 section 14's review decisions of the same day (the console is a remote REPL in the worker,
 a thin UI already in phase 1, invalid entries are skipped and flagged; the review items
-still open are at the end of section 11). Read it before designing anything; update it when a decision changes. As of 2026-09-26
-no application code exists yet (phase 0 not started; the git repository is initialised but has
-no commits).
+still open are at the end of section 11). Read it before designing anything; update it when
+a decision changes.
+
+Status: phase 0 (bootstrap) done on 2026-09-26: packaging, the pyqula path shim, the Qt
+environment fixes, the offscreen test harness, the startup check, a placeholder main window
+and a `tools/drive.py` stub. Phase 1 is next; the review items it depends on are still open
+(end of PLAN.md section 11).
 
 ## Hard rules
 
@@ -41,8 +45,12 @@ no commits).
   scratchpad when experimenting by hand). Verified: `h.get_bands(write=False)` still writes
   `KPOINTS_BANDS.OUT` and `BANDLINES.OUT` to the cwd.
 - Layering (PLAN.md section 3): no Qt imports outside `src/guiqula/ui/` and `src/guiqula/remote/`;
-  no pyqula imports in `core/`, `commands/`, `io/`; every mutation of the Document goes through
-  a Command; every registry entry gets an engine test against a direct pyqula call.
+  pyqula imports only in `engine/` and `worker/`, and in `registry/` only inside function
+  bodies (the UI imports the registry to build its forms, and the UI process must never load
+  pyqula, jax or numba, PLAN.md 13.15); every mutation of the Document goes through a
+  Command; every registry entry gets an engine test against a direct pyqula call. The import
+  rules are enforced by `tests/test_layering.py`, the UI-process rule by
+  `tests/ui/test_startup.py`.
 - Every stochastic term or calculation (disorder, random guesses, multistart, annealing)
   carries an explicit `seed` that the engine applies before the entry; pyqula itself draws
   from the unseeded global generator. Several `add_*` calls silently turn a Hamiltonian
@@ -54,8 +62,17 @@ no commits).
 
 ## Using the vendored pyqula
 
+`import guiqula` puts the right copy on `sys.path` without importing it
+(`src/guiqula/vendoring.py`): `$GUIQULA_PYQULA_PATH` if set (a directory containing `pyqula/`,
+or the package directory itself; it then also stops bytecode writes so an upstream checkout
+stays untouched), else the shipped `guiqula/_vendor`, else the checkout's `vendor/`. It also
+sets `NUMBA_CACHE_DIR` to the user cache, so numba never writes next to pyqula's sources.
+Code that needs pyqula calls `vendoring.ensure_pyqula_on_path()`, which raises if no copy is
+found or a different pyqula was imported first. By hand, from a scratch directory:
+
 ```python
-import sys; sys.path.insert(0, "<repo>/vendor")   # the package is vendor/pyqula
+import sys; sys.path.insert(0, "<repo>/src")
+import guiqula                                     # or sys.path.insert(0, "<repo>/vendor")
 from pyqula import geometry                        # always import submodules explicitly;
                                                    # pyqula/__init__.py exports nothing
 ```
@@ -81,20 +98,32 @@ Under that setup a window builds, buttons can be clicked with `.click()`, and
 `widget.grab().save("shot.png")` writes a screenshot that can be inspected with the Read tool.
 An interactive matplotlib `QtAgg` canvas embeds and renders offscreen too. The harmless
 message `This plugin does not support propagateSizeHints()` is printed by the offscreen
-plugin. The test `conftest.py` and `tools/drive.py` are meant to set these variables
-themselves (to be written in phase 0); `pytest-qt` and `pyqtgraph` are not installed yet
-(`pip install pytest-qt pyqtgraph`).
+plugin. `guiqula.env.configure_qt(offscreen=True)` sets both variables; `tests/conftest.py`,
+`tools/drive.py` and `guiqula --offscreen` call it. `pytest-qt` 4.5 and `pyqtgraph` 0.14 are
+installed (2026-09-26). Importing pyqtgraph prints a NumPy-ABI traceback from the conda base's
+`bottleneck`, which was built against NumPy 1.x; pyqtgraph catches it and works.
 
 ## Commands
 
-Nothing to build yet. Planned (phase 0), keep this section in sync when they exist:
+Nothing is installed: pytest puts `src/` on the path (`pyproject.toml`), and `tools/drive.py`
+does it itself. Keep this section in sync with what exists.
 
 ```bash
-python -m pytest tests                 # everything (core, engine, ui offscreen)
-python -m pytest tests/ui -k outliner  # one area / one test
-python tools/drive.py preset.guiqula --run bands --shot out.png   # drive the app headlessly
+python -m pytest                       # everything (offscreen Qt; about 7 s)
+python -m pytest -m "not slow"         # skip the wheel build
+python -m pytest tests/ui -k startup   # one area / one test
+PYTHONPATH=src python -m guiqula       # start the program (--offscreen, --version)
+python tools/drive.py --shot out.png   # drive the window headlessly; --widget NAME,
+                                       # --list-widgets, --python CODE (see --help)
 tools/update_vendor.sh                 # refresh vendor/ from upstream pyqula
 ```
+
+Every test runs with its own `tmp_path` as the cwd (autouse fixture in `tests/conftest.py`),
+so pyqula's `.OUT` files never reach the repository. The `shot(widget, name)` fixture saves
+screenshots to `ui_dump/<test id>/` (gitignored) for inspection with the Read tool; the
+`run_python(code)` fixture runs code in a fresh interpreter that sees `src/`.
+`tools/drive.py preset.guiqula --run bands` (documents and calculations) arrives in phase 1
+with the command API; until then those arguments exit with status 2.
 
 Do not pipe pytest output through `tail`/`grep` without `set -o pipefail`: the pipe hides
 pytest's exit status (a lesson recorded in pyqula's own notes).

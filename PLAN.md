@@ -7,8 +7,9 @@ for every later design discussion; update it when a decision changes.
 
 Status: **all decisions in sections 12 and 13 made on 2026-09-26 (only 13.13 is
 still open); the plan review of the same day is in section 14 (decided items)
-and at the end of section 11 (items still open).** Nothing in `src/` exists
-yet; phase 0 is next.
+and at the end of section 11 (items still open).** Phase 0 was done on
+2026-09-26 (section 7); phase 1 is next and waits on the open review items at
+the end of section 11.
 
 ## 1. Requirements (as stated by the maintainer)
 
@@ -79,7 +80,7 @@ model. That is also what makes the Claude add-on (requirement 9) cheap.
   and publication export (PNG/PDF/SVG plus the raw data) all come for free.
   Every plot lives in a tab of the central viewport and can be detached into a
   floating dock.
-- **pyqtgraph** (pip, pure Python, not installed yet) as the fast path for the
+- **pyqtgraph** (pip, pure Python, installed in phase 0) as the fast path for the
   structure canvas once systems have thousands of atoms, and for slider-driven
   live updates. Not needed for phase 1; the canvas starts on matplotlib too.
 - **3D structures**: pyqtgraph.opengl first (light). pyvista/vtk are already
@@ -90,6 +91,9 @@ model. That is also what makes the Claude add-on (requirement 9) cheap.
 
 ```
 src/guiqula/
+  __init__.py, vendoring.py, env.py, __main__.py
+              Package entry: the pyqula sys.path shim (never imports pyqula),
+              the Qt plugin path and NUMBA_CACHE_DIR fixes, the command line.
   core/       Document model (JSON-serializable). No Qt, no pyqula imports.
   registry/   Declarative catalogue: lattices, geometry ops, terms, calculations,
               operators. Each entry = parameter schema + applicability rules +
@@ -577,12 +581,24 @@ Each phase ends with tests that run headlessly and, where there is UI, with
 screenshots Claude can inspect. No phase starts a new layer before the
 previous one has tests.
 
-**Phase 0 — bootstrap (short).** `pyproject.toml`, `src/guiqula` skeleton with
+**Phase 0 — bootstrap (short). Done 2026-09-26.** `pyproject.toml`, `src/guiqula` skeleton with
 the `_vendor` path shim, `vendor/` wiring (done), `tools/update_vendor.sh`
 (done), `git init` + license (done), test harness (`conftest.py` sets offscreen
 Qt and plugin path, screenshot fixture, startup-time check), `tools/drive.py`
 stub. Install `pytest-qt` and `pyqtgraph` (`platformdirs` 3.10 and `pydantic`
 2.8 are already present).
+What was built: `pyproject.toml` plus a small `setup.py` that maps
+`vendor/pyqula` to `guiqula._vendor.pyqula` in the wheel (a test builds the
+wheel and imports pyqula from it); `guiqula.vendoring` (lookup order
+`$GUIQULA_PYQULA_PATH`, shipped `_vendor`, checkout `vendor/`; never imports
+pyqula; refuses a different pyqula imported first; no bytecode writes into an
+override tree); `guiqula.env` (Qt plugin path found without importing Qt,
+`NUMBA_CACHE_DIR` in the user cache, because numba otherwise writes its cache
+next to pyqula's sources); the empty layer packages; a placeholder main window;
+`tools/drive.py` (window and widget screenshots, widget tree, Python snippets;
+documents and `--run` wait for phase 1). Tests: an AST check of the layering
+rules (section 10), the shim, the packaging, the startup budget, the driver, a
+pyqula smoke build. Requires Python 3.11 or newer (jax 0.8.1).
 
 **Phase 1 — headless vertical slice, plus a thin UI.** Document + commands +
 registry with ~5 lattices, 3 geometry ops, 5 terms, 2 calculations (bands,
@@ -664,8 +680,11 @@ supersede quantum-lattice; both can coexist.
 ## 10. Repository conventions (to be kept in CLAUDE.md)
 
 - Upstream pyqula is read-only; only `tools/update_vendor.sh` touches `vendor/`.
-- No Qt imports outside `src/guiqula/ui/` and `remote/`. No pyqula imports in
-  `core/`, `commands/`, `io/` (they only see the Document).
+- No Qt imports outside `src/guiqula/ui/` and `remote/`. pyqula imports only
+  in `engine/` and `worker/`, and in `registry/` only inside function bodies
+  (the UI imports the registry for its forms and must never load pyqula,
+  13.15); `core/`, `commands/`, `io/` only see the Document. Enforced by
+  `tests/test_layering.py` since phase 0.
 - Anything that mutates the Document goes through a Command.
 - Every registry entry has an engine test against direct pyqula.
 - Every calculation runs in a scratch cwd, never in the repo or `vendor/`.
@@ -803,7 +822,11 @@ onward are features (placement per phase at the end of section 7).
 15. **Startup budget.** jax imports in about 0.5 s warm and much more cold,
    numba similar. Keep jax and pyqula out of the UI process entirely (they live
    in the worker), start the worker while the window appears, and measure
-   startup in the test suite.
+   startup in the test suite. Measured in phase 0 (2026-09-26, warm cache,
+   offscreen): 0.23 s from the first guiqula import to a shown window, 0.3 s
+   wall-clock with interpreter start, none of pyqula, jax, numba, numpy or
+   matplotlib loaded; importing pyqula alone takes 0.7 s.
+   `tests/ui/test_startup.py` asserts the module set and a 2 s budget.
 
 16. **Teaching use.** A preset gallery, one-click export of figure plus data plus
    script, and presets with locked parameters, for use in courses.
