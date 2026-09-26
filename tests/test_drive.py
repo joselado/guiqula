@@ -87,6 +87,8 @@ def test_kill_and_recover(repo, tmp_path):
     autosaves = tmp_path / "data" / "autosave"
     victim = subprocess.Popen(
         [sys.executable, str(repo / "tools" / "drive.py"), "honeycomb_zeeman_rashba", "--no-warm",
+         "--do", json.dumps({"do": "select", "entry": "t2"}),
+         "--do", json.dumps({"do": "workspace", "name": "hamiltonian"}),
          "--do", json.dumps({"do": "rename", "entry": "s1", "name": "before the crash"}),
          "--do", json.dumps({"do": "add_geometry_op", "system": "s1", "kind": "remove_atoms",
                              "params": {"positions": [[1.0, 0.0, 0.0]]}}),
@@ -123,5 +125,6 @@ def test_kill_and_recover(repo, tmp_path):
     assert report["document"][0]["name"] == "before the crash"
     assert report["document"][0]["ops"] == ["op1:supercell", "op2:remove_atoms"]
     assert report["builds"]["s1"]["sites"] == 7 and report["modified"]
+    assert report["selected"] == "t2" and report["workspace"] == "hamiltonian"   # the view too
     assert (tmp_path / "recovered.png").read_bytes().startswith(PNG_MAGIC)
     assert list(autosaves.glob("*.json")) == []    # the recovering session closed cleanly

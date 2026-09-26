@@ -4,9 +4,12 @@ its Regions and its Hamiltonian (the terms, each with the Hilbert space
 after it), then the Calculations with their result status.
 
 Ops and terms carry a checkbox (enabled); an invalid entry is marked ✗ in
-red with the planner's or pyqula's message (decision 14.3). Everything the
-outliner changes goes out as a command (name, args) for the window to run
-through the dispatcher; it never touches the Document itself.
+red with the planner's or pyqula's message (decision 14.3). Ops, terms,
+regions and calculations are reordered by dragging them within their own
+list (or with Alt+arrows). Everything the outliner changes goes out as a
+command (name, args) for the window to run through the dispatcher; it never
+touches the Document itself, and Qt never moves an item: the tree is
+rebuilt from the Document after the move command.
 
 Items carry the id of what they show: an entry id (s1, op2, t3, r1, c2),
 or ``<system>/base``, ``<system>/geometry``, ``<system>/regions``,
@@ -15,7 +18,8 @@ or ``<system>/base``, ``<system>/geometry``, ``<system>/regions``,
 """
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QBrush, QColor, QKeySequence
-from PySide6.QtWidgets import QInputDialog, QMenu, QTreeWidget, QTreeWidgetItem
+from PySide6.QtWidgets import (QAbstractItemView, QInputDialog, QMenu, QTreeWidget,
+                               QTreeWidgetItem)
 
 from guiqula.core import regions as region_tools
 from guiqula.registry import base as registry
@@ -24,6 +28,20 @@ from guiqula.ui import theme
 
 ID_ROLE = Qt.ItemDataRole.UserRole
 INVALID = "✗ "
+MOVABLE = ("op", "term", "region", "calculation")
+
+
+def drop_index(old, target, below):
+    """The index to give move() so that the entry at old lands just above
+    (or below) the entry at target, both indices of the same list."""
+    before = target + (1 if below else 0)
+    return before - 1 if old < before else before
+
+
+def list_heads(family, system):
+    """Rows a drop onto means "to the top of the list" for this family."""
+    return {"op": {f"{system}/geometry", f"{system}/base"}, "term": {f"{system}/hamiltonian"},
+            "region": {f"{system}/regions"}, "calculation": {"calculations"}}[family]
 
 
 def system_of(item_id):
@@ -69,6 +87,10 @@ class Outliner(QTreeWidget):
         self.setHeaderLabels(["entry", "status"])
         self.setColumnWidth(0, 230)
         self.setUniformRowHeights(True)
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._context_menu)
         self.currentItemChanged.connect(self._current_changed)
@@ -103,12 +125,14 @@ class Outliner(QTreeWidget):
         finally:
             self.blockSignals(False)
 
-    def _add(self, parent, item_id, texts, tooltip=None):
+    def _add(self, parent, item_id, texts, tooltip=None, movable=False):
         item = QTreeWidgetItem(parent, list(texts)) if parent is not None \
             else QTreeWidgetItem(list(texts))
         if parent is None:
             self.addTopLevelItem(item)
         item.setData(0, ID_ROLE, item_id)
+        if not movable:
+            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsDragEnabled)
         if tooltip:
             item.setToolTip(0, tooltip)
             item.setToolTip(1, tooltip)
@@ -186,7 +210,7 @@ class Outliner(QTreeWidget):
                     text += f" · {count} sites"
                 except Exception as error:
                     text = INVALID + str(error)
-            self._add(regions, region.id, [f"{region.id}  {region.name}", text])
+            self._add(regions, region.id, [f"{region.id}  {region.name}", text], movable=True)
 
         if system.hamiltonian is None:
             return
@@ -201,7 +225,8 @@ class Outliner(QTreeWidget):
             self._add_entry(hamiltonian, term, "term", stages[term.id], report, status.strip())
 
     def _add_entry(self, parent, entry, family, stage, report, status):
-        item = self._add(parent, entry.id, [f"{entry.id}  {_label(family, entry.kind)}", status])
+        item = self._add(parent, entry.id, [f"{entry.id}  {_label(family, entry.kind)}", status],
+                         movable=True)
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
         item.setCheckState(0, Qt.CheckState.Checked if entry.enabled else Qt.CheckState.Unchecked)
         message = stage.problem
@@ -236,7 +261,7 @@ class Outliner(QTreeWidget):
         status, error = self._calculation_status(session, calc.id)
         item = self._add(parent, calc.id,
                          [f"{calc.id}  {_label('calculation', calc.kind)} on {calc.system}", status],
-                         tooltip=error)
+                         tooltip=error, movable=True)
         if status.startswith("failed"):
             item.setForeground(1, QBrush(QColor(theme.ERROR)))
         elif status == "stale":
@@ -283,6 +308,55 @@ class Outliner(QTreeWidget):
         _, _, items, index, _ = found
         if 0 <= index + step < len(items):
             self.command.emit("move", {"entry": self.current_id(), "index": index + step})
+
+    # ---- drag to reorder
+    def move_for_drop(self, point):
+        """(entry id, new index) for dropping the current item at a point of
+        the viewport, or None when that drop moves nothing: only within
+        the entry's own list (above or below a sibling, or onto the list's
+        header for the top)."""
+        found = self._family(self.current_id())
+        target = self.itemAt(point)
+        if found is None or found[0] not in MOVABLE or target is None:
+            return None
+        family, owner, items, old, obj = found
+        target_id = target.data(0, ID_ROLE)
+        if target_id == obj.id:
+            return None
+        system = owner.id if owner is not None else None
+        if target_id in list_heads(family, system):
+            new = 0
+        else:
+            other = self._family(target_id)
+            if other is None or other[2] is not items:
+                return None
+            below = point.y() > self.visualItemRect(target).center().y()
+            new = drop_index(old, other[3], below)
+        new = min(max(new, 0), len(items) - 1)
+        return None if new == old else (obj.id, new)
+
+    def dragMoveEvent(self, event):
+        super().dragMoveEvent(event)      # auto-scroll and the drop indicator
+        if event.source() is self and self.move_for_drop(event.position().toPoint()):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        event.setDropAction(Qt.DropAction.IgnoreAction)   # Qt must not move the item itself
+        event.ignore()
+        if event.source() is self:                         # never a drop from elsewhere
+            self.drop_at(event.position().toPoint())
+
+    def drop_at(self, point):
+        """Drop the current item at a point of the viewport: sends the move
+        command (later, since it rebuilds the tree) and returns it, or None."""
+        move = self.move_for_drop(point)
+        if move is not None:
+            entry, index = move
+            QTimer.singleShot(0, lambda: self.command.emit("move", {"entry": entry,
+                                                                    "index": index}))
+        return move
 
     def rename_current(self):
         found = self._family(self.current_id())

@@ -168,6 +168,7 @@ def main(argv=None):
                                 for s, b in session.builds.items()}
             report["build_errors"] = dict(session.build_errors)
             report["selected"] = window.selected
+            report["workspace"] = window.workspace
             report["selection"] = len(window.structure.selected())
             report["modified"] = session.modified
             report["jobs"] = [j.summary() for j in session.jobs.jobs.values() if j.kind != "build"]

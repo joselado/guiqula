@@ -10,6 +10,7 @@ updated in place, so an editor in use is never destroyed under the mouse;
 otherwise the form is rebuilt.
 """
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QGroupBox, QLabel, QLineEdit,
                                QPushButton, QScrollArea, QVBoxLayout, QWidget)
 
@@ -17,6 +18,7 @@ from guiqula.core import regions as region_tools
 from guiqula.core.document import DocumentError
 from guiqula.registry import base as registry
 from guiqula.registry import pipeline
+from guiqula.ui import formulas
 from guiqula.ui.forms import format_number, make_editor
 from guiqula.ui.outliner import system_of
 
@@ -214,9 +216,10 @@ class EntryForm(Form):
             spec = None
             super().__init__(panel, entry_id, f"{entry_id}  {obj.kind}", str(error).strip("\"'"))
         if spec is not None:
-            doc = spec.doc + (f"\n\nformula: {spec.formula}" if spec.formula else "")
             super().__init__(panel, entry_id, f"{spec.label}",
-                             f"{entry_id} · {spec.group}\n{doc}".strip())
+                             f"{entry_id} · {spec.group}\n{spec.doc}".strip())
+            if spec.formula:
+                self.layout().insertWidget(2, self._formula(spec.formula))
         self.family, self.kind, self.spec = family, obj.kind, spec
         self.system_id = owner.id if owner is not None else obj.system
         self.enabled = None
@@ -248,6 +251,19 @@ class EntryForm(Form):
         self.status.setWordWrap(True)
         self.layout().insertWidget(self.layout().count() - 2, self.status)
         self.update_values()
+
+    def _formula(self, tex):
+        label = QLabel()
+        label.setObjectName("formulaImage")
+        label.setToolTip(tex)
+        label.setContentsMargins(0, 6, 0, 6)
+        color = self.palette().color(QPalette.ColorRole.WindowText).name()
+        try:
+            label.setPixmap(formulas.pixmap(tex, color, self.devicePixelRatioF()))
+        except formulas.FormulaError as error:
+            label.setText(f"formula: {tex}")
+            label.setToolTip(str(error))
+        return label
 
     def signature(self):
         found = self.session.document.find(self.item_id)

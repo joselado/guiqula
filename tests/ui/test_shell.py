@@ -6,8 +6,8 @@ import subprocess
 import sys
 
 import pytest
-from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QMessageBox, QToolButton
+from PySide6.QtCore import QPoint, Qt, QTimer
+from PySide6.QtWidgets import QLabel, QMessageBox, QToolButton
 
 from guiqula.io import autosave, project
 from guiqula.session import Session
@@ -63,6 +63,48 @@ def test_outliner_checkbox_toggles_and_undo(window, qtbot):
     assert window.outliner.item("t2").checkState(0).name == "Checked"
 
 
+def test_drop_index():
+    from guiqula.ui.outliner import drop_index
+    # entries a b c d at 0..3; move b (1)
+    assert drop_index(1, 3, below=True) == 3        # below d: a c d b
+    assert drop_index(1, 3, below=False) == 2       # above d: a c b d
+    assert drop_index(1, 0, below=False) == 0       # above a: b a c d
+    assert drop_index(1, 0, below=True) == 1        # below a: unchanged
+    assert drop_index(3, 1, below=False) == 1       # d above b: a d b c
+
+
+def drop(window, qtbot, source, target, below):
+    outliner = window.outliner
+    outliner.setCurrentItem(outliner.item(source))
+    rect = outliner.visualItemRect(outliner.item(target))
+    point = rect.center() + QPoint(0, rect.height() // 3 if below else -rect.height() // 3)
+    return outliner.drop_at(point)
+
+
+def test_drag_to_reorder(window, qtbot):
+    fresh(qtbot, window)
+    session = window.session
+    session.do("add_term", system="s1", kind="onsite")                        # t3
+    session.do("add_geometry_op", system="s1", kind="ribbon")                  # op2
+
+    def terms():
+        return [t.id for t in session.document.system("s1").hamiltonian.terms]
+    assert drop(window, qtbot, "t3", "t1", below=False) == ("t3", 0)
+    qtbot.waitUntil(lambda: terms() == ["t3", "t1", "t2"], timeout=5000)
+    assert drop(window, qtbot, "t3", "t2", below=True) == ("t3", 2)
+    qtbot.waitUntil(lambda: terms() == ["t1", "t2", "t3"], timeout=5000)
+    assert drop(window, qtbot, "op2", "s1/base", below=True) == ("op2", 0)    # the list head
+    qtbot.waitUntil(lambda: [o.id for o in session.document.system("s1").geometry.ops]
+                    == ["op2", "op1"], timeout=5000)
+    assert drop(window, qtbot, "t1", "op1", below=False) is None              # another list
+    assert drop(window, qtbot, "t1", "t2", below=False) is None               # no change
+    assert drop(window, qtbot, "s1", "c1", below=False) is None               # not movable
+    assert not window.outliner.item("s1").flags() & Qt.ItemFlag.ItemIsDragEnabled
+    assert window.outliner.item("t1").flags() & Qt.ItemFlag.ItemIsDragEnabled
+    session.undo()
+    assert [o.id for o in session.document.system("s1").geometry.ops] == ["op1", "op2"]
+
+
 def test_select_action_drives_properties_and_viewport(window, qtbot):
     fresh(qtbot, window)
     assert window.session.act("select", entry="t2") == "t2"
@@ -70,6 +112,8 @@ def test_select_action_drives_properties_and_viewport(window, qtbot):
     assert isinstance(form, EntryForm) and form.title.text() == "Rashba spin-orbit coupling"
     assert window.outliner.current_id() == "t2" and window.viewport.currentIndex() == 0
     assert "Hilbert space after it: spinful" in form.status.text()
+    formula = form.findChild(QLabel, "formulaImage")        # rendered, not LaTeX source
+    assert not formula.pixmap().isNull() and "sigma" in formula.toolTip()
     window.session.act("select", entry="c2")
     assert window.viewport.currentIndex() == 1 and window.selected_calculation() == "c2"
     window.session.act("select", entry="s1/base")
@@ -191,6 +235,33 @@ def test_selection_to_removal_and_region(window, qtbot, shot):
     session.undo()                                       # the region
     session.undo()                                       # the grown removal
     assert len(session.document.find(op)[-1].params["positions"]) == 2
+
+
+def test_project_remembers_the_view(window, qtbot, tmp_path):
+    """The workspace, the selected entry and calculation, the tool, the tab
+    and the canvas selection are saved with the project (maintainer,
+    phase-2 review item 1)."""
+    fresh(qtbot, window)
+    session = window.session
+    session.act("select_sites", sublattice=-1)
+    session.act("workspace", name="hamiltonian")
+    session.act("tool", name="lasso")
+    session.act("select", entry="t2")
+    window.select_calculation("c2")
+    assert not session.modified                       # none of that is an unsaved change
+    path = tmp_path / "view.guiqula"
+    session.act("save", path=str(path))
+    fresh(qtbot, window)                              # the preset has no view state
+    assert window.selected == "" and window.structure.selected().tolist() == []
+    session.act("load", path=str(path))
+    assert window.workspace == "hamiltonian" and window.selected == "t2"
+    assert window.structure.tool == "lasso" and window.tool_buttons.checkedButton().objectName() \
+        == "tool_lasso" and window.selected_calculation() == "c2"
+    settle(qtbot, window)
+    qtbot.waitUntil(lambda: len(window.structure.selected()) == 4, timeout=10_000)
+    assert not session.modified and window.windowTitle() == "guiqula — view.guiqula"
+    window.set_tool("pick")
+    window.set_workspace("geometry")
 
 
 def test_report_exception_writes_a_crash_report(window, tmp_path, monkeypatch):

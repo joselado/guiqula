@@ -55,8 +55,10 @@ a `Session`.
 - `ui/`: `mainwindow.py` (workspaces, palettes from the registry, docks, bars; the window's
   own dispatcher actions `select`, `workspace`, `tool`, `select_sites`,
   `region_from_selection`, `remove_selected`), `outliner.py`, `properties.py` + `forms.py`
-  (forms from the parameter declarations), `structure.py` (canvas and selection tools),
-  `plots.py`, `jobpanel.py`, `bars.py`, `errors.py` (exception hook), `theme.py`. The window
+  (forms from the parameter declarations), `formulas.py` (mathtext images), `structure.py`
+  (canvas and selection tools), `plots.py`, `jobpanel.py`, `bars.py`, `errors.py` (exception
+  hook), `theme.py`. The window saves its view state as the Document's `ui` block (not a
+  Command, not an unsaved change) and restores it on open and recovery. The window
   polls the session from a `QTimer` and starts the workers after it is shown; a form or tree
   rebuilt from inside one of its own signals must be deleted later (PLAN.md phase 2 facts).
 

@@ -9,8 +9,15 @@ Document from poll() and deletes the autosave on a clean close()
 (guiqula.io.autosave); the ``recover`` action loads what a crashed session
 left behind.
 
+The Document's ``ui`` block is view state (the window's workspace,
+selection, canvas selection): the window hands a ``view_state`` callable,
+whose dict is written into ``ui`` of what is saved and autosaved, and reads
+it back after a load. It is not physics: it never goes on the undo stack,
+never enters a key, and does not count as an unsaved change.
+
 Qt-free and pyqula-free: it runs in the UI process.
 """
+import json
 from pathlib import Path
 
 from guiqula.commands import CommandError, Dispatcher
@@ -21,6 +28,11 @@ from guiqula.io import results as result_files
 from guiqula.io.script import export_script
 from guiqula.registry import pipeline
 from guiqula.worker.client import JobManager
+
+
+def _content(document):
+    """The Document without its view state, for the modified flag."""
+    return json.dumps(document.model_dump(mode="json", exclude={"ui"}), sort_keys=True)
 
 
 def _project_path(path_or_name):
@@ -45,7 +57,8 @@ class Session:
         self.build_errors = {}   # system id -> why the latest build failed
         self._build_times = {}   # system id -> submission time of the stored build
         self.path = path         # where the document was loaded from / saved to
-        self._saved_json = self.document.to_json()
+        self.view_state = None   # callable -> dict saved as the document's ui block (the window)
+        self._saved_json = _content(self.document)
         self.autosaver = autosave if isinstance(autosave, autosave_files.Autosaver) else \
             autosave_files.Autosaver() if autosave else None
         self._listeners = []
@@ -63,8 +76,20 @@ class Session:
     @property
     def modified(self):
         """Whether the Document differs from the file it was loaded from or
-        last saved to (a new document: from the empty one)."""
-        return self.document.to_json() != self._saved_json
+        last saved to (a new document: from the empty one); the view state
+        does not count."""
+        return _content(self.document) != self._saved_json
+
+    def document_for_file(self):
+        """The Document as saved: with the current view state as its ui."""
+        if self.view_state is None:
+            return self.document
+        try:
+            ui = self.view_state()
+            json.dumps(ui)
+        except Exception:            # a broken view state must not block a save
+            return self.document
+        return self.document.model_copy(update={"ui": ui})
 
     def do(self, name, /, **args):
         return self.dispatcher.do(name, **args)
@@ -156,8 +181,8 @@ class Session:
         """Process worker messages; autosave if due. The window calls this
         from a timer, headless code through wait()."""
         count = self.jobs.poll(timeout)
-        if self.autosaver is not None:
-            self.autosaver.tick(self.document, self.path, self.modified)
+        if self.autosaver is not None and self.autosaver.due():
+            self.autosaver.write(self.document_for_file(), self.path, self.modified)
         return count
 
     def wait(self, calculation=None, timeout=None):
@@ -235,17 +260,17 @@ class Session:
         return self.cancel(target).summary()
 
     def _action_save(self, path):
-        self.path = project.save(self.document, path)
-        self._saved_json = self.document.to_json()
+        self.path = project.save(self.document_for_file(), path)
+        self._saved_json = _content(self.document)
         return str(self.path)
 
     def _action_load(self, path):
         document = project.load(path)
-        self._replace_document(document, _project_path(path), document.to_json())
+        self._replace_document(document, _project_path(path), _content(document))
         return str(project.resolve(path))
 
     def _action_new(self):
-        self._replace_document(Document(), None, Document().to_json())
+        self._replace_document(Document(), None, _content(Document()))
 
     def _action_recover(self, path=None):
         """Load what a session that did not close cleanly left behind (the
@@ -262,7 +287,7 @@ class Session:
         self._replace_document(document, source, None)
         if self.autosaver is not None:     # claimed at once: not offered again meanwhile
             self.autosaver.adopt(path)
-            self.autosaver.write(self.document, self.path, self.modified)
+            self.autosaver.write(self.document_for_file(), self.path, self.modified)
         return {"path": str(path), "source": info.get("source"),
                 "systems": [s.id for s in document.systems]}
 

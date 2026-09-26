@@ -173,11 +173,15 @@ with its ordered stacks, plus a list of calculations and their results:
 }
 ```
 
-(Since phase 2 the selected item, the workspace and the canvas selection
-are window state, reached through dispatcher actions, not stored in `ui`:
-writing them into the Document outside a Command would break the
-every-mutation-is-a-Command rule, and a Command per click would fill the
-undo stack. Whether a saved project should remember them is open.)
+(Since phase 2 `ui` holds the view state: the workspace, the selected
+entry and calculation, the canvas tool, the viewport tab and the canvas
+selection by position. The window keeps it as its own state, reached
+through dispatcher actions, and hands the session a `view_state` callable
+whose dict is written into `ui` of what is saved and autosaved; opening or
+recovering a project restores it. A click is not a Command: the view state
+never goes on the undo stack, never enters a key, and does not count as an
+unsaved change. The maintainer asked for projects to remember it, answer 1
+to the phase-2 report.)
 
 A document holds a list of **systems** (decision 13.1). Each system has a
 `kind`: `quantum` (geometry, regions, Hamiltonian construction, term stack,
@@ -669,7 +673,11 @@ a Result tab, jobs and log docks, status bar); the structure canvas
 (`ui/structure.py`: atoms as circles in data units coloured by sublattice,
 pyqula's first-neighbour bonds, the neighbouring cells faded, the unit
 cell, overlays for the selected region or removal op, wheel zoom, and the
-pick, box and lasso tools plus select by sublattice or edge); regions and
+pick, box and lasso tools plus select by sublattice or edge); formulas
+rendered as images with matplotlib's mathtext (`ui/formulas.py`, a test
+renders every registry formula); drag to reorder in the outliner (within an
+entry's own list; the tree sends a `move` command and is rebuilt, Qt never
+moves an item); the view state saved with the project; regions and
 removals made from a selection (`remove_selected` grows a trailing Remove
 atoms op, PLAN 3.1); the island op (`pyqula.islands`); the build summary
 carries the geometry arrays (`engine/structure.py`); build requests
@@ -680,11 +688,22 @@ exception hook with a non-modal error bar; a `duplicate` mutation; the
 window's own actions (`select`, `workspace`, `tool`, `select_sites`,
 `region_from_selection`, `remove_selected`) so drivers reach everything;
 `tools/drive.py --recover --hold`; `$GUIQULA_DATA_DIR`. Left for later:
-drag to reorder in the outliner (Alt+arrows and the context menu move
-entries), region kinds by rule that follow geometry changes (by sublattice
-or edge distance; the canvas tools store positions), crash reports for
-worker deaths (shown next to the job, as in phase 1), rendered formulas
-(the LaTeX source is shown), a 3D view (the canvas draws xy). Facts
+region kinds by rule that follow geometry changes (by sublattice or edge
+distance; the canvas tools store positions), crash reports for worker
+deaths (shown next to the job, as in phase 1), a 3D view (the canvas draws
+xy; see answer 9 below). Maintainer's answers to the phase-2 report
+(numbered as reported): 1, the project should remember the selection and
+the workspace (done, see 3.1); 3, drag to reorder should exist (done; a
+real mouse drag cannot be simulated offscreen, so the tests drive the drop
+logic, `Outliner.drop_at`); 5, formulas should be images (done); 9, a 3D
+view will be made for the cases that need it (geometries that are not
+flat: 3D lattices, stacked or twisted layers), with pyqtgraph.opengl as in
+section 2, when the first such lattices and ops arrive (phase 4). Items 2
+(canvas selections stored as positions, no rule-based region kinds), 4
+(no crash report for a worker death), 6 (the close prompt only in the
+interactive program), 7 (recovery offers only autosaves with unsaved
+changes) and 8 (island size from n alone) were not commented on and stand
+as built. Facts
 learned: with `geo=` given, `islands.get_geometry` still takes the default
 `nedges` from `name="square"` (4), so the entry always passes it, and the
 island size does not depend on the input cell (inradius 1.5 n); PySide6
@@ -694,7 +713,9 @@ island size does not depend on the input cell (inradius 1.5 n); PySide6
 inside one of its own signals must be deleted later (the window does);
 pytest-qt creates the QApplication, so the theme is applied to an existing
 application too; matplotlib's selectors and synthetic `MouseEvent`s work
-offscreen (a press outside the axes is ignored); `os.kill(pid, 0)`
+offscreen (a press outside the axes is ignored), a Qt drag does not
+(`QTest.mouseMove` carries no pressed button in Qt 6); mathtext renders all
+registry formulas (1 s for the first, fonts, then milliseconds); `os.kill(pid, 0)`
 terminates a process on Windows, so the autosave's liveness check uses
 `OpenProcess` there; pyqula's KD-tree neighbour search takes 0.2 s for
 10,000 sites.
@@ -814,7 +835,10 @@ supersede quantum-lattice; both can coexist.
      PySide6-Essentials has no QtWebEngine, so a MathJax view would work on
      the development machine (the Addons wheel is installed) but not for a
      pip install. Candidates: matplotlib mathtext per equation, or images
-     rendered at refresh time.
+     rendered at refresh time. (Phase 2 renders the registry's formulas
+     with mathtext, `ui/formulas.py`; mathtext has no `pmatrix` or
+     multi-line environments, so the guide's equations may still need the
+     second route.)
   5. Refresh workflow: the anchor test runs in pytest, not in
      `update_vendor.sh`, so an upstream section rename makes the refresh
      commit red, and fixing the anchor means editing the registry, which

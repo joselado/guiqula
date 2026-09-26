@@ -96,6 +96,22 @@ def test_modified_flag(data_dir, tmp_path):
     assert Session(str(tmp_path / "p.guiqula"), jobs=NoJobs()).path == tmp_path / "p.guiqula"
 
 
+def test_view_state_is_saved_but_is_not_a_change(data_dir, tmp_path):
+    s = session("honeycomb_zeeman_rashba")
+    view = {"workspace": "hamiltonian", "selected": "t2"}
+    s.view_state = lambda: dict(view)
+    assert not s.modified
+    s.act("save", path=str(tmp_path / "p.json"))
+    assert json.loads((tmp_path / "p.json").read_text())["ui"] == view
+    view["selected"] = "t1"                         # clicking around changes nothing to save
+    assert not s.modified and not s.dispatcher.can_undo()
+    s.act("load", path=str(tmp_path / "p.json"))
+    assert s.document.ui == {"workspace": "hamiltonian", "selected": "t2"} and not s.modified
+    s.view_state = lambda: {"broken": object()}     # never blocks a save
+    s.act("save", path=str(tmp_path / "q.json"))
+    assert json.loads((tmp_path / "q.json").read_text())["ui"]["selected"] == "t2"
+
+
 def write_orphan(directory, document, pid, source=None, modified=True, name="orphan.json"):
     saver = autosave.Autosaver(directory=directory)
     saver.path = directory / name

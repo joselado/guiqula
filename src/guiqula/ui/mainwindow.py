@@ -11,7 +11,9 @@ the dispatcher as actions (select, workspace, tool, select_sites), so
 tools/drive.py and the future remote API reach them without putting clicks
 on the undo stack. region_from_selection and remove_selected are actions
 that apply one mutation each (add_region; add_geometry_op, or set_param on
-a trailing removal op, PLAN.md 3.1).
+a trailing removal op, PLAN.md 3.1). The same state is saved with the
+project as the Document's ui block (view_state, through the session) and
+restored when a document is opened or recovered (apply_view_state).
 
 The window does not start workers by itself: start_session() creates the
 Session (app.run calls it right after the window is shown, so the window
@@ -72,6 +74,7 @@ class MainWindow(QMainWindow):
         self._owns_session = False
         self._unsubscribe = None
         self._last_crash_text = None
+        self._pending_sites = None     # (system, positions) to select once it is built
 
         self.outliner = Outliner()
         self.outliner.selected.connect(self.select)
@@ -325,8 +328,10 @@ class MainWindow(QMainWindow):
         dispatcher.register_action("select_sites", self.select_sites)
         dispatcher.register_action("region_from_selection", self.region_from_selection)
         dispatcher.register_action("remove_selected", self.remove_selected)
+        session.view_state = self.view_state
         self.timer.start(POLL_MS)
         self._document_changed()
+        self.apply_view_state(session.document.ui)
         self.offer_recovery(quiet=True)
 
     def closeEvent(self, event):
@@ -396,6 +401,8 @@ class MainWindow(QMainWindow):
         self._update_status()
         self.build_timer.start(BUILD_DELAY_MS)
         self._update_title()
+        if event is not None and event["type"] == "reset":      # new, open, recover
+            self.apply_view_state(self.session.document.ui)
 
     def _update_title(self):
         path = self.session.path
@@ -501,6 +508,42 @@ class MainWindow(QMainWindow):
             bar.setVisible(key == name)
         self.viewport.setCurrentIndex(RESULT_TAB if name == "calculate" else STRUCTURE_TAB)
         return name
+
+    # ---- view state, saved with the project
+    def view_state(self):
+        """What the window shows, as the Document's ui block."""
+        state = {"workspace": self.workspace, "selected": self.selected,
+                 "tool": self.structure.tool,
+                 "tab": "result" if self.viewport.currentIndex() == RESULT_TAB else "structure"}
+        if self.selected_calculation():
+            state["calculation"] = self.selected_calculation()
+        if self.structure.system_id is not None and len(self.structure.selected()):
+            state["sites"] = {"system": self.structure.system_id,
+                              "positions": [[round(float(c), 10) for c in p]
+                                            for p in self.structure.selected_positions]}
+        return state
+
+    def apply_view_state(self, ui):
+        """Show what a saved ui block describes; whatever no longer fits the
+        Document (a removed entry, an unknown tool) is skipped, never an
+        error. An empty block leaves the workspace and the tool as they are
+        and selects nothing."""
+        ui = ui if isinstance(ui, dict) else {}
+        self._pending_sites = None
+        if ui.get("workspace") in WORKSPACES:
+            self.set_workspace(ui["workspace"])
+        if ui.get("tool") in structure_tools.TOOLS:
+            self.set_tool(ui["tool"])
+        if isinstance(ui.get("calculation"), str) and self.calc_box.findData(ui["calculation"]) >= 0:
+            self.select_calculation(ui["calculation"])
+        selected = ui.get("selected", "")
+        self.select(selected if isinstance(selected, str) and self._exists(selected) else "")
+        if ui.get("tab") in ("structure", "result"):
+            self.viewport.setCurrentIndex(RESULT_TAB if ui["tab"] == "result" else STRUCTURE_TAB)
+        sites = ui.get("sites")
+        if isinstance(sites, dict) and isinstance(sites.get("positions"), list):
+            self._pending_sites = (sites.get("system"), sites["positions"])
+            self._refresh_structure()
 
     # ---- canvas tools and the site selection
     def set_tool(self, name):
@@ -643,6 +686,14 @@ class MainWindow(QMainWindow):
         elif not self.session.build_is_current(system):
             caption += " · updating…"
         self.structure.show_structure(system, build, caption, **self._overlays(system, build))
+        pending = self._pending_sites
+        if pending is not None and pending[0] == system and self.session.build_is_current(system):
+            self._pending_sites = None
+            try:
+                self.structure.select(structure_tools.match_positions(
+                    build["positions"], pending[1], REGION_TOLERANCE))
+            except (ValueError, TypeError):
+                pass
 
     def _update_status(self):
         system = self.current_system()
