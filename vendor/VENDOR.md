@@ -5,17 +5,10 @@ during development. Never edit anything under `vendor/pyqula/`; refresh
 the whole copy instead.
 
 - Source: a local checkout of upstream pyqula (working tree, not git HEAD)
-- Upstream HEAD at copy time: `39003fb34c41caa8b1ce6d20ec9b2d559f49da03` (2026-09-26 16:40:27 +0300)
+- Upstream HEAD at copy time: `f8087b43e9011228dddf17e62a6809dde77e14dc` (2026-09-26 17:57:58 +0300)
 - Copied on: 2026-09-26
 - Uncommitted upstream changes that were included in this copy:
-     M src/pyqula/bsetk/interaction.py
-     M src/pyqula/chitk/densitychi.py
-     M src/pyqula/greentk/rg.py
-     M src/pyqula/scftk/densitydensity.py
-     M src/pyqula/scftk/densitydensity_kpm.py
-     M src/pyqula/scftk/spinspin.py
-     M src/pyqula/scftk/vjinteraction_jax.py
-     M src/pyqula/specialhopping.py
+    (none)
 
 Contents:
 - `pyqula/` — the package (`src/pyqula` upstream), without `__pycache__`

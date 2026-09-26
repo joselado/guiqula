@@ -40,7 +40,7 @@ from ..checkclass import is_iterable
 # module a caller happens to import first.
 
 
-def _build_v(h, J1=0.0, J2=0.0, J3=0.0, Jr=None, nd=None):
+def _build_v(h, J1=0.0, J2=0.0, J3=0.0, Jr=None, nd=None, rcut=None):
     """Build the spin-orbital interaction matrix for a J1/J2/J3 (plus
     optional general Jr(r) function) neighbor-shell SzSz coupling,
     following exactly the same neighbor-shell/hopping-dict construction as
@@ -55,17 +55,22 @@ def _build_v(h, J1=0.0, J2=0.0, J3=0.0, Jr=None, nd=None):
     _build_density_v -- several times for the same h and would otherwise
     recompute this O(n^2) geometry search from scratch on every call).
     Computed here if not given, so single-channel callers (SzSz) are
-    unaffected."""
+    unaffected.
+
+    rcut: range of the Jr tail, with the same meaning as for Vr (every
+    pair up to rcut, whole distance shells; None keeps every pair of a 0d
+    system and means 5.0 for a periodic one), see
+    specialhopping.distance_cut_interaction."""
     if nd is None: nd = h.geometry.neighbor_distances() # distances to the neighbor shells
     mgenerator = specialhopping.distance_hopping_matrix(
             [J1/2., J2/2., J3/2.], nd[0:3])
     hv = h.geometry.get_hamiltonian(has_spin=False, is_multicell=True,
             mgenerator=mgenerator)
-    if Jr is not None:
-        hv1 = h.geometry.get_hamiltonian(has_spin=False, is_multicell=True,
-                tij=Jr)
-        hv = hv + hv1
-    v = hv.get_hopping_dict()
+    v = {tuple(d): np.array(m, dtype=np.complex128)
+            for d, m in hv.get_hopping_dict().items()}
+    if Jr is not None: # every pair within rcut, whole distance shells
+        specialhopping.add_distance_cut_interaction(v, h.geometry, Jr,
+                rcut=rcut)
     for d in v:
         m = v[d]
         n = m.shape[0]
@@ -381,7 +386,7 @@ def VJinteraction(h0, V1=0.0, V2=0.0, V3=0.0, U=0.0, Vr=None,
     """Self-consistent mean field combining density-density interactions
     (U onsite Hubbard, V1/V2/V3/Vr neighbor-shell -- same convention as
     Vinteraction) with spin-spin exchange in a single SCF loop. rcut is
-    the range of Vr: every pair of sites up to rcut interacts and none
+    the range of Vr and Jr: every pair of sites up to rcut interacts and none
     beyond it; None keeps every pair of a finite (0d) system and means 5.0
     for a periodic one, see specialhopping.distance_cut_interaction.
 
@@ -662,10 +667,10 @@ def VJinteraction(h0, V1=0.0, V2=0.0, V3=0.0, U=0.0, Vr=None,
     h1 = h0.get_multicell()
     if integration != "kpm": h1 = h1.get_dense() # see docstring above
     nd = h1.geometry.neighbor_distances() # shared by all four _build_*_v calls below
-    vz = _build_v(h1, J1+J1z, J2, J3, Jr, nd=nd)
+    vz = _build_v(h1, J1+J1z, J2, J3, Jr, nd=nd, rcut=rcut)
     vd = _build_density_v(h1, V1, V2, V3, U, Vr, nd=nd, rcut=rcut)
-    vx = _build_v(h1, J1+J1x, J2, J3, Jr, nd=nd)
-    vy = _build_v(h1, J1+J1y, J2, J3, Jr, nd=nd)
+    vx = _build_v(h1, J1+J1x, J2, J3, Jr, nd=nd, rcut=rcut)
+    vy = _build_v(h1, J1+J1y, J2, J3, Jr, nd=nd, rcut=rcut)
     vz_exchange = vz # keep the pure exchange z channel and the density
     vd_reference = vd # part separately, see _run_anisotropic_scf
     if not h1.has_eh: # normal-state: fold density-density directly into vz

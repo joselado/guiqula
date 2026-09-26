@@ -570,10 +570,10 @@ def VJinteraction_jax(h0, V1=0.0, V2=0.0, V3=0.0, U=0.0, Vr=None,
                 "instead of raising, if not caught here")
     h1 = h0.get_multicell().get_dense()
     nd = h1.geometry.neighbor_distances()  # shared by all three _build_*_v calls
-    vz = _build_v(h1, J1 + J1z, J2, J3, Jr, nd=nd)
+    vz = _build_v(h1, J1 + J1z, J2, J3, Jr, nd=nd, rcut=rcut)
     vd = _build_density_v(h1, V1, V2, V3, U, Vr, nd=nd, rcut=rcut)
-    vx = _build_v(h1, J1 + J1x, J2, J3, Jr, nd=nd)
-    vy = _build_v(h1, J1 + J1y, J2, J3, Jr, nd=nd)
+    vx = _build_v(h1, J1 + J1x, J2, J3, Jr, nd=nd, rcut=rcut)
+    vy = _build_v(h1, J1 + J1y, J2, J3, Jr, nd=nd, rcut=rcut)
     vz_exchange = vz  # keep the pure exchange z channel and the density
     vd_reference = vd  # part, for h.Vchannels -- see generic_vjinteraction_jax
     vz = (MultiHopping(vz) + MultiHopping(vd)).get_dict()  # fold density-density in
