@@ -133,7 +133,7 @@ Nothing is installed: pytest puts `src/` on the path (`pyproject.toml`), and `to
 does it itself. Keep this section in sync with what exists.
 
 ```bash
-python -m pytest                       # everything (offscreen Qt, worker processes; ~2.5 min)
+python -m pytest                       # everything (offscreen Qt, worker processes; 1.5-2.5 min)
 python -m pytest -m "not slow"         # skip the wheel build
 python -m pytest tests/core            # pure Python, under a second
 python -m pytest tests/engine -k zeeman  # one area / one test

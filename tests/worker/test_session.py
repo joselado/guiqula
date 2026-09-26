@@ -112,3 +112,12 @@ def test_cli_run_and_script(tmp_path, repo):
     bad = subprocess.run([sys.executable, "-m", "guiqula", "run", "nope"], cwd=tmp_path,
                          capture_output=True, text=True, env=env, timeout=120)
     assert bad.returncode != 0 and "no such preset" in bad.stderr
+
+
+def test_removed_calculation_forgets_its_result(session):
+    session.act("load", path="honeycomb_zeeman_rashba")
+    assert session.run_calculation("c2", wait=True, timeout=600).status == "done"
+    session.do("remove", entry="c2")
+    assert session.result("c2") is None
+    session.do("add_calculation", system="s1", kind="bands")      # reuses the id c2
+    assert session.result("c2") is None and session.status("c2") == "none"

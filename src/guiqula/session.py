@@ -30,6 +30,7 @@ class Session:
         self.path = None         # where the document was loaded from / saved to
         self._listeners = []
         self.jobs.subscribe(self._on_job_event)
+        self.dispatcher.subscribe(self._on_document_event)
         for name in ("run_calculation", "cancel", "save", "load", "new", "export_script",
                      "save_result"):
             self.dispatcher.register_action(name, getattr(self, "_action_" + name))
@@ -123,9 +124,20 @@ class Session:
     def __exit__(self, *exc):
         self.close()
 
+    def _on_document_event(self, event):
+        """Forget results of calculations that no longer exist: ids are
+        reused after a removal, and a new c1 must not show the old c1's
+        result."""
+        present = {c.id for c in self.document.calculations}
+        for calc in [c for c in self.results if c not in present]:
+            del self.results[calc]
+        for calc in [c for c, job in self.calc_jobs.items() if c not in present and job.done]:
+            del self.calc_jobs[calc]
+
     def _on_job_event(self, kind, payload):
         if kind == "job" and payload.kind == "run" and payload.status == "done":
-            self.results[payload.label] = payload.value
+            if any(c.id == payload.label for c in self.document.calculations):
+                self.results[payload.label] = payload.value
         for listener in list(self._listeners):
             listener(kind, payload)
 

@@ -29,7 +29,6 @@ def wait_running(manager, job, timeout=60):
 def test_workers_are_non_daemonic_processes(manager):
     for worker in manager._all_workers():
         assert worker.process.daemon is False and worker.alive()
-    assert "pyqula" not in sys.modules or True   # the test process may import it itself
 
 
 def test_run_equals_direct_pyqula(manager, pyqula_direct):

@@ -97,6 +97,8 @@ src/guiqula/
   registry/   Declarative catalogue: lattices, geometry ops, terms, calculations,
               operators. Each entry = parameter schema + applicability rules +
               a build function + docs/tooltip/formula. Plugins register here.
+              registry/pipeline.py plans a system without pyqula (mode pre-scan,
+              invalid entries, stage and calculation keys) for the engine and the UI.
   engine/     Turns a Document into pyqula objects. Content-hash cache so that
               editing one term rebuilds only from that point down.
   worker/     Runs engine jobs in a separate OS process (multiprocessing spawn),
@@ -104,6 +106,8 @@ src/guiqula/
   commands/   Every mutation of the Document is a named Command with undo.
               This is the single API used by the UI, the tests, the embedded
               console, the CLI driver and the future Claude add-on.
+  session.py  Dispatcher + job manager + results: the one object the tests, the
+              CLI, tools/drive.py, the UI and the remote API drive (phase 1).
   io/         Project save/load (.guiqula), autosave journal, crash recovery,
               pyqula script export.
   ui/         PySide6: main window, outliner, properties forms (auto-generated
@@ -645,6 +649,10 @@ supercell/ribbon/island/remove-atoms ops; autosave, recovery and crash reports.
 Acceptance: `tools/drive.py` loads a preset, removes atoms by command, and the
 screenshot shows the sculpted geometry; killing the process and restarting
 recovers the document.
+Carried over from phase 1: coalesce the interactive worker's build requests
+per system (every document event queues one build now, which a slider drag
+would pile up); show the Hilbert-space mode after each entry in the outliner
+(the build reports carry it, the phase-1 tree only shows the system's mode).
 
 **Phase 3 — Hamiltonian workspace and results.** Term palette, schema forms
 with `f(r)` expressions, invalid-entry flagging with pyqula's messages, job
