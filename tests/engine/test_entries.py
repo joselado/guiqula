@@ -653,7 +653,7 @@ def test_every_entry_has_a_case():
     covered = {"lattice": set(LATTICES), "geometry_op": set(OP_CASES),
                "term": set(TERM_CASES) | set(CLASSICAL_TERM_CASES),
                "meanfield": set(MEANFIELD_CASES), "model": set(MODEL_CASES),
-               "calculation": set(CALC_CASES)}
+               "calculation": set(CALC_CASES) | {"sweep"}}     # sweep: test_sweeps.py
     assert set(covered) == set(registry.base.FAMILIES)
     for family, kinds in covered.items():
         assert kinds == set(registry.kinds(family)), family

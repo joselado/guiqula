@@ -67,14 +67,21 @@ def assert_reproduces(document, calc_id, repo, tmp_path):
     return result
 
 
-@pytest.mark.parametrize("preset", project.presets())
-def test_preset_bands(pyqula, repo, tmp_path, preset):
-    result = assert_reproduces(project.load(preset), "c1", repo, tmp_path)
-    assert result.skipped == []
-    if preset == "honeycomb_hubbard":        # the Neel state opens a gap at half filling
-        energies = result.arrays["energies"]
-        assert result.meanfield["total_energy"] < 0
-        assert energies[energies > 0].min() - energies[energies < 0].max() > 0.5
+def test_every_preset_exports(pyqula, repo, tmp_path):
+    """The first calculation of every preset, run by the engine and by its
+    exported script (in one interpreter)."""
+    presets = project.presets()
+    results = {name: run_calculation(project.load(name), "c1") for name in presets}
+    sources = [export_script(project.load(name), "c1") for name in presets]
+    for name, got in zip(presets, run_scripts(sources, repo, tmp_path)):
+        assert results[name].skipped == [], name
+        assert_same_arrays(results[name].arrays, got, name)
+    hubbard = results["honeycomb_hubbard"]           # the Neel state opens a gap
+    energies = hubbard.arrays["energies"]
+    assert hubbard.meanfield["total_energy"] < 0
+    assert energies[energies > 0].min() - energies[energies < 0].max() > 0.5
+    wire = results["majorana_wire"].arrays["ldos"]  # zero modes at the ends
+    assert wire[:4].sum() > 20 * wire[36:44].mean()
 
 
 def test_everything_at_once(pyqula, repo, tmp_path):

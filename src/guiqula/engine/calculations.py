@@ -8,7 +8,7 @@ import guiqula
 from guiqula import vendoring
 from guiqula.core.results import Result
 from guiqula.engine import structure
-from guiqula.engine.build import build_system, seed
+from guiqula.engine.build import BuildError, build_system, seed
 from guiqula.engine.context import ApplyContext
 from guiqula.registry import pipeline
 
@@ -37,6 +37,30 @@ def provenance():
     return out
 
 
+def _run_document_level(document, plan, cache, progress, trusted, results):
+    """A sweep: its adapter runs another calculation on changed copies of
+    the Document, through the same build cache."""
+    from pyqula import parallel
+    ctx = ApplyContext(plan.spec, plan.params, progress=progress)
+    inner = plan.params["calculation"]
+
+    def run(changed):
+        return run_calculation(changed, inner, cache, None, trusted, results)
+    start = time.perf_counter()
+    try:
+        arrays = plan.spec.apply(document, ctx, run)
+    except (CalculationError, BuildError) as error:
+        raise CalculationError(f"{plan.spec.label}: {error}") from error
+    except Exception as error:
+        raise CalculationError(f"{plan.spec.label}: {type(error).__name__}: {error}") from error
+    arrays = {k: np.asarray(v) for k, v in arrays.items()}
+    return Result(calculation=plan.calc_id, kind=plan.kind, key=plan.key, params=plan.params,
+                  arrays=arrays, plot=plot_spec(plan.spec, plan.params, arrays),
+                  mode=plan.system.mode, document=document.to_json(),
+                  meta={"seconds": time.perf_counter() - start, "cores": parallel.cores,
+                        "guiqula": guiqula.__version__, "pyqula": provenance()})
+
+
 def plot_spec(spec, params, arrays):
     """The plot of a result: a dict, or a callable of the parameters, or of
     the parameters and the arrays (when the drawing depends on what came
@@ -58,6 +82,8 @@ def run_calculation(document, calc_id, cache=None, progress=None, trusted=True, 
     plan = pipeline.plan_calculation(document, calc_id, trusted, results)
     if plan.problem:
         raise CalculationError(f"{calc_id}: {plan.problem}")
+    if plan.spec.document_level:
+        return _run_document_level(document, plan, cache, progress, trusted, results)
     start = time.perf_counter()
     built = build_system(document, plan.system_id, cache, trusted=trusted, results=results)
     build_seconds = time.perf_counter() - start

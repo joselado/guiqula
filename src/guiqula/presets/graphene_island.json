@@ -1,0 +1,79 @@
+{
+  "version": 1,
+  "notes": "Graphene island\nA hexagonal graphene flake cut with the island op: its discrete spectrum (c1) and the local density of states at zero energy (c2), where the states live on the edges. Change the size, the number of edges or the rotation of the island op, or remove sites by hand on the Structure tab.",
+  "systems": [
+    {
+      "id": "s1",
+      "name": "graphene island",
+      "kind": "quantum",
+      "geometry": {
+        "base": {
+          "kind": "honeycomb_lattice",
+          "params": {}
+        },
+        "ops": [
+          {
+            "id": "op1",
+            "kind": "island",
+            "enabled": true,
+            "params": {
+              "n": 4.0,
+              "nedges": 6,
+              "rot": 0.0,
+              "clean": true
+            },
+            "region": null
+          }
+        ]
+      },
+      "regions": [],
+      "hamiltonian": {
+        "construction": {
+          "has_spin": false,
+          "nambu": false,
+          "tij": [1.0],
+          "is_sparse": false
+        },
+        "terms": [],
+        "meanfield": {
+          "enabled": false,
+          "kind": "interactions",
+          "params": {}
+        }
+      },
+      "model": null
+    }
+  ],
+  "calculations": [
+    {
+      "id": "c1",
+      "system": "s1",
+      "kind": "dos",
+      "params": {
+        "emin": -3.2,
+        "emax": 3.2,
+        "ne": 400,
+        "delta": 0.03,
+        "nk": 1,
+        "mode": "ED",
+        "operator": null,
+        "seed": 1
+      }
+    },
+    {
+      "id": "c2",
+      "system": "s1",
+      "kind": "ldos",
+      "params": {
+        "energy": 0.0,
+        "delta": 0.05,
+        "nk": 1,
+        "operator": null
+      }
+    }
+  ],
+  "ui": {
+    "workspace": "geometry",
+    "calculation": "c2"
+  }
+}

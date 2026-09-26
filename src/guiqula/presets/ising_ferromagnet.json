@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "notes": "Ising ferromagnet\nIsing spins on the square lattice with a ferromagnetic coupling, annealed from high temperature: the spins align (c1), and the magnetization grows from zero to full as the temperature drops through the transition (c2; pyqula counts every bond twice, so the transition is near 4.5 in these units).",
+  "systems": [
+    {
+      "id": "s1",
+      "name": "Ising ferromagnet",
+      "kind": "ising",
+      "geometry": {
+        "base": {
+          "kind": "square_lattice",
+          "params": {}
+        },
+        "ops": [
+          {
+            "id": "op1",
+            "kind": "supercell",
+            "enabled": true,
+            "params": {
+              "n": [16, 16, 1]
+            },
+            "region": null
+          }
+        ]
+      },
+      "regions": [],
+      "hamiltonian": null,
+      "model": {
+        "kind": "ising",
+        "params": {
+          "m": 0.0,
+          "seed": 1
+        },
+        "terms": [
+          {
+            "id": "t1",
+            "kind": "ising_interaction",
+            "enabled": true,
+            "params": {
+              "J1": 1.0,
+              "J2": 0.0,
+              "J3": 0.0
+            },
+            "region": null
+          }
+        ]
+      }
+    }
+  ],
+  "calculations": [
+    {
+      "id": "c1",
+      "system": "s1",
+      "kind": "anneal_ising",
+      "params": {
+        "t_start": 6.0,
+        "t_end": 0.5,
+        "temperatures": 10,
+        "ntries": 20000,
+        "seed": 1,
+        "show": "spins"
+      }
+    },
+    {
+      "id": "c2",
+      "system": "s1",
+      "kind": "anneal_ising",
+      "params": {
+        "t_start": 6.0,
+        "t_end": 0.5,
+        "temperatures": 10,
+        "ntries": 20000,
+        "seed": 1,
+        "show": "magnetization"
+      }
+    }
+  ],
+  "ui": {
+    "workspace": "calculate",
+    "calculation": "c1"
+  }
+}

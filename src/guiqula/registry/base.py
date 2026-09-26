@@ -76,6 +76,7 @@ class EntrySpec:
     preamble: tuple = ()             # lines an exported script runs once, after its imports
     regions: bool = True             # terms: whether a region may restrict it (a factor may not)
     runs_code: bool = False          # a Python node: runs only in a trusted document (13.7)
+    document_level: bool = False     # a sweep: apply(document, ctx, run) runs other calculations
     extra: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
@@ -159,7 +160,7 @@ def _load_builtins():
     if not _loaded:
         _loaded = True
         from guiqula.registry import (calculations, classical, geometry_ops,  # noqa: F401
-                                      lattices, meanfield, python_nodes, terms)
+                                      lattices, meanfield, python_nodes, sweeps, terms)
 
 
 ALL_SYSTEMS = ("quantum", "classical_spin", "lattice_gas", "ising")

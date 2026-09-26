@@ -130,6 +130,7 @@ class Calculation(_Model):
 
 class Document(_Model):
     version: int = SCHEMA_VERSION
+    notes: str = ""                # what the document is about (the presets gallery shows it)
     systems: list[System] = Field(default_factory=list)
     calculations: list[Calculation] = Field(default_factory=list)
     ui: dict[str, Any] = Field(default_factory=dict)

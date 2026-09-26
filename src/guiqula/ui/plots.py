@@ -19,18 +19,26 @@ Kinds (the ``kind`` of a Result's plot spec, which also names the arrays):
 Every calculation gets its own PlotView (a tab of the viewport, which can
 be detached into a floating dock): the navigation toolbar (pan, zoom, save
 the figure), Save data (the arrays and the metadata, io/results.py),
-Detach, and a readout of the data point under the mouse.
+Detach, Overlay, and a readout of the data point under the mouse.
+
+Overlays (decision 13.11): the curves of other results drawn on the same
+axes, each in its colour with a legend, or the difference of this result
+and another one with the same x (two densities of states on one energy
+grid); for lines and coloured scatter plots. The window keeps which, and
+lists what can be overlaid in the Overlay menu.
 """
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QLabel, QToolButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QMenu, QToolButton, QVBoxLayout, QWidget
 
 from guiqula.core.results import PLOT_KINDS as KINDS  # noqa: F401 (the kinds drawn here)
 from guiqula.ui import structure as structure_tools
 
 READOUT_PIXELS = 12      # the readout names a data point this close to the mouse
+CURVES = ("lines", "colored_scatter")       # plot kinds that overlay
+OVERLAY_MODES = ("overlay", "difference")
 
 
 def _lines(ax, result):
@@ -162,15 +170,63 @@ DRAW = {"lines": _lines, "colored_scatter": _colored_scatter, "heatmap": _heatma
 ON_STRUCTURE = ("structure_scalar", "structure_vector")
 
 
-def draw(figure, result, title=""):
-    """Draw a Result; returns the Axes and the points (x, y, c or None)
-    the readout looks up."""
+def curves(result):
+    """(x, y) of a lines or colored_scatter result, y with one column per
+    curve (or against its index when the spec names no x)."""
+    plot = result.plot
+    y = np.asarray(result.arrays[plot["y"]])
+    x = np.asarray(result.arrays[plot["x"]]) if plot.get("x") else np.arange(len(y))
+    return x, y.reshape(len(x), -1)
+
+
+def can_overlay(result, other, mode="overlay"):
+    """Whether other can be drawn over result (in this mode)."""
+    if result is None or other is None or result.plot["kind"] not in CURVES \
+            or other.plot["kind"] not in CURVES:
+        return False
+    if mode == "overlay":
+        return True
+    (x1, y1), (x2, y2) = curves(result), curves(other)
+    return x1.shape == x2.shape and y1.shape == y2.shape and np.allclose(x1, x2)
+
+
+def _draw_overlays(ax, result, overlays):
+    """overlays: [(label, Result, mode)]; returns the points of the drawing
+    when a difference replaced it, else None."""
+    difference = [(label, other) for label, other, mode in overlays if mode == "difference"]
+    if difference:
+        label, other = difference[0]
+        (x, y), (_, y_other) = curves(result), curves(other)
+        ax.cla()
+        lines = ax.plot(x, y - y_other, color="C3", linewidth=1.2)
+        lines[0].set_label(f"{result.calculation} − {label}")
+        ax.legend(fontsize=8)
+        return np.repeat(x[:, None], y.shape[1], axis=1).ravel(), (y - y_other).ravel(), None
+    handles = [ax.lines[0]] if ax.lines else []
+    if handles:
+        handles[0].set_label(result.calculation)
+    for i, (label, other, _) in enumerate(overlays):
+        x, y = curves(other)
+        lines = ax.plot(x, y, color=f"C{i + 1}", linewidth=1.0, alpha=0.85)
+        lines[0].set_label(label)
+        handles.append(lines[0])
+    if handles:
+        ax.legend(handles=handles, fontsize=8)
+    return None
+
+
+def draw(figure, result, title="", overlays=()):
+    """Draw a Result, with the overlays [(label, Result, mode)]; returns the
+    Axes and the points (x, y, c or None) the readout looks up."""
     figure.clear()
     plot = result.plot
     three_d = plot["kind"] in ON_STRUCTURE and result.structure is not None and \
         not structure_tools.is_flat(result.structure)
     ax = figure.add_subplot(111, projection="3d" if three_d else None)
     points = DRAW[plot["kind"]](ax, result)
+    overlays = [o for o in overlays if can_overlay(result, o[1], o[2])]
+    if overlays:
+        points = _draw_overlays(ax, result, overlays) or points
     if plot["kind"] in ON_STRUCTURE and not three_d:
         ax.set_xlabel("x")
         ax.set_ylabel("y")
@@ -193,6 +249,7 @@ class PlotView(QWidget):
 
     save_requested = Signal(str)          # calculation id
     detach_requested = Signal(str)
+    overlay_menu_requested = Signal(str)      # the window fills the Overlay menu
 
     def __init__(self, calc_id="", parent=None):
         super().__init__(parent)
@@ -219,6 +276,16 @@ class PlotView(QWidget):
         self.toolbar.addSeparator()
         self.toolbar.addWidget(self.save_data)
         self.toolbar.addWidget(self.detach)
+        self.overlay = QToolButton()
+        self.overlay.setText("Overlay")
+        self.overlay.setObjectName(f"overlay{suffix}")
+        self.overlay.setToolTip("draw another result on the same axes, or the difference of "
+                                "the two")
+        self.overlay.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.overlay.setMenu(QMenu(self.overlay))
+        self.overlay.menu().aboutToShow.connect(
+            lambda: self.overlay_menu_requested.emit(self.calc_id))
+        self.toolbar.addWidget(self.overlay)
         self.readout = QLabel("")
         self.readout.setObjectName(f"readout{suffix}")
         self.caption = QLabel("No result yet: choose a calculation and press Run (F5).")
@@ -235,17 +302,21 @@ class PlotView(QWidget):
         self.ax = None
         self.points = None
         self.stale = False
+        self.overlays = []
         self._update_buttons()
         self.canvas.mpl_connect("motion_notify_event", self._on_motion)
 
     def _update_buttons(self):
         self.save_data.setEnabled(self.result is not None and bool(self.calc_id))
         self.detach.setVisible(bool(self.calc_id))
+        self.overlay.setVisible(bool(self.calc_id))
+        self.overlay.setEnabled(self.result is not None and self.result.plot["kind"] in CURVES)
 
-    def show_result(self, result, title="", caption="", stale=False):
+    def show_result(self, result, title="", caption="", stale=False, overlays=()):
         self.result = result
         self.stale = stale
-        self.ax, self.points = draw(self.figure, result, title)
+        self.overlays = list(overlays)
+        self.ax, self.points = draw(self.figure, result, title, overlays)
         self.caption.setText(caption)
         self.readout.setText("")
         self.canvas.draw()        # now: the limits and the layout are final for the readout

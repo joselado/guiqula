@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "notes": "Graphene with an exchange field and Rashba coupling\nA 2x2 honeycomb supercell with an exchange field whose z component turns with x (0.3 tanh(x/4)) and Rashba spin-orbit coupling: the bands coloured by sz (c1) and the density of states (c2). The first preset, and the one the tests and tools/drive.py use.",
+  "notes": "Quasiperiodic chain (Aubry-Andre model)\nA chain with an onsite energy lambda*cos(2 pi beta x) of irrational beta (the golden ratio), in an 89-site cell. Above lambda = 2 every state is localized: the density of states (c1) is a fractal set of bands, and the local density of states (c2) is concentrated on a few sites. Edit lambda (2.5) in the onsite term's expression.",
   "systems": [
     {
       "id": "s1",
-      "name": "graphene with exchange and Rashba",
+      "name": "Aubry-Andre chain",
       "kind": "quantum",
       "geometry": {
         "base": {
-          "kind": "honeycomb_lattice",
+          "kind": "chain",
           "params": {}
         },
         "ops": [
@@ -17,7 +17,7 @@
             "kind": "supercell",
             "enabled": true,
             "params": {
-              "n": [2, 2, 1]
+              "n": [89, 1, 1]
             },
             "region": null
           }
@@ -26,7 +26,7 @@
       "regions": [],
       "hamiltonian": {
         "construction": {
-          "has_spin": true,
+          "has_spin": false,
           "nambu": false,
           "tij": [1.0],
           "is_sparse": false
@@ -34,19 +34,10 @@
         "terms": [
           {
             "id": "t1",
-            "kind": "zeeman",
+            "kind": "onsite",
             "enabled": true,
             "params": {
-              "m": [0.0, 0.0, "0.3*tanh(x/4)"]
-            },
-            "region": null
-          },
-          {
-            "id": "t2",
-            "kind": "rashba",
-            "enabled": true,
-            "params": {
-              "c": 0.1
+              "mu": "2.5*cos(2*pi*0.6180339887*x)"
             },
             "region": null
           }
@@ -64,26 +55,32 @@
     {
       "id": "c1",
       "system": "s1",
-      "kind": "bands",
+      "kind": "dos",
       "params": {
-        "nk": 100,
-        "operator": "sz"
+        "emin": -4.5,
+        "emax": 4.5,
+        "ne": 400,
+        "delta": 0.02,
+        "nk": 4,
+        "mode": "ED",
+        "operator": null,
+        "seed": 1
       }
     },
     {
       "id": "c2",
       "system": "s1",
-      "kind": "dos",
+      "kind": "ldos",
       "params": {
-        "emin": -4.0,
-        "emax": 4.0,
-        "ne": 400,
-        "delta": 0.05,
-        "nk": 20,
-        "mode": "ED",
+        "energy": 0.0,
+        "delta": 0.1,
+        "nk": 4,
         "operator": null
       }
     }
   ],
-  "ui": {}
+  "ui": {
+    "workspace": "hamiltonian",
+    "calculation": "c1"
+  }
 }

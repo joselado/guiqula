@@ -184,3 +184,27 @@ def test_console(session):
     session.interrupt_console()
     assert job.status == "cancelled"
     assert session.act("console", code="1 + 1", timeout=300)["output"] == ["2"]
+
+
+def test_results_are_kept_in_the_project(session, tmp_path, no_jobs):
+    """A .guiqula file keeps the results (PLAN.md 3.5): opened again they
+    are there and current, and an edit makes them stale as before."""
+    session.act("load", path="honeycomb_zeeman_rashba")
+    job = session.run_calculation("c1", wait=True, timeout=600)
+    assert job.status == "done", job.error
+    path = tmp_path / "with_results.guiqula"
+    session.act("save", path=str(path))
+    session.act("new")
+    assert not session.results
+    session.act("load", path=str(path))
+    kept = session.result("c1")
+    assert kept is not None and session.status("c1") == "done"
+    assert np.allclose(kept.arrays["energies"], job.value.arrays["energies"])
+    assert kept.structure == job.value.structure and kept.reports == job.value.reports
+    session.do("set_param", entry="t2", name="c", value=0.3)
+    assert session.status("c1") == "stale"
+    session.act("save", path=str(tmp_path / "bare.json"))        # bare JSON: no results
+    reopened = Session(str(tmp_path / "bare.json"), jobs=no_jobs)
+    assert reopened.results == {}
+    reopened = Session(str(path), jobs=no_jobs)
+    assert set(reopened.results) == {"c1"}

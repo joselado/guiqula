@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "notes": "Quantum spin Hall ribbon (Kane-Mele model)\nA zigzag graphene ribbon with intrinsic spin-orbit coupling: the bulk gaps, and helical edge states cross the gap, each edge carrying one pair with opposite spins (c1, coloured by sz). The local density of states inside the gap sits on the edges (c2).",
+  "systems": [
+    {
+      "id": "s1",
+      "name": "Kane-Mele ribbon",
+      "kind": "quantum",
+      "geometry": {
+        "base": {
+          "kind": "honeycomb_zigzag_ribbon",
+          "params": {
+            "width": 8
+          }
+        },
+        "ops": []
+      },
+      "regions": [],
+      "hamiltonian": {
+        "construction": {
+          "has_spin": true,
+          "nambu": false,
+          "tij": [1.0],
+          "is_sparse": false
+        },
+        "terms": [
+          {
+            "id": "t1",
+            "kind": "kane_mele",
+            "enabled": true,
+            "params": {
+              "t": 0.08
+            },
+            "region": null
+          }
+        ],
+        "meanfield": {
+          "enabled": false,
+          "kind": "interactions",
+          "params": {}
+        }
+      },
+      "model": null
+    }
+  ],
+  "calculations": [
+    {
+      "id": "c1",
+      "system": "s1",
+      "kind": "bands",
+      "params": {
+        "nk": 150,
+        "operator": "sz"
+      }
+    },
+    {
+      "id": "c2",
+      "system": "s1",
+      "kind": "ldos",
+      "params": {
+        "energy": 0.05,
+        "delta": 0.02,
+        "nk": 40,
+        "operator": null
+      }
+    }
+  ],
+  "ui": {
+    "workspace": "calculate",
+    "calculation": "c1"
+  }
+}

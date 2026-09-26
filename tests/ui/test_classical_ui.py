@@ -41,7 +41,8 @@ def test_a_classical_system_in_the_window(window, qtbot, shot):
     assert window.workspace_tabs.tabText(1) == "Model"
     terms = menu_kinds(window, "addTermButton", "addTerm")
     assert terms == {"ising_interaction", "ising_field", "python"}
-    assert menu_kinds(window, "addCalculationButton", "addCalc") == {"anneal_ising", "python"}
+    assert menu_kinds(window, "addCalculationButton", "addCalc") == {"anneal_ising", "python",
+                                                                     "sweep"}
     assert not window.meanfield_button.isEnabled()
     window.term_search.setText("interaction")
     window.term_search.returnPressed.emit()

@@ -347,3 +347,18 @@ def test_close_asks_about_unsaved_changes(qtbot, monkeypatch, no_jobs):
     assert not window.close() and window.isVisible()
     answers.append(QMessageBox.StandardButton.Discard)
     assert window.close()
+
+
+def test_presets_gallery(window, qtbot, shot):
+    from guiqula.io import project
+    gallery = window.show_gallery()
+    assert gallery.list.count() == len(project.presets())
+    gallery.select("majorana_wire")
+    assert "Majorana" in gallery.description.text()
+    shot(gallery, "gallery")
+    gallery.open_button.click()
+    assert window.session.document.notes.startswith("Majorana wire")
+    assert not gallery.isVisible()
+    settle(qtbot, window)
+    window.session.act("load", path="honeycomb_zeeman_rashba")
+    settle(qtbot, window)

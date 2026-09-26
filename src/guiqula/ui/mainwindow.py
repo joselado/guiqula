@@ -52,6 +52,7 @@ from guiqula.registry import cost, pipeline
 from guiqula.registry.params import VectorFieldParam
 from guiqula.ui.bars import MessageBar
 from guiqula.ui.console import ConsoleWidget
+from guiqula.ui.sliders import SlidersPanel
 from guiqula.ui.jobpanel import JobPanel
 from guiqula.ui.outliner import Outliner, system_of
 from guiqula.ui.plots import PlotView
@@ -65,7 +66,8 @@ PREVIEW_DELAY_MS = 120
 WORKSPACES = ("geometry", "hamiltonian", "calculate")
 # actions of the window itself: they change what is shown, not the Document
 WINDOW_ACTIONS = ("select", "workspace", "tool", "select_sites", "canvas_view", "preview",
-                  "auto_rerun", "projection")
+                  "auto_rerun", "projection", "overlay", "slider", "set_slider",
+                  "remove_slider")
 STRUCTURE_TAB = 0
 # a new classical system: its lattice, and a supercell the usual orders fit in
 CLASSICAL_STARTS = {"classical_spin": ("triangular_lattice", 3, "Classical spins"),
@@ -125,6 +127,7 @@ class MainWindow(QMainWindow):
         self._last_crash_text = None
         self._pending_sites = None     # (system, positions) to select once it is built
         self.plots = {}                # calculation id -> PlotView (a tab or a floating dock)
+        self.overlays = {}             # calculation id -> [(other calculation, mode)] drawn over it
         self.plot_docks = {}           # calculation id -> QDockWidget of a detached view
         self.canvas_view = "structure"
         self.field_preview = None      # (entry, parameter) the field view draws
@@ -175,12 +178,26 @@ class MainWindow(QMainWindow):
         self.console.run_requested.connect(self.run_console)
         self.console.interrupt_requested.connect(self.interrupt_console)
         self._console_lines = {}       # console job id -> log lines written so far
+        self.sliders = []              # [{entry, param, component, min, max}] (13.10)
+        self.sliders_panel = SlidersPanel()
+        self.sliders_panel.add_requested.connect(
+            lambda entry, param, component, low, high: self._act(
+                "slider", entry=entry, param=param, component=component, minimum=low,
+                maximum=high))
+        self.sliders_panel.moved.connect(
+            lambda index, value, dragging: self.set_slider(index, value, dragging))
+        self.sliders_panel.removed.connect(lambda index: self._act("remove_slider",
+                                                                   index=index))
         outliner_dock = self._dock("Outliner", self.outliner, "outlinerDock",
                                    Qt.DockWidgetArea.LeftDockWidgetArea)
         properties_dock = self._dock("Properties", self.properties, "propertiesDock",
                                      Qt.DockWidgetArea.RightDockWidgetArea)
         jobs_dock = self._dock("Jobs", self.jobs, "jobsDock", Qt.DockWidgetArea.RightDockWidgetArea)
         self.splitDockWidget(properties_dock, jobs_dock, Qt.Orientation.Vertical)
+        sliders_dock = self._dock("Sliders", self.sliders_panel, "slidersDock",
+                                  Qt.DockWidgetArea.RightDockWidgetArea)
+        self.tabifyDockWidget(jobs_dock, sliders_dock)
+        jobs_dock.raise_()
         log_dock = self._dock("Log", self.log, "logDock", Qt.DockWidgetArea.BottomDockWidgetArea)
         console_dock = self._dock("Console", self.console, "consoleDock",
                                   Qt.DockWidgetArea.BottomDockWidgetArea)
@@ -190,7 +207,7 @@ class MainWindow(QMainWindow):
         self.resizeDocks([properties_dock, jobs_dock], [480, 180], Qt.Orientation.Vertical)
         self.resizeDocks([log_dock], [130], Qt.Orientation.Vertical)
         self.docks = {d.objectName(): d for d in (outliner_dock, properties_dock, jobs_dock,
-                                                  log_dock, console_dock)}
+                                                  log_dock, console_dock, sliders_dock)}
 
         self._build_toolbars()
         self._build_menus()
@@ -442,6 +459,8 @@ class MainWindow(QMainWindow):
         file_menu = self.menuBar().addMenu("&File")
         self._action(file_menu, "&New", lambda: self._act("new"), QKeySequence.StandardKey.New)
         self._action(file_menu, "&Open...", self.open_dialog, QKeySequence.StandardKey.Open)
+        self._action(file_menu, "Presets &gallery...", self.show_gallery, "Ctrl+Shift+O",
+                     "galleryAction")
         presets = file_menu.addMenu("Open &preset")
         for name in project.presets():
             self._action(presets, name, lambda checked=False, n=name: self.open_document(n))
@@ -516,6 +535,10 @@ class MainWindow(QMainWindow):
                                                                                       param))
         dispatcher.register_action("auto_rerun", lambda enabled=True: self.set_auto_rerun(enabled))
         dispatcher.register_action("projection", lambda name: self.set_projection(name))
+        dispatcher.register_action("overlay", self.overlay)
+        dispatcher.register_action("slider", self.add_slider)
+        dispatcher.register_action("set_slider", self.set_slider)
+        dispatcher.register_action("remove_slider", self.remove_slider)
         session.view_state = self.view_state
         self.timer.start(POLL_MS)
         self._document_changed()
@@ -590,6 +613,8 @@ class MainWindow(QMainWindow):
         self._refresh_structure()
         self._update_actions()
         self._refresh_results()
+        if self.sliders:
+            self.sliders_panel.show_values([self._slider_value(sl) for sl in self.sliders])
         self._update_status()
         self.build_timer.start(BUILD_DELAY_MS)
         self._update_title()
@@ -667,6 +692,9 @@ class MainWindow(QMainWindow):
             if job.status == "done" and job.kind == "run":
                 if job.label in pipeline.result_references(self.session.document):
                     self.build_timer.start(0)      # the systems that read it change
+                for calc, chosen in self.overlays.items():   # the views it is drawn over
+                    if calc in self.plots and any(o[0] == job.label for o in chosen):
+                        self._draw_result(calc)
                 if job.label in self.plots:
                     self._draw_result(job.label)
                 if job.label == self.selected_calculation() and job.id not in self._auto_jobs:
@@ -884,6 +912,11 @@ class MainWindow(QMainWindow):
             state["projection"] = self.structure.projection
         if self.auto_rerun:
             state["auto_rerun"] = True
+        if self.overlays:
+            state["overlays"] = {calc: [list(o) for o in chosen]
+                                 for calc, chosen in self.overlays.items()}
+        if self.sliders:
+            state["sliders"] = [dict(s) for s in self.sliders]
         if self.field_preview is not None:
             state["preview"] = list(self.field_preview)
         if self.selected_calculation():
@@ -925,6 +958,22 @@ class MainWindow(QMainWindow):
             self.select_calculation(ui["calculation"])
         selected = ui.get("selected", "")
         self.select(selected if isinstance(selected, str) and self._exists(selected) else "")
+        self.sliders = []
+        for spec in ui.get("sliders", []) if isinstance(ui.get("sliders"), list) else []:
+            try:
+                self.add_slider(spec["entry"], spec["param"], spec.get("component"),
+                                spec["min"], spec["max"])
+            except Exception:
+                pass
+        self._show_sliders()
+        self.overlays = {}
+        overlays = ui.get("overlays") if isinstance(ui.get("overlays"), dict) else {}
+        for calc, chosen in overlays.items():
+            present = [tuple(o) for o in chosen if isinstance(o, list) and len(o) == 2
+                       and self.calc_box.findData(o[0]) >= 0 and o[1] in ("overlay",
+                                                                           "difference")]
+            if self.calc_box.findData(calc) >= 0 and present:
+                self.overlays[calc] = present
         for calc in ui.get("results", []) if isinstance(ui.get("results"), list) else []:
             if isinstance(calc, str) and self.calc_box.findData(calc) >= 0:
                 self.result_view(calc)
@@ -1231,6 +1280,7 @@ class MainWindow(QMainWindow):
             view = PlotView(calc)
             view.save_requested.connect(self.save_result_dialog)
             view.detach_requested.connect(self.toggle_detached)
+            view.overlay_menu_requested.connect(self._fill_overlay_menu)
             self.plots[calc] = view
             self.viewport.addTab(view, calc)
             self._draw_result(calc)
@@ -1315,7 +1365,12 @@ class MainWindow(QMainWindow):
             if view.result is not None or not view.caption.text().startswith(calc):
                 view.clear(f"{calc}: no result yet; press Run (F5).")
             return
-        if view.result is result and view.stale == stale:
+        overlays = [(other, self.session.result(other), mode)
+                    for other, mode in self.overlays.get(calc, [])
+                    if self.session.result(other) is not None]
+        if view.result is result and view.stale == stale and \
+                [(o, id(r), m) for o, r, m in overlays] == \
+                [(o, id(r), m) for o, r, m in view.overlays]:
             return
         title = f"{calc} · {result.kind} · {result.mode}" + (" · STALE" if stale else "")
         notes = [f"{result.meta.get('seconds', 0):.2f} s"]
@@ -1328,12 +1383,134 @@ class MainWindow(QMainWindow):
                                                  for r in result.skipped))
         if stale:
             notes.append("the document changed since this result was computed; run again")
-        view.show_result(result, title, " · ".join(notes), stale=stale)
+        view.show_result(result, title, " · ".join(notes), stale=stale, overlays=overlays)
+
+    def overlay(self, calc, other=None, mode="overlay"):
+        """Draw the result of other over calc's (mode overlay), or their
+        difference (mode difference); other None clears them. Returns the
+        overlays of calc."""
+        from guiqula.ui import plots as plot_tools
+        self.session.document.calculation(calc)
+        if other is None:
+            self.overlays.pop(calc, None)
+        else:
+            if mode not in plot_tools.OVERLAY_MODES:
+                raise ValueError(f"mode is one of {list(plot_tools.OVERLAY_MODES)}")
+            self.session.document.calculation(other)
+            if other == calc:
+                raise ValueError("a result cannot overlay itself")
+            result, theirs = self.session.result(calc), self.session.result(other)
+            if result is not None and theirs is not None and \
+                    not plot_tools.can_overlay(result, theirs, mode):
+                raise ValueError(f"{other} cannot be drawn over {calc} ({mode}): both must be "
+                                 f"curves" + (" on the same x" if mode == "difference" else ""))
+            current = [o for o in self.overlays.get(calc, []) if o[0] != other]
+            self.overlays[calc] = [(other, mode)] if mode == "difference" else \
+                [o for o in current if o[1] != "difference"] + [(other, mode)]
+        self.show_result(calc)
+        self._draw_result(calc)
+        return [list(o) for o in self.overlays.get(calc, [])]
+
+    # ---- sliders (13.10)
+    def _slider_value(self, spec):
+        """The number a slider's parameter holds now, or None."""
+        from guiqula.registry import sweeps
+        try:
+            _, params = sweeps.locate(self.session.document, spec["entry"])
+            value = params.get(spec["param"])
+            if spec["component"] is not None:
+                value = value[spec["component"]]
+            return float(value) if isinstance(value, (int, float)) else None
+        except Exception:
+            return None
+
+    def _show_sliders(self):
+        self.sliders_panel.set_sliders(self.sliders, [self._slider_value(s) for s in self.sliders])
+
+    def add_slider(self, entry, param, component=None, minimum=0.0, maximum=1.0):
+        """Attach a parameter to a slider; returns its index."""
+        from guiqula.registry import sweeps
+        problem = sweeps.check_target(self.session.document, entry, param, component)
+        if problem:
+            raise ValueError(problem)
+        if not maximum > minimum:
+            raise ValueError("the range needs a maximum above its minimum")
+        self.sliders.append({"entry": entry, "param": param, "component": component,
+                             "min": float(minimum), "max": float(maximum)})
+        self._show_sliders()
+        self.docks["slidersDock"].raise_()
+        return len(self.sliders) - 1
+
+    def remove_slider(self, index):
+        del self.sliders[index]
+        self._show_sliders()
+
+    def set_slider(self, index, value, dragging=False):
+        """Set a slider's parameter; the steps of one drag are one undo step."""
+        spec = self.sliders[index]
+        value = min(max(float(value), spec["min"]), spec["max"])
+        entry, param, component = spec["entry"], spec["param"], spec["component"]
+        if component is not None:
+            from guiqula.registry import sweeps
+            current = list(sweeps.locate(self.session.document, entry)[1].get(param))
+            current[component] = value
+            value_sent = current
+        else:
+            value_sent = value
+        key = f"slider:{index}:{entry}:{param}:{component}"
+        if entry.endswith("/meanfield"):
+            command = ("set_meanfield", {"system": entry.split("/")[0],
+                                         "params": {param: value_sent}})
+        elif entry.endswith("/model"):
+            command = ("set_model", {"system": entry.split("/")[0], "params": {param: value_sent}})
+        else:
+            command = ("set_param", {"entry": entry, "name": param, "value": value_sent})
+        try:
+            self.session.do_merged(key, command[0], **command[1])
+        finally:
+            if not dragging:
+                self.session.dispatcher.end_merge()
+        self.sliders_panel.show_values([self._slider_value(s) for s in self.sliders])
+        return value
+
+    def _fill_overlay_menu(self, calc):
+        """The Overlay menu of a result view: the other results that can be
+        drawn over it, and their differences."""
+        from guiqula.ui import plots as plot_tools
+        menu = self.plots[calc].overlay.menu()
+        menu.clear()
+        result = self.session.result(calc)
+        chosen = dict(self.overlays.get(calc, []))
+        for other in self.session.document.calculations:
+            theirs = self.session.result(other.id)
+            if other.id == calc or not plot_tools.can_overlay(result, theirs):
+                continue
+            action = menu.addAction(f"{other.id} {other.kind} on {other.system}")
+            action.setObjectName(f"overlayWith_{other.id}")
+            action.setCheckable(True)
+            action.setChecked(chosen.get(other.id) == "overlay")
+            action.triggered.connect(lambda checked, o=other.id: self._act(
+                "overlay", calc=calc, **({"other": o} if checked else {})))
+            if plot_tools.can_overlay(result, theirs, "difference"):
+                action = menu.addAction(f"{calc} − {other.id}")
+                action.setObjectName(f"difference_{other.id}")
+                action.triggered.connect(lambda checked=False, o=other.id: self._act(
+                    "overlay", calc=calc, other=o, mode="difference"))
+        if self.overlays.get(calc):
+            menu.addSeparator()
+            action = menu.addAction("None")
+            action.setObjectName("overlayNone")
+            action.triggered.connect(lambda: self._act("overlay", calc=calc))
+        if menu.isEmpty():
+            menu.addAction("no other result to draw here").setEnabled(False)
 
     def _refresh_results(self):
         """After a document change: close the views of removed calculations,
         mark stale results."""
         present = {c.id for c in self.session.document.calculations}
+        self.overlays = {calc: [o for o in chosen if o[0] in present]
+                         for calc, chosen in self.overlays.items() if calc in present}
+        self.overlays = {calc: chosen for calc, chosen in self.overlays.items() if chosen}
         for calc in list(self.plots):
             if calc not in present:
                 self.close_result(calc)
@@ -1426,6 +1603,15 @@ class MainWindow(QMainWindow):
     # ---- files, recovery and undo
     def open_document(self, path_or_name):
         self._act("load", path=str(path_or_name))
+
+    def show_gallery(self):
+        """The presets gallery (non-modal); Open loads the preset chosen."""
+        from guiqula.ui.gallery import Gallery
+        gallery = Gallery(self)
+        gallery.opened.connect(self.open_document)
+        gallery.show()
+        self.gallery = gallery
+        return gallery
 
     def open_dialog(self):
         path, _ = QFileDialog.getOpenFileName(self, "Open", "", "guiqula (*.guiqula *.json)")

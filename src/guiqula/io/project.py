@@ -1,13 +1,21 @@
 """Project files (PLAN.md 3.5): a ``.guiqula`` file is a zip holding
-``document.json`` (later also cached results); a bare ``.json`` document is
-read and written too, which is how presets are stored so that they diff in
-git (decision 14.4). Presets ship inside the package (guiqula/presets) and
-load by name."""
+``document.json`` and the results of its calculations
+(``results/<calculation>.npz`` and ``.json``, as io/results.py writes a
+result file); a bare ``.json`` document is read and written too, without
+results, which is how presets are stored so that they diff in git
+(decision 14.4). Presets ship inside the package (guiqula/presets) and
+load by name. A result keeps the key it was computed with, so after a
+load it is stale exactly when the Document it belongs to says so. The
+converged mean-field Hamiltonian is not kept (its total energy is, in the
+result's reports): a run computes it again (section 11)."""
 import json
 import zipfile
 from pathlib import Path
 
 from guiqula.core.document import Document, DocumentError
+from guiqula.io import results as result_files
+
+RESULTS = "results/"
 
 PRESETS = Path(__file__).resolve().parents[1] / "presets"
 
@@ -49,16 +57,40 @@ def load(path_or_name):
         raise DocumentError(f"{path}: not JSON ({error})") from None
 
 
-def save(document, path):
-    """Write a .guiqula zip, or bare JSON for any other suffix. The file is
-    written next to the target and renamed over it, so a crash never leaves
-    a half-written project."""
+def load_results(path_or_name):
+    """{calculation id: Result} kept in a .guiqula file (none elsewhere)."""
+    path = resolve(path_or_name)
+    if not zipfile.is_zipfile(path):
+        return {}
+    out = {}
+    with zipfile.ZipFile(path) as archive:
+        names = set(archive.namelist())
+        for name in sorted(names):
+            if name.startswith(RESULTS) and name.endswith(".json"):
+                stem = name[:-len(".json")]
+                if stem + ".npz" in names:
+                    result = result_files.from_bytes(archive.read(stem + ".npz"),
+                                                     archive.read(name).decode())
+                    out[result.calculation] = result
+    return out
+
+
+def save(document, path, results=None):
+    """Write a .guiqula zip (with results: {calculation id: Result}), or
+    bare JSON for any other suffix. The file is written next to the target
+    and renamed over it, so a crash never leaves a half-written project."""
     path = Path(path)
     temporary = path.with_name(path.name + ".tmp")
     text = document.to_json()
     if path.suffix == ".guiqula":
         with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             archive.writestr("document.json", text)
+            present = {c.id for c in document.calculations}
+            for calc, result in sorted((results or {}).items()):
+                if calc in present:
+                    npz, meta = result_files.to_bytes(result)
+                    archive.writestr(f"{RESULTS}{calc}.npz", npz)
+                    archive.writestr(f"{RESULTS}{calc}.json", meta)
     else:
         temporary.write_text(text + "\n")
     temporary.replace(path)

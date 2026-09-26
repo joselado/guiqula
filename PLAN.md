@@ -1038,6 +1038,42 @@ True)` at import time), so the same pyqula script minimizes to another
 now always runs jax in double precision (the workers did already, since
 they list the jax solvers at start) and an exported script with classical
 spins switches it on too (an entry's `preamble`). Worth fixing in pyqula.
+**Part 4a done 2026-09-27** (part 4 is built in two halves). Built:
+results in project files (a `.guiqula` zip holds `results/<calculation>.npz`
+and `.json` next to `document.json`; opening it restores them, current or
+stale by their keys; bare JSON and the autosave keep the document only;
+the converged mean-field Hamiltonian is not kept, its total energy is,
+in the reports: that settles the section 11 question). The presets
+gallery (13.16): `Document.notes` (a title line and a description,
+`set_notes`), ten new presets after quantum-lattice's modes and the
+phase 4 features (Chern insulator, quantum spin Hall ribbon, graphene
+island, Aubry-Andre chain, Landau levels on a ribbon, Majorana wire,
+120-degree classical spins, lattice gas at 1/3, Ising ferromagnet, a
+classical texture as an exchange field), and the gallery dialog (File,
+Presets gallery). Overlays (13.11): the Overlay menu of a result view
+draws other results on the same axes, or the difference of two curves on
+the same x; the `overlay` window action; kept with the view state (a tab
+dropped on another, as 13.11 said, cannot be driven offscreen, so it is a
+menu, as Detach is a button). Sweeps (13.10): a calculation kind (the
+section 11 question), `registry/sweeps.py`: another calculation of the
+same system run at every value of one parameter or on a grid of two
+(any number of an entry: a term's Field or a vector component, an op's or
+a calculation's number, the lattice, the mean field, a classical model),
+through the build cache; the numbers of its results collected, drawn as a
+curve or a map; its key hashes the inner calculation's key; the cost
+guard multiplies; the exported script loops over a function of the
+value (the swept parameter is set to a sentinel number while the inner
+script is generated, then replaced by the loop variable, so every way a
+parameter reaches the code works). Sliders (13.10): a Sliders dock
+(tabbed with the Jobs) with a slider per parameter and its range, the
+`slider`, `set_slider` and `remove_slider` actions, kept with the view
+state; a drag is one undo step (`Dispatcher.do_merged` and `end_merge`).
+Tests: `test_results_are_kept_in_the_project`, `test_presets_gallery`,
+`test_every_preset_exports` (every preset's first calculation against its
+script, in one interpreter), `test_overlays`, `tests/engine/test_sweeps.py`
+(the Haldane phase diagram point by point against pyqula, the scripts),
+`test_merged_mutations_are_one_undo_step`,
+`test_sliders_and_a_sweep_in_the_window`.
 
 **Phase 5 — polish.** Undo everywhere, keyboard shortcuts, theming (light and
 dark), tooltips and formulas (reuse quantum-lattice's), user guide, example

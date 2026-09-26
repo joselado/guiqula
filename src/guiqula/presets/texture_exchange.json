@@ -1,0 +1,186 @@
+{
+  "version": 1,
+  "notes": "A classical texture as an exchange field\nTwo systems: classical spins on a ladder, with a field that turns along it, minimized into a domain wall (c1); then electrons on the same ladder whose exchange field reads that texture site by site (a from_result Field). Run c1 first, then c2 and c3: the electrons feel the domain wall. Running c1 again makes them stale.",
+  "systems": [
+    {
+      "id": "s1",
+      "name": "spin texture",
+      "kind": "classical_spin",
+      "geometry": {
+        "base": {
+          "kind": "ladder",
+          "params": {}
+        },
+        "ops": [
+          {
+            "id": "op1",
+            "kind": "supercell",
+            "enabled": true,
+            "params": {
+              "n": [20, 1, 1]
+            },
+            "region": null
+          },
+          {
+            "id": "op2",
+            "kind": "finite",
+            "enabled": true,
+            "params": {},
+            "region": null
+          }
+        ]
+      },
+      "regions": [],
+      "hamiltonian": null,
+      "model": {
+        "kind": "classical_spin",
+        "params": {},
+        "terms": [
+          {
+            "id": "t1",
+            "kind": "heisenberg",
+            "enabled": true,
+            "params": {
+              "J1": -1.0,
+              "J2": 0.0,
+              "J3": 0.0,
+              "anisotropy": [1.0, 1.0, 1.0]
+            },
+            "region": null
+          },
+          {
+            "id": "t2",
+            "kind": "spin_field",
+            "enabled": true,
+            "params": {
+              "b": ["0.6*tanh(x - 10)", 0.0, 0.3]
+            },
+            "region": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "s2",
+      "name": "electrons on the texture",
+      "kind": "quantum",
+      "geometry": {
+        "base": {
+          "kind": "ladder",
+          "params": {}
+        },
+        "ops": [
+          {
+            "id": "op3",
+            "kind": "supercell",
+            "enabled": true,
+            "params": {
+              "n": [20, 1, 1]
+            },
+            "region": null
+          },
+          {
+            "id": "op4",
+            "kind": "finite",
+            "enabled": true,
+            "params": {},
+            "region": null
+          }
+        ]
+      },
+      "regions": [],
+      "hamiltonian": {
+        "construction": {
+          "has_spin": true,
+          "nambu": false,
+          "tij": [1.0],
+          "is_sparse": false
+        },
+        "terms": [
+          {
+            "id": "t3",
+            "kind": "zeeman",
+            "enabled": true,
+            "params": {
+              "m": [
+                {
+                  "kind": "from_result",
+                  "calculation": "c1",
+                  "array": "magnetization",
+                  "component": 0,
+                  "scale": 0.8,
+                  "tol": 0.1
+                },
+                {
+                  "kind": "from_result",
+                  "calculation": "c1",
+                  "array": "magnetization",
+                  "component": 1,
+                  "scale": 0.8,
+                  "tol": 0.1
+                },
+                {
+                  "kind": "from_result",
+                  "calculation": "c1",
+                  "array": "magnetization",
+                  "component": 2,
+                  "scale": 0.8,
+                  "tol": 0.1
+                }
+              ]
+            },
+            "region": null
+          }
+        ],
+        "meanfield": {
+          "enabled": false,
+          "kind": "interactions",
+          "params": {}
+        }
+      },
+      "model": null
+    }
+  ],
+  "calculations": [
+    {
+      "id": "c1",
+      "system": "s1",
+      "kind": "minimize_spins",
+      "params": {
+        "tries": 3,
+        "seed": 1,
+        "show": "texture"
+      }
+    },
+    {
+      "id": "c2",
+      "system": "s2",
+      "kind": "dos",
+      "params": {
+        "emin": -3.5,
+        "emax": 3.5,
+        "ne": 300,
+        "delta": 0.05,
+        "nk": 1,
+        "mode": "ED",
+        "operator": null,
+        "seed": 1
+      }
+    },
+    {
+      "id": "c3",
+      "system": "s2",
+      "kind": "ldos",
+      "params": {
+        "energy": 0.0,
+        "delta": 0.1,
+        "nk": 1,
+        "operator": null
+      }
+    }
+  ],
+  "ui": {
+    "workspace": "calculate",
+    "calculation": "c1"
+  }
+}

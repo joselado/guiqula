@@ -108,3 +108,70 @@ def test_buckled_layers_are_not_flat():
     buckled = {"positions": np.array([[0, 0, 0.0], [1, 0, 0.3]]), "dimensionality": 2}
     bulk = {"positions": np.array([[0, 0, 0.0]]), "dimensionality": 3}
     assert is_flat(flat) and not is_flat(buckled) and not is_flat(bulk)
+
+
+def test_overlays(window, qtbot, shot):
+    """Two densities of states on one axes, then their difference (13.11)."""
+    session = window.session
+    session.act("load", path="honeycomb_zeeman_rashba")
+    settle(qtbot, window)
+    other = session.do("add_calculation", system="s1", kind="dos",
+                       params={"operator": "sz", "ne": 400})
+    for calc in ("c2", other):
+        view = run(window, qtbot, calc)
+    view = window.plots["c2"]
+    view.overlay.menu().aboutToShow.emit()
+    names = [a.objectName() for a in view.overlay.menu().actions()]
+    assert f"overlayWith_{other}" in names and f"difference_{other}" in names
+    next(a for a in view.overlay.menu().actions()
+         if a.objectName() == f"overlayWith_{other}").trigger()
+    assert window.overlays["c2"] == [(other, "overlay")]
+    assert [line.get_label() for line in view.ax.get_legend().get_lines()] == ["c2", other]
+    shot(view, "overlay")
+    session.act("overlay", calc="c2", other=other, mode="difference")
+    assert window.overlays["c2"] == [(other, "difference")]
+    assert view.ax.get_legend().get_texts()[0].get_text() == f"c2 − {other}"
+    difference = view.result.arrays["dos"] - session.result(other).arrays["dos"]
+    assert np.allclose(view.ax.lines[0].get_ydata(), difference)
+    assert window.view_state()["overlays"] == {"c2": [[other, "difference"]]}
+    with pytest.raises(Exception, match="cannot overlay itself"):
+        session.act("overlay", calc="c2", other="c2")
+    session.act("overlay", calc="c2")
+    assert "c2" not in window.overlays and view.ax.get_legend() is None
+    session.do("remove", entry=other)
+
+
+def test_sliders_and_a_sweep_in_the_window(window, qtbot, shot):
+    """A slider on the Rashba coupling: one drag is one undo step, the
+    value follows undo; a sweep of the gap against it, drawn as a curve."""
+    session = window.session
+    session.act("load", path="honeycomb_zeeman_rashba")
+    settle(qtbot, window)
+    index = session.act("slider", entry="t2", param="c", minimum=0.0, maximum=0.4)
+    zeeman = session.act("slider", entry="t1", param="m", component=0, minimum=-1, maximum=1)
+    row = window.sliders_panel.rows[index]
+    assert row.value.text() == "0.1"
+    undo_depth = len(session.dispatcher._undo)
+    for value in (0.2, 0.3):                                 # a drag
+        window.set_slider(index, value, dragging=True)
+    window.set_slider(index, 0.35)                           # released
+    assert session.document.find("t2")[-1].params["c"] == pytest.approx(0.35)
+    assert len(session.dispatcher._undo) == undo_depth + 1
+    session.undo()
+    assert session.document.find("t2")[-1].params["c"] == pytest.approx(0.1)
+    assert window.sliders_panel.rows[index].value.text() == "0.1"
+    session.act("set_slider", index=zeeman, value=0.5)
+    assert session.document.find("t1")[-1].params["m"][0] == pytest.approx(0.5)
+    assert window.view_state()["sliders"][1] == {"entry": "t1", "param": "m", "component": 0,
+                                                 "min": -1.0, "max": 1.0}
+    with pytest.raises(Exception, match="no parameter"):
+        session.act("slider", entry="t2", param="nope")
+    gap = session.do("add_calculation", system="s1", kind="gap")
+    sweep = session.do("add_calculation", system="s1", kind="sweep", params={
+        "calculation": gap, "entry": "t2", "param": "c", "start": 0.0, "stop": 0.3, "steps": 4})
+    view = run(window, qtbot, sweep)
+    assert view.result.plot["kind"] == "lines" and len(view.points[0]) == 4
+    shot(window, "sliders_sweep")
+    session.act("remove_slider", index=zeeman)
+    session.act("remove_slider", index=index)
+    assert window.sliders == []

@@ -50,6 +50,7 @@ class Dispatcher:
         check(self.document)
         self._undo = []
         self._redo = []
+        self._merge = None       # the merge key of the last mutation (do_merged)
         self._actions = {}
         self._listeners = []
         self.journal = []
@@ -76,6 +77,20 @@ class Dispatcher:
     # ---- mutations
     def do(self, name, /, **args):
         """Apply a mutation; returns its result (e.g. the id of a new entry)."""
+        return self._do(name, args, None)
+
+    def do_merged(self, key, name, /, **args):
+        """A mutation that joins the one before it into a single undo step
+        when both were done with the same key (the steps of a slider
+        drag): undo goes back to before the first of them."""
+        return self._do(name, args, key)
+
+    def end_merge(self):
+        """The next mutation starts an undo step of its own (a slider was
+        released)."""
+        self._merge = None
+
+    def _do(self, name, args, merge):
         function = MUTATIONS.get(name)
         if function is None:
             raise CommandError(f"unknown command {name!r}; known: {sorted(MUTATIONS)}")
@@ -88,7 +103,11 @@ class Dispatcher:
         except (CommandError, DocumentError, ValueError, KeyError, TypeError) as error:
             raise CommandError(f"{name}: {_message(error)}") from None
         self.document = after
-        self._undo.append((name, args, before, after))
+        if merge is not None and merge == self._merge and self._undo:
+            self._undo[-1] = (name, args, self._undo[-1][2], after)
+        else:
+            self._undo.append((name, args, before, after))
+        self._merge = merge
         del self._undo[:-UNDO_LIMIT]
         self._redo.clear()
         self._emit({"type": "mutation", "name": name, "args": args, "result": result})
@@ -103,6 +122,7 @@ class Dispatcher:
     def undo(self):
         if not self._undo:
             raise CommandError("nothing to undo")
+        self._merge = None
         name, args, before, after = self._undo.pop()
         self._redo.append((name, args, before, after))
         self.document = before
@@ -111,6 +131,7 @@ class Dispatcher:
     def redo(self):
         if not self._redo:
             raise CommandError("nothing to redo")
+        self._merge = None
         name, args, before, after = self._redo.pop()
         self._undo.append((name, args, before, after))
         self.document = after
@@ -118,6 +139,7 @@ class Dispatcher:
 
     def reset(self, document):
         """Replace the whole Document (new, open, recover); clears undo."""
+        self._merge = None
         document = document.copy_deep()
         check(document)
         self.document = document

@@ -375,10 +375,54 @@ def plan_calculation(document, calc_id, trusted=True, results=None):
                                                         system_kind, trusted)
     if plan.problem is None and plan.system.problem:
         plan.problem = plan.system.problem
-    plan.key = content_hash({"stage": "calculation", "kind": calc.kind,
-                             "params": plan.params if plan.params is not None else calc.params,
-                             "systems": [plan.system.key]})
+    inner = None
+    if plan.problem is None and plan.spec.document_level:
+        plan.problem, inner = _plan_sweep(document, calc, plan.params, trusted, results)
+    params = plan.params if plan.params is not None else calc.params
+    if inner is not None:              # a sweep: ids out, the key of what it runs in
+        params = {k: v for k, v in params.items() if k != "calculation"}
+    plan.key = content_hash({"stage": "calculation", "kind": calc.kind, "params": params,
+                             "systems": [plan.system.key], "inner": inner})
     return plan
+
+
+def _owner(document, target):
+    """The system a swept parameter belongs to."""
+    if "/" in target:
+        return target.split("/", 1)[0]
+    family, owner, _, _, obj = document.find(target)
+    if family == "system":
+        return obj.id
+    if family == "calculation":
+        return obj.system
+    return owner.id
+
+
+def _plan_sweep(document, calc, params, trusted, results):
+    """(problem or None, key of the calculation it runs) of a sweep."""
+    from guiqula.registry import sweeps
+    inner_id = params["calculation"]
+    try:
+        inner = document.calculation(inner_id)
+    except DocumentError:
+        return f"it runs {inner_id!r}, which is not a calculation of the document", None
+    if inner.id == calc.id or registry.get("calculation", inner.kind).document_level:
+        return "a sweep runs a calculation, not a sweep", None
+    if inner.system != calc.system:
+        return f"{inner_id} runs on {inner.system}, the sweep on {calc.system}", None
+    axes = [(params["entry"], params["param"], params["component"])]
+    if params["entry2"]:
+        axes.append((params["entry2"], params["param2"], params["component2"]))
+    for target, param, component in axes:
+        problem = sweeps.check_target(document, target, param, component)
+        if problem:
+            return problem, None
+        if _owner(document, target) != calc.system:
+            return f"{target} is not part of {calc.system}, which the sweep runs on", None
+    inner_plan = plan_calculation(document, inner_id, trusted, results)
+    if inner_plan.problem:
+        return f"{inner_id}: {inner_plan.problem}", None
+    return None, inner_plan.key
 
 
 def calculation_key(document, calc_id, trusted=True, results=None):

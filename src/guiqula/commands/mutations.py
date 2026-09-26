@@ -110,6 +110,12 @@ def set_model(document, system, params):
 
 
 @mutation
+def set_notes(document, notes):
+    """What the document is about: a title line, then a description."""
+    document.notes = str(notes)
+
+
+@mutation
 def rename(document, entry, name):
     family, _, _, _, obj = document.find(entry)
     if family not in ("system", "region"):

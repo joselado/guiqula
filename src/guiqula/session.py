@@ -81,10 +81,13 @@ class Session:
             path = _project_path(document)
             source, document = document, project.load(document)
             self.trusted = trusted_on_open(source, document)
+            loaded_results = project.load_results(source)
+        else:
+            loaded_results = {}
         self.dispatcher = Dispatcher(document or Document())
         self.jobs = jobs if jobs is not None else JobManager(
             batch=batch, interactive=interactive, warm=warm, timeout=timeout)
-        self.results = {}        # calculation id -> latest Result
+        self.results = dict(loaded_results)     # calculation id -> latest Result
         self.calc_jobs = {}      # calculation id -> latest Job
         self.builds = {}         # system id -> latest build summary (engine/structure.py)
         self.build_errors = {}   # system id -> why the latest build failed
@@ -129,6 +132,11 @@ class Session:
 
     def do(self, name, /, **args):
         return self.dispatcher.do(name, **args)
+
+    def do_merged(self, key, name, /, **args):
+        """A mutation joined with the previous one of the same key into one
+        undo step (a slider drag, Dispatcher.do_merged)."""
+        return self.dispatcher.do_merged(key, name, **args)
 
     def act(self, name, /, **args):
         return self.dispatcher.act(name, **args)
@@ -366,12 +374,14 @@ class Session:
             self.build_errors[system] = job.error
         self.jobs.forget(job)
 
-    def _replace_document(self, document, path, saved_json, trusted=True):
-        """New, open, recover: a whole new Document (not undoable)."""
+    def _replace_document(self, document, path, saved_json, trusted=True, results=None):
+        """New, open, recover: a whole new Document (not undoable), with the
+        results kept in its file."""
         self.path = path
         self.trusted = trusted
         self._saved_json = saved_json
         self.results.clear()
+        self.results.update(results or {})
         self.calc_jobs.clear()
         self.dispatcher.reset(document)
 
@@ -384,14 +394,14 @@ class Session:
         return self.cancel(target).summary()
 
     def _action_save(self, path):
-        self.path = project.save(self.document_for_file(), path)
+        self.path = project.save(self.document_for_file(), path, self.results)
         self._saved_json = _content(self.document)
         return str(self.path)
 
     def _action_load(self, path):
         document = project.load(path)
         self._replace_document(document, _project_path(path), _content(document),
-                               trusted_on_open(path, document))
+                               trusted_on_open(path, document), project.load_results(path))
         return str(project.resolve(path))
 
     def _action_new(self):

@@ -123,3 +123,23 @@ def test_regions_used_by_piecewise_fields():
     assert new != r
     assert system.hamiltonian.terms[0].params["mu"]["pieces"][0]["region"] == new
     assert system.hamiltonian.meanfield.params["U"]["pieces"][0]["region"] == new
+
+
+def test_merged_mutations_are_one_undo_step():
+    """A slider drag: many set_param with one merge key, one undo step."""
+    from guiqula.commands import Dispatcher
+    d = Dispatcher()
+    s = d.do("add_system")
+    t = d.do("add_term", system=s, kind="onsite", params={"mu": 0.1})
+    for value in (0.2, 0.3, 0.4):
+        d.do_merged("slider:t1.mu", "set_param", entry=t, name="mu", value=value)
+    d.do_merged("slider:other", "set_param", entry=t, name="mu", value=0.5)
+    assert d.document.find(t)[-1].params["mu"] == 0.5
+    d.undo()
+    assert d.document.find(t)[-1].params["mu"] == 0.4
+    d.undo()                                         # the whole first drag
+    assert d.document.find(t)[-1].params["mu"] == 0.1
+    d.redo()
+    d.do_merged("slider:t1.mu", "set_param", entry=t, name="mu", value=0.6)   # after a redo:
+    d.undo()                                                                  # a new step
+    assert d.document.find(t)[-1].params["mu"] == 0.4

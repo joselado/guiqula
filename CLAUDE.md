@@ -27,8 +27,9 @@ Status (2026-09-26): phases 0 to 3 are done and the maintainer has answered the 
 report (PLAN.md section 7 says what each phase built, what was left for later, and the
 answers). Phase 4 is under way in four parts (PLAN.md section 7): parts 1 (the breadth of
 the quantum registry, the plot kinds, the 3D drawing), 2 (Python nodes, trust, console) and
-3 (classical systems, `from_result` Fields) are done; part 4 (the remaining Fields, the
-Brillouin-zone canvas, sweeps, overlays, presets gallery, results in project files) is next.
+3 (classical systems, `from_result` Fields) and 4a (results in project files, presets
+gallery, overlays, sweeps, sliders) are done; part 4b (the Brillouin-zone canvas, the
+remaining Fields: profile, interpolated, painted) is next.
 
 ## Code map
 
@@ -44,7 +45,8 @@ a `Session`.
   `structure`; `ResultRef`, what a from_result Field reads), `hashing.py`.
 - `registry/`: one declaration per lattice, op, term, mean field and calculation
   (`lattices.py`, `geometry_ops.py`, `terms.py`, `meanfield.py`, `calculations.py`,
-  `classical.py` for the classical models, terms and calculations, `python_nodes.py`); an
+  `classical.py` for the classical models, terms and calculations, `python_nodes.py`,
+  `sweeps.py`, a calculation that runs another one over parameter values); an
   entry's `systems` names the system kinds it applies to. A
   declarative `Call("h.add_zeeman", "m")` drives both the engine and the script export; a
   custom entry gives `apply` and `script`. `pipeline.py` plans a system without pyqula: the
@@ -74,12 +76,16 @@ a `Session`.
   `trusted` + the console (`console(code)`); with `autosave=True` (the window's) it
   autosaves from `poll()`. The object tests, `guiqula run`, `tools/drive.py` and the window
   drive.
-- `io/`: project files, presets (`src/guiqula/presets/*.json`, loadable by name), script
-  export, result files, `autosave.py` (autosave and recovery), `crashreport.py`.
+- `io/`: project files (a `.guiqula` zip keeps the results too), presets
+  (`src/guiqula/presets/*.json`, loadable by name, described by the Document's `notes`),
+  script export (a sweep exports a loop), result files, `autosave.py` (autosave and
+  recovery), `crashreport.py`.
 - `ui/`: `mainwindow.py` (workspaces, palettes with search boxes from the registry, docks,
   bars, one result view per calculation, the cost guard, auto re-run; the window's own
   dispatcher actions `select`, `workspace`, `tool`, `select_sites`, `region_from_selection`,
-  `remove_selected`, `canvas_view`, `preview`, `auto_rerun`, `projection`), `outliner.py`,
+  `remove_selected`, `canvas_view`, `preview`, `auto_rerun`, `projection`, `overlay`,
+  `slider`, `set_slider`, `remove_slider`), `outliner.py`, `gallery.py` (presets),
+  `sliders.py` (the Sliders dock),
   `properties.py` + `forms.py` (forms from the parameter declarations; the `f(r)` Field
   editor), `formulas.py` (mathtext images), `structure.py` (canvas, its three views,
   selection tools, and the mplot3d drawing of geometries that are not flat), `plots.py`

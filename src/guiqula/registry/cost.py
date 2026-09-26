@@ -52,6 +52,13 @@ def estimate(document, calc_id, builds, trusted=True, results=None):
     calculation, or None when its system is not built (or the calculation
     cannot run). meanfield: the seconds of the mean field in the total."""
     plan = pipeline.plan_calculation(document, calc_id, trusted, results)
+    if plan.problem is None and plan.spec is not None and plan.spec.document_level:
+        inner = estimate(document, plan.params["calculation"], builds, trusted, results)
+        if inner is None:
+            return None
+        points = plan.params["steps"] * (plan.params["steps2"] if plan.params["entry2"] else 1)
+        return dict(inner, seconds=inner["seconds"] * points,
+                    meanfield=inner["meanfield"] * points)
     build = builds.get(plan.system_id)
     if plan.problem or build is None or plan.spec is None or plan.spec.cost is None:
         return None

@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "notes": "Frustrated classical spins (120-degree order)\nClassical Heisenberg spins on the triangular lattice with an antiferromagnetic first-neighbour exchange: the three spins of every triangle settle at 120 degrees (c1). The 3x3 supercell holds the three-sublattice pattern; on the primitive cell only the ferromagnet fits.",
+  "systems": [
+    {
+      "id": "s1",
+      "name": "triangular antiferromagnet",
+      "kind": "classical_spin",
+      "geometry": {
+        "base": {
+          "kind": "triangular_lattice",
+          "params": {}
+        },
+        "ops": [
+          {
+            "id": "op1",
+            "kind": "supercell",
+            "enabled": true,
+            "params": {
+              "n": [3, 3, 1]
+            },
+            "region": null
+          }
+        ]
+      },
+      "regions": [],
+      "hamiltonian": null,
+      "model": {
+        "kind": "classical_spin",
+        "params": {},
+        "terms": [
+          {
+            "id": "t1",
+            "kind": "heisenberg",
+            "enabled": true,
+            "params": {
+              "J1": 1.0,
+              "J2": 0.0,
+              "J3": 0.0,
+              "anisotropy": [1.0, 1.0, 1.0]
+            },
+            "region": null
+          }
+        ]
+      }
+    }
+  ],
+  "calculations": [
+    {
+      "id": "c1",
+      "system": "s1",
+      "kind": "minimize_spins",
+      "params": {
+        "tries": 5,
+        "seed": 1,
+        "show": "texture"
+      }
+    }
+  ],
+  "ui": {
+    "workspace": "calculate",
+    "calculation": "c1"
+  }
+}

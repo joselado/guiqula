@@ -1,0 +1,120 @@
+{
+  "version": 1,
+  "notes": "Majorana wire\nA finite wire with Rashba spin-orbit coupling, an exchange field and s-wave pairing, in the topological phase (exchange field above the pairing, chemical potential near the band bottom): a Majorana zero mode at each end, seen in the local density of states at zero energy (c1) and as a zero-energy peak in the density of states (c2). Lower the exchange field below the pairing and the end states go.",
+  "systems": [
+    {
+      "id": "s1",
+      "name": "Majorana wire",
+      "kind": "quantum",
+      "geometry": {
+        "base": {
+          "kind": "chain",
+          "params": {}
+        },
+        "ops": [
+          {
+            "id": "op1",
+            "kind": "supercell",
+            "enabled": true,
+            "params": {
+              "n": [80, 1, 1]
+            },
+            "region": null
+          },
+          {
+            "id": "op2",
+            "kind": "finite",
+            "enabled": true,
+            "params": {},
+            "region": null
+          }
+        ]
+      },
+      "regions": [],
+      "hamiltonian": {
+        "construction": {
+          "has_spin": true,
+          "nambu": false,
+          "tij": [1.0],
+          "is_sparse": false
+        },
+        "terms": [
+          {
+            "id": "t1",
+            "kind": "onsite",
+            "enabled": true,
+            "params": {
+              "mu": 1.8
+            },
+            "region": null
+          },
+          {
+            "id": "t2",
+            "kind": "rashba",
+            "enabled": true,
+            "params": {
+              "c": 0.4
+            },
+            "region": null
+          },
+          {
+            "id": "t3",
+            "kind": "zeeman",
+            "enabled": true,
+            "params": {
+              "m": [0.0, 0.0, 0.5]
+            },
+            "region": null
+          },
+          {
+            "id": "t4",
+            "kind": "swave",
+            "enabled": true,
+            "params": {
+              "delta": 0.3
+            },
+            "region": null
+          }
+        ],
+        "meanfield": {
+          "enabled": false,
+          "kind": "interactions",
+          "params": {}
+        }
+      },
+      "model": null
+    }
+  ],
+  "calculations": [
+    {
+      "id": "c1",
+      "system": "s1",
+      "kind": "ldos",
+      "params": {
+        "energy": 0.0,
+        "delta": 0.01,
+        "nk": 1,
+        "operator": null
+      }
+    },
+    {
+      "id": "c2",
+      "system": "s1",
+      "kind": "dos",
+      "params": {
+        "emin": -1.0,
+        "emax": 1.0,
+        "ne": 300,
+        "delta": 0.01,
+        "nk": 1,
+        "mode": "ED",
+        "operator": null,
+        "seed": 1
+      }
+    }
+  ],
+  "ui": {
+    "workspace": "hamiltonian",
+    "calculation": "c1"
+  }
+}
