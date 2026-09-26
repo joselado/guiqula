@@ -121,3 +121,28 @@ def test_removed_calculation_forgets_its_result(session):
     assert session.result("c2") is None
     session.do("add_calculation", system="s1", kind="bands")      # reuses the id c2
     assert session.result("c2") is None and session.status("c2") == "none"
+
+
+def test_builds_coalesce_and_are_kept_per_system(session):
+    """A burst of edits costs one build per system (the carried-over phase-1
+    item): requests still queued are superseded by the newest one."""
+    session.act("load", path="honeycomb_zeeman_rashba")
+    session.jobs.submit("sleep", {"seconds": 1.0}, role="interactive")    # keep the worker busy
+    jobs = []
+    for n in (2, 3, 4, 5):
+        session.do("set_param", entry="op1", name="n", value=[n, n, 1])
+        jobs.append(session.build("s1", wait=False))
+    session.jobs.wait(jobs[-1], 300)
+    assert [j.status for j in jobs] == ["cancelled"] * 3 + ["done"]
+    build = session.builds["s1"]
+    assert build["sites"] == 50 and build["positions"].shape == (50, 3)
+    assert session.build_is_current("s1") and not session.build_errors
+    assert all(j.id not in session.jobs.jobs for j in jobs)             # finished builds forgotten
+    modes = [r.get("mode") for r in build["reports"] if r["stage"] in ("construction", "term")]
+    assert modes == ["spinful"] * 3
+    session.do("set_param", entry="op1", name="n", value=[1, 1, 1])
+    assert not session.build_is_current("s1")
+    session.do("remove", entry="c1")
+    session.do("remove", entry="c2")
+    session.do("remove", entry="s1")
+    assert session.builds == {}

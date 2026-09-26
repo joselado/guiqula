@@ -1,7 +1,8 @@
 """Geometry operations: each takes the geometry built so far and returns a
 new one (PLAN.md 3.1)."""
 from guiqula.registry.base import G, Call, entry
-from guiqula.registry.params import FloatParam, IntParam, IntVectorParam, PositionsParam
+from guiqula.registry.params import (BoolParam, FloatParam, IntParam, IntVectorParam,
+                                     PositionsParam)
 
 entry("geometry_op", "supercell", "Supercell",
       IntVectorParam("n", (1, 1, 1), "repetitions", "cells along each lattice vector", minimum=1),
@@ -13,6 +14,20 @@ entry("geometry_op", "ribbon", "Ribbon",
       IntVectorParam("boundary", (1, 0), "boundary", "direction of the edge, in lattice vectors"),
       group="Dimensionality", doc="Cut a two-dimensional lattice into a periodic ribbon.",
       call=Call("ribbon.bulk2ribbon", G, n="n", boundary="boundary"))
+
+# pyqula builds a 7n x 7n supercell of the geometry it is given, centres it,
+# and keeps the sites inside a regular polygon of inradius 1.5 n (in units of
+# the first-neighbour distance), so the size does not depend on the cell.
+# nedges is always passed: with geo= given, pyqula's default comes from
+# name="square" (4), whatever the lattice.
+entry("geometry_op", "island", "Island",
+      FloatParam("n", 3.0, "size", "the polygon's inradius is 1.5 n", minimum=0.5),
+      IntParam("nedges", 6, "edges", "number of edges of the polygon", minimum=3),
+      FloatParam("rot", 0.0, "rotation", "rotation of the lattice before the cut, in radians"),
+      BoolParam("clean", True, "clean edges", "remove sites with a single neighbour, repeatedly"),
+      group="Dimensionality", doc="Cut a finite polygon-shaped flake out of a periodic "
+                                  "geometry (pyqula.islands).",
+      call=Call("islands.get_geometry", geo=G, n="n", nedges="nedges", rot="rot", clean="clean"))
 
 
 def _remove_atoms(g, ctx):

@@ -205,6 +205,22 @@ class JobManager:
         self._dispatch()
         return job
 
+    def supersede(self, kind, label):
+        """Cancel the queued (not yet running) jobs of this kind and label:
+        a newer request replaces them (interactive builds coalesce per
+        system). Returns them."""
+        superseded = [job for queue in self.queues.values() for job in queue
+                      if job.kind == kind and job.label == label]
+        for job in superseded:
+            self.cancel(job)
+        return superseded
+
+    def forget(self, job):
+        """Drop a finished job from the table (builds are frequent)."""
+        job = self.jobs.get(job) if isinstance(job, str) else job
+        if job is not None and job.done:
+            self.jobs.pop(job.id, None)
+
     def poll(self, timeout=0.0):
         """Process pending messages, detect dead workers and timeouts, and
         hand queued jobs to idle workers. Returns the number of messages."""
@@ -269,7 +285,7 @@ class JobManager:
         self.closed = True
         for worker in self._all_workers():
             worker.stop()
-        for job in self.jobs.values():
+        for job in list(self.jobs.values()):     # listeners may forget jobs
             if not job.done:
                 self._finish(job, "cancelled")
         _MANAGERS.discard(self)

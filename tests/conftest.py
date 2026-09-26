@@ -5,13 +5,18 @@
   cwd-relative .OUT files can never land in the repository.
 - ``shot(widget, name)`` saves a screenshot under ui_dump/<test>/ for Claude
   to inspect with the Read tool (GUIQULA_SHOT_DIR overrides the directory).
+- Autosaves and crash reports go to a temporary directory
+  ($GUIQULA_DATA_DIR), never to the user's data directory.
 - ``run_python(code)`` runs code in a fresh interpreter that sees src/, for
   checks that need a clean process (startup cost, import side effects).
 """
+import atexit
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -23,6 +28,10 @@ from guiqula import env  # noqa: E402  (src/ is on sys.path via pyproject)
 
 env.configure_qt(offscreen=True)
 os.environ.setdefault("MPLBACKEND", "Agg")   # pyplot never opens a window
+# autosaves and crash reports of the whole run (children inherit it) go to a
+# temporary directory, never to the user's data directory
+os.environ["GUIQULA_DATA_DIR"] = tempfile.mkdtemp(prefix="guiqula-test-data-")
+atexit.register(shutil.rmtree, os.environ["GUIQULA_DATA_DIR"], True)
 
 
 @pytest.fixture(autouse=True)

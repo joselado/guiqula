@@ -34,8 +34,6 @@ class MainWindow(QMainWindow):
         self.session = None
         self._owns_session = False
         self._unsubscribe = None
-        self.builds = {}               # system id -> latest interactive build summary
-        self._build_jobs = {}
 
         self.tree = DocumentTree()
         self.plot = PlotView()
@@ -182,26 +180,26 @@ class MainWindow(QMainWindow):
         path = self.session.path
         self.setWindowTitle(f"guiqula — {path.name}" if path else "guiqula")
 
+    @property
+    def builds(self):
+        """system id -> latest build summary (kept by the session)."""
+        return self.session.builds if self.session is not None else {}
+
     def _request_builds(self):
         """Ask the interactive worker to build every system (modes, sites,
         entries pyqula rejects), without blocking the batch workers."""
-        if self.session is None:
-            return
-        for system in self.session.document.systems:
-            job = self.session.build(system.id, wait=False)
-            self._build_jobs[job.id] = system.id
+        if self.session is not None:
+            self.session.build_all()
 
     def _job_changed(self, job):
         if job.kind == "build":
-            system = self._build_jobs.pop(job.id, None) if job.done else None
-            if system is not None and job.status == "done":
-                self.builds[system] = job.value
+            system = job.payload["system"]
+            if job.status == "done" and self.builds.get(system) is job.value:
                 self.tree.refresh(self.session, self.builds)
                 self.status_label.setText(
                     f"{system}: {job.value['mode']} · {job.value['sites']} sites · "
                     f"dimension {job.value['dimension']} · {vendoring.describe()}")
-            elif system is not None and job.status == "failed":
-                self.builds.pop(system, None)
+            elif job.status == "failed":
                 self.message(f"{system} cannot be built: {job.error}", error=True)
             return
         self.jobs.update_job(job)

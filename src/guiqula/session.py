@@ -1,8 +1,13 @@
-"""A Session: the Document with its command dispatcher, the workers, and
-the latest result of every calculation. It is the one object the tests, the
-headless runner (``guiqula run``, PLAN.md 13.3), tools/drive.py, the UI and
-the future remote API all drive; none of them reaches the Document or the
-workers any other way.
+"""A Session: the Document with its command dispatcher, the workers, the
+latest result of every calculation and the latest build of every system.
+It is the one object the tests, the headless runner (``guiqula run``,
+PLAN.md 13.3), tools/drive.py, the UI and the future remote API all drive;
+none of them reaches the Document or the workers any other way.
+
+With ``autosave=True`` (the window's session) it also autosaves the
+Document from poll() and deletes the autosave on a clean close()
+(guiqula.io.autosave); the ``recover`` action loads what a crashed session
+left behind.
 
 Qt-free and pyqula-free: it runs in the UI process.
 """
@@ -10,6 +15,7 @@ from pathlib import Path
 
 from guiqula.commands import CommandError, Dispatcher
 from guiqula.core.document import Document
+from guiqula.io import autosave as autosave_files
 from guiqula.io import project
 from guiqula.io import results as result_files
 from guiqula.io.script import export_script
@@ -17,28 +23,48 @@ from guiqula.registry import pipeline
 from guiqula.worker.client import JobManager
 
 
+def _project_path(path_or_name):
+    """Where Save writes back to after opening this: None for a preset."""
+    resolved = project.resolve(path_or_name)
+    return None if resolved.parent == project.PRESETS else resolved
+
+
 class Session:
     def __init__(self, document=None, batch=1, interactive=True, warm=True, timeout=None,
-                 jobs=None):
+                 jobs=None, autosave=False):
+        path = None
         if isinstance(document, (str, Path)):
+            path = _project_path(document)
             document = project.load(document)
         self.dispatcher = Dispatcher(document or Document())
         self.jobs = jobs if jobs is not None else JobManager(
             batch=batch, interactive=interactive, warm=warm, timeout=timeout)
         self.results = {}        # calculation id -> latest Result
         self.calc_jobs = {}      # calculation id -> latest Job
-        self.path = None         # where the document was loaded from / saved to
+        self.builds = {}         # system id -> latest build summary (engine/structure.py)
+        self.build_errors = {}   # system id -> why the latest build failed
+        self._build_times = {}   # system id -> submission time of the stored build
+        self.path = path         # where the document was loaded from / saved to
+        self._saved_json = self.document.to_json()
+        self.autosaver = autosave if isinstance(autosave, autosave_files.Autosaver) else \
+            autosave_files.Autosaver() if autosave else None
         self._listeners = []
         self.jobs.subscribe(self._on_job_event)
         self.dispatcher.subscribe(self._on_document_event)
         for name in ("run_calculation", "cancel", "save", "load", "new", "export_script",
-                     "save_result"):
+                     "save_result", "recover", "list_recoverable", "discard_recovery"):
             self.dispatcher.register_action(name, getattr(self, "_action_" + name))
 
     # ---- the command API
     @property
     def document(self):
         return self.dispatcher.document
+
+    @property
+    def modified(self):
+        """Whether the Document differs from the file it was loaded from or
+        last saved to (a new document: from the empty one)."""
+        return self.document.to_json() != self._saved_json
 
     def do(self, name, /, **args):
         return self.dispatcher.do(name, **args)
@@ -94,11 +120,31 @@ class Session:
             self.jobs.wait(job, timeout)
         return job
 
+    # ---- builds (the interactive worker)
     def build(self, system, wait=True, timeout=None):
+        """Ask the interactive worker to build a system: its geometry arrays,
+        stage reports and Hilbert space land in ``builds[system]``. A request
+        still queued for the same system is superseded, so a burst of edits
+        costs one build, not one per edit."""
+        self.document.system(system)
+        self.jobs.supersede("build", system)
         job = self.jobs.build(self.document.to_json(), system)
         if wait:
             self.jobs.wait(job, timeout)
         return job
+
+    def build_all(self):
+        return [self.build(system.id, wait=False) for system in self.document.systems]
+
+    def build_is_current(self, system):
+        """Whether builds[system] was built from the current Document."""
+        build = self.builds.get(system)
+        if build is None:
+            return False
+        try:
+            return build["key"] == pipeline.plan_system(self.document, system).key
+        except Exception:
+            return False
 
     def cancel(self, calculation_or_job):
         job = self.calc_jobs.get(calculation_or_job) or self.jobs.jobs.get(calculation_or_job)
@@ -107,7 +153,12 @@ class Session:
         return self.jobs.cancel(job)
 
     def poll(self, timeout=0.0):
-        return self.jobs.poll(timeout)
+        """Process worker messages; autosave if due. The window calls this
+        from a timer, headless code through wait()."""
+        count = self.jobs.poll(timeout)
+        if self.autosaver is not None:
+            self.autosaver.tick(self.document, self.path, self.modified)
+        return count
 
     def wait(self, calculation=None, timeout=None):
         jobs = [self.calc_jobs[calculation]] if calculation else list(self.calc_jobs.values())
@@ -116,7 +167,10 @@ class Session:
         return jobs[0] if calculation else jobs
 
     def close(self):
+        """A clean close: stop the workers and delete the autosave."""
         self.jobs.shutdown()
+        if self.autosaver is not None:
+            self.autosaver.discard()
 
     def __enter__(self):
         return self
@@ -125,21 +179,52 @@ class Session:
         self.close()
 
     def _on_document_event(self, event):
-        """Forget results of calculations that no longer exist: ids are
-        reused after a removal, and a new c1 must not show the old c1's
-        result."""
+        """Forget results and builds of entries that no longer exist: ids
+        are reused after a removal, and a new c1 must not show the old
+        c1's result."""
+        if self.autosaver is not None:
+            self.autosaver.changed()
+        if event["type"] == "reset":
+            self.builds.clear()
+            self.build_errors.clear()
+            self._build_times.clear()
         present = {c.id for c in self.document.calculations}
         for calc in [c for c in self.results if c not in present]:
             del self.results[calc]
         for calc in [c for c, job in self.calc_jobs.items() if c not in present and job.done]:
             del self.calc_jobs[calc]
+        systems = {s.id for s in self.document.systems}
+        for table in (self.builds, self.build_errors, self._build_times):
+            for system in [s for s in table if s not in systems]:
+                del table[system]
 
     def _on_job_event(self, kind, payload):
         if kind == "job" and payload.kind == "run" and payload.status == "done":
             if any(c.id == payload.label for c in self.document.calculations):
                 self.results[payload.label] = payload.value
+        if kind == "job" and payload.kind == "build" and payload.done:
+            self._store_build(payload)
         for listener in list(self._listeners):
             listener(kind, payload)
+
+    def _store_build(self, job):
+        system = job.payload.get("system")
+        exists = any(s.id == system for s in self.document.systems)
+        if exists and job.status == "done" and job.submitted >= self._build_times.get(system, 0):
+            self.builds[system] = job.value
+            self._build_times[system] = job.submitted
+            self.build_errors.pop(system, None)
+        elif exists and job.status == "failed":
+            self.build_errors[system] = job.error
+        self.jobs.forget(job)
+
+    def _replace_document(self, document, path, saved_json):
+        """New, open, recover: a whole new Document (not undoable)."""
+        self.path = path
+        self._saved_json = saved_json
+        self.results.clear()
+        self.calc_jobs.clear()
+        self.dispatcher.reset(document)
 
     # ---- actions (journaled through the dispatcher, not undoable)
     def _action_run_calculation(self, calculation, wait=False, timeout=None, cores=1):
@@ -151,22 +236,40 @@ class Session:
 
     def _action_save(self, path):
         self.path = project.save(self.document, path)
+        self._saved_json = self.document.to_json()
         return str(self.path)
 
     def _action_load(self, path):
         document = project.load(path)
-        self.dispatcher.reset(document)
-        self.results.clear()
-        self.calc_jobs.clear()
-        resolved = project.resolve(path)
-        self.path = None if resolved.parent == project.PRESETS else resolved
-        return str(resolved)
+        self._replace_document(document, _project_path(path), document.to_json())
+        return str(project.resolve(path))
 
     def _action_new(self):
-        self.dispatcher.reset(Document())
-        self.results.clear()
-        self.calc_jobs.clear()
-        self.path = None
+        self._replace_document(Document(), None, Document().to_json())
+
+    def _action_recover(self, path=None):
+        """Load what a session that did not close cleanly left behind (the
+        newest one, or the autosave file at path). The recovered Document
+        counts as unsaved, Save writes back to its project file, and the
+        autosave file is taken over, so it stays recoverable until saved."""
+        if path is None:
+            candidates = [e for e in autosave_files.recoverable() if "error" not in e]
+            if not candidates:
+                raise CommandError("there is nothing to recover")
+            path = candidates[0]["path"]
+        document, info = autosave_files.read(path)
+        source = Path(info["source"]) if info.get("source") else None
+        self._replace_document(document, source, None)
+        if self.autosaver is not None:
+            self.autosaver.adopt(path)
+        return {"path": str(path), "source": info.get("source"),
+                "systems": [s.id for s in document.systems]}
+
+    def _action_list_recoverable(self, include_unmodified=False):
+        return autosave_files.recoverable(include_unmodified=include_unmodified)
+
+    def _action_discard_recovery(self, path):
+        autosave_files.discard(path)
 
     def _action_export_script(self, calculation, path=None):
         result = self.results.get(calculation)

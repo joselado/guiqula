@@ -46,6 +46,9 @@ def positions_equal(g1, g2):
 OP_CASES = {
     "supercell": ({"n": [2, 3, 1]}, lambda g: g.get_supercell([2, 3, 1])),
     "ribbon": ({"n": 3}, lambda g: __import__("pyqula.ribbon").ribbon.bulk2ribbon(g, n=3, boundary=[1, 0])),
+    "island": ({"n": 2.5, "nedges": 3, "rot": 0.3},
+               lambda g: __import__("pyqula.islands").islands.get_geometry(
+                   geo=g, n=2.5, nedges=3, rot=0.3, clean=True)),
     "remove_atoms": (None, None),        # built on a supercell, below
 }
 

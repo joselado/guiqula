@@ -61,6 +61,19 @@ def test_everything_at_once(pyqula, repo, tmp_path):
     assert_reproduces(d.document, c, repo, tmp_path)
 
 
+def test_island(pyqula, repo, tmp_path):
+    """A module-level Call with a keyword geometry (islands.get_geometry)."""
+    d = Dispatcher()
+    s = d.do("add_system", lattice="honeycomb_lattice")
+    d.do("add_geometry_op", system=s, kind="island", params={"n": 2.0, "rot": 0.1})
+    d.do("add_term", system=s, kind="sublattice_imbalance", params={"mass": 0.2})
+    c = d.do("add_calculation", system=s, kind="dos", params={"ne": 30, "nk": 1, "delta": 0.1})
+    source = export_script(d.document, c)
+    assert "from pyqula import geometry, islands" in source
+    assert "g = islands.get_geometry(geo=g, n=2.0, nedges=6, rot=0.1, clean=True)" in source
+    assert_reproduces(d.document, c, repo, tmp_path)
+
+
 def test_skipped_entry_is_commented(pyqula, repo, tmp_path):
     d = Dispatcher()
     s = d.do("add_system", lattice="triangular_lattice")

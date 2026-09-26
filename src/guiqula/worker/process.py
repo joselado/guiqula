@@ -89,6 +89,7 @@ def main(conn, config):
     from guiqula import vendoring
     vendoring.ensure_pyqula_on_path()
     from guiqula.core.document import Document
+    from guiqula.engine import structure
     from guiqula.engine.build import BuildCache, build_system
     from guiqula.engine.calculations import run_calculation
     from pyqula import parallel
@@ -119,13 +120,11 @@ def main(conn, config):
         if kind == "build":
             document = Document.from_json(payload["document"])
             built = build_system(document, payload["system"], cache)
-            g = built.g
-            return {"system": payload["system"], "key": built.key, "mode": built.mode,
-                    "reports": built.reports, "upgraded_by": built.plan.upgraded_by,
-                    "sites": len(g.r), "dimensionality": int(g.dimensionality),
-                    "dimension": int(built.h.intra.shape[0]),
-                    "positions": [list(map(float, r)) for r in g.r],
-                    "cache": {"hits": cache.hits, "misses": cache.misses, "size": len(cache)}}
+            return dict(structure.describe(built.g),
+                        system=payload["system"], key=built.key, mode=built.mode,
+                        reports=built.reports, upgraded_by=built.plan.upgraded_by,
+                        sites=len(built.g.r), dimension=int(built.h.intra.shape[0]),
+                        cache={"hits": cache.hits, "misses": cache.misses, "size": len(cache)})
         if kind == "sleep":
             steps = max(int(payload.get("seconds", 1.0) / 0.05), 1)
             for i in range(steps):

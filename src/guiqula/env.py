@@ -17,6 +17,12 @@ def user_cache_dir():
 
 
 def user_data_dir():
+    """Autosaves and crash reports live here. $GUIQULA_DATA_DIR overrides
+    it; the test suite points it at a temporary directory so tests never
+    touch the real one."""
+    override = os.environ.get("GUIQULA_DATA_DIR")
+    if override:
+        return Path(override)
     return Path(platformdirs.user_data_dir(APP_NAME, appauthor=False))
 
 
