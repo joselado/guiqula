@@ -25,9 +25,9 @@ a decision changes.
 
 Status (2026-09-26): phases 0 to 3 are done and the maintainer has answered the phase-3
 report (PLAN.md section 7 says what each phase built, what was left for later, and the
-answers).
-Phase 4 (breadth: Python nodes, console, more ops/terms/calculations, classical systems) is
-next.
+answers). Phase 4 is under way in four parts (PLAN.md section 7): part 1 (the breadth of
+the quantum registry, the plot kinds, the 3D drawing) is done; part 2 (Python nodes, trust
+prompt, console) is next, then the classical systems and the rest.
 
 ## Code map
 
@@ -38,7 +38,8 @@ a `Session`.
   system's Hamiltonian = construction, terms, mean-field block), `fields.py` and
   `expressions.py` (Fields: constant, expression, piecewise over regions; the
   AST-whitelisted expression evaluator), `regions.py`, `results.py` (the `Result` dataclass
-  that crosses the process boundary), `hashing.py`.
+  that crosses the process boundary; a result drawn on the atoms carries its geometry in
+  `structure`), `hashing.py`.
 - `registry/`: one declaration per lattice, op, term, mean field and calculation
   (`lattices.py`, `geometry_ops.py`, `terms.py`, `meanfield.py`, `calculations.py`). A
   declarative `Call("h.add_zeeman", "m")` drives both the engine and the script export; a
@@ -46,7 +47,10 @@ a `Session`.
   Hilbert-space pre-scan, invalid entries, region references resolved to selections, and
   the stage and calculation keys (staleness); the mean field is the last stage. `cost.py`
   estimates durations (the cost guard). Adding a term = one `entry(...)` call plus its case
-  in `tests/engine/test_entries.py` (a completeness test fails otherwise).
+  in `tests/engine/test_entries.py` (a completeness test fails otherwise; the case is also
+  exported and run by `tests/engine/test_script_export.py`). A custom script names the
+  pyqula modules it uses (`modules=`); a calculation's `plot` is a dict or a callable of the
+  parameters (and the arrays); plot kinds are listed in `ui/plots.py`.
 - `commands/`: `Dispatcher` (mutations with snapshot undo, actions journaled only);
   `mutations.py` lists every mutation. Command arguments are JSON.
 - `engine/`: `build.py` executes a plan (per-stage cache handing out copies, skip on error,
@@ -64,10 +68,12 @@ a `Session`.
 - `ui/`: `mainwindow.py` (workspaces, palettes with search boxes from the registry, docks,
   bars, one result view per calculation, the cost guard, auto re-run; the window's own
   dispatcher actions `select`, `workspace`, `tool`, `select_sites`, `region_from_selection`,
-  `remove_selected`, `canvas_view`, `preview`, `auto_rerun`), `outliner.py`,
+  `remove_selected`, `canvas_view`, `preview`, `auto_rerun`, `projection`), `outliner.py`,
   `properties.py` + `forms.py` (forms from the parameter declarations; the `f(r)` Field
-  editor), `formulas.py` (mathtext images), `structure.py` (canvas, its three views and
-  selection tools), `plots.py` (`PlotView` per calculation, `plot_<id>`), `jobpanel.py`,
+  editor), `formulas.py` (mathtext images), `structure.py` (canvas, its three views,
+  selection tools, and the mplot3d drawing of geometries that are not flat), `plots.py`
+  (`PlotView` per calculation, `plot_<id>`; lines, colored_scatter, heatmap,
+  structure_scalar, structure_vector, scalar), `jobpanel.py`,
   `bars.py`, `errors.py` (exception hook), `theme.py`. The window saves its view state as the Document's `ui` block (not a
   Command, not an unsaved change) and restores it on open and recovery. The window
   polls the session from a `QTimer` and starts the workers after it is shown; a form or tree
@@ -155,7 +161,7 @@ Nothing is installed: pytest puts `src/` on the path (`pyproject.toml`), and `to
 does it itself. Keep this section in sync with what exists.
 
 ```bash
-python -m pytest                       # everything (offscreen Qt, worker processes; 3-5 min)
+python -m pytest                       # everything (offscreen Qt, worker processes; 5-6 min)
 python -m pytest -m "not slow"         # skip the wheel build
 python -m pytest tests/core            # pure Python, under a second
 python -m pytest tests/engine -k zeeman  # one area / one test

@@ -1,5 +1,13 @@
 """Results of calculations (PLAN.md 3.4): plain data that crosses the
-worker boundary by pickling and is drawn in the UI process."""
+worker boundary by pickling and is drawn in the UI process.
+
+A result drawn on the atoms (plot kinds structure_scalar and
+structure_vector) carries the geometry it was computed on in
+``structure`` (engine/structure.describe: positions, lattice,
+dimensionality, sublattice, bonds, image_bonds), since the UI process has
+no built geometry of the snapshot it came from; ``arrays`` holds only what
+the calculation itself returns, which is what an exported script
+reproduces."""
 from dataclasses import dataclass, field
 
 
@@ -15,6 +23,7 @@ class Result:
     mode: str = ""              # Hilbert space the Hamiltonian was built in
     document: str = ""          # JSON snapshot of the Document that was run
     meta: dict = field(default_factory=dict)      # timing, pyqula provenance, cores
+    structure: dict | None = None                 # geometry arrays, for plots on the atoms
 
     @property
     def skipped(self):
@@ -35,4 +44,5 @@ class Result:
                 "arrays": {k: list(getattr(v, "shape", ())) for k, v in self.arrays.items()},
                 "plot": self.plot["kind"], "mode": self.mode,
                 "skipped": [r["id"] for r in self.skipped], "meanfield": self.meanfield,
-                "seconds": self.meta.get("seconds")}
+                "seconds": self.meta.get("seconds"),
+                "sites": None if self.structure is None else len(self.structure["positions"])}

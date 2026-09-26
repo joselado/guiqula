@@ -64,7 +64,7 @@ PREVIEW_DELAY_MS = 120
 WORKSPACES = ("geometry", "hamiltonian", "calculate")
 # actions of the window itself: they change what is shown, not the Document
 WINDOW_ACTIONS = ("select", "workspace", "tool", "select_sites", "canvas_view", "preview",
-                  "auto_rerun")
+                  "auto_rerun", "projection")
 STRUCTURE_TAB = 0
 REGION_TOLERANCE = 0.05      # positions regions made from a canvas selection
 AUTO_RERUN_SECONDS = 3.0     # stale results re-run automatically when cheaper than this
@@ -76,19 +76,31 @@ def _grouped(family):
     return sorted(registry.entries(family), key=lambda s: (s.group, s.label))
 
 
+def _search_rank(spec, text):
+    """How well an entry matches a search (lower is better), or None."""
+    label = spec.label.lower()
+    if text in (label, f"{spec.label} ({spec.group})".lower(), spec.kind):
+        return 0
+    if label.startswith(text):
+        return 1
+    if any(word.startswith(text) for word in label.replace("-", " ").replace("/", " ").split()):
+        return 2
+    for rank, where in enumerate((label, spec.kind, spec.group.lower(), spec.doc.lower()), 3):
+        if text in where:
+            return rank
+    return None
+
+
 def search_entries(family, text):
-    """Registry entries whose label, kind, group or doc contain the text
-    (case-insensitive); an exact label (or "label (group)") first."""
+    """Registry entries matching the text (case-insensitive), best first:
+    the exact label (or "label (group)", or the kind), a label starting
+    with it, a word of the label starting with it, then the text anywhere
+    in the label, the kind, the group or the doc; ties in palette order."""
     text = text.strip().lower()
     if not text:
         return []
-    found = []
-    for spec in _grouped(family):
-        exact = text in (spec.label.lower(), f"{spec.label} ({spec.group})".lower(), spec.kind)
-        words = " ".join((spec.label, spec.kind, spec.group, spec.doc)).lower()
-        if exact or text in words:
-            found.append((not exact, spec))
-    return [spec for _, spec in sorted(found, key=lambda item: item[0])]
+    found = [(_search_rank(spec, text), i, spec) for i, spec in enumerate(_grouped(family))]
+    return [spec for rank, _, spec in sorted(f for f in found if f[0] is not None)]
 
 
 class MainWindow(QMainWindow):
@@ -124,6 +136,7 @@ class MainWindow(QMainWindow):
         self.structure = StructureView()
         self.structure.selection_changed.connect(self._selection_changed)
         self.structure.view_chosen.connect(self.set_canvas_view)
+        self.structure.projection_chosen.connect(self.set_projection)
         self.viewport = QTabWidget()
         self.viewport.setObjectName("viewport")
         self.viewport.setTabsClosable(True)
@@ -433,6 +446,7 @@ class MainWindow(QMainWindow):
         dispatcher.register_action("preview", lambda entry, param: self.preview_field(entry,
                                                                                       param))
         dispatcher.register_action("auto_rerun", lambda enabled=True: self.set_auto_rerun(enabled))
+        dispatcher.register_action("projection", lambda name: self.set_projection(name))
         session.view_state = self.view_state
         self.timer.start(POLL_MS)
         self._document_changed()
@@ -637,6 +651,14 @@ class MainWindow(QMainWindow):
                 self.build_timer.start(0)      # the builds so far left the view out
         return name
 
+    def set_projection(self, name):
+        """How the structure canvas draws the geometry: auto (3D when it is
+        not flat), xy or 3d."""
+        self.structure.set_projection(name)
+        if self.session is not None:
+            self._refresh_structure()
+        return name
+
     def preview_field(self, entry, param):
         """Draw a Field of a term (or of a mean field, <system>/meanfield) on
         the structure; the canvas switches to the field view."""
@@ -738,6 +760,8 @@ class MainWindow(QMainWindow):
         state = {"workspace": self.workspace, "selected": self.selected,
                  "tool": self.structure.tool, "tab": self.current_tab(),
                  "canvas_view": self.canvas_view, "results": list(self.plots)}
+        if self.structure.projection != "auto":
+            state["projection"] = self.structure.projection
         if self.auto_rerun:
             state["auto_rerun"] = True
         if self.field_preview is not None:
@@ -775,6 +799,8 @@ class MainWindow(QMainWindow):
             self.set_canvas_view(ui["canvas_view"])
         if ui.get("tool") in structure_tools.TOOLS:
             self.set_tool(ui["tool"])
+        self.structure.set_projection(ui.get("projection") if ui.get("projection") in
+                                      structure_tools.PROJECTIONS else "auto")
         if isinstance(ui.get("calculation"), str) and self.calc_box.findData(ui["calculation"]) >= 0:
             self.select_calculation(ui["calculation"])
         selected = ui.get("selected", "")

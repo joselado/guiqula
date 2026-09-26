@@ -21,6 +21,14 @@ toolbar pans and zooms (while it does, the tools are off). The selection
 is kept as positions, so it survives a rebuild of the same geometry. The
 window turns it into a region or a removal op; the pure functions below do
 the geometry, so tests and drivers use them without a mouse.
+
+A geometry that is not flat (a three-dimensional lattice, buckled or
+stacked layers) is drawn in 3D (matplotlib's mplot3d: drag to turn it) with
+the same overlays; the 3D box switches between that and the xy projection,
+where the selection tools work (they act on x and y only). pyqtgraph's
+OpenGL view was the plan (PLAN.md section 2), but Qt refuses OpenGL widgets
+on the offscreen platform the tests and tools/drive.py use, and PyOpenGL
+is not a dependency.
 """
 import itertools
 
@@ -32,8 +40,9 @@ from matplotlib.patches import Polygon
 from matplotlib.path import Path
 from matplotlib.widgets import LassoSelector, RectangleSelector
 from matplotlib import cm, colors as mcolors
+from mpl_toolkits.mplot3d.art3d import Line3DCollection
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QCheckBox, QComboBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from guiqula.ui import theme
 
@@ -46,7 +55,10 @@ MODES = ("replace", "add", "toggle", "remove")
 VIEWS = {"structure": "Sites and bonds", "hamiltonian": "Hamiltonian", "field": "Field preview"}
 SELECTION_ZORDER = 6
 VALUE_MAP = "coolwarm"       # site values, symmetric about zero
+SEQUENTIAL_MAP = "viridis"   # site values of one sign (a density, an LDOS)
 PHASE_MAP = "twilight"       # hopping phases, cyclic
+FLAT = 1e-6                  # heights spread less than this: a flat geometry
+PROJECTIONS = ("auto", "xy", "3d")   # auto: 3D when the geometry is not flat
 
 
 # ---- selection geometry (pure numpy)
@@ -211,7 +223,9 @@ def draw_structure(ax, build, highlight=None, selected=None, removed=None, image
                    site_values=None, arrows=None, hoppings=None):
     """Draw a build summary on a matplotlib Axes. highlight: boolean mask of
     sites (a region), selected: site indices, removed: (M, 3) positions;
-    site_values: {"values": (N,), "label"} colours the atoms; arrows:
+    site_values: {"values": (N,), "label", "symmetric"} colours the atoms
+    (symmetric, the default: a diverging scale centred at zero; else a
+    sequential one from the smallest to the largest value); arrows:
     {"vectors": (N, 3), "label"} draws the in-plane part at the sites,
     coloured by the z part; hoppings: a Hamiltonian view, whose hoppings
     replace the first-neighbour bonds. Only the central cell sets the view;
@@ -232,7 +246,10 @@ def draw_structure(ax, build, highlight=None, selected=None, removed=None, image
                                else 0.08, location="right" if not bars else "left")
             bars.append(label)
     if site_values is not None:
-        colors, mappable = value_colors(site_values["values"])
+        colors, mappable = value_colors(site_values["values"],
+                                        symmetric=site_values.get("symmetric", True),
+                                        cmap=VALUE_MAP if site_values.get("symmetric", True)
+                                        else SEQUENTIAL_MAP)
         if varies(site_values["values"]):
             colorbar(mappable, site_values.get("label", ""))
     lattice = np.asarray(build["lattice"])[:, :2]
@@ -303,12 +320,124 @@ def draw_structure(ax, build, highlight=None, selected=None, removed=None, image
     return selection
 
 
+def is_flat(build):
+    """Whether a geometry lies in a plane of constant z (drawn in 2D)."""
+    r = np.asarray(build["positions"])
+    return int(build["dimensionality"]) < 3 and (len(r) == 0 or float(np.ptp(r[:, 2])) < FLAT)
+
+
+def bond_segments_3d(build):
+    """Segments (K, 2, 3) of the bonds touching the central cell."""
+    r = np.asarray(build["positions"], dtype=float)
+    lattice = np.asarray(build["lattice"], dtype=float)
+    segments = [np.stack([r[i], r[j]]) for i, j in build["bonds"]]
+    for i, j, *cell in build["image_bonds"]:
+        shift = np.asarray(cell) @ lattice
+        segments.append(np.stack([r[i], r[j] + shift]))
+        segments.append(np.stack([r[j], r[i] - shift]))
+    return np.array(segments).reshape(-1, 2, 3)
+
+
+def cell_edges_3d(build):
+    """Edges (E, 2, 3) of the unit cell: a parallelogram for a 2D lattice,
+    a parallelepiped for a 3D one, none otherwise."""
+    dimensionality = int(build["dimensionality"])
+    if dimensionality < 2:
+        return np.zeros((0, 2, 3))
+    lattice = np.asarray(build["lattice"], dtype=float)[:dimensionality]
+    centre = np.asarray(build["positions"], dtype=float).mean(axis=0)
+    corner = centre - lattice.sum(axis=0) / 2
+    codes = list(itertools.product((0, 1), repeat=dimensionality))
+    corners = [corner + np.array(c) @ lattice for c in codes]
+    return np.array([[corners[a], corners[b]] for a in range(len(codes))
+                     for b in range(a + 1, len(codes))
+                     if sum(x != y for x, y in zip(codes[a], codes[b])) == 1])
+
+
+def draw_structure_3d(ax, build, highlight=None, selected=None, removed=None, images=True,
+                      site_values=None, arrows=None, hoppings=None):
+    """draw_structure for a geometry that is not flat, on an mplot3d Axes;
+    returns the scatter of the selected sites (its _offsets3d moves them)."""
+    r = np.asarray(build["positions"], dtype=float)
+    n = len(r)
+    size = float(np.clip(4000 / max(n, 1), 12, 120))
+    colors = site_colors(build)
+    if site_values is not None:
+        symmetric = site_values.get("symmetric", True)
+        colors, mappable = value_colors(site_values["values"], symmetric=symmetric,
+                                        cmap=VALUE_MAP if symmetric else SEQUENTIAL_MAP)
+        if varies(site_values["values"]):
+            ax.figure.colorbar(mappable, ax=ax, label=site_values.get("label", ""), shrink=0.6)
+    if hoppings is not None:
+        rows = np.asarray(hoppings["hoppings"]).reshape(-1, 5)
+        lattice = np.asarray(build["lattice"], dtype=float)
+        shift = rows[:, 2:5] @ lattice if len(rows) else np.zeros((0, 3))
+        segments = np.stack([r[rows[:, 0]], r[rows[:, 1]] + shift], axis=1) if len(rows) \
+            else np.zeros((0, 2, 3))
+        amplitude = np.asarray(hoppings["amplitude"])
+        top = float(amplitude.max()) if len(amplitude) else 1.0
+        widths = 0.4 + 3.6 * amplitude / (top if top > 0 else 1.0)
+        phase_map = cm.ScalarMappable(norm=mcolors.Normalize(-np.pi, np.pi), cmap=PHASE_MAP)
+        bond_colors = phase_map.to_rgba(np.asarray(hoppings["phase"]))
+    else:
+        segments = bond_segments_3d(build)
+        widths, bond_colors = 1.2, theme.BOND
+    if len(segments):
+        ax.add_collection3d(Line3DCollection(segments, colors=bond_colors, linewidths=widths))
+    if images and 0 < n <= IMAGE_LIMIT // 4 and int(build["dimensionality"]):
+        lattice = np.asarray(build["lattice"], dtype=float)
+        ghosts = np.concatenate([r + c @ lattice for c in image_cells(build["dimensionality"])])
+        ax.scatter(ghosts[:, 0], ghosts[:, 1], ghosts[:, 2], s=size * 0.5, c="#9e9e9e",
+                   alpha=0.15, depthshade=False, linewidths=0)
+    ax.scatter(r[:, 0], r[:, 1], r[:, 2], s=size, c=colors, edgecolors="white",
+               linewidths=0.4, depthshade=True)
+    edges = cell_edges_3d(build)
+    if len(edges):
+        ax.add_collection3d(Line3DCollection(edges, colors=theme.CELL, linestyles="--",
+                                             linewidths=0.8))
+    if arrows is not None:
+        vectors = np.asarray(arrows["vectors"], dtype=float).reshape(-1, 3)
+        longest = float(np.max(np.linalg.norm(vectors, axis=1))) if n else 0.0
+        if longest > 1e-12:
+            v = vectors * (0.8 / longest)
+            ax.quiver(r[:, 0] - v[:, 0] / 2, r[:, 1] - v[:, 1] / 2, r[:, 2] - v[:, 2] / 2,
+                      v[:, 0], v[:, 1], v[:, 2], color="#1e1e1e", linewidth=1.2,
+                      arrow_length_ratio=0.3)
+    if highlight is not None and np.any(highlight):
+        h = r[np.asarray(highlight, dtype=bool)]
+        ax.scatter(h[:, 0], h[:, 1], h[:, 2], s=size * 2.2, facecolors="none",
+                   edgecolors=theme.REGION, linewidths=1.8, depthshade=False)
+    if removed is not None and len(removed):
+        p = np.asarray(removed, dtype=float).reshape(-1, 3)
+        ax.scatter(p[:, 0], p[:, 1], p[:, 2], marker="x", c=theme.REMOVED, s=30,
+                   depthshade=False)
+    idx = np.asarray(selected if selected is not None else [], dtype=int)
+    chosen = r[idx].reshape(-1, 3)
+    selection = ax.scatter(chosen[:, 0], chosen[:, 1], chosen[:, 2], s=size * 1.8,
+                           facecolors="none", edgecolors=theme.SELECTED, linewidths=2.0,
+                           depthshade=False)
+    points = np.concatenate([r, edges.reshape(-1, 3)]) if len(edges) else r
+    if len(points):
+        low, high = points.min(axis=0), points.max(axis=0)
+        span = np.maximum(high - low, 1.0)
+        middle = (low + high) / 2
+        for setter, m, w in zip((ax.set_xlim, ax.set_ylim, ax.set_zlim), middle, span):
+            setter(m - 0.55 * w, m + 0.55 * w)
+        ax.set_box_aspect(tuple(span))
+    ax.set_xlabel("x", fontsize=8)
+    ax.set_ylabel("y", fontsize=8)
+    ax.set_zlabel("z", fontsize=8)
+    ax.tick_params(labelsize=7)
+    return selection
+
+
 class StructureView(QWidget):
     """A matplotlib canvas with its navigation toolbar (pan, zoom, save)
     and the site-selection tools."""
 
     selection_changed = Signal(int)          # number of selected sites
     view_chosen = Signal(str)                # a key of VIEWS, chosen by the user
+    projection_chosen = Signal(str)          # "xy" or "3d", chosen with the 3D box
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -326,6 +455,13 @@ class StructureView(QWidget):
             self.view_box.addItem(text, key)
         self.view_box.activated.connect(
             lambda i: self.view_chosen.emit(self.view_box.itemData(i)))
+        self.box_3d = QCheckBox("3D")
+        self.box_3d.setObjectName("view3dBox")
+        self.box_3d.setToolTip("draw the geometry in 3D (drag to turn it); a geometry that is "
+                               "not flat is drawn in 3D unless this is unchecked. The site "
+                               "selection tools work on the flat (xy) drawing")
+        self.box_3d.clicked.connect(
+            lambda checked: self.projection_chosen.emit("3d" if checked else "xy"))
         self.caption = QLabel("No system yet: add one from the Geometry toolbar.")
         self.caption.setObjectName("structureCaption")
         self.caption.setWordWrap(True)
@@ -334,6 +470,7 @@ class StructureView(QWidget):
         top.addWidget(self.toolbar, 1)
         top.addWidget(QLabel("Show"))
         top.addWidget(self.view_box)
+        top.addWidget(self.box_3d)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.addLayout(top)
@@ -342,6 +479,7 @@ class StructureView(QWidget):
         self.system_id = None
         self.build = None
         self.ax = None
+        self.projection = "auto"
         self.tool = "pick"
         self.selected_positions = np.zeros((0, 3))
         self._selection_artist = None
@@ -359,18 +497,51 @@ class StructureView(QWidget):
             self.view_box.setCurrentIndex(index)
             self.view_box.blockSignals(False)
 
+    def set_projection(self, projection):
+        """auto (3D when the geometry is not flat), xy or 3d; the window
+        redraws."""
+        if projection not in PROJECTIONS:
+            raise ValueError(f"unknown projection {projection!r}; projections: "
+                             f"{list(PROJECTIONS)}")
+        self.projection = projection
+        return projection
+
+    def in_3d(self, build=None):
+        """Whether a build is drawn in 3D with the current projection."""
+        build = build if build is not None else self.build
+        if self.projection != "auto":
+            return self.projection == "3d"
+        return build is not None and not is_flat(build)
+
     def show_structure(self, system_id, build, caption="", **overlays):
-        """Redraw; keeps the zoom when the same geometry is shown again,
-        and the selection when its sites are still there."""
-        limits = None
+        """Redraw; keeps the zoom (or the 3D viewing angle) when the same
+        geometry is shown again, and the selection when its sites are
+        still there."""
+        three_d = self.in_3d(build)
+        was_3d = self.ax is not None and getattr(self.ax, "name", "") == "3d"
+        limits = angles = None
         if self.ax is not None and system_id == self.system_id and self.build is not None:
-            limits = (self.ax.get_xlim(), self.ax.get_ylim())
+            if was_3d and three_d:
+                angles = (self.ax.elev, self.ax.azim)
+            elif not was_3d and not three_d:
+                limits = (self.ax.get_xlim(), self.ax.get_ylim())
         same_sites = self.build is not None and build is not None and \
             np.shape(self.build["positions"]) == np.shape(build["positions"])
         if system_id != self.system_id:
             self.selected_positions = np.zeros((0, 3))
         self.system_id, self.build = system_id, build
+        self.box_3d.setChecked(three_d)
         self.figure.clear()
+        if three_d:
+            self.ax = self.figure.add_subplot(111, projection="3d")
+            self._selection_artist = draw_structure_3d(self.ax, build, selected=self.selected(),
+                                                       **overlays)
+            if angles is not None:
+                self.ax.view_init(*angles)
+            self._caption = caption
+            self._install_tool()
+            self._update_selection()
+            return
         self.ax = self.figure.add_subplot(111)
         self._selection_artist = draw_structure(self.ax, build, selected=self.selected(),
                                                 **overlays)
@@ -414,8 +585,11 @@ class StructureView(QWidget):
     def _update_selection(self):
         indices = self.selected()
         if self._selection_artist is not None and self.build is not None:
-            xy = np.asarray(self.build["positions"])[indices, :2]
-            self._selection_artist.set_offsets(xy.reshape(-1, 2))
+            chosen = np.asarray(self.build["positions"])[indices].reshape(-1, 3)
+            if hasattr(self._selection_artist, "_offsets3d"):
+                self._selection_artist._offsets3d = (chosen[:, 0], chosen[:, 1], chosen[:, 2])
+            else:
+                self._selection_artist.set_offsets(chosen[:, :2])
         n = len(indices)
         text = self._caption + (f" · {n} selected" if n else "")
         self.caption.setText(text)
@@ -434,7 +608,7 @@ class StructureView(QWidget):
         if self._selector is not None:
             self._selector.set_active(False)
             self._selector = None
-        if self.ax is None:
+        if self.ax is None or self._is_3d():              # the tools work in xy
             return
         props = {"color": theme.SELECTED, "linewidth": 1.5}
         if self.tool == "box":
@@ -444,6 +618,9 @@ class StructureView(QWidget):
         elif self.tool == "lasso":
             self._selector = LassoSelector(self.ax, self._on_lasso, useblit=False, button=[1],
                                            props=props)
+
+    def _is_3d(self):
+        return getattr(self.ax, "name", "") == "3d"
 
     def _navigating(self):
         return bool(getattr(self.toolbar, "mode", ""))
@@ -459,7 +636,7 @@ class StructureView(QWidget):
 
     def _on_press(self, event):
         if self.tool != "pick" or self.build is None or event.inaxes is not self.ax \
-                or event.button != 1 or self._navigating():
+                or event.button != 1 or self._navigating() or self._is_3d():
             return
         i = nearest_index(self.build["positions"], event.xdata, event.ydata)
         mode = self._mode(event.key)
@@ -482,7 +659,8 @@ class StructureView(QWidget):
         self.select(indices_in_polygon(self.build["positions"], vertices))
 
     def _on_scroll(self, event):
-        if self.ax is None or event.inaxes is not self.ax or event.xdata is None:
+        if self.ax is None or event.inaxes is not self.ax or event.xdata is None \
+                or self._is_3d():
             return
         factor = 1 / 1.2 if event.button == "up" else 1.2
         for get, set_, centre in ((self.ax.get_xlim, self.ax.set_xlim, event.xdata),

@@ -151,8 +151,9 @@ class SystemForm(Form):
         self.base_kind = system.geometry.base.kind
         try:
             spec = registry.get("lattice", self.base_kind)
-            self.add_editors(spec.params, system.geometry.base.params, lambda name, value:
-                             self.commit("set_param", entry=system_id, name=name, value=value))
+            self.add_editors(spec.params, spec.normalize_params({}) | system.geometry.base.params,
+                             lambda name, value: self.commit("set_param", entry=system_id,
+                                                             name=name, value=value))
         except registry.RegistryError:
             pass
         if system.hamiltonian is not None:
@@ -192,7 +193,8 @@ class SystemForm(Form):
         _quiet(self.lattice, self.lattice.setCurrentIndex,
                self.lattice.findData(system.geometry.base.kind))
         for name, editor in self.editors.items():
-            editor.set_value(system.geometry.base.params[name])
+            param = editor.param
+            editor.set_value(system.geometry.base.params.get(name, param.default))
         if system.hamiltonian is not None:
             c = system.hamiltonian.construction
             _quiet(self.has_spin, self.has_spin.setChecked, c.has_spin)

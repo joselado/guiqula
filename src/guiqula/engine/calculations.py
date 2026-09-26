@@ -7,9 +7,12 @@ import numpy as np
 import guiqula
 from guiqula import vendoring
 from guiqula.core.results import Result
-from guiqula.engine.build import build_system
+from guiqula.engine import structure
+from guiqula.engine.build import build_system, seed
 from guiqula.engine.context import ApplyContext
 from guiqula.registry import pipeline
+
+STRUCTURE_PLOTS = ("structure_scalar", "structure_vector")   # drawn on the atoms
 
 
 class CalculationError(RuntimeError):
@@ -34,6 +37,19 @@ def provenance():
     return out
 
 
+def plot_spec(spec, params, arrays):
+    """The plot of a result: a dict, or a callable of the parameters, or of
+    the parameters and the arrays (when the drawing depends on what came
+    out, a curve for a one-dimensional system and a map otherwise)."""
+    import inspect
+    plot = spec.plot
+    if not callable(plot):
+        return dict(plot)
+    if len(inspect.signature(plot).parameters) == 2:
+        return plot(params, arrays)
+    return plot(params)
+
+
 def run_calculation(document, calc_id, cache=None, progress=None):
     """Returns a Result; raises CalculationError or BuildError."""
     vendoring.ensure_pyqula_on_path()
@@ -46,15 +62,19 @@ def run_calculation(document, calc_id, cache=None, progress=None):
     ctx = ApplyContext(plan.spec, plan.params, progress=progress)
     start = time.perf_counter()
     try:
+        seed(plan.spec, plan.params)
         arrays = plan.spec.apply(built.h, ctx)
     except Exception as error:
         raise CalculationError(f"{plan.spec.label}: {type(error).__name__}: {error}") from error
     seconds = time.perf_counter() - start
     from pyqula import parallel
-    plot = plan.spec.plot(plan.params) if callable(plan.spec.plot) else dict(plan.spec.plot)
+    arrays = {k: np.asarray(v) for k, v in arrays.items()}
+    plot = plot_spec(plan.spec, plan.params, arrays)
+    geometry = structure.describe(built.g) if plot["kind"] in STRUCTURE_PLOTS else None
     return Result(calculation=calc_id, kind=plan.kind, key=plan.key, params=plan.params,
-                  arrays={k: np.asarray(v) for k, v in arrays.items()}, plot=plot,
+                  arrays=arrays, plot=plot,
                   reports=built.reports, mode=built.mode, document=document.to_json(),
+                  structure=geometry,
                   meta={"seconds": seconds, "build_seconds": build_seconds,
                         "cores": parallel.cores,
                         "guiqula": guiqula.__version__, "pyqula": provenance()})

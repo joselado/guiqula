@@ -4,7 +4,7 @@ import pytest
 from guiqula import registry
 from guiqula.commands import Dispatcher
 from guiqula.registry import pipeline
-from guiqula.registry.params import FieldParam, FloatParam, IntParam
+from guiqula.registry.params import FieldParam, FloatParam, IntParam, IntVectorParam
 
 
 def test_catalogue():
@@ -20,7 +20,7 @@ def test_catalogue():
 def test_term_numbers_are_fields(spec):
     """Every numeric term parameter is a Field (CLAUDE.md hard rule)."""
     for p in spec.params:
-        if isinstance(p, (FloatParam, IntParam)) and p.type_name != "seed":
+        if isinstance(p, (FloatParam, IntParam, IntVectorParam)) and p.type_name != "seed":
             pytest.fail(f"{spec.kind}.{p.name} is a bare number, not a Field")
 
 

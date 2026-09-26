@@ -20,8 +20,9 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxL
                                QWidget)
 
 from guiqula.core import fields
-from guiqula.registry.params import (BoolParam, ChoiceParam, FieldParam, FloatParam, IntParam,
-                                     IntVectorParam, PositionsParam, SeedParam, VectorFieldParam)
+from guiqula.registry.params import (BoolParam, ChoiceParam, ConditionParam, FieldParam,
+                                     FloatParam, FloatVectorParam, IntParam, IntVectorParam,
+                                     PositionsParam, SeedParam, TextParam, VectorFieldParam)
 
 INT_LIMIT = 2**31 - 1
 NONE_TEXT = "(none)"
@@ -443,6 +444,33 @@ class IntVectorEditor(Editor):
             self._quiet(spin, spin.setValue, int(v))
 
 
+class FloatVectorEditor(Editor):
+    """One number per component, each a line of text."""
+
+    def __init__(self, param, parent=None):
+        super().__init__(param, parent)
+        self.edits = []
+        for i in range(param.length):
+            edit = QLineEdit()
+            edit.setObjectName(f"edit_{param.name}_{i}")
+            edit.editingFinished.connect(self._finished)
+            self.layout_.addWidget(edit)
+            self.edits.append(edit)
+        self._shown = None
+
+    def _finished(self):
+        if [e.text() for e in self.edits] != self._shown:
+            self.committed.emit()
+
+    def value(self):
+        return [parse_float(e.text()) for e in self.edits]
+
+    def set_value(self, value):
+        self._shown = [format_number(float(v)) for v in value]
+        for edit, text in zip(self.edits, self._shown):
+            self._quiet(edit, edit.setText, text)
+
+
 class BoolEditor(Editor):
     def __init__(self, param, parent=None):
         super().__init__(param, parent)
@@ -541,8 +569,14 @@ def make_editor(param, names=None, regions=()):
         return LineEditor(param, parse_float, format_number)
     if isinstance(param, IntParam):
         return IntEditor(param)
+    if isinstance(param, FloatVectorParam):
+        return FloatVectorEditor(param)
     if isinstance(param, IntVectorParam):
         return IntVectorEditor(param)
+    if isinstance(param, ConditionParam):
+        return LineEditor(param, str.strip, str, "a condition on x, y, z, r")
+    if isinstance(param, TextParam):
+        return LineEditor(param, str.strip, str, param.hint)
     if isinstance(param, BoolParam):
         return BoolEditor(param)
     if isinstance(param, ChoiceParam):

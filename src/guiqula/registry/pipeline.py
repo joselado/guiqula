@@ -156,6 +156,10 @@ def plan_system(document, system_id):
             elif not any(isinstance(p, FieldParam) and p.native for p in spec.params):
                 problem = (f"{spec.label} cannot be restricted to a region: none of its "
                            f"parameters takes a function of position")
+            elif not spec.regions:
+                problem = (f"{spec.label} cannot be restricted to a region: it multiplies what "
+                           f"is there, so outside the region it would remove it; use a "
+                           f"piecewise Field (one value per region) instead")
             else:
                 try:
                     select = region_tools.normalize(regions[term.region].select)

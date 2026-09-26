@@ -26,6 +26,7 @@ from guiqula.core import regions as region_tools
 from guiqula.registry import base as registry
 from guiqula.registry import pipeline
 from guiqula.ui import theme
+from guiqula.ui.plots import scalar_rows
 
 ID_ROLE = Qt.ItemDataRole.UserRole
 INVALID = "✗ "
@@ -278,6 +279,11 @@ class Outliner(QTreeWidget):
             status = f"running {job.progress:.0%}"
         elif job is not None and status == "failed":
             status = f"failed: {job.error}"
+        result = session.result(calc_id)
+        if status in ("done", "stale") and result is not None and \
+                result.plot.get("kind") == "scalar":              # the numbers themselves
+            values = ", ".join(text for _, text in scalar_rows(result))
+            status = values if status == "done" else f"{values} (stale)"
         return status, job.error if job is not None and job.error else None
 
     def _add_calculation(self, session, parent, calc):
@@ -287,7 +293,7 @@ class Outliner(QTreeWidget):
                          tooltip=error, movable=True)
         if status.startswith("failed"):
             item.setForeground(1, QBrush(QColor(theme.ERROR)))
-        elif status == "stale":
+        elif status == "stale" or status.endswith("(stale)"):
             item.setForeground(1, QBrush(QColor(theme.DISABLED)))
 
     def update_calculation(self, session, calc_id):

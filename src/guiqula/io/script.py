@@ -13,7 +13,7 @@ from guiqula.core import fields
 from guiqula.core import regions as region_tools
 from guiqula.registry import pipeline
 from guiqula.registry.base import G, H
-from guiqula.registry.params import FieldParam, VectorFieldParam
+from guiqula.registry.params import ConditionParam, FieldParam, VectorFieldParam
 
 
 class ScriptContext:
@@ -34,6 +34,8 @@ class ScriptContext:
             return fields.code_vector(value, weight, self.regions)
         if isinstance(param, FieldParam):
             return fields.code_scalar(value, weight, self.regions)
+        if isinstance(param, ConditionParam):
+            return param.code(value)
         return repr(value)
 
 
@@ -57,6 +59,10 @@ def _imports(stages, calc_spec):
     for stage in stages:
         if stage.spec is not None and stage.spec.call is not None and stage.spec.call.module:
             modules.add(stage.spec.call.module)
+        if stage.spec is not None and stage.applied:
+            modules.update(stage.spec.modules)
+    if calc_spec is not None:
+        modules.update(calc_spec.modules)
     lines = []
     plain = sorted(m for m in modules if "." not in m)
     if plain:
@@ -86,7 +92,7 @@ def export_script(document, calc_id, skipped=None):
              f"Calculation {calc_id} ({plan.kind}) on system {system.system_id}.",
              "Run it with pyqula importable; it writes result.npz in the current directory.",
              '"""',
-             *(["import random", ""] if any(
+             *(["import random", ""] if plan.spec.seed_param is not None or any(
                  st.applied and st.spec is not None and st.spec.seed_param is not None
                  for st in system.stages) else []),
              "import numpy as np",
@@ -129,6 +135,9 @@ def export_script(document, calc_id, skipped=None):
         else:
             lines.append(call_code(stage.spec, ctx))
     lines.append("")
+    if plan.spec.seed_param is not None:
+        s = plan.params[plan.spec.seed_param.name]
+        lines.append(f"np.random.seed({s}); random.seed({s})")
     lines += plan.spec.script(ScriptContext(plan.spec, plan.params))
     lines += ['np.savez("result.npz", **arrays)',
               'print({k: np.shape(v) for k, v in arrays.items()})', ""]

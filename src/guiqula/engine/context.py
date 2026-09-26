@@ -8,7 +8,8 @@ import importlib
 from guiqula.core import fields
 from guiqula.core import regions as region_tools
 from guiqula.registry.base import G, H
-from guiqula.registry.params import ChoiceParam, FieldParam, ParamError, VectorFieldParam
+from guiqula.registry.params import (ChoiceParam, ConditionParam, FieldParam, ParamError,
+                                     VectorFieldParam)
 
 
 class ApplyContext:
@@ -29,6 +30,8 @@ class ApplyContext:
         if isinstance(param, FieldParam):
             return fields.compile_scalar(value, self.weight if param.native else None,
                                          self.regions)
+        if isinstance(param, ConditionParam):
+            return param.compile(value)
         if isinstance(param, ChoiceParam) and param.source and value is not None:
             _check_source(param, value)
         return value
@@ -62,16 +65,19 @@ def source_names(source):
     if source == "jax_solvers":
         from pyqula.scftk import densitydensity_jax
         return list(densitydensity_jax.get_jax_solver_names())
+    if source == "pairing_modes":
+        from pyqula.sctk import pairing
+        return list(pairing.get_pairing_modes())
     raise ParamError(f"unknown name source {source!r}")
 
 
-SOURCES = ("operators", "guesses", "jax_solvers")
+SOURCES = ("operators", "guesses", "jax_solvers", "pairing_modes")
 
 
 def _check_source(param, value):
     names = source_names(param.source)
     if value not in names:
-        what = param.source[:-1].replace("_", " ")
+        what = param.source[:-1].replace("_", " ")     # operators -> operator
         raise ParamError(f"{param.name}: pyqula has no {what} {value!r}; it has {names}")
 
 

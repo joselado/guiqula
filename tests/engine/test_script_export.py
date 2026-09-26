@@ -23,6 +23,40 @@ def run_script(source, repo, tmp_path):
     return dict(np.load(tmp_path / "result.npz"))
 
 
+DRIVER = """import os, runpy, sys
+for folder in sys.argv[1:]:
+    os.chdir(folder)
+    print("running", folder, flush=True)
+    runpy.run_path("exported.py", run_name="__main__")
+"""
+
+
+def run_scripts(sources, repo, tmp_path):
+    """Run several exported scripts in one interpreter, each in its own
+    folder (pyqula is imported and its kernels compiled once); returns the
+    arrays each saved."""
+    folders = []
+    for i, source in enumerate(sources):
+        folder = tmp_path / f"script{i}"
+        folder.mkdir()
+        (folder / "exported.py").write_text(source)
+        folders.append(folder)
+    driver = tmp_path / "driver.py"
+    driver.write_text(DRIVER)
+    env = dict(os.environ, PYTHONPATH=str(repo / "vendor"))
+    done = subprocess.run([sys.executable, str(driver), *map(str, folders)], cwd=tmp_path,
+                          env=env, capture_output=True, text=True, timeout=1800)
+    failed = done.stdout.strip().splitlines()[-1] if done.stdout.strip() else ""
+    assert done.returncode == 0, f"{failed}\n{done.stderr[-3000:]}"
+    return [dict(np.load(folder / "result.npz")) for folder in folders]
+
+
+def assert_same_arrays(expected, got, label):
+    assert set(got) == set(expected), label
+    for name, value in expected.items():
+        assert np.allclose(got[name], value, rtol=0, atol=1e-10), f"{label}: {name}"
+
+
 def assert_reproduces(document, calc_id, repo, tmp_path):
     result = run_calculation(document, calc_id)
     skipped = {r["id"]: r["message"] for r in result.skipped}
@@ -144,3 +178,51 @@ def test_export_refuses_a_broken_calculation():
     d.document.calculations[0].kind = "nope"
     with pytest.raises(ValueError, match="unknown calculation"):
         export_script(d.document, c)
+
+
+def test_every_calculation_exports(pyqula, repo, tmp_path):
+    """The script of every calculation case of the engine tests reproduces
+    the engine's arrays (run in one interpreter)."""
+    from .test_entries import CALC_CASES, calc_system
+    cases, sources = [], []
+    for kind, params_list in sorted(CALC_CASES.items()):
+        for params, name, _ in params_list:
+            d, s, _ = calc_system(name)
+            c = d.do("add_calculation", system=s, kind=kind, params=params)
+            cases.append((f"{kind} on {name}", run_calculation(d.document, c).arrays))
+            sources.append(export_script(d.document, c))
+    for (label, expected), got in zip(cases, run_scripts(sources, repo, tmp_path)):
+        assert_same_arrays(expected, got, label)
+
+
+def test_every_entry_exports(pyqula, repo, tmp_path):
+    """Every lattice, geometry op and term case of the engine tests, with
+    the bands on top, exported and run: the script builds the same system."""
+    from .test_entries import LATTICES, OP_CASES, TERM_CASES, TERM_SYSTEMS, system
+    documents = []
+    for lattice in LATTICES:
+        d, s, _ = system(lattice)
+        documents.append((f"lattice {lattice}", d, s))
+    for kind, (params, lattice, before, _) in sorted(OP_CASES.items()):
+        d, s, _ = system(lattice, ops=before + [(kind, params)])
+        documents.append((f"op {kind}", d, s))
+    for kind, cases in sorted(TERM_CASES.items()):
+        options = TERM_SYSTEMS.get(kind, {})
+        n = options.get("n", 2)
+        ops = [("supercell", {"n": [n, n, 1]})] + ([("finite", {})] if options.get("finite")
+                                                    else [])
+        for params, _ in cases:
+            d, s, _ = system(options.get("lattice", "honeycomb_lattice"), ops=ops,
+                             terms=[(kind, params)], has_spin=options.get("has_spin", True))
+            if "tij" in options:
+                d.do("set_construction", system=s, tij=options["tij"])
+            documents.append((f"term {kind} {params}", d, s))
+    cases, sources = [], []
+    for label, d, s in documents:
+        c = d.do("add_calculation", system=s, kind="bands", params={"nk": 6})
+        result = run_calculation(d.document, c)
+        assert result.skipped == [], label
+        cases.append((label, result.arrays))
+        sources.append(export_script(d.document, c))
+    for (label, expected), got in zip(cases, run_scripts(sources, repo, tmp_path)):
+        assert_same_arrays(expected, got, label)

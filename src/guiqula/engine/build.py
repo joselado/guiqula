@@ -93,13 +93,19 @@ def _run(function):
     return value, buffer.getvalue().strip()
 
 
-def _seed(stage):
-    seed_param = stage.spec.seed_param
+def seed(spec, params):
+    """Seed numpy's global generator (which pyqula draws from) and Python's
+    with an entry's seed, if it has one (PLAN.md 3.3)."""
+    seed_param = spec.seed_param
     if seed_param is not None:
         import numpy as np
-        seed = stage.params[seed_param.name]
-        np.random.seed(seed)
-        random.seed(seed)
+        value = params[seed_param.name]
+        np.random.seed(value)
+        random.seed(value)
+
+
+def _seed(stage):
+    seed(stage.spec, stage.params)
 
 
 def _apply_stage(stage, obj):

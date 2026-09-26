@@ -216,3 +216,64 @@ class PositionsParam(Param):
                 raise ParamError(f"{self.name}: every position is [x, y, z], got {p!r}")
             out.append([_number(self.name, c, float, None, None) for c in p])
         return out
+
+
+class FloatVectorParam(IntVectorParam):
+    """A fixed-length list of plain numbers (a displacement, a direction)."""
+    type_name = "float_vector"
+
+    def normalize(self, value):
+        if not isinstance(value, (list, tuple)) or len(value) != self.length:
+            raise ParamError(f"{self.name}: expected a list of {self.length} numbers")
+        return [_number(self.name, v, float, self.minimum, None) for v in value]
+
+
+class TextParam(Param):
+    """A short string, optionally checked against a regular expression
+    (``pattern``, with ``hint`` saying what it wants)."""
+    type_name = "text"
+
+    def __init__(self, name, default, label=None, doc="", pattern=None, hint=""):
+        super().__init__(name, default, label, doc)
+        self.pattern, self.hint = pattern, hint
+
+    def normalize(self, value):
+        import re
+        if not isinstance(value, str):
+            raise ParamError(f"{self.name}: expected text, got {value!r}")
+        value = value.strip()
+        if self.pattern and not re.fullmatch(self.pattern, value):
+            raise ParamError(f"{self.name}: {value!r} is not valid" +
+                             (f"; {self.hint}" if self.hint else ""))
+        return value
+
+    def describe(self):
+        return dict(super().describe(), pattern=self.pattern, hint=self.hint)
+
+
+class ConditionParam(Param):
+    """A condition on the position: an expression of x, y, z, r
+    (guiqula.core.expressions) that is true, or nonzero, on the sites it
+    selects. The engine hands pyqula a function of one position returning a
+    boolean; the exporter writes the same function as a lambda."""
+    type_name = "condition"
+
+    def normalize(self, value):
+        from guiqula.core.expressions import Expression, ExpressionError
+        if not isinstance(value, str):
+            raise ParamError(f"{self.name}: expected an expression of x, y, z, r")
+        try:
+            return Expression(value).source
+        except ExpressionError as error:
+            raise ParamError(f"{self.name}: {error}") from None
+
+    @staticmethod
+    def compile(value):
+        from guiqula.core.expressions import Expression
+        expression = Expression(value)
+        return lambda r, e=expression: bool(e.at(r))
+
+    @staticmethod
+    def code(value):
+        from guiqula.core.expressions import Expression
+        return f"lambda r: bool({Expression(value).to_python('r')})"

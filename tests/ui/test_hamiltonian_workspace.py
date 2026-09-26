@@ -150,9 +150,13 @@ def test_term_search(window, qtbot):
     assert window.session.document.find(window.selected)[-1].kind == "kane_mele"
     assert isinstance(window.properties.form, EntryForm)
     qtbot.waitUntil(lambda: search.text() == "", timeout=2000)
-    search.setText("superconduct")                        # the group matches too
+    search.setText("superconduct")                        # a word of a label
     search.returnPressed.emit()
-    assert window.session.document.find(window.selected)[-1].kind == "swave"
+    assert window.session.document.find(window.selected)[-1].kind == "pairing"
+    qtbot.waitUntil(lambda: search.text() == "", timeout=2000)
+    search.setText("topology")                            # the group matches too
+    search.returnPressed.emit()
+    assert window.session.document.find(window.selected)[-1].kind == "haldane"
     count = len(window.session.document.system("s1").hamiltonian.terms)
     search.setText("no such physics")
     search.returnPressed.emit()

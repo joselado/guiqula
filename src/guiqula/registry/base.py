@@ -71,6 +71,8 @@ class EntrySpec:
     script: Callable | None = None   # custom: (ctx) -> list of source lines
     plot: dict | None = None         # calculations: plot kind and array mapping
     cost: Callable | None = None     # calculations: (params, size) -> seconds (registry/cost.py)
+    modules: tuple = ()              # pyqula modules a custom script uses ("disorder")
+    regions: bool = True             # terms: whether a region may restrict it (a factor may not)
     extra: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):

@@ -9,7 +9,7 @@ Status: **all decisions in sections 12 and 13 made on 2026-09-26 (13.13, in-app
 help from pyqula's documentation, decided after phase 1, with open design
 points in section 11); the plan review of the same day is in section 14
 (decided items) and at the end of section 11 (items still open).** Phases 0 to 3 were
-done on 2026-09-26 (section 7); phase 4 is next.
+done on 2026-09-26 (section 7); phase 4 is under way (part 1 of 4 done).
 
 ## 1. Requirements (as stated by the maintainer)
 
@@ -849,6 +849,74 @@ calculations, structure-scalar and vector plots, classical spin, lattice-gas
 and Ising systems with their palettes, Brillouin-zone canvas, sliders and
 sweeps, result overlays, presets gallery from quantum-lattice's modes, project
 save/load with results cache, script export for everything.
+Built in four parts: (1) the breadth of the quantum registry and the plot
+kinds, (2) Python nodes, the trust prompt and the console, (3) the
+classical systems and `from_result` Fields, (4) the remaining Fields, the
+Brillouin-zone canvas, sweeps, overlays, the presets gallery and results
+in project files.
+**Part 1 done 2026-09-26.** Built: 33 lattices (0D to 3D, the honeycomb
+cells, ribbons with their width, multilayer graphene by stacking letters,
+commensurate twisted bilayer graphene); 14 geometry ops (new: keep or
+remove sites where a condition on the position holds, remove dangling
+sites, make finite, film, orthorhombic cell, rotate, shift, center,
+uniaxial strain; a condition is an AST-checked expression, `ConditionParam`);
+21 terms (new: anti Kane-Mele, modified Haldane, Kekule, hopping
+modulation, valley exchange, crystal field, electric field, orbital and
+in-plane magnetic fields as Peierls phases, spin spiral, pairing of every
+symmetry pyqula lists with its d-vector, phase disorder with a seed); 17
+calculations (new: LDOS, electron density and magnetization on the
+atoms, the local Chern marker of a finite system, Fermi surface, spectral
+function along the path, surface spectral function, Berry curvature map
+and along the path, Chern and spin Chern numbers, Z2, gap, total energy,
+optical conductivity; the DOS gained KPM with a seed). The plot kinds
+`heatmap`, `structure_scalar`, `structure_vector` and `scalar` (a table;
+the outliner row shows the numbers); a result drawn on the atoms carries
+the geometry it ran on (`Result.structure`, saved with the arrays), since
+the UI process has no build of that snapshot. A 3D drawing of geometries
+that are not flat (3D lattices, buckled or stacked layers) on the canvas
+and in the results, with a 3D box and a `projection` window action (auto,
+xy, 3d); the selection tools work on the flat drawing. Every calculation
+that declares a seed is seeded by the engine and the exported script, as
+the terms were. Entries declare the pyqula modules a custom script
+imports (`modules`) and whether a region may restrict them (`regions`:
+the hopping modulation multiplies what is there, so a region would zero
+the Hamiltonian outside it; a piecewise Field does it instead). The term
+search ranks a label starting with the text, then a word of a label,
+before the rest. Tests: every entry against a direct pyqula call
+(`tests/engine/test_entries.py`), every case exported and run in one
+interpreter (`test_every_entry_exports`, `test_every_calculation_exports`),
+a form for every entry (`tests/ui/test_forms.py`), each plot kind and the
+3D canvas in the window (`tests/ui/test_result_kinds.py`).
+Decisions taken while building, for the maintainer to confirm (numbered
+in the phase-4 report): the 3D view is matplotlib's mplot3d, not
+pyqtgraph.opengl as section 2 planned (Qt refuses OpenGL widgets on the
+offscreen platform that the tests and tools/drive.py use, the conda build
+here cannot load a GL driver either, and PyOpenGL is not a dependency; a
+pyqtgraph view for large 3D systems can come with the phase-5 performance
+pass); Z2 is reported as pyqula gives it, a parity (-1 topological, +1
+trivial); the numbers of the new terms that pyqula takes as numbers only
+(crystal field cutoff, electric field, spin spiral axis and wavevector) are
+constant-only Fields, so the rule that every term number is a Field
+holds; result figures use matplotlib's constrained layout (tight_layout
+was computed at the figure's first size and clipped labels after a
+resize). Facts learned: pyqula refuses a pairing function that is not
+periodic with the lattice (its Fermi-antisymmetry check across cells), so
+a modulated pairing needs a commensurate supercell or a finite geometry;
+`add_valley_exchange` needs a Kekule-commensurate cell (a supercell of
+the honeycomb cell whose size is a multiple of 3); `add_crystal_field`
+and `add_valley_exchange` take numbers only, while `add_anti_kane_mele`,
+`add_modified_haldane`, `add_kekule` and `add_pairing` (amplitude and
+d-vector) take functions of position; `Geometry.shift(r0)` moves the
+sites by -r0 and wraps them into the cell, `rotate(angle)` turns clockwise
+in degrees and only up to two dimensions; `disorder.phase` returns a new
+Hamiltonian (spinless, normal state only); `kdos.kdos_bands` passes its
+keywords to `get_bands`, so `write=False` collides; `get_gap` is
+deterministic (a seeded grid scan); `topology.z2_invariant` returns -1
+for a quantum spin Hall insulator; the first magnetization and optical
+conductivity in a process compile numba kernels for about 10 s each;
+Qt prints "QOpenGLWidget is not supported on this platform" offscreen;
+without tight_layout (which renders) matplotlib autoscales the limits
+only at the first draw, so a readout needs a synchronous draw first.
 
 **Phase 5 — polish.** Undo everywhere, keyboard shortcuts, theming (light and
 dark), tooltips and formulas (reuse quantum-lattice's), user guide, example

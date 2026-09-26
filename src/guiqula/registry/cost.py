@@ -24,6 +24,12 @@ def diagonalization(dimension):
     return A * float(dimension) ** 3 + B
 
 
+def kpm(dimension, polynomials, nonzero=20):
+    """Seconds of one KPM expansion: a sparse matrix-vector product per
+    polynomial, about `nonzero` entries per row (a guess)."""
+    return 5e-9 * float(dimension) * nonzero * polynomials + B
+
+
 def kmesh(nk, dimensionality):
     """k-points of a mesh with nk per periodic direction."""
     return max(int(nk), 1) ** int(dimensionality)
