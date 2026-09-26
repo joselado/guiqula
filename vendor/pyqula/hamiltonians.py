@@ -1,0 +1,1412 @@
+from __future__ import print_function
+from __future__ import division
+from .helptk import get_docstring
+from scipy.sparse import csc_matrix,bmat,csr_matrix
+import scipy.linalg as lg
+import scipy.sparse.linalg as slg
+import numpy as np
+from . import ldos
+from . import operators
+from . import inout
+from . import superconductivity
+from . import kanemele 
+from . import magnetism
+from . import checkclass
+from . import extract
+from . import multicell
+from . import spectrum
+from . import kekule
+from . import algebra
+from . import groundstate
+from . import rotate_spin
+from . import topology
+from . import ldos
+from . import bandstructure
+from . import increase_hilbert
+from .meanfield import Vinteraction
+from .meanfield import Vinteraction_kpm
+from .meanfield import SzSz,SxSx,SySy,Jinteraction,VJinteraction
+from .sctk import dvector
+from .algebratk import hamiltonianalgebra
+from .bandstructure import get_bands_nd
+
+from scipy.sparse import coo_matrix,bmat,csc_matrix
+from .rotate_spin import sx,sy,sz
+from .increase_hilbert import get_spinless2full,get_spinful2full
+from . import tails
+from scipy.sparse import diags as sparse_diag
+import pickle
+from .htk import mode as hamiltonianmode
+from .htk import symmetry
+
+#import data
+
+optimal = False
+
+def _mean_field_scf_result(scf,return_total_energy):
+    """Shared tail for the get_*_mean_field_hamiltonian wrappers below:
+    SzSz/SxSx/SySy return the NotImplemented sentinel (not an SCF object)
+    for spinless/BdG Hamiltonians, which must be checked before touching
+    scf.converged."""
+    if scf is NotImplemented:
+        if return_total_energy: return (None,None)
+        else: return None
+    if not scf.converged: scf.hamiltonian = None # no convergence
+    if return_total_energy:
+        return (scf.hamiltonian,scf.total_energy)
+    else: return scf.hamiltonian
+
+class Hamiltonian():
+    """ Class for a hamiltonian """
+    def __add__(self,h):  return hamiltonianalgebra.add(self,h)
+    def __rmul__(self,h):  return hamiltonianalgebra.rmul(self,h)
+    def __mul__(self,h):  return hamiltonianalgebra.mul(self,h)
+    def __neg__(self):  return (-1)*self
+    def __sub__(self,a):  return self + (-a)
+    def spinless2full(self,m,**kwargs):
+        """Transform a spinless matrix in its full form"""
+        return get_spinless2full(self,**kwargs)(m) # return
+    def spinful2full(self,m):
+        """Transform a spinless matrix in its full form"""
+        return get_spinful2full(self)(m) # return
+    def kchain(self,k=0.):
+        return kchain(self,k=k)
+    def get_fermi_surface(self,**kwargs):
+        return spectrum.fermi_surface(self,**kwargs)
+    def get_multi_fermi_surface(self,**kwargs):
+        return spectrum.multi_fermi_surface(self,**kwargs)
+    def get_eigenvectors(self,**kwargs):
+        from .htk.eigenvectors import get_eigenvectors
+        return get_eigenvectors(self,**kwargs)
+    def get_average_spin_splitting(self,**kwargs):
+        from .fermisurfacetk.spinsplitting import average_spin_splitting
+        return average_spin_splitting(self,**kwargs)
+    def get_spin_splitting_density(self,**kwargs):
+        from .fermisurfacetk.spinsplitting import spin_splitting_density
+        return spin_splitting_density(self,**kwargs)
+    def get_spin_splitting_vs_energy(self,**kwargs):
+        from .fermisurfacetk.spinsplitting import spin_splitting_vs_energy
+        return spin_splitting_vs_energy(self,**kwargs)
+    def get_gf(self,**kwargs):
+        from .htk.green import get_gf
+        return get_gf(self,**kwargs)
+    def modify_hamiltonian_matrices(self,f,**kwargs):
+        """Modify all the matrices of a Hamiltonian"""
+        modify_hamiltonian_matrices(self,f,**kwargs)
+    def add_strain(self,fs,**kwargs):
+        from .strain import add_strain
+        add_strain(self,fs,**kwargs) 
+    def remove_pairing(self):
+        superconductivity.remove_pairing(self)
+    def remove_sites(self,store):
+        from . import sculpt
+        # the guard goes first: it used to fire after the geometry had
+        # already been replaced, leaving a shrunken geometry next to the
+        # original, full-size matrices
+        if self.has_spin:
+            raise NotImplementedError("remove_sites is not implemented for "
+                    "spinful Hamiltonians")
+        from .algebratk.matrixcrop import crop_matrix
+        self.geometry = sculpt.remove_sites(self.geometry,store)
+        f = lambda m: crop_matrix(m,store)
+        self.modify_hamiltonian_matrices(f) # modify all the matrices
+    def get_filling(self,**kwargs):
+        """Get the filling of a Hamiltonian at this energy"""
+        return spectrum.get_filling(self,**kwargs) # eigenvalues
+    def get_kdos(self,**kwargs):
+        from . import kdos
+        return kdos.surface_kdos(self,**kwargs)
+    def project_interactions(self,**kwargs):
+        """Project interactions"""
+        from .interactions.vijkl import Vijkl
+        return Vijkl(self,**kwargs)
+    def reduce(self):
+        return hamiltonianmode.reduce_hamiltonian(self)
+
+    def full2profile(self,x,**kwargs):
+        """Transform a 1D array in the full space to the spatial basis"""
+        from .htk.matrixcomponent import full2profile
+        return full2profile(self,x,**kwargs)
+
+    def get_chern(h,**kwargs):
+        return topology.chern(h,**kwargs)
+
+    def get_berry_curvature(h,**kwargs):
+        return topology.get_berry_curvature(h,**kwargs)
+
+    def get_spin_chern(h,**kwargs):
+        """Spin Chern number (C_+ - C_-)/2 of the occupied states split by
+        the sign of P s_z P, see topologytk/topologicalsector.py"""
+        from .topologytk.topologicalsector import spin_chern
+        return spin_chern(h,**kwargs)
+
+    def get_mirror_chern(h,**kwargs):
+        """Mirror Chern number (C_{+i} - C_{-i})/2 for the mirror z -> -z,
+        see topologytk/topologicalsector.py"""
+        from .topologytk.topologicalsector import mirror_chern
+        return mirror_chern(h,**kwargs)
+
+    def get_winding_number(h,**kwargs):
+        """Winding number of a one-dimensional Hamiltonian with a chiral
+        symmetry, see topology.winding_number"""
+        return topology.winding_number(h,**kwargs)
+
+    def get_wannier_sector_polarization(h,**kwargs):
+        """Polarization of a sector of the Wannier bands, from the nested
+        Wilson loop, see topologytk/nestedwilson.py"""
+        return topology.wannier_sector_polarization(h,**kwargs)
+
+    def get_quadrupole_moment(h,**kwargs):
+        """Quadrupole moment q_xy from the nested Wilson loop, see
+        topologytk/nestedwilson.py"""
+        return topology.quadrupole_moment(h,**kwargs)
+
+    def get_quantum_geometric_tensor(h,**kwargs):
+        """Multiband (non-Abelian) quantum geometric tensor at a single
+        k-point, see topologytk/qgt.py for the formula and references"""
+        return topology.quantum_geometric_tensor(h,**kwargs)
+
+    def get_quantum_metric(h,**kwargs):
+        """Quantum metric (symmetric part of the quantum geometric
+        tensor) at a single k-point"""
+        return topology.quantum_metric(h,**kwargs)
+
+    def get_optical_conductivity(h,**kwargs):
+        """Frequency-dependent (optical) conductivity tensor
+        sigma_ab(omega) in the Kubo-Greenwood formalism, see
+        conductivity.py for the formula and conventions"""
+        from . import conductivity
+        return conductivity.optical_conductivity(h,**kwargs)
+
+    def get_nonlinear_drude_conductivity(h,**kwargs):
+        """l-th order nonlinear Drude conductivity sigma^{x^l1 y^l2 ; b},
+        whose lowest nonvanishing order measures the X-wave index of a
+        collinear magnet, see conductivity.py for the formula"""
+        from . import conductivity
+        return conductivity.nonlinear_drude_conductivity(h,**kwargs)
+
+    def get_nonlinear_drude_components(h,l,**kwargs):
+        """Every component of the l-th order nonlinear Drude conductivity"""
+        from . import conductivity
+        return conductivity.nonlinear_drude_components(h,l,**kwargs)
+
+    def get_nonlinear_drude_orders(h,**kwargs):
+        """X-wave selection-rule sweep of the nonlinear Drude spin
+        conductivity over orders l = 0..lmax"""
+        from . import conductivity
+        return conductivity.nonlinear_drude_orders(h,**kwargs)
+
+    def get_drude_weight(h,**kwargs):
+        """Drude (intraband) weight tensor, the Fermi-surface average of
+        the squared band velocity, see conductivity.py"""
+        from . import conductivity
+        return conductivity.drude_weight(h,**kwargs)
+
+    def get_sum_rule_weight(h,**kwargs):
+        """Diamagnetic weight tensor W entering the optical f-sum rule
+        int Re sigma_aa(omega) domega = pi*W_aa, see conductivity.py"""
+        from . import conductivity
+        return conductivity.sum_rule_weight(h,**kwargs)
+
+    def get_superfluid_weight(h,**kwargs):
+        """Superfluid weight (superfluid stiffness) tensor of a BdG
+        Hamiltonian, see sctk/superfluidweight.py for the formula"""
+        from . import superfluid
+        return superfluid.superfluid_weight(h,**kwargs)
+
+    def get_bkt_temperature(h,**kwargs):
+        """Berezinskii-Kosterlitz-Thouless temperature of a 2d BdG
+        Hamiltonian, from the superfluid weight"""
+        from . import superfluid
+        return superfluid.bkt_temperature(h,**kwargs)
+
+    def get_entanglement_entropy(h,**kwargs):
+        """Entanglement entropy of a real-space region, from the
+        one-particle correlation matrix (Peschel's method), see
+        entanglement.py"""
+        from . import entanglement
+        return entanglement.entanglement_entropy(h,**kwargs)
+
+    def get_entanglement_spectrum(h,**kwargs):
+        """Entanglement spectrum (single-particle entanglement
+        Hamiltonian eigenvalues) of a real-space region, see
+        entanglement.py"""
+        from . import entanglement
+        return entanglement.entanglement_spectrum(h,**kwargs)
+
+    def get_chi(self,**kwargs):
+        from . import chi
+        return chi.chiAB_trace(self,**kwargs)
+    def get_spinchi_ladder(self,**kwargs):
+        """Spin-spin response function with ladder operators.
+
+        With RPA=True (the default) an interaction that couples each site
+        only to itself (a Hubbard U) is dressed with the site-basis
+        vertex, which is exact there for the transverse response. An
+        interaction that couples
+        different sites, density-density or exchange, has a Fock rung on
+        the electron-hole pair index that vertex has no place for, so the
+        response is summed in the pair basis instead (chitk.pairchi), with
+        the same keyword arguments and defaults; see
+        chitk.spinchi._use_pair_basis."""
+        from . import chi
+        return chi.spinchi_ladder(self,**kwargs)
+    def get_spinchi_full(self,**kwargs):
+        """Full spin-spin response function.
+
+        With RPA=True (the default) an interaction that couples each site
+        only to itself (a Hubbard U) is dressed with the site-basis
+        vertex, which is exact there for the transverse response. An
+        interaction that couples
+        different sites, density-density or exchange, is summed in the
+        pair basis instead (chitk.pairchi), with the same keyword
+        arguments and defaults; see chitk.spinchi._use_pair_basis."""
+        from . import chi
+        return chi.spinchi_full(self,**kwargs)
+    def get_iets_ldos(self,**kwargs):
+        """Spatially resolved IETS at a certain energy"""
+        from . import chi
+        return chi.get_iets_ldos(self,**kwargs)
+    def get_qdos_iets(self,**kwargs):
+        """Spatially resolved IETS at a certain energy"""
+        from . import chi
+        return chi.get_qdos_iets(self,**kwargs)
+    def get_rpa_kernel_poles(self,**kwargs):
+        """Return the poles of the RPA kernel 1 - U*chi(q,omega), i.e. the
+        frequencies of the collective modes/instabilities of the
+        interacting response function"""
+        from . import chi
+        return chi.rpa_kernel_poles(self,**kwargs)
+    def get_magnon_bands(self,method="rpa",**kwargs):
+        """Return the magnon bands of a magnetic mean-field state, scanned
+        along a q-path.
+
+        method="rpa" (the default) takes the poles of the spin RPA kernel
+        (the Sx,Sy,Sz channel used by get_spinchi_full/get_iets_ldos) on a
+        frequency grid, and works for metals as well as insulators. For an
+        interaction that couples each site only to itself (a Hubbard U)
+        the kernel is built with the site-basis vertex, which is exact
+        there for the transverse response; for one that couples different sites it is the pair-basis
+        ladder of method="pair", with the frequency grid, broadening and
+        k-mesh defaults of "rpa" (see chitk.spinchi._use_pair_basis).
+
+        method="pair" sums the same ladder as "rpa" but in the basis of
+        the interaction's pair index, where the rung of a neighbour-shell
+        density-density interaction actually lives. It keeps the frequency
+        scan and the metal support of "rpa" and gains the interaction
+        coverage of "tdhf"; see chitk.pairchi.
+
+        method="tdhf" solves the time-dependent Hartree-Fock (Bethe-
+        Salpeter) problem in the spin-flip electron-hole pair basis
+        instead, which is where that rung belongs: it handles any
+        density-density interaction, onsite or not, and has an exact
+        Goldstone mode at Q=0 (check it with get_goldstone_residual).
+
+        "pair" and "tdhf" both take an EXCHANGE interaction too, when the
+        SCF recorded its spin channels in H.Vchannels: the Sx Sx and Sy Sy
+        channels carry the transverse part J/2 (S+_i S-_j + h.c.), which
+        h.V alone does not have. An Ising h.V with no H.Vchannels, e.g. a
+        hand-built matrix, raises ValueError, since nothing says whether
+        that transverse part belongs to it (SzSz, SxSx and SySy record
+        theirs, as an anisotropic exchange). "tdhf" needs the same k-mesh
+        the mean field was converged on, and by default a gapped reference -- pass metal=True for an
+        itinerant magnet, which decides the occupied and empty sets per
+        k-point instead. See bsetk.spinflip.magnon_bands_tdhf."""
+        if method=="tdhf":
+            from . import bse
+            return bse.magnon_bands_tdhf(self,**kwargs)
+        if method=="pair":
+            from . import chi
+            return chi.pair_magnon_bands(self,**kwargs)
+        if method!="rpa":
+            raise ValueError("method must be 'rpa', 'tdhf' or 'pair', got "
+                    "%r"%(method,))
+        from . import chi
+        return chi.magnon_bands(self,**kwargs)
+    def get_transverse_spinchi(self,**kwargs):
+        """Transverse (S+/S-) spin response computed in the basis of the
+        interaction's PAIR index rather than of sites, which is what lets
+        it carry a neighbour-shell density-density interaction -- the one
+        the site-basis RPA maps to exactly zero. An exchange interaction
+        is carried as well, through the spin channels the SCF records in
+        H.Vchannels. Needs no gap, and returns a frequency-resolved chi.
+        See chitk.pairchi"""
+        from . import chi
+        return chi.transverse_spinchi(self,**kwargs)
+    def get_magnon_energies(self,**kwargs):
+        """Return the magnon energies at a single momentum Q, from the
+        spin-flip channel of the Bethe-Salpeter equation, see
+        bsetk.spinflip.magnon_energies"""
+        from . import bse
+        return bse.magnon_energies(self,**kwargs)
+    def get_goldstone_residual(self,**kwargs):
+        """Return how far this magnetic mean field is from having a
+        zero-energy magnon at Q=0, as the Goldstone theorem requires of
+        any magnetic state without spin-orbit coupling. Zero up to the SCF
+        tolerance; see bsetk.spinflip.goldstone_residual"""
+        from . import bse
+        return bse.goldstone_residual(self,**kwargs)
+    def get_densitychi_RPA(self,**kwargs):
+        """Density (charge) RPA response function for a V1/V2/V3/U/Vr
+        neighbor-shell density-density interaction"""
+        from . import chi
+        return chi.densitychi_RPA(self,**kwargs)
+    def get_plasmon_bands(self,**kwargs):
+        """Return the plasmon/charge-order bands: the poles of the density
+        RPA kernel for a V1/V2/V3/U/Vr neighbor-shell density-density
+        interaction, scanned along a q-path"""
+        from . import chi
+        return chi.plasmon_bands(self,**kwargs)
+    def get_bse(self,**kwargs):
+        """Return the solved Bethe-Salpeter (exciton) problem on top of
+        this mean-field Hamiltonian, as a bsetk.solve.BSE object"""
+        from . import bse
+        return bse.get_bse(self,**kwargs)
+    def get_exciton_energies(self,**kwargs):
+        """Return the exciton energies from the Bethe-Salpeter equation
+        solved on top of this mean-field Hamiltonian. The interaction
+        defaults to the one the mean field was converged with (self.V);
+        pass V explicitly for a different (e.g. screened) interaction"""
+        from . import bse
+        return bse.exciton_energies(self,**kwargs)
+    def get_exciton_states(self,**kwargs):
+        """Return (energies,amplitudes) of the excitons, the amplitudes
+        being the electron-hole amplitudes A_vc(k) of each exciton"""
+        from . import bse
+        return bse.exciton_states(self,**kwargs)
+    def get_exciton_binding_energies(self,**kwargs):
+        """Return the exciton binding energies, i.e. how far below the
+        lowest independent-particle transition each exciton lies"""
+        from . import bse
+        return bse.exciton_binding_energies(self,**kwargs)
+    def get_screened_interaction(self,**kwargs):
+        """Return the static RPA screened interaction W = eps^-1 v built
+        from this Hamiltonian's own bands, as a ScreenedInteraction. Pass
+        V= for the bare interaction to screen (it defaults to self.V, the
+        one a mean field was converged with -- but note that a fitted
+        Hubbard U is already screened and should not be screened again)"""
+        from . import screening
+        return screening.get_screened_interaction(self,**kwargs)
+    def get_polarizability(self,**kwargs):
+        """Return (qs,chi0), the static polarizability of this Hamiltonian
+        on its k-mesh, in the orbital basis"""
+        from . import screening
+        return screening.get_polarizability(self,**kwargs)
+    def get_exciton_bands(self,**kwargs):
+        """Return the exciton bands E_X(Q): the Bethe-Salpeter energies at
+        finite center-of-mass momentum, scanned along a q-path. Returns
+        flat (qs,es) arrays, same convention as get_bands"""
+        from . import bse
+        return bse.exciton_bands(self,**kwargs)
+    def get_hopping_dict(self):
+        """Return the dictionary with the hoppings"""
+        return multicell.get_hopping_dict(self)
+
+    def get_multihopping(self):
+        out = multicell.get_hopping_dict(self)
+        return multicell.MultiHopping(out) # return the object
+
+    def set_multihopping(self,mh):
+        """Set a multihopping as the Hamiltonian"""
+        multicell.set_multihopping(self,mh)
+
+    def get_wannier_hamiltonian(self,**kwargs):
+        """Wannierize a subset of this Hamiltonian's bands (via wannierpy's
+        pure-Python Wannier90 port) and return a new Hamiltonian in the
+        resulting maximally-localized Wannier basis"""
+        from .wanniertk.wannierize import get_wannier_hamiltonian
+        return get_wannier_hamiltonian(self,**kwargs)
+    @get_docstring(spectrum.set_filling)
+    def set_filling(self,filling,**kwargs):
+        spectrum.set_filling(self,filling=filling,**kwargs)
+
+    def __init__(self,geometry=None):
+        self.data = dict() # empty dictionary with various data
+        self.has_spin = True # has spin degree of freedom
+        self.V = None # density-density interaction
+        self.Vchannels = None # the x/y/z exchange channels and the
+        # density-density part of the interaction, kept separately because
+        # self.V is a single matrix and an isotropic J and an anisotropic
+        # Jz leave exactly the same one in it. Set by the exchange SCF
+        # (scftk.spinspin), read by the spin-channel RPA
+        # (chitk.spinchi._full_spin_U)
+        self.has_kondo = False # has Kondo sites
+        self.prefix = "" # a string used a prefix for different files
+        self.path = "" # a path used for different files
+        self.has_eh = False # has electron hole pairs
+        self.get_eh_sector = None # no function for getting electrons
+        self.fermi_energy = 0.0 # fermi energy at zero
+        self.dimensionality = 0 # dimensionality of the Hamiltonian
+        self.temperature = 0.0 # temperature of the Hamiltonian
+        self.is_sparse = False
+        self.is_multicell = False # for hamiltonians with hoppings to several neighbors
+        self.hopping_dict = {} # hopping dictonary
+        self.has_hopping_dict = False # has hopping dictonary
+        self.non_hermitian = False # non hermitian Hamiltonian
+        self.os_gen = None # occupied states generator, for topology
+        if not geometry is None:
+    # dimensionality of the system
+          self.dimensionality = geometry.dimensionality 
+          self.geometry = geometry # add geometry object
+          self.num_orbitals = len(geometry.x)
+    def get_hk_gen(self,**kwargs):
+        """ Generate kdependent hamiltonian"""
+        #if self.is_multicell:
+        out = multicell.hk_gen(self,**kwargs) # for multicell
+       # else: out = hk_gen(self) # for normal cells
+        from .htk.canonicalphase import canonical_unitary
+#        return canonical_unitary(self,out)
+        return out
+
+    def has_time_reversal_symmetry(self):
+        """Check if a Hamiltonian has time reversal symmetry"""
+        from .htk import symmetry
+        return symmetry.has_time_reversal_symmetry(self)
+
+    def get_qpi(self,**kwargs):
+        from .chitk import qpi
+        return qpi.get_qpi(self,**kwargs)
+    def get_qpi_impurity(self,**kwargs):
+        """Real-space-impurity QPI (supercell + real-space impurities +
+        ARPACK LDOS + direct Fourier transform); see
+        qpitk.realspace.get_qpi_impurity for the full docstring"""
+        from .qpitk.realspace import get_qpi_impurity
+        return get_qpi_impurity(self,**kwargs)
+    def get_rkky(self,**kwargs):
+        #from .chitk import magneticresponse
+        from . import rkky
+        return rkky.rkky(self,**kwargs)
+    @get_docstring(ldos.get_ldos)
+    def get_ldos(self,**kwargs):
+        return ldos.get_ldos(self,**kwargs)
+    def get_gk_gen(self,delta=1e-3,operator=None,canonical_phase=False):
+      """Return the Green function generator"""
+      hkgen = self.get_hk_gen() # Hamiltonian generator
+      def f(k=[0.,0.,0.],e=0.0,inv=False):
+          hk = hkgen(k) # get matrix
+          if canonical_phase: # use a Bloch phase in all the sites
+              if not getattr(self.geometry, "has_fractional", False): self.geometry.get_fractional()
+              frac_r = self.geometry.frac_r # fractional coordinates
+              # start in zero
+              U = np.diag([self.geometry.bloch_phase(k,r) for r in frac_r])
+              U = np.array(U) # this is without .H
+              # increase the space if necessary
+              U = self.spinless2full(U,is_hamiltonian=False) 
+              Ud = algebra.dagger(U) # dagger
+              hk = Ud@hk@U
+          if operator is not None: 
+              hk = algebra.dagger(operator)@hk@operator # project
+          if not self.is_sparse: # dense Hamiltonians
+              out = np.identity(hk.shape[0])*(e+1j*delta) - hk
+              if not inv: 
+                  out = algebra.inv(algebra.todense(out)) # Green's function
+              else: out = out # just the Hamiltonian
+          else: # for sparse, use the Operator object
+              from scipy.sparse import identity
+              g = identity(hk.shape[0])*(e+1j*delta) - hk
+              out = operators.Operator(g) # get the inverse operator
+              if not inv: out = out.inv() # Green's function
+              else: out = out # just the Hamiltonian
+          return out
+      return f
+    def to_canonical_gauge(self,m,k):
+        """Return a matrix in the canonical gauge"""
+        from . import gauge
+        return gauge.to_canonical_gauge(self,m,k) # return the matrix
+    def print_hamiltonian(self):
+        """Print hamiltonian on screen"""
+        print_hamiltonian(self)
+    def check_mode(self,n):
+        """Verify the type of Hamiltonian"""
+        return hamiltonianmode.check_mode(self,n)
+    def get_bandwidth(self,**kwargs):
+        from .spectrum import get_bandwidth
+        return get_bandwidth(self,**kwargs)
+    def diagonalize(self,nkpoints=100):
+      """Return eigenvalues"""
+      (k,e) = self.get_bands(nk=nkpoints,write=False)
+      return e
+    def get_fermi4filling(self,filling,**kwargs):
+        """Return the fermi energy for a certain filling"""
+        return spectrum.get_fermi4filling(self,filling,**kwargs)
+    def get_dos(self,**kwargs):
+        from . import dos
+        return dos.get_dos(self,**kwargs)
+    def get_density(self,**kwargs):
+        from .ldostk import atomicmultildos
+        return atomicmultildos.get_density(self,**kwargs)
+    def get_bands(self,**kwargs):
+        """ Compute the bandstructure, optionally with operator
+        expectation values (operator can be a single spec or a list)"""
+        return bandstructure.get_bands(self,**kwargs)
+    def get_bands_map(self,**kwargs):
+        """ Returns a figure with the bandstructure"""
+        return bandstructure.get_bands_map(self,**kwargs)
+    def get_kdos_bands(self,**kwargs):
+        from .kdos import kdos_bands
+        return kdos_bands(self,**kwargs)
+    def get_unfolded_kpath(self,*args,**kwargs):
+        """k-path of the primitive cell, in this supercell's coordinates"""
+        from .unfolding import get_unfolded_kpath
+        return get_unfolded_kpath(self,*args,**kwargs)
+    def get_surface_kdos(self,**kwargs):
+        from .kdos import surface_kdos
+        return surface_kdos(self,**kwargs)
+    def add_sublattice_imbalance(self,mass):
+      """ Adds a sublattice imbalance """
+      require_sublattice(self,"add_sublattice_imbalance","staggers the "
+        +"onsite energy between the two sublattices")
+      if self.geometry.sublattice_number!=2:
+          raise ValueError("add_sublattice_imbalance is defined for two "
+            +"sublattices, and this geometry has "
+            +str(self.geometry.sublattice_number)+", whose sublattice index "
+            +"runs 0,1,2,... rather than +-1, so a single mass has no "
+            +"staggering to apply. Use add_onsite with a per-site profile "
+            +"instead, e.g. h.add_onsite(lambda r: ...).")
+      add_sublattice_imbalance(self,mass)
+    def add_antiferromagnetism(self,mass):
+        """ Adds antiferromagnetic imbalanc """
+        require_sublattice(self,"add_antiferromagnetism","staggers the "
+          +"magnetization between sublattices")
+        if self.geometry.sublattice_number==2:
+            magnetism.add_antiferromagnetism(self,mass)
+        elif self.geometry.sublattice_number>2:
+            magnetism.add_frustrated_antiferromagnetism(self,mass)
+        else: raise ValueError("a geometry with "
+            +str(self.geometry.sublattice_number)+" sublattices has no "
+            +"antiferromagnetic pattern to write")
+    def turn_nambu(self):
+        """Add electron hole degree of freedom"""
+        self.get_eh_sector = get_eh_sector_odd_even # assign function
+        superconductivity.turn_nambu(self)
+    def add_swave(self,*args,**kwargs):
+        """ Adds swave superconducting pairing"""
+        superconductivity.add_swave_to_hamiltonian(self,*args,**kwargs)
+    def setup_nambu_spinor(self): self.add_swave(0.0)
+    def get_anomalous_hamiltonian(self):
+        """Return a Hamiltonian only with the anomalous part"""
+        return superconductivity.get_anomalous_hamiltonian(self)
+    def add_pairing(self,**kwargs):
+        """ Add a general pairing matrix, uu,dd,ud"""
+        superconductivity.add_pairing_to_hamiltonian(self,**kwargs)
+    def same_hamiltonian(self,*args,**kwargs):
+        """Check if two hamiltonians are the same"""
+        return hamiltonianmode.same_hamiltonian(self,*args,**kwargs)
+    def get_supercell(self,nsuper,**kwargs):
+      """ Creates a supercell of a one dimensional system"""
+      # the contract is a new Hamiltonian, so the no-op cases return a copy
+      # and never an alias of self, which the caller would then mutate
+      if nsuper is None: return self.copy() # do nothing
+      if self.dimensionality==0: return self.copy() # nothing to replicate
+      try: 
+          nsuper[0] # check if it is a tuple 
+          ns = nsuper # array as input
+      except: # a single number was given
+          if nsuper==1: return self.copy() # nothing to replicate
+          if self.dimensionality==1: ns = [nsuper,1,1]
+          elif self.dimensionality==2: ns = [nsuper,nsuper,1]
+          elif self.dimensionality==3: ns = [nsuper,nsuper,nsuper]
+          else: raise
+      # a sequence is padded to three components and checked against the
+      # dimensionality here: multicell.supercell_hamiltonian unpacks three
+      # of them, while the geometry only reads the first `dimensionality`
+      ns = normalize_nsuper(self,ns)
+      return multicell.supercell_hamiltonian(self,nsuper=ns,**kwargs)
+    def supercell(self,*args,**kwargs):
+      return self.get_supercell(*args,**kwargs)
+    def set_finite_system(self,**kwargs):
+      """ Transforms the system into a finite system"""
+      return set_finite_system(self,**kwargs) 
+    def get_gap(self,**kwargs):
+      """Returns the gap of the Hamiltonian"""
+      from . import gap
+      return gap.get_gap(self,**kwargs) # return the gap
+    def save(self,output_file="hamiltonian.pkl"):
+      """ Write the hamiltonian in a file"""
+      inout.save(self,output_file) # write in a file
+    write = save # just in case
+    def read(self,output_file="hamiltonian.pkl"):
+      """ Read the Hamiltonian"""
+      return load(output_file) # read Hamiltonian
+
+    def load(self,**kwargs): return self.read(**kwargs)
+
+    @get_docstring(spectrum.total_energy)
+    def get_total_energy(self,**kwargs):
+      return spectrum.total_energy(self,**kwargs)
+
+    def total_energy(self,**kwargs): return self.get_total_energy(**kwargs)
+
+    def add_zeeman(self,zeeman):
+        """Adds zeeman to the matrix """
+        self.turn_spinful()
+        from .magnetism import add_zeeman
+        add_zeeman(self,zeeman=zeeman)
+    def add_magnetism(self,m):
+        """Adds magnetism, new version of zeeman"""
+        self.turn_spinful()
+        from .magnetism import add_magnetism
+        add_magnetism(self,m)
+    def add_exchange(self,m): self.add_magnetism(m)
+    def turn_spinful(self,**kwargs):
+        from .htk.mode import turn_spinful
+        turn_spinful(self,**kwargs)
+    def remove_spin(self,channel="up"):
+      """Removes spin degree of freedom"""
+      if self.check_mode("spinless"): return # do nothing
+      elif self.check_mode("spinful"):
+          if channel=="up": c = 0
+          elif channel=="dn": c = 1
+          else:
+              raise ValueError("unknown spin channel; remove_spin accepts 'up' "
+                      "and 'dn'")
+          def f(m): return des_spin(m,component=c)
+          self.modify_hamiltonian_matrices(f) # modify the matrices
+          self.has_spin = False # set to spinless
+      else:
+          raise NotImplementedError("remove_spin is not implemented for "
+                  "Hamiltonians with the electron-hole (Nambu) degree of "
+                  "freedom; call h.remove_nambu() first")
+    def remove_nambu(self):
+      if self.check_mode("spinful_nambu"): 
+          def f(m):
+              return superconductivity.get_eh_sector(m,i=0,j=0)
+          self.modify_hamiltonian_matrices(f) # modify the matrices
+          self.has_eh = False # set to normal
+      elif self.check_mode("spinful"): pass
+      elif self.check_mode("spinless"): pass
+      else:
+          raise NotImplementedError("remove_nambu is not implemented for this "
+                  "Hilbert space")
+    def add_onsite(self,fermi):
+      """ Move the Fermi energy of the system"""
+      shift_fermi(self,fermi)
+    def get_topological_invariant(self,**kwargs):
+        """Return a topological invariant of the occupied bands.
+
+        In one dimension this is the Z2 invariant for a time-reversal-
+        symmetric superconductor (class DIII) and the Berry (Zak) phase
+        otherwise, in two the Z2
+        invariant for a time-reversal-symmetric Hamiltonian and the Chern
+        number otherwise, and in three the strong and weak Z2 indices
+        (nu0,(nu1,nu2,nu3)) for a time-reversal-symmetric Hamiltonian and
+        the Chern vector (C1,C2,C3) otherwise. The 0d case used to return
+        None."""
+        if self.dimensionality==0:
+            raise ValueError("a 0-dimensional (finite) Hamiltonian has no "
+              +"Brillouin zone, so no topological invariant is defined for "
+              +"it; build a periodic system, or look at the spectrum of "
+              +"the finite cluster instead")
+        elif self.dimensionality==1:
+            if self.has_eh and self.has_time_reversal_symmetry():
+                return topology.z2_invariant_1d(self,**kwargs) # class DIII
+            return topology.berry_phase(self,**kwargs) # Zak phase
+        elif self.dimensionality==2: 
+            if self.has_time_reversal_symmetry():
+                return topology.z2_invariant(self,**kwargs)
+            else:
+                return topology.chern(self,**kwargs)
+        elif self.dimensionality==3:
+            if self.has_time_reversal_symmetry():
+                return topology.z2_invariant_3d(self,**kwargs)
+            else:
+                return topology.chern_vector(self,**kwargs)
+        else:
+            raise ValueError("no topological invariant is defined for a "
+              +"Hamiltonian of dimensionality "+str(self.dimensionality))
+    def shift_fermi(self,fermi): self.add_onsite(fermi)  
+    def first_neighbors(self):
+      """ Create first neighbor hopping"""
+      if 0<=self.dimensionality<3:
+        first_neighborsnd(self)
+      elif self.dimensionality == 3:
+        from .multicell import first_neighbors as fnm
+        fnm(self)
+      else:
+          raise ValueError("the first-neighbor hopping needs a dimensionality "
+                  "between 0 and 3")
+    def add_hopping_matrix(self,fm,**kwargs):
+        """
+        Add a certain hopping matrix to the Hamiltonian. Any extra keyword
+        (in particular nc, the neighbor cutoff) is forwarded to the
+        geometry's Hamiltonian builder -- raise it above its default when
+        fm reaches beyond the cells that default cutoff covers.
+        """
+        if not self.is_multicell: 
+            self.turn_multicell()
+            #raise # this may not work for multicell
+        h = self.geometry.get_hamiltonian(has_spin=self.has_spin,
+                is_multicell=self.is_multicell,
+                mgenerator=fm,**kwargs) # generate a new Hamiltonian
+        self.add_hamiltonian(h) # add this contribution
+    def add_hamiltonian(self,h):
+        """
+        Add the hoppings of another Hamiltonian
+        """
+        if not self.is_multicell: # not implemented
+            self.turn_multicell()
+        # this used to loop over the directions self already had, so any
+        # lattice direction present only in h was dropped in silence
+        from .multihopping import MultiHopping
+        mh = MultiHopping(self.get_dict()) + MultiHopping(h.get_dict())
+        self.set_multihopping(mh) # store the merged hoppings
+    def get_dict(self):
+        """
+        Return the dictionary that yields the hoppings
+        """
+        if not self.is_multicell: # not implemented
+            self = self.get_multicell()
+        hop = dict()
+        hop[(0,0,0)] = self.intra
+        for t in self.hopping: 
+            hop[tuple(np.array(t.dir))] = t.m
+        return hop # return dictionary
+    @get_docstring(ldos.multi_ldos)
+    def get_multildos(self,**kwargs):
+        return ldos.multi_ldos(self,**kwargs)
+    def get_multihopping(self):
+        """Return a multihopping object"""
+        from .multihopping import MultiHopping
+        return MultiHopping(self.get_dict())
+    @get_docstring(VJinteraction)
+    def get_mean_field_hamiltonian(self,return_total_energy=False,
+            integration="ed",**kwargs):
+        if self.has_spin and integration in ("ed","kpm"):
+            scf = VJinteraction(self,integration=integration,**kwargs)
+        else:
+            # VJinteraction requires has_spin (spin-spin exchange has no
+            # meaning for a spinless Hamiltonian -- see its own has_spin
+            # check) and only supports integration="ed"/"kpm" (no
+            # qtci/solver zoo); fall back for the remaining combinations to
+            # whichever of Vinteraction/Vinteraction_kpm supports this
+            # integration mode -- Vinteraction itself never learned "kpm"
+            # (that is Vinteraction_kpm's own separate entry point), so
+            # route there explicitly instead of forwarding integration="kpm"
+            # into Vinteraction's get_dm, which only accepts "ed"/"qtci"
+            if checkclass.is_iterable(kwargs.get("filling")) and not self.has_spin:
+                from . import check # a per-site filling needs VJinteraction
+                check.require_spin(self,"a per-site (array) filling "
+                        "(supported only by VJinteraction, integration=\"ed\")")
+            if integration=="kpm":
+                scf = Vinteraction_kpm(self,**kwargs)
+            else:
+                scf = Vinteraction(self,integration=integration,**kwargs)
+        return _mean_field_scf_result(scf,return_total_energy)
+    @get_docstring(Vinteraction_kpm)
+    def get_mean_field_hamiltonian_kpm(self,return_total_energy=False,**kwargs):
+        """KPM-based (sparse, Chebyshev) alternative to
+        get_mean_field_hamiltonian: instead of diagonalizing the Bloch
+        Hamiltonian H(k) at each k-point, evaluates only the density-matrix
+        elements required by the provided interaction (U, V1, V2, V3, Vr)
+        through Chebyshev recursion on H(k). Meant for large/sparse
+        Hamiltonians; see scftk.densitydensity_kpm."""
+        return _mean_field_scf_result(Vinteraction_kpm(self,**kwargs),return_total_energy)
+    @get_docstring(SzSz)
+    def get_szsz_mean_field_hamiltonian(self,return_total_energy=False,**kwargs):
+        return _mean_field_scf_result(SzSz(self,**kwargs),return_total_energy)
+    @get_docstring(SxSx)
+    def get_sxsx_mean_field_hamiltonian(self,return_total_energy=False,**kwargs):
+        return _mean_field_scf_result(SxSx(self,**kwargs),return_total_energy)
+    @get_docstring(SySy)
+    def get_sysy_mean_field_hamiltonian(self,return_total_energy=False,**kwargs):
+        return _mean_field_scf_result(SySy(self,**kwargs),return_total_energy)
+    @get_docstring(Jinteraction)
+    def get_exchange_mean_field_hamiltonian(self,return_total_energy=False,**kwargs):
+        return _mean_field_scf_result(Jinteraction(self,**kwargs),return_total_energy)
+    @get_docstring(VJinteraction)
+    def get_combined_mean_field_hamiltonian(self,return_total_energy=False,**kwargs):
+        return _mean_field_scf_result(VJinteraction(self,**kwargs),return_total_energy)
+    def get_tails(self,discard=None):
+        """Write the tails of the wavefunctions"""
+        if self.dimensionality!=0:
+            raise ValueError("the tails of the wavefunctions are only defined "
+                    "for 0d Hamiltonians")
+        else: return tails.matrix_tails(self.intra,discard=discard)
+    def copy(self):
+        """
+        Return a copy of the hamiltonian
+        """
+        from copy import deepcopy
+        return deepcopy(self)
+    def is_zero(self): return self.get_multihopping().is_zero()
+    def check(self,**kwargs):
+        """
+        Check if the Hamiltonian is OK
+        """
+        from . import check
+        check.check_hamiltonian(self,**kwargs) # check the Hamiltonian
+    def enforce_eh(self):
+        """Enforce electron-hole symmetry in the Hamiltonian"""
+        # the routine is not written yet, so say so and change nothing: the
+        # two lines that used to run first were a Python-2 absolute import
+        # (which raised ModuleNotFoundError before this guard could fire)
+        # and a turn_multicell() that mutated the Hamiltonian on the way out
+        raise NotImplementedError("enforce_eh is not implemented")
+    def turn_sparse(self):
+        """
+        Transforms the hamiltonian into a sparse hamiltonian
+        """
+        from scipy.sparse import csc_matrix
+        def f(m):
+            return csc_matrix(m)
+        self.modify_hamiltonian_matrices(f) # modify the matrices
+        self.is_sparse = True # sparse flag to true
+    def turn_dense(self):
+        """ Transforms the hamiltonian into a sparse hamiltonian"""
+        def f(m):
+            return algebra.todense(m)
+        self.modify_hamiltonian_matrices(f) # modify the matrices
+        self.is_sparse = False # sparse flag to true
+    def get_dense(self):
+        from .htk.modify import get_dense
+        return get_dense(self)
+    def add_rashba(self,c):
+        """Adds Rashba coupling"""
+        from . import rashba
+        rashba.add_rashba(self,c)
+    def add_soc(self,t,**kwargs):
+        self.add_kane_mele(t,**kwargs)
+    def add_kane_mele(self,t,**kwargs):
+        """ Adds a Kane-Mele SOC term"""  
+        kanemele.add_kane_mele(self,t,**kwargs) # return kane-mele SOC
+    def add_haldane(self,t):
+        """ Adds a Haldane term"""  
+        kanemele.add_haldane(self,t) # return Haldane SOC
+    def add_kekule(self,t):
+        """
+        Add Kekule coupling
+        """
+        if self.dimensionality==0: # zero dimensional
+          m = kekule.kekule_matrix(self.geometry.r,t=t)
+          self.intra = self.intra + self.spinless2full(m)
+        else: # workaround for higher dimensionality
+          r = self.geometry.multireplicas(2) # get many replicas
+          fm = kekule.kekule_function(r,t=t)
+          self.add_hopping_matrix(fm) # add the Kekule hopping
+    def add_chiral_kekule(self,**kwargs):
+        """
+        Add a chiral kekule hopping
+        """
+        fun = kekule.chiral_kekule(self.geometry,**kwargs)
+        # fun already does its own complete bond classification (and,
+        # if a non-default registry= was passed, its own registry
+        # membership check), so go through bond_function_to_matrix
+        # directly rather than add_kekule/kekule_function, which would
+        # independently re-derive and re-apply *their own* (always
+        # default-registry) mask on top -- silently zeroing out every
+        # bond outside the default registry regardless of what fun
+        # itself was built against.
+        fm = kekule.bond_function_to_matrix(fun)
+        if self.dimensionality==0: # zero dimensional
+            m = fm(self.geometry.r,self.geometry.r)
+            self.intra = self.intra + self.spinless2full(m)
+        else: # workaround for higher dimensionality
+            self.add_hopping_matrix(fm) # add the Kekule hopping
+  
+    def add_modified_haldane(self,t):
+        """
+        Adds a Haldane term
+        """  
+        kanemele.add_modified_haldane(self,t) # return Haldane SOC
+    def add_anti_kane_mele(self,t):
+        """
+        Adds an anti Kane-Mele term
+        """  
+        kanemele.add_anti_kane_mele(self,t) # return anti kane mele SOC
+    def add_antihaldane(self,t):
+        """Add an anti-Haldane term"""
+        self.add_modified_haldane(t) # second name
+    def add_valley_exchange(self,v):
+        """Add a valley-space exchange term v=(vx,vy,vz).(tau_x,tau_y,tau_z),
+        the valley-pseudospin analogue of add_exchange for real spin"""
+        from .operatortk.inplane_valley import add_valley_exchange
+        add_valley_exchange(self,v)
+    def add_crystal_field(self,v,**kwargs):
+        """Add a crystal field term to the Hamiltonian"""
+        from . import crystalfield
+        crystalfield.hartree(self,v=v,**kwargs) 
+    def add_peierls(self,mag_field,**kwargs):
+        """
+        Add magnetic field
+        """
+        from .peierls import add_peierls
+        add_peierls(self,mag_field=mag_field,**kwargs)
+    def add_orbital_magnetic_field(self,*args,**kwargs):
+        self.add_peierls(*args,**kwargs)
+    def add_inplane_bfield(self,**kwargs):
+        """Add in-plane magnetic field"""
+        from .peierls import add_inplane_bfield
+        add_inplane_bfield(self,**kwargs)
+    def align_magnetism(self,vectors=None):
+        """ Rotate the Hamiltonian to have magnetism in the z direction"""
+        if self.has_eh:
+            raise NotImplementedError("align_magnetism is not implemented for "
+                    "Hamiltonians with the electron-hole (Nambu) degree of "
+                    "freedom")
+        from .rotate_spin import align_magnetism as align
+        f = lambda m: align(m,vectors) # align the matrix
+        if vectors is None: # get the magnetization
+            mx = self.get_vev("mx")
+            my = self.get_vev("my")
+            mz = self.get_vev("mz")
+            vectors = np.array([mx,my,mz]).T
+        self.modify_hamiltonian_matrices(f) # modify the matrices
+    def global_spin_rotation(self,**kwargs):
+        """ Perform a global spin rotation """
+        return rotate_spin.hamiltonian_spin_rotation(self,**kwargs)
+    def generate_spin_spiral(self,**kwargs):
+        """ Generate a spin spiral antsaz in the Hamiltonian """
+        return rotate_spin.generate_spin_spiral(self,**kwargs)
+    def get_magnetization(self,mode="vev",**kwargs):
+        """Return the site-resolved magnetization, as an (nsites,3) array.
+
+        Two different quantities go by this name:
+
+        - mode="vev" (the default) returns the physical magnetization: the
+          per-site expectation value (<S_x>,<S_y>,<S_z>) over the occupied
+          states, i.e. get_vev("sx"/"sy"/"sz"). This is the moment, and it
+          is what to report as one. Being a Brillouin-zone integral it
+          needs a k-mesh: pass nk, or rely on the mesh a self-consistent
+          Hamiltonian remembers from its own loop. With the electron-hole
+          (Nambu) degree of freedom the hole-hole block of the spin
+          operators is dropped (operators.vev_operator), so that a BdG
+          description of a state gives the same moment as the normal-state
+          description of that same state.
+
+        - mode="field" reads the magnetic *term written in the
+          Hamiltonian* instead, i.e. the coefficients of sigma_x/y/z on
+          each site, via extract("mx"/"my"/"mz"). After a self-consistent
+          calculation that term is the mean-field exchange field: the
+          natural order parameter of the loop, proportional -- not equal
+          -- to the moment. On a Hamiltonian whose field was put in by
+          hand with add_zeeman/add_exchange it hands that field straight
+          back, rather than the polarization the field induces. That used
+          to be the default, which made it easy to report a field as if it
+          were a moment.
+
+        Any extra keyword is forwarded to get_vev (e.g. nk) in "vev" mode.
+        """
+        if mode=="field":
+            mx = self.extract(name="mx")
+            my = self.extract(name="my")
+            mz = self.extract(name="mz")
+        elif mode=="vev":
+            # the moment is a Brillouin-zone integral, so unlike the field
+            # readout it has a k-mesh and needs a fine enough one: a
+            # weakly polarized metal whose moment is 0.02 comes out as
+            # exactly 0 on get_vev's default 30-point mesh. A Hamiltonian
+            # produced by a self-consistent calculation remembers the mesh
+            # it was converged on, so use that unless told otherwise.
+            if "nk" not in kwargs and getattr(self,"nk",None) is not None:
+                kwargs["nk"] = self.nk
+            # one Brillouin-zone sweep for the three components, rather
+            # than one per component: spectrum.ev takes a list of
+            # operators and shares the diagonalization between them
+            nsites = len(self.geometry.r) # number of sites
+            idx = [operators.index(self,n=[i]) for i in range(nsites)]
+            ops = []
+            for name in ["sx","sy","sz"]:
+                op = self.get_operator(name) # spin operator
+                # counted once on a Nambu Hamiltonian, as in get_vev
+                op = operators.vev_operator(self,op)
+                ops += [(o*op).get_matrix() for o in idx]
+            out = spectrum.ev(self,operator=ops,**kwargs).real
+            mx,my,mz = out[:nsites],out[nsites:2*nsites],out[2*nsites:]
+        else:
+            raise ValueError("unknown magnetization mode '"+str(mode)
+              +"', expected 'field' (the magnetic term in the Hamiltonian) "
+              +"or 'vev' (the expectation value of the spin operator)")
+        return np.array([mx,my,mz]).T # return array
+    def get_vev(self,operator=None,**kwargs):
+        """
+        Compute a VEV of a spatially resolved operator.
+
+        With the electron-hole (Nambu) degree of freedom the sum runs over
+        the whole particle-hole-redundant set of negative-energy BdG
+        states, so a physical one-body observable is counted twice: the
+        site occupation of a BdG Hamiltonian came out as 2 where the
+        identical normal-state Hamiltonian gives 1, and its moment twice
+        as large. The hole-hole block of the operator is therefore dropped
+        there (operators.vev_operator), so that a BdG description of a
+        state returns the same numbers as the normal-state description of
+        that state, while a pairing operator, which lives in the
+        electron-hole blocks, keeps its value: get_vev("spair") is the
+        share of get_single_vev("spair") on each site. The electron-sector
+        restriction this used to apply made every pairing operator zero.
+        """
+        n = len(self.geometry.r) # number of sites
+        op = self.get_operator(operator) # get an operator
+        op = operators.vev_operator(self,op) # counted once, see above
+        if op is not None and op.matrix is None:
+            # an operator defined only by its action, and possibly a
+            # different one at every kpoint: the Brillouin-zone sum has to
+            # be done with the operator inside it, which spectrum.ev cannot
+            # do because it contracts against an already k-summed density
+            # matrix (see vev.kresolved_orbital_vev)
+            from .vev import kresolved_orbital_vev
+            return self.full2profile(kresolved_orbital_vev(self,op,**kwargs))
+        ops = [operators.index(self,n=[i]) for i in range(n)]
+        if op is not None:
+          ops = [(o*op).get_matrix() for o in ops] # define operators
+        else:
+          ops = [o.get_matrix() for o in ops] # define operators
+        return spectrum.ev(self,operator=ops,**kwargs).real
+    # for backwards compatibility
+    def compute_vev(self,operator=None,**kwargs):
+        return self.get_vev(operator=operator,**kwargs)
+    def get_1dh(self,k=[0.0]):
+        """Return a 1d Hamiltonian"""
+        if self.is_multicell: # not implemented
+            self = self.get_no_multicell() # return the no multicell Hamiltonian
+        if not self.dimensionality==2:
+            raise NotImplementedError("get_1dh takes a 2d Hamiltonian, and "
+                    "returns the 1d one at a fixed transverse momentum")
+        intra,inter = kchain(self,k=k) # generate intra and inter
+        hout = self.copy() # copy the Hamiltonian
+        hout.intra = intra # store
+        hout.inter = inter # store
+        hout.dimensionality = 1 # one dimensional
+        hout.geometry.dimensionality = 1 # one dimensional
+        return hout
+    def get_multicell(self):
+        """Return a multicell copy of the Hamiltonian, a new object even
+        when this one is already multicell, so the result can be modified
+        without touching this one. Internal read-only callers that do not
+        want the copy use multicell.turn_multicell directly."""
+        h = multicell.turn_multicell(self)
+        if h is self: h = self.copy()
+        return h
+    def turn_multicell(self):
+        """Conver to multicell Hamiltonian"""
+        h = multicell.turn_multicell(self)
+        self.is_multicell = True
+        self.hopping = h.hopping # assign hopping
+    def get_no_multicell(self):
+        """Return a multicell Hamiltonian"""
+        h1 = multicell.turn_no_multicell(self)
+        h0 = h1.get_multicell() # turn multicell again
+        diff = (self.get_multihopping() - h0.get_multihopping()).norm()
+        if diff>1e-6: 
+            for t in self.hopping:
+                print(t.m)
+                print(t.dir)
+            for t in h0.hopping:
+                print(t.m)
+                print(t.dir)
+            raise ValueError("this Hamiltonian cannot be written in the "
+                    "non-multicell form, it couples cells beyond first "
+                    "neighbors")
+        else: return h1 # return the Hamiltonian
+    def clean(self):
+        """Clean a Hamiltonian"""
+        from .clean import clean_hamiltonian
+        clean_hamiltonian(self)
+    def get_operator(self,name,**kwargs):
+        """Return a certain operator"""
+        from . import operatorlist
+        return operators.object2operator(operatorlist.get_operator(self,name,
+            **kwargs))
+    def extract(self,name,**kwargs): 
+        """Extract something from the Hamiltonian"""
+        return extract.extract_from_hamiltonian(self,name,**kwargs)
+    @get_docstring(dvector.dvector_non_unitarity_map)
+    def write_non_unitarity(self,**kwargs):
+        dvector.dvector_non_unitarity_map(self,**kwargs)
+    def write_magnetization(self,**kwargs):
+        from .htk.write import write_magnetization
+        write_magnetization(self,**kwargs)
+    def write_onsite(self,zero_average=False,**kwargs):
+        """Extract onsite energy"""
+        d = self.extract("density")
+        if zero_average: d = d - np.mean(d)
+        self.geometry.write_profile(d,name="ONSITE.OUT",**kwargs)
+    def write_hopping(self,**kwargs):
+        groundstate.hopping(self,**kwargs)
+    def write_anomalous_hopping(self,**kwargs):
+        groundstate.anomalous_hopping(self,**kwargs)
+    def write_swave(self,**kwargs):
+        """Write the swave pairing"""
+        groundstate.swave(self,**kwargs)
+    def get_ipr(self,**kwargs):
+        """Return the IPR"""
+        from . import ipr
+        if self.dimensionality==0:
+            return ipr.ipr(self.intra,**kwargs) 
+        else:
+            raise NotImplementedError("the IPR is only implemented for 0d "
+                    "Hamiltonians")
+    @get_docstring(dvector.dvector_non_unitarity)
+    def get_dvector_non_unitarity(self,**kwargs):
+        return dvector.dvector_non_unitarity(self,**kwargs)
+    def get_density_matrix(self,**kwargs):
+        """Return the density matrix.
+
+        Note the index convention: this is
+        dm[i,j] = sum_occ conj(psi_i) psi_j, the transpose of the usual
+        one, so an expectation value is Tr(dm.T@A) and NOT Tr(dm@A) --
+        the two differ by a sign for any purely imaginary operator (sy,
+        valley, current). See densitymatrix.full_dm for why the convention
+        is what it is. h.get_vev(operator) does this correctly and is the
+        way to get an expectation value.
+        """
+        from . import densitymatrix
+        return densitymatrix.full_dm(self,**kwargs)
+    @get_docstring(superconductivity.average_hamiltonian_dvector)
+    def get_average_dvector(self,**kwargs):
+        return superconductivity.average_hamiltonian_dvector(self,**kwargs)
+    def didv(self,**kwargs):
+        from .transporttk.localprobe import Hamiltonian_didv
+        return Hamiltonian_didv(self,**kwargs)
+    def didv_curve(self,energies,**kwargs):
+        from .transporttk.localprobe import Hamiltonian_didv_curve
+        return Hamiltonian_didv_curve(self,energies,**kwargs)
+    def get_central_heterostructure(self,i=0,j=None,left=None,right=None,**kwargs):
+        """Two-terminal transport with `self` as the central scattering
+        region, contacted by two semi-infinite 1D chain leads at sites
+        `i`/`j` (see transporttk.central for details, including how to
+        use a superconducting lead). Returns a Heterostructure."""
+        from .transporttk.central import get_central_heterostructure
+        return get_central_heterostructure(self,i=i,j=j,left=left,
+                                            right=right,**kwargs)
+    def get_dm_vev(self,A,**kwargs):
+        # this used to be `from . import get_dm_vev`, a package attribute
+        # that src/pyqula/__init__.py deliberately never populates, so the
+        # method raised ImportError for every argument
+        from .vev import get_dm_vev
+        return get_dm_vev(self,A,**kwargs)
+    def get_single_vev(self,A,**kwargs):
+        # a single number, as the user guide documents it: spectrum.ev
+        # returns one entry per operator and there is one operator here,
+        # so this used to hand back an array of length one
+        A = self.get_operator(A) # get an operator
+        A = operators.vev_operator(self,A) # counted once, see get_vev
+        if A.matrix is None: # applied inside the sum over kpoints, see get_vev
+            from .vev import kresolved_orbital_vev
+            return float(np.sum(kresolved_orbital_vev(self,A,**kwargs)))
+        return float(spectrum.ev(self,operator=A.get_matrix(),**kwargs).real[0])
+    def get_several_vev(self,As,**kwargs):
+        As = [self.get_operator(A) for A in As] # get an operator
+        if all(A.matrix is not None for A in As): # all of them are matrices
+            # contract them against one density matrix, built once, each
+            # counted once on a Nambu Hamiltonian, see get_vev
+            As = [operators.vev_operator(self,A) for A in As]
+            return spectrum.ev(self,operator=[A.get_matrix() for A in As],
+                    **kwargs).real
+        # get_single_vev drops the hole-hole block itself
+        return np.array([self.get_single_vev(A,**kwargs) for A in As])
+
+
+hamiltonian = Hamiltonian
+
+
+
+
+
+def normalize_nsuper(h,nsuper):
+  """Turn the number of repetitions of a supercell into a (n1,n2,n3) triple
+
+  Only a single number used to be padded, so a two-component sequence --
+  which Geometry.get_supercell accepts -- raised a bare IndexError inside
+  the supercell builder, and a three-component one on a 2d Hamiltonian
+  built matrices of n1*n2*n3 cells next to a geometry of n1*n2, with
+  nothing downstream noticing."""
+  if np.array(nsuper).shape==(3,3): # a supercell matrix
+      raise NotImplementedError("a non-orthogonal (3x3 matrix) supercell is "
+              "only implemented for the geometry, g.get_supercell(m); for a "
+              "Hamiltonian give the number of repetitions along each lattice "
+              "vector instead")
+  ns = [n for n in nsuper] # as a list
+  if len(ns)>3:
+      raise ValueError("nsuper has "+str(len(ns))+" components, but a "
+              "supercell has at most three (one per lattice vector)")
+  ns = ns + [1 for i in range(3-len(ns))] # pad the missing directions
+  for i in range(h.dimensionality,3): # directions the lattice does not have
+      if ns[i]!=1:
+          raise ValueError("nsuper asks for "+str(ns[i])+" repetitions along "
+                  "direction "+str(i)+", but this Hamiltonian is "
+                  +str(h.dimensionality)+"-dimensional; only its first "
+                  +str(h.dimensionality)+" components may differ from 1")
+  return ns
+
+
+def print_hamiltonian(h):
+  """ Print the hamilotnian on screen """
+  from scipy.sparse import coo_matrix as coo # import sparse matrix
+  # the real-space hoppings, which every Hamiltonian has: this used to read
+  # h.inter, an attribute only a non-multicell 1d Hamiltonian carries, so it
+  # raised AttributeError on every 2d and 3d lattice
+  dd = h.get_multihopping().get_dict() # dictionary of hoppings
+  # the intracell block first, then the neighboring cells, in a stable order
+  keys = sorted(dd,key=lambda d: (np.max(np.abs(d)),tuple(d)))
+  for key in keys: # loop over directions
+    if np.max(np.abs(key))==0: print("Intracell matrix")
+    else: print("Hopping matrix to the cell",tuple([int(i) for i in key]))
+    print(coo(dd[key]))
+  return
+
+
+from .htk.cdw import add_sublattice_imbalance
+
+
+def require_sublattice(h,name,what):
+    """Refuse a sublattice-staggered term on a geometry with no sublattice.
+
+    These used to be silent no-ops, so a caller building "a gapped
+    semiconductor" on a triangular lattice got a gapless metal and no
+    warning."""
+    if not h.geometry.has_sublattice:
+        raise ValueError(name+" "+what+", and this geometry has no "
+          +"sublattice. On a bipartite lattice, build a cell that fits the "
+          +"pattern and label it -- g = g.get_supercell(2) followed by "
+          +"g.get_sublattice(), which two-colors the lattice. Otherwise "
+          +"write the profile explicitly with add_onsite/add_exchange.")
+
+
+
+
+
+
+def set_finite_system(hin,n=1,periodic=False):
+  """ Transforms the hamiltonian into a finite system,
+  removing the hoppings """
+  from copy import deepcopy
+  from .algebra import dagger
+  h = hin.copy() # copy Hamiltonian
+  h = h.get_supercell(n) # make the supercell
+  h = h.get_no_multicell()
+  # the wrap-around terms have to be added while the Hamiltonian still
+  # knows its dimensionality: this used to zero it two lines before the
+  # branches below tested it, so both were false by construction and
+  # periodic=True silently built an open cluster
+  dim = h.dimensionality # the dimensionality being collapsed
+  h.dimensionality = 0 # put dimensionality = 0
+  h.geometry.dimensionality = 0 # put dimensionality = 0
+  if periodic: # periodic boundary conditions
+    if dim == 1:
+      h.intra = h.intra + h.inter + dagger(h.inter)
+    elif dim == 2:
+      h.intra = h.intra +  h.tx + dagger(h.tx) 
+      h.intra = h.intra +  h.ty + dagger(h.ty)
+      h.intra = h.intra +  h.txy + dagger(h.txy)
+      h.intra = h.intra +  h.txmy + dagger(h.txmy)
+    else:
+      raise NotImplementedError("periodic boundary conditions are only "
+        +"implemented for one- and two-dimensional Hamiltonians, not "
+        +str(dim)+"-dimensional ones")
+  return h
+  
+# remove spin degree of freedom
+des_spin = increase_hilbert.des_spin
+
+
+def shift_fermi(h,fermi):
+    """ Moves the fermi energy of the system, the new value is at zero"""
+    r = h.geometry.r # positions
+    n = len(r) # number of sites
+    if checkclass.is_iterable(fermi): # iterable
+      if len(fermi)==n: # same number of sites
+        h.intra = h.intra + h.spinless2full(sparse_diag([fermi],[0]))
+      else:
+          raise ValueError("a site-dependent Fermi energy needs one value per "
+                  "site")
+    else:
+      rc = [i for i in range(n)]  # index
+      datatmp = [] # data
+      for i in range(n): # loop over positions 
+        if callable(fermi): fshift = fermi(r[i]) # fermi shift
+        else: fshift = fermi # assume it is a number
+        datatmp.append(fshift) # append value
+      m = csc_matrix((datatmp,(rc,rc)),shape=(n,n)) # matrix with the shift
+      h.intra = h.intra + h.spinless2full(m) # Add matrix 
+      return
+
+
+def first_neighborsnd(h):
+  """ Gets a first neighbor hamiltonian"""
+  r = h.geometry.r    # x coordinate 
+  g = h.geometry
+# first neighbors hopping, all the matrices
+  a1, a2 = g.a1, g.a2
+  def gett(r1,r2):
+    """Return hopping given two sets of positions"""
+    from . import neighbor
+    pairs = neighbor.find_first_neighbor(r1,r2)
+    if len(pairs)==0: rows,cols = [],[]
+    else: rows,cols = np.array(pairs).T # transpose
+    data = np.array([1. for c in cols])
+    n = len(r1)
+    m = csc_matrix((data,(rows,cols)),shape=(n,n),dtype=np.complex128)
+    m = h.spinless2full(m) # add spin degree of freedom if necessary
+    if h.is_sparse: return m
+    else: return m.todense()
+  if h.dimensionality==0:
+    h.intra = gett(r,r)
+  elif h.dimensionality==1:
+    h.intra = gett(r,r)
+    h.inter = gett(r,r+a1)
+  elif h.dimensionality==2:
+    h.intra = gett(r,r)
+    h.tx = gett(r,r+a1)
+    h.ty = gett(r,r+a2)
+    h.txy = gett(r,r+a1+a2)
+    h.txmy = gett(r,r+a1-a2)
+  else:
+      raise ValueError("the non-multicell first-neighbor hopping is only "
+              "implemented up to 2d")
+
+
+
+from .bandstructure import lowest_bands
+
+
+
+
+
+
+from .neighbor import parametric_hopping
+from .neighbor import parametric_hopping_spinful
+from .neighbor import generate_parametric_hopping
+
+
+
+
+from .superconductivity import project_electrons
+from .superconductivity import project_holes
+from .superconductivity import get_eh_sector_odd_even
+
+
+from .htk.kchain import kchain
+
+
+
+# import the function written in the library
+from .kanemele import generalized_kane_mele
+from .htk.modify import modify_hamiltonian_matrices
+
+from . import inout
+
+def load(input_file="hamiltonian.pkl"):  return inout.load(input_file)
+
+
+def print_hopping(h):
+    """Print all the hoppings in a user friendly way"""
+    from pandas import DataFrame
+    def pprint(m): 
+        if np.max(np.abs(m.real))>0.00001: print(DataFrame(m.real))
+        if np.max(np.abs(m.imag))>0.00001: print(DataFrame(m.imag*1j))
+        print("\n")
+    print("Onsite")
+    pprint(h.intra)
+    if h.dimensionality==0: return
+    h = h.get_multicell()
+    for t in h.hopping:
+        print("Hopping",t.dir)
+        pprint(t.m)
+
+
+
+
+from .htk.dummy import generate_dummy_hamiltonian
+generate_hamiltonian_from_dict = generate_dummy_hamiltonian
+
+

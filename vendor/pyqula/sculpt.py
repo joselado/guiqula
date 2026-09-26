@@ -1,0 +1,506 @@
+from __future__ import print_function
+from copy import deepcopy
+from . import algebra
+import numpy as np
+
+
+def keep_supercell_record(g,go,keep):
+  """Carry the unfolding replica bookkeeping (see supercell.py and
+  unfolding.bloch_projector) across an operation that keeps a subset of
+  the atoms of g, indexed by keep. The record travels with a geometry
+  through Geometry.copy(), and a geometry can be assembled in ways that
+  change the atom count without touching it (sculpt.add, for one), so a
+  record whose length no longer matches g is dropped rather than indexed
+  into -- a stale map is worse than none, and unfolding rebuilds one by
+  matching positions when it finds none."""
+  rep = getattr(g,"supercell_replica",None)
+  pri = getattr(g,"supercell_primal_index",None)
+  if rep is None or pri is None: return
+  rep = np.array(rep) ; pri = np.array(pri)
+  if len(rep)!=len(g.r) or len(pri)!=len(g.r): # stale, describes other atoms
+    drop_supercell_record(go) ; return
+  go.supercell_replica = rep[keep]
+  go.supercell_primal_index = pri[keep]
+
+
+def drop_supercell_record(go):
+  """Forget the unfolding replica bookkeeping, for an operation whose
+  output is not a supercell of anything in particular"""
+  go.supercell_matrix = None
+  go.supercell_replica = None
+  go.supercell_primal_index = None
+
+
+def remove(g,l):
+  """ Remove certain atoms from the geometry"""
+  lset = set(l) # membership test below is O(1) against a set, O(len(l)) against a list
+  go = g.copy() # copy the geometry
+  xo = [] # copy the list
+  yo = [] # copy the list
+  zo = [] # copy the list
+  for i in range(len(g.x)):
+    if not i in lset:
+      xo.append(g.x[i])
+      yo.append(g.y[i])
+      zo.append(g.z[i])
+  go.x = np.array(xo)
+  go.y = np.array(yo)
+  go.z = np.array(zo)
+  go.xyz2r() # update the revectors
+  go.has_fractional = False # site count changed, stale cached frac_r no longer valid
+  if hasattr(go, "frac_r"): del go.frac_r # don't leave a wrong-length array for
+  # code that reads frac_r directly without checking has_fractional first
+  # (see wanniertk/wannierize.py's _particle_hole_operator for a real bug
+  # this caused)
+  ##### if has sublattice ####
+  if g.has_sublattice: # if has sublattice, keep the indexes
+    ab = [] # initialize
+    for i in range(len(g.x)):
+      if not i in lset:
+        ab.append(g.sublattice[i]) # keep the index
+    go.sublattice = ab # store the keeped atoms
+  ##### keep the unfolding bookkeeping in sync with the atoms kept
+  keep_supercell_record(g,go,[i for i in range(len(g.x)) if i not in lset])
+  return go
+
+def intersec(g,f):
+  """ Intersec coordinates with a certain function which yields True or False,
+  output is resultant geometry """
+  store = np.array([f(ir) for ir in g.r],dtype=int) # store
+  return remove_sites(g,store) # remove those sites
+
+
+def remove_sites(g,store):
+  """ Intersec coordinates with a certain function which yields True or False,
+  output is resultant geometry """
+  gout = g.copy() # copy the geometry
+  store = np.array(store,dtype=int) # store
+  gout.r = g.r[store==1]
+  gout.r2xyz() # update r
+  gout.has_fractional = False # site count changed, stale cached frac_r no longer valid
+  if hasattr(gout, "frac_r"): del gout.frac_r # see remove()'s matching comment above
+  if gout.has_sublattice: # if has sublattice, keep the indexes
+    gout.sublattice = np.array(g.sublattice)[store==1]
+  keep_supercell_record(g,gout,store==1) # unfolding bookkeeping
+  return gout
+
+
+def intersected_indexes(g,f):
+  """Return the indexes of the atoms located in this function"""
+  iis = []
+  for (ii,ix,iy,iz) in zip(range(len(g.x)),g.x,g.y,g.z): # loop over positions
+    if f([ix,iy,iz]): # if the function yields true
+      iis.append(ii)
+  return iis
+
+
+
+
+
+
+
+
+
+
+
+def circle(r=1.0,out=False):
+  """ Returns a function which encondes a circle"""
+  if out:  # if true is inside
+    def f(x,y):
+      if r*r > x*x + y*y:
+        return True
+      else:
+        return False  
+  else: # if true is outside
+    def f(x,y):
+      if r*r < x*x + y*y:
+        return True
+      else:
+        return False  
+  return f # return the function
+
+
+
+def rotate(g,angle):
+    """ Rotates a geometry"""
+    if np.abs(angle)<0.0000001: 
+  #    print("No rotation performed")
+      return g
+    phi = angle
+    go = g.copy()
+    # modify x and y, z is the same
+    c,s = np.cos(phi), np.sin(phi)  # sin and cos of the anggle
+    go.x = c*g.x + s*g.y    # x coordinate 
+    go.y = -s*g.x + c*g.y    # y coordinate
+    go.xyz2r() # update r
+    if go.dimensionality==2:  # two dimensional
+      x,y,z = go.a1
+      go.a1 = np.array([c*x + s*y,-s*x + c*y,z])
+      x,y,z = go.a2
+      go.a2 = np.array([c*x + s*y,-s*x + c*y,z])
+    elif go.dimensionality==1: 
+      x,y,z = go.a1
+      go.a1 = np.array([c*x + s*y,-s*x + c*y,z])
+    elif go.dimensionality==0: pass
+    else: # 
+      raise NotImplementedError("rotate is only implemented for geometries up "
+              "to 2d")
+    if getattr(go,"primal_geometry",None) is not None:
+      # a supercell carries the primal cell it was built from, and the
+      # replica record that unfolding reads places every atom of the
+      # supercell at r0[primal] + n@A0, so the primal cell has to turn
+      # with it: leaving it behind makes the record stop describing the
+      # geometry, and get_supercell_map then throws it away and falls
+      # back to matching positions against an ideal diagonal supercell,
+      # which a rotated non-diagonal cell has no reason to match
+      go.primal_geometry = rotate(go.primal_geometry,angle)
+    go.get_fractional() # get fractional coordinates 
+    return go
+
+
+def center(g,angle):
+  """Center a geometry"""
+  g.x = g.x -sum(g.x)/len(g.x)
+  g.y = g.y -sum(g.y)/len(g.y)
+ 
+
+
+def remove_unibonded(g,d=1.0,tol=0.01,iterative=False):
+  """Removes from the geometry atoms with only one bond"""
+  sb = []
+  # precompute every direction's replicas once (this used to be redone
+  # from scratch inside the loop over i, turning what should be a single
+  # O(natoms) pass into an O(natoms^2) one) and count neighbors with
+  # numpy broadcasting instead of a per-atom python loop
+  replicas = [g.replicas(d=direc) for direc in g.neighbor_directions()]
+  for i in range(len(g.r)):
+    r1 = g.r[i] # first position
+    nb = 0 # initialize
+    for r2 in replicas: # loop over directions
+      dr2 = np.sum((r1-r2)**2,axis=1) # squared distances to this direction's replicas
+      nb += np.count_nonzero((d-tol < dr2) & (dr2 < d+tol)) # first neighbors
+    if nb<2:
+      sb.append(i+0) # add to the list
+  gout = remove(g,sb) # remove those atoms
+  if iterative: # ensure that it hs the same number of atoms by calling again
+    if len(g.x) != len(gout.x): # call again
+      return remove_unibonded(gout,d=d,tol=tol,iterative=iterative)
+  return gout # return the geometry
+
+
+
+def remove_central(g,n):
+  """Removes n atoms from the center of the crystal"""
+  rr = [r.dot(r) for r in g.r] # norm of the distances
+  inds = range(len(rr)) # indexes
+  sort_inds = [x for (y,x) in sorted(zip(rr,inds))] # indexes sorted by distance
+  rind = [sort_inds[i] for i in range(n)]
+  return remove(g,rind)  # return geometry with removed 
+
+
+def get_closest(g,**kwargs):
+  """Gets n atoms from the center of the crystal"""
+  return get_closest_rs(rs=g.r,**kwargs)
+
+
+def get_closest_rs(n=1,r0=[0.,0.,0.],rs=[]):
+  """Gets n sites around r0"""
+  r0 = np.array(r0)
+  rr = [(r-r0).dot(r-r0) for r in np.array(rs)] # norm of the distances
+  inds = range(len(rr)) # indexes
+  sort_inds = [x for (y,x) in sorted(zip(rr,inds))] # indexes sorted by distance
+  rind = [sort_inds[i] for i in range(n)]
+  return rind # return the indexes
+
+
+def get_central(g,n=1):
+    """Get the index of the central atom"""
+    g = g.copy() ; g.center()
+    return get_closest(g,n=n,r0=[0.,0.,0.])
+
+def shift(g,r=np.array([0.,0.,0.])):
+    """Shift the geometry by a certain vector"""
+    g.r = np.array([ri-r for ri in g.r])
+    g.r2xyz() # update
+
+
+def get_angle(v1,v2):
+    """Get the angle between two vectors"""
+    v3 = v1/np.sqrt(v1.dot(v1)) # normalize
+    v4 = v2/np.sqrt(v2.dot(v2)) # normalize
+    alpha = np.arccos(v3.dot(v4))
+    return alpha
+
+
+
+
+
+def get_furthest(g,n=1,angle=0.,tol=5.):
+    """Gets n atoms in a certain direction"""
+    rs = [] # norm of the distances
+    inds = [] # norm of the distances
+    for ir in range(len(g.r)): # store only vectors with a certain angle
+      r = g.r[ir]
+      a = np.arctan2(r[1],r[0])/np.pi*180.
+      if (np.abs(angle-a)%360)<tol: # if direction is right
+        rs.append(r) # store vector
+        inds.append(ir) # indexes
+    rr = [-r.dot(r) for r in rs] # norm of the distances
+    sort_inds = [x for (y,x) in sorted(zip(rr,inds))] # indexes sorted by distance
+    rind = [sort_inds[i] for i in range(n)]
+    return rind # return the indexes
+
+
+
+
+
+def rotate_a2b(g,a,b):
+  """ Rotates the geometry making an original vector pointing along b"""
+  da = a.dot(a)
+  da = a/np.sqrt(da) # unit vector
+  db = b.dot(b)
+  db = b/np.sqrt(db) # unit vector
+  # define two complex numbers
+  za = da[0] + da[1]*1j
+  zb = db[0] + db[1]*1j
+  angle = np.angle(za/zb) # angle in the complex plane
+  return rotate(g,angle)
+
+
+def build_island(gin,n=5,angle=20,nedges=6,clear=True):
+  """ Build an island starting from a 2d geometry"""
+  nf = float(n)   # get the desired size, in float
+  if gin.dimensionality!=2:
+    raise ValueError("build_island needs a 2d geometry")
+  g = gin.copy()
+  g = g.supercell(8*n)   # create supercell
+  g.set_finite() # set as finite system
+  g.center() # center the geometry
+  # now scuplt the geometry
+  g = rotate(g,angle*2.*np.pi/360) # initial rotation
+  def f(x,y): return x>-nf*(np.cos(np.pi/3)+1.)  # function to use as cut
+  for i in range(nedges): # loop over rotations, 60 degrees
+    g = intersec(g,f) # retain certain atoms
+    g = rotate(g,2.*np.pi/nedges) # rotate 60 degrees
+  if clear:  g = remove_unibonded(g)  # remove single bonded atoms
+  g.center() # center the geometry
+  return g # return the new geometry
+
+
+
+
+
+def reciprocal(v1,v2,v3=np.array([0.,0.,1.])):
+  """Return the reciprocal vectors"""
+  vol = v1.dot(np.cross(v2,v3)) # volume
+  w1 = np.cross(v2,v3)/vol
+  w2 = np.cross(v3,v1)/vol
+  w3 = np.cross(v1,v2)/vol
+  return (w1,w2,w3)
+
+
+
+def build_ribbon(g,n):
+  """ Return a geometry of a ribbon based on this cell"""
+  if g.dimensionality!=2: # if it is not two dimensional
+    raise ValueError("build_ribbon needs a 2d geometry")
+  angle = sculpt.get_angle(g.a1,g.a2)/np.pi*180 # get the angle
+  if np.abs(angle-90)<1.: # if it is square
+    gout = g.copy() # copy geometry
+    gout.dimensionality = 1
+    rs = []
+    for ir in g.r:
+      for i in range(n):
+        rs.append(ir+g.a1*i) # append position
+    gout.r = rs
+    gout.r2xyz() # update
+    raise NotImplementedError("build_ribbon is only implemented for a square "
+            "unit cell")
+    return gout
+
+
+def image2island(impath,g,nsuper=4,size=10,color="black",
+        npristine=1,periodic=False):
+  """Build an island using a certain image"""
+  from PIL import Image
+  im = Image.open(impath)
+  im = im.convert('RGBA')
+  data = np.array(im) # convert to array
+  red, green, blue, alpha = data.T # store data for readbility
+  if color=="black": #retain the black color
+    retain = (red < 20) & (blue < 20) & (green < 20)
+  elif color=="red": #retain the black color
+    retain = (red > 200) & (blue < 20) & (green < 20)
+  elif color=="blue": #retain the black color
+    retain = (red < 20) & (blue > 200) & (green < 20)
+  elif color=="green": #retain the black color
+    retain = (red < 20) & (blue < 20) & (green > 200)
+  else: # unrecognized
+    raise ValueError("unknown color; image2island accepts 'black', 'red', "
+            "'blue' and 'green'")
+  data[..., :-1][retain.T] = (0, 0, 0) # set as black
+  data[..., :-1][np.logical_not(retain.T)] = (255, 255, 255) # set as white
+#  data[..., :-1][not retain.T] = (255, 255, 255) # set as black
+  im2 = Image.fromarray(data) # convert to image
+  im2 = im2.convert("L") # to black and white
+  bw = np.asarray(im2).copy() # convert to array
+  bw[bw < 128] = 0  # Black
+  bw[bw >= 128] = 1 # White
+  bw = bw.transpose() # transpose image
+  # now create a supercell
+  nx,ny = bw.shape # size of the image
+  go = g.supercell(nsuper*size) # build supercell
+  go.center()
+  minx = -size
+  maxx = size
+  miny = -size*bw.shape[1]/bw.shape[0]
+  maxy = size*bw.shape[1]/bw.shape[0]
+  def finter(rtmp):
+    x = rtmp[0]
+    y = rtmp[1]
+    x = (x - minx)/(maxx-minx)
+    y = (y - miny)/(maxy-miny)
+    xi = (nx-1)*x # normalized
+    yi = (ny-1)*y # normalized
+    xi,yi = int(round(xi)),int(round(yi)) # integer
+    if not 0<xi<bw.shape[0]: 
+        if periodic: return True
+        else: return False
+    if not 0<yi<bw.shape[1]:
+        if periodic: return True
+        else: return False
+    if bw[xi,yi]==0: return True
+    else: return False
+  if periodic: 
+      go = go.supercell(npristine) # pristine supercell
+  go = intersec(go,finter)
+  if not periodic: go.dimensionality = 0 # zero dimensional
+  else: go.celldis = None
+  return go 
+
+
+def common(g1,g2,tol=0.1):
+  """Return the indexes of atoms common in both structures"""
+  indexes = []
+  for i in range(len(g1.r)):
+    r1 = g1.r[i] # position
+    for r2 in g2.r:
+      dr = r1-r2
+      if dr.dot(dr)<tol:
+        indexes.append(i)
+        break # next iteration
+  return indexes
+
+def add(g1,g2):
+  g = g1.copy() # copy geometry
+  g.x = np.concatenate([g1.x,g2.x])
+  g.y = np.concatenate([g1.y,g2.y])
+  g.z = np.concatenate([g1.z,g2.z])
+  g.xyz2r()
+  g.has_fractional = False # site count changed, stale cached frac_r no longer valid
+  if hasattr(g, "frac_r"): del g.frac_r # see remove()'s matching comment above
+  g.has_sublattice = False
+  drop_supercell_record(g) # the sum of two geometries is not a supercell
+  return g
+
+
+def set_xy_plane(g):
+  """Modify a geometry so the lattice vectors lie in the xy plane"""
+#  if g.dimensionality != 2: raise # only for 2d
+  go = g.copy() # copy geometry
+  nv = np.cross(g.a1,g.a2)
+  nv /= np.sqrt(nv.dot(nv)) # unitary normal vector
+  if (np.abs(np.abs(nv[2])-1.0)<1e-6): return go # do nothing
+  rho = np.sqrt(nv[0]*nv[0] + nv[1]*nv[1]) # planar component
+  theta = np.arctan2(rho,nv[2]) # theta angle
+  phi = np.arctan2(nv[1],nv[0]) # phi angle
+  # matrix that transforms (0,0,1) to that vector
+  ct,st = np.cos(theta),np.sin(theta)
+  cp,sp = np.cos(phi),np.sin(phi)
+  Rt = np.array([[ct,0,st],[0.,1.,0],[-st,0,ct]]) # rotate along y
+  Rp = np.array([[cp,-sp,0.],[sp,cp,0],[0.,0.,1.]]) # rotate along z
+  R = Rp@Rt # transforms (0,0,1) to nv
+  # algebra.inv always returns a complex128 array; this is a rotation of
+  # real vectors, so cast back to real to avoid leaking complex dtype
+  # into the geometry (breaks numba-jitted real-valued code downstream)
+  U = np.array(algebra.inv(R)).real # inverse transformation
+  # now transform everything
+  def transform(r): return np.array(U@r).flatten()
+  go.a1 = transform(g.a1)
+  go.a2 = transform(g.a2)
+  go.a3 = transform(g.a3)
+  go.r = np.array([transform(ri) for ri in g.r])
+  go.r2xyz()
+  return go
+
+
+
+
+def sites_in_unit_cell(r,a1,a2,a3,dim=3):
+  """Retain position located in the unit cell defined by a1,a2,a3"""
+  R = np.array([a1,a2,a3]).T # transformation matrix
+  L = algebra.inv(R) # inverse matrix
+  d0 = 0.00234231421 - 0.5 # random number
+  d1 = 1.0 + d0 # accuracy
+  # transform every position at once instead of looping over positions in
+  # python with a per-atom matrix-vector product
+  rn = np.array(r)@L.T # fractional coordinates of every position
+  if dim==3:
+    retain = (d0<rn[:,0])&(rn[:,0]<d1)&(d0<rn[:,1])&(rn[:,1]<d1)&(d0<rn[:,2])&(rn[:,2]<d1)
+  elif dim==2:
+    retain = (d0<rn[:,0])&(rn[:,0]<d1)&(d0<rn[:,1])&(rn[:,1]<d1)
+  else: return np.array([]) # unreached in practice, matches the old behavior
+  return retain.astype(int)
+
+def retain_unit_cell(r,a1,a2,a3,dim=3):
+    """Retain position located in the unit cell defined by a1,a2,a3"""
+    retain = sites_in_unit_cell(r,a1,a2,a3,dim=3)
+    return r[retain==1.]
+
+
+
+def indexes_line(g,r0,r1=None,width=2.0):
+    """Return the indexes along a certain line"""
+    if r1 is None: # workaround
+        r1 = np.array(r0)
+        r0 = np.array([0.,0.,0.])
+    i0 = g.closest_index(np.array(r0)) # first index
+    i1 = g.closest_index(np.array(r1)) # first index
+    r0 = g.r[i0] # initial point
+    r1 = g.r[i1] # final point
+    # now rotate the geometry to check which
+    # atoms to accept
+    gtmp = g.copy() # copy geometry
+    gtmp.dimensionality = 0 # this is just a workaround
+    gtmp.shift(r0) # shift the geometry
+    gtmp = rotate_a2b(gtmp,r1-r0,np.array([1.,0.,0.]))
+    # new positions
+    r0 = gtmp.r[i0]
+    r1 = gtmp.r[i1]
+    dr = r1 - r0 # vector between both points
+    dy = width # width accepted
+    dx = np.sqrt(dr.dot(dr))+0.1
+    # and every coordinate
+    x1,y1 = r0[0],r0[1]
+    x2,y2 = r1[0],r1[1]
+    ym = (y1+y2)/2. # average y
+    def fun(r):
+      """Function that decides which atoms to calculate"""
+      x0 = r[0]
+      y0 = r[1]
+      if (x1-dy)<x0<(x2+dy) and np.abs(y0-ym)<dy: return True
+      else: return False
+    inds = intersected_indexes(gtmp,fun) # indexes of the atoms
+    ur = dr/np.sqrt(dr.dot(dr)) # unitary vector
+    steps = [(gtmp.r[i] - r0).dot(ur) for i in inds] # proyect along that line
+    inds = [i for (s,i) in sorted(zip(steps,inds))] # sort by step
+    steps = sorted(steps) # sort the steps
+    return inds,np.array(steps) # return the index and associated steps
+
+
+
+
+
+
+
+

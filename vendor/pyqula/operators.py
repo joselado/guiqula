@@ -1,0 +1,693 @@
+# library to create operators
+from __future__ import division
+import numpy as np
+from scipy.sparse import csc_matrix as csc
+from scipy.sparse import csc_matrix
+from scipy.sparse import bmat,diags
+from scipy.sparse import identity
+from .superconductivity import build_eh
+from scipy.sparse import issparse
+import scipy.linalg as lg
+from . import current
+from . import algebra
+from . import topology
+from . import superconductivity
+from .algebra import braket_wAw
+
+import numbers
+from .check import require_nambu
+
+isnumber = algebra.isnumber
+
+
+class Operator():
+    def __init__(self,m,linear=True):
+        """Initialization"""
+        from .hamiltonians import Hamiltonian
+        self.linear = linear
+        self.matrix = None
+        # None, or a function of the kpoint returning an N x r matrix U with
+        # O(k) = U U^dagger, which lets a KPM expansion take the trace
+        # Tr[O delta(E-H)] exactly from the r columns of U (the unfolding
+        # projector has one, see unfolding.bloch_projector). A copy keeps
+        # it; a product or a sum, built out of a copy below, drops it
+        self.factor = None
+        if algebra.ismatrix(m):
+            self.m = lambda v,k=None: m@v # create dummy function
+            self.matrix = m
+            self.linear = True
+        elif type(m)==Operator: 
+            self.m = m.m
+            self.linear = m.linear
+            self.matrix = m.matrix
+            self.factor = m.factor # the same operator, the same factor
+        elif isinstance(m, numbers.Number): 
+            self.m = lambda v,k=None: m*v
+        elif callable(m): 
+            self.m = m # as function (assume k is a keyword)
+        elif isinstance(m, Hamiltonian): # Hamiltonian type
+            hkgen = m.get_hk_gen()
+            self.m = lambda v,k=None: hkgen(k)@v
+            self.linear = True
+        else: 
+            raise TypeError("an Operator must be built from a matrix, another "
+                    "Operator, a number, a callable, or a Hamiltonian, and "
+                    "not from a "+str(type(m)))
+    def __mul__(self,a):
+        """Define the multiply method"""
+        if type(a)==Operator:
+            out = Operator(self)
+            out.factor = None # a product is not factored as self is
+            if self.matrix is not None and a.matrix is not None:
+                out.matrix = self.get_matrix()@a.get_matrix()
+                out.m = lambda v,k=None: out.matrix@v # create dummy function
+            else:
+                # Operator(self) copied self.matrix, which is not the matrix
+                # of the composition; one of the two factors has none at all,
+                # so neither has the product. Leaving it in place made
+                # get_matrix() return the left factor alone, and the right one
+                # was then silently dropped (h.get_vev with a matrix-less
+                # operator returned the same numbers as with no operator)
+                out.matrix = None
+                out.m = lambda v,k=None: self.m(a.m(v,k=k),k=k)
+            out.linear = self.linear and a.linear
+            return out
+        elif algebra.ismatrix(a): # matrix type
+            if self.matrix is not None: # return a matrix
+                return self.get_matrix()@a # multiply matrices
+            else:
+                return self*Operator(a) # convert to operator
+        elif algebra.isnumber(a): # single number, just multiply
+            out = Operator(self) # make a copy
+            out.factor = None # nor a multiple
+            if self.matrix is not None:
+                out.matrix = self.get_matrix()*a # multiply
+                out.m = lambda v,k=None: out.matrix@v # create dummy function
+            else: 
+                out.m = lambda v,k=None: a*self.m(v,k=k)
+            return out
+        elif algebra.isvector(a): # array type, apply the operator to it
+            return self(a)
+        else: # anything else, try to convert it to operator
+            return self*Operator(a) # convert to operator
+    def trace(self):
+        if self.matrix is not None: 
+            return algebra.trace(self.matrix)
+        else:
+            raise ValueError("this operator has no matrix representation, so "
+                    "its trace is not defined")
+    def __rmul__(self,a):
+        if algebra.isnumber(a): # single number, just multiply
+            return self*a # just multiply
+        else: # not a number
+            return Operator(a)*self
+    def __truediv__(self,a):
+        if isnumber(a): return self*(1./a)
+        else:
+            raise TypeError("an Operator can only be divided by a number")
+    def __add__(self,a):
+        """Define the add method"""
+        if type(a)==Operator:
+            out = Operator(self)
+            out.factor = None # nor a sum
+            out.m = lambda v,k=None: self.m(v,k=k) + a.m(v,k=k)
+            if self.matrix is not None and a.matrix is not None:
+                out.matrix = self.matrix + a.matrix
+            else: out.matrix = None # not self's matrix, see __mul__
+            out.linear = self.linear and a.linear
+            return out
+        else:
+            return self + Operator(a) # convert to operator
+    def __sub__(self,a):
+        """Substraction method"""
+        return self + (-a)
+    def __neg__(self):
+        """Negative operator"""
+        return (-1)*self # return
+    def __call__(self,v,k=None):
+        """Define the call method"""
+        return self.m(v,k=k) 
+    def __matmul__(self,a): return self*a
+    def get_matrix(self,k=None,required=True):
+        """Return the matrix this operator acts with.
+
+        An Operator built from a function has none: it is defined only by
+        its action on a wavefunction, and when that action depends on the
+        kpoint (the unfolding projector, for one) no single matrix exists.
+        Asking for one raises, so that a routine needing a matrix fails
+        where the mistake is instead of silently computing an unweighted
+        quantity. Pass required=False to get None back and say in your own
+        message what your routine wanted the matrix for."""
+        if self.matrix is None:
+            if not required: return None # the caller will say what it needs
+            raise ValueError("this Operator is defined only by its action on "
+                    "a wavefunction and has no matrix representation, so the "
+                    "routine that asked for one cannot use it; build the "
+                    "operator from a matrix, or use a method that applies "
+                    "the operator to one state at a time")
+        if algebra.ismatrix(self.matrix):
+            return self.matrix
+        else:
+            raise TypeError("the stored operator is not a matrix but "
+                    "a "+str(type(self.matrix)))
+    def inv(self):
+        """Return the inverse operator"""
+        if self.matrix is not None and self.linear: # input is a matrix
+            m = self.matrix
+            def f(v,**kwargs):
+                return algebra.applyinverse(m,v)
+            return Operator(f,linear=True)
+        else:
+            raise NotImplementedError("only a linear operator with a matrix "
+                    "representation can be inverted")
+    def braket(self,w,**kwargs):
+        """Compute an expectation value"""
+        wi = self(w,**kwargs) # apply the operator
+        out =  algebra.braket_ww(w,wi)
+        if np.abs(out.imag)<1e-8: return out.real
+        else: return out
+
+
+def object2operator(a):
+    if a is None: return None
+    else: return Operator(a)
+
+
+
+def index(h,n=[0]):
+  """Return a projector onto a site"""
+  num = len(h.geometry.r)
+  val = [1. for i in n]
+  m = csc((val,(n,n)),shape=(num,num),dtype=np.complex128)
+  m = h.spinless2full(m) # return matrix with e-h
+  return Operator(m@m)
+
+
+
+def rfunction2operator(h,f):
+    """Given a function that takes a position, return the operator"""
+    n = len(h.geometry.r)
+    val = [f(ri) for ri in h.geometry.r]
+    inds = range(n)
+    m = csc((val,(inds,inds)),shape=(n,n),dtype=np.complex128)
+    return h.spinless2full(m) # return matrix
+
+
+def density2operator(h,d):
+    """Given a function that takes a position, return the operator"""
+    n = len(h.geometry.r)
+    if len(d)!=n:
+        raise ValueError("the density must have one value per site")
+    inds = range(n)
+    m = csc((d,(inds,inds)),shape=(n,n),dtype=np.complex128)
+    return h.spinless2full(m) # return matrix
+
+
+
+
+def operator2list(operator):
+  """Convert an input operator in a list of operators"""
+  if operator is None: # no operator given on input
+    operator = [] # empty list
+  elif not isinstance(operator,list): # if it is not a list
+    operator = [operator] # convert to list
+  return operator
+
+
+
+def interface1d(h,cut = 3.):
+  dind = 1 # index to which divide the positions
+  if h.has_spin:  dind *= 2 # duplicate for spin
+  if h.has_eh:  dind *= 2  # duplicate for eh
+  n = h.intra.shape[0] # number of elments of the hamiltonian
+  data = [] # epmty list
+  for i in range(n): # loop over elements
+    y = h.geometry.y[i//dind]
+    if np.abs(y)<cut: data.append(1.) # if it belongs to the interface
+    else:  data.append(0.)  # otherwise
+  row, col = range(n),range(n)
+  m = csc((data,(row,col)),shape=(n,n),dtype=np.complex128)
+  return m # return the operator
+
+
+
+def get_interface(h,fun=None):
+  """Return an operator that projects onte the interface"""
+  dind = 1 # index to which divide the positions
+  if h.has_spin:  dind *= 2 # duplicate for spin
+  if h.has_eh:  dind *= 2  # duplicate for eh
+  iden = csc(np.array(np.identity(dind,dtype=np.complex128))) # identity matrix
+  r = h.geometry.r # positions
+  out = [[None for ri in r] for rj in r] # initialize
+  if fun is None: # no input function
+    cut = 2.0 # cutoff
+    if h.dimensionality==1: index = 1
+    elif h.dimensionality==2: index = 2
+    else:
+        raise NotImplementedError("the default interface operator is only "
+                "defined for 1d and 2d Hamiltonians; pass an explicit fun "
+                "instead")
+    def fun(ri): # define the function
+      if np.abs(ri[index])<cut: return 1.0
+      else: return 0.0
+  for i in range(len(r)): # loop over positions
+    out[i][i] = fun(r[i])*iden 
+  return bmat(out) # return matrix
+
+
+
+def get_pairing(h,ptype="s"):
+  """Return an operator that calculates the expectation value of the
+  s-wave pairing"""
+  require_nambu(h,"a pairing operator")
+  if ptype=="s": op = superconductivity.spair
+  elif ptype=="deltax": op = superconductivity.deltax
+  elif ptype=="deltay": op = superconductivity.deltay
+  elif ptype=="deltaz": op = superconductivity.deltaz
+  else:
+      raise ValueError("unknown pairing operator '"+str(ptype)
+        +"', expected 's', 'deltax', 'deltay' or 'deltaz'")
+  r = h.geometry.r
+  out = [[None for ri in r] for rj in r]
+  for i in range(len(r)): # loop over positions
+    out[i][i] = op
+  return bmat(out) # return matrix
+
+
+
+def get_electron(h):
+  """Operator to project on the electron sector"""
+  if not h.has_eh:
+      return np.identity(h.intra.shape[0])
+  op = superconductivity.proje
+  r = h.geometry.r
+  out = [[None for ri in r] for rj in r]
+  for i in range(len(r)): # loop over positions
+    out[i][i] = op
+  return bmat(out)
+
+
+def get_hole(h):
+  """Operator to project on the hole sector"""
+  require_nambu(h,"the hole projector")
+  op = superconductivity.projh
+  r = h.geometry.r
+  out = [[None for ri in r] for rj in r]
+  for i in range(len(r)): # loop over positions
+    out[i][i] = op
+  return bmat(out)
+
+
+def get_tauz(h):
+  """Nambu particle-hole grading operator (+1 electron, -1 hole)"""
+  return get_electron(h)-get_hole(h)
+
+
+def vev_operator(h,op):
+  """The operator to sum over the occupied states to get <op>
+
+  With the electron-hole (Nambu) degree of freedom the sum runs over the
+  whole particle-hole-redundant set of negative-energy BdG states, and a
+  normal observable, which the Nambu lift puts both in the electron-electron
+  and in the hole-hole block, is counted twice. Dropping the hole-hole block
+  counts it once, and leaves a pairing operator, which lives in the
+  electron-hole blocks, untouched; restricting to the electron sector
+  instead, as get_vev and real_space_vev used to do, turned every pairing
+  operator into zero.
+  Applying it twice gives the same operator. op=None is the identity, whose
+  electron-electron block is the electron projector."""
+  if not h.has_eh: return op # nothing to drop
+  if op is None: return Operator(get_electron(h)) # the occupation
+  ph = Operator(get_hole(h)) # projector on the hole sector
+  return op - ph*op*ph # works for an operator without a matrix as well
+
+
+def get_bulk(h,fac=0.8):
+    """Return the bulk operator"""
+    r = h.geometry.r # positions
+    g = h.geometry
+    g.center() # center the geometry
+    out = np.array([1. for ir in r]) # initialize
+    if h.dimensionality==0:
+        dr = r[:,0]**2 + r[:,1]**2 # radii
+        dr = dr - np.min(dr)
+        dr = dr/np.max(dr) # to interval 0,1
+        out[fac<dr] = 0.0 # set to zero
+    elif h.dimensionality==1:
+        dr = r[:,1] # y positions
+        dr = dr - np.min(dr)
+        dr = dr/np.max(dr) # to interval 0,1
+        dr2 = dr - np.mean(dr) # minus the average
+        out[fac/2.<np.abs(dr2)] = 0.0 # set to zero
+    elif h.dimensionality==2:
+        dr = r[:,2] # z positions
+        dr = dr - np.min(dr)
+        dr = dr/np.max(dr) # to interval 0,1
+        dr2 = dr - np.mean(dr) # minus the average
+        out[fac/2.<np.abs(dr2)] = 0.0 # set to zero
+    else: # unsupported dimensionality
+        raise NotImplementedError("the bulk operator is only implemented for "
+                "Hamiltonians up to 2d")
+    from scipy.sparse import diags
+    n = len(r) # number of sites
+    out = diags([out],offsets=[0],shape=(n,n),dtype=np.complex128) # create matrix
+    m = h.spinless2full(out) # return this matrix
+    return m@m # return the square
+
+
+def get_surface(self,**kwargs):
+    m = get_bulk(self,**kwargs)
+    return identity(m.shape[0]) - m 
+
+
+def bulk1d(h,p = 0.5):
+    return get_bulk(h,fac=1.-p/2.)
+
+def get_xposition(h):  return get_position(h,mode="x")
+def get_yposition(h):  return get_position(h,mode="y")
+def get_zposition(h):  return get_position(h,mode="z")
+
+
+
+
+def get_position(h,mode="z"):
+  dind = 1
+  if h.has_spin:  dind *= 2 # duplicate for spin
+  if h.has_eh:  dind *= 2  # duplicate for eh
+  n = h.intra.shape[0] # number of elments of the hamiltonian
+  if len(h.geometry.z)!=n//dind: # dimensions do not match
+      raise ValueError("the geometry and the Hamiltonian have a different "
+              "number of sites")
+  data = [] # epmty list
+  if mode=="x": pos = h.geometry.x
+  elif mode=="y": pos = h.geometry.y
+  elif mode=="z":  pos = h.geometry.z
+  else:
+      raise ValueError("unknown mode; the position operator accepts 'x', 'y' "
+              "and 'z'")
+  for i in range(n): # loop over elements
+    z = pos[i//dind]
+    data.append(z)
+  row, col = range(n),range(n)
+  m = csc((data,(row,col)),shape=(n,n),dtype=np.complex128)
+  return m # return the operator
+
+
+
+from .spin import sx,sy,sz # import pauli matrices
+ 
+
+from .operatortk.spin import get_sx
+from .operatortk.spin import get_sy
+from .operatortk.spin import get_sz
+
+
+
+
+
+
+
+def get_rop(h,fun):
+  """Operator for the calculation of a position expectation value"""
+  rep = 1 # repetitions 
+  if h.has_spin: rep *= 2
+  if h.has_eh: rep *= 2
+  data = []
+  for ri in h.geometry.r: 
+    for i in range(rep): data.append(fun(ri)) # store
+  n = h.intra.shape[0]
+  row = range(n)
+  col = range(n)
+  m = csc((data,(row,col)),shape=(n,n),dtype=np.complex128)
+  return m
+
+
+
+
+def get_sublattice(h,mode="both"):
+  """Sublattice operator"""
+  if not h.geometry.has_sublattice:
+      raise ValueError("the sublattice operator needs a geometry with a "
+              "sublattice index")
+  rep = 1 # repetitions 
+  if h.has_spin: rep *= 2
+  if h.has_eh: rep *= 2
+  data = []
+  for s in h.geometry.sublattice: 
+    for i in range(rep): 
+      if mode=="both": data.append(s) # store
+      elif mode=="A": data.append((s+1.)/2.) # store
+      elif mode=="B": data.append((-s+1.)/2.) # store
+      else:
+          raise ValueError("unknown mode; the sublattice operator accepts "
+                  "'both', 'A' and 'B'")
+  n = h.intra.shape[0]
+  row = range(n)
+  col = range(n)
+  m = csc((data,(row,col)),shape=(n,n),dtype=np.complex128)
+  return m
+
+
+def get_velocity(h):
+  """Return the velocity operator"""
+  if h.dimensionality==1:
+    vk = current.current_operator(h)
+    def f(w,k=[0.,0.,0.]):
+        return vk(k)@w
+    return f
+  elif h.dimensionality==2:
+    # the Cartesian band speed |<v>|, with v_alpha = i[H,r_alpha] built by
+    # conductivitytk.kubo (the shared, benchmarked velocity: it applies
+    # current.hk_derivative's 2*pi normalization, the reduced->Cartesian
+    # Jacobian, and the intracell-bond term that the lattice gauge drops).
+    # Building it out of raw current.derivative instead, as this used to,
+    # got all three wrong -- the x and y derivative orders were also
+    # swapped -- and the result was not even C3 invariant on a honeycomb
+    # lattice: three symmetry-equivalent k-points of the same band came
+    # out with three different speeds.
+    from .conductivitytk.kubo import _setup,_velocities
+    hm,orders,hkgen,jac,dr,cellvol,scale = _setup(h)
+    def f(w,k=[0.,0.,0.]):
+      hk = hkgen(k) # Bloch Hamiltonian at this k-point
+      v = _velocities(hm,orders,jac,dr,hk,k) # Cartesian velocity operators
+      vs = np.array([braket_wAw(w,v[a]).real for a in range(3)])
+      return np.sqrt(vs.dot(vs))*w # return the modulus of the velocity
+    return Operator(f)
+  else:
+    raise NotImplementedError("the velocity operator is only implemented "
+      +"for dimensionality 1 and 2 (current.derivative, the shared "
+      +"k-derivative, has no 3D branch)")
+
+
+
+get_current = get_velocity
+
+def get_spin_current(h):
+  vk = current.current_operator(h)
+  sz = get_sz(h)
+  def f(w,k=[0.,0.,0.]):
+    return braket_wAw(w,vk(k)).real*braket_wAw(w,sz).real
+  return f
+
+
+
+from .operatortk.valley import get_valley
+from .operatortk.inplane_valley import get_valley_taux, get_valley_tauy, \
+        get_inplane_valley
+
+
+
+
+
+def tofunction(A):
+    """Transform this object into a callable function"""
+    if A is None: return lambda x,k=0.0: 1.0
+    return Operator(A) # use operator
+#    if A is None: return lambda x,k=0.0: 1.0 # no input
+#    if callable(A): return A # if it is a function
+#    else: return lambda x,k=0.0: braket_wAw(x,A).real # if it is a matrix
+
+
+def ipr(w,k=None):
+    """IPR operator"""
+    return np.sum(np.abs(w)**4)*w # return a vector
+
+
+def get_envelop(h,sites=[],d=0.3):
+    """
+    Return a list of operators that project on the different
+    sites
+    """
+    # get a first neighbor Hamiltonian
+    h0 = h.geometry.get_hamiltonian(has_spin=h.has_spin,is_sparse=True)
+    m = h0.get_hk_gen()([0.,0.,0.]) # evaluate Hamiltonian at Gamma
+    out = [] # output list
+    for s in sites: # loop over sites
+      c = m.getcol(s) # get column
+      c = np.array(c.todense()) # transform into a dense matrix
+      c = c.reshape(m.shape[0]) # 1D vector
+      c = c*d # renormalize all the hoppings
+      c[s] = 1.0 # set same atom to 1
+      c = c/np.sum(c) # normalize the whole vector
+      c = diags([c],[0],dtype=np.complex128) # create matrix
+      out.append(c) # store matrix
+    return out # return matrices
+
+
+def get_sigma_minus(h):
+    """Bloch generator of the sublattice lowering operator: a first
+    neighbor hopping that starts only on sublattice A, so the intra-cell
+    block is sigma_minus in the sublattice pseudospin.
+
+    Note that get_hk_gen adds the Hermitian conjugate of the inter-cell
+    hoppings, so the matrix this returns at finite k is not purely
+    sigma_minus -- only its intra-cell block is."""
+    def fun(r1,r2):
+        i1 = h.geometry.get_index(r1,replicas=True)
+        # get_index returns None for a position that is not in the cell or
+        # any of its replicas; there is nothing to couple then. This used
+        # to be unreachable, because `fun` was silently dropped by
+        # get_hamiltonian (it is the old name of `tij`) and a plain
+        # first-neighbor Hamiltonian was built instead
+        if i1 is None: return 0.0
+        if not h.geometry.sublattice[i1]==1: return 0.0
+        dr = r1-r2 # distance
+        if 0.9<dr.dot(dr)<1.1: return 1.0 # get first neighbor
+        return 0.0
+    h0 = h.geometry.get_hamiltonian(has_spin=h.has_spin,fun=fun) # FN coupling
+    hk = h0.get_hk_gen() # get generator
+    return hk # return function
+
+
+
+
+
+
+
+
+
+def get_operator(op,k=[0.,0.,0.],h=None):
+    """Get a function that acts as an operator"""
+    return Operator(op)
+
+
+def get_berry(h,**kwargs):
+    """Return Berry operator"""
+    return topology.berry_operator(h,**kwargs)
+
+def get_valley_berry(h,**kwargs):
+    """Return Valley Berry operator"""
+    return get_operator_berry(h,"valley",**kwargs)
+
+
+def get_operator_berry(h,name,**kwargs):
+    """Return Valley Berry operator"""
+    op = get_matrix_operator(h,name) # matrix operator (handles composite names)
+    return topology.berry_operator(h,operator=op,**kwargs)
+
+
+
+def get_sz_berry(h,**kwargs):
+    """Return Valley Berry operator"""
+    return get_operator_berry(h,"sz",**kwargs)
+
+
+def get_matrix_operator(h,name,k=None,**kwargs):
+    """Return a function that takes a matrix as input and returns another
+    matrix"""
+    if name=="valley":
+        op = get_valley(h,projector=True) # valley operator
+        return op
+    elif name in ["valley_spin","spin_valley","valley_sz","sz_valley"]:
+        op = get_valley(h,projector=True) # valley operator
+        sz = get_sz(h) # sz matrix (not an Operator wrapper)
+        return lambda m,k=None: op(m,k=k)@sz # return operator
+    else:
+        op = h.get_operator(name) # assume that it is a matrix
+        return lambda m,k=None: op@m
+
+
+def bool_layer_array(g,n=0):
+    """Return the lowest layer array"""
+    fac = []
+    z0 = sorted(np.unique(g.z).tolist())[n]
+    fac = g.z*0. # initialize
+    fac[np.abs(g.z-z0)<1e-3] = 1.0
+#    for z in g.z:
+#        if abs(z-z0)<1e-3: fac.append(1)
+#        else: fac.append(0)
+#    fac = np.array(fac)
+    return fac
+
+
+bottom_layer = lambda g: bool_layer_array(g,n=0)
+top_layer = lambda g: bool_layer_array(g,n=1)
+
+def get_valley_layer(self,n=0,**kwargs):
+    """Get the valley operator for a specific layer"""
+    ht = self.copy() # create a dummy
+    fac = bool_layer_array(self.geometry,n=n) # create array
+    ht.geometry.sublattice = self.geometry.sublattice * fac
+    return get_valley(ht,**kwargs) # return the valley operator
+
+operator_list = ["None","Sx","Sy","Sz","valley","sublattice","Berry","valleyberry","IPR","electron","hole","Bulk","Surface","xposition","yposition","zposition"]
+
+def get_layer(self,n=0):
+   fac = bool_layer_array(self.geometry,n=n)
+   inds = range(len(fac)) # sites
+   d = len(fac)
+   m = csc_matrix((fac,(inds,inds)),shape=(d,d),dtype=np.complex128) # matrix
+   return self.spinless2full(m)
+
+
+
+
+def get_up(self):
+    """Return up sector"""
+    op = get_sz(self)
+    return (op@op + op)/2.
+
+
+def get_dn(self):
+    """Return up sector"""
+    op = get_sz(self)
+    return (op@op - op)/2.
+
+
+def get_potential(self,**kwargs):
+    """Return the operator associated to a potential"""
+    h = self.copy()
+    h.clean() # clean the Hamiltonian
+    from . import potentials
+    f = potentials.commensurate_potential(h.geometry,amplitude=1.0,**kwargs)
+    h.add_onsite(f)
+    return Operator(h.intra) # return the operator
+
+
+
+def get_location(self,r=[0.,0.,0.]):
+    "Return the closest index to a specific location"
+    ir = self.geometry.closest_index(r)
+    return index(self,n=[ir])
+
+
+def get_site(H,index=0):
+    """Return a projector operator in site number index"""
+    from . import potentials
+    Hp = H*0. # make a dummy copy of the Hamiltonian
+    f = potentials.impurity(H.geometry.r[index],v=1.0) # create a local pot
+    Hp.add_onsite(f) # add onsite energy
+    return Operator(Hp.intra) # return an operator object
+
+
+def get_correlator_ij(H,i=0,j=0):
+    """Return a projector for the correlator ij"""
+    d = len(H.geometry.r)
+    m = np.zeros((d,d),dtype=np.complex128)
+    m[i,j] = 1.0 # set this to nonzero
+    # WARNING, this uses dense matrices
+    m = H.spinless2full(m) # as full matrix
+    return Operator(m) # return operator
+
+
+from .operatortk.angularmomenta import get_angular_momenta

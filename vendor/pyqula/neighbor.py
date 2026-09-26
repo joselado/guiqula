@@ -1,0 +1,339 @@
+from __future__ import print_function
+import numpy as np
+from scipy.sparse import csc_matrix,bmat
+from numba import jit
+from . import algebra
+
+
+minimum_hopping = 1e-3
+
+
+def find_close_neighbors(r0,rs,d=2.0):
+    """Return the indexes of the neighbors that are closer than a
+    certain distance"""
+    return find_close_neighbors_jit(np.array(r0),np.array(rs),d=d)
+
+
+def find_close_neighbors_batch(r1,rs,d=2.0):
+    """Return, for every point in r1, the indexes of the points in rs
+    closer than distance d -- i.e. the same criterion as
+    find_close_neighbors, but for many query points at once against one
+    shared KD-tree over rs (built once), instead of one O(len(rs)) scan
+    per query point (kanemele.py calls find_close_neighbors once per site
+    in a Python loop, which is O(N^2) total for N sites; this is
+    O(N log N))."""
+    from scipy.spatial import cKDTree
+    r1 = np.array(r1,dtype=np.float64).real
+    rs = np.array(rs,dtype=np.float64).real
+    if len(rs)==0 or len(r1)==0:
+        return [np.zeros(0,dtype=np.int_) for _ in range(len(r1))]
+    tree = cKDTree(rs)
+    neighbors = tree.query_ball_point(r1,r=d)
+    return [np.array(js,dtype=np.int_) for js in neighbors]
+
+
+@jit(nopython=True)
+def find_close_neighbors_jit(r0,rs,d=2.0):
+    """Return the indexes of the neighbors that are closer than a
+    certain distance"""
+    nout = 0
+    out = np.zeros(len(rs),dtype=np.int_)
+    d2 = d*d
+    dx = rs[:,0] - r0[0]
+    dy = rs[:,1] - r0[1]
+    dz = rs[:,2] - r0[2]
+    dr2 = dx*dx + dy*dy + dz*dz
+    inds = np.arange(0,len(rs))
+    return inds[dr2<d2]
+
+
+
+def find_first_neighbor(r1,r2):
+     """Return the (i,j) index pairs of first neighbors between the point
+     sets r1 and r2, i.e. 0.99<|r1[i]-r2[j]|^2<1.01.
+
+     Uses a KD-tree to only compare points that are actually close to each
+     other, instead of number_neighbors_jit/find_first_neighbor_jit's
+     all-pairs O(N^2) scan below (kept for testing): for N~1e5 sites the
+     O(N^2) scan is 1e10 distance checks, infeasible in time even jitted,
+     while the KD-tree query is O(N log N)."""
+     from scipy.spatial import cKDTree
+     r1 = np.array(r1,dtype=np.float64).real
+     r2 = np.array(r2,dtype=np.float64).real
+     if len(r1)==0 or len(r2)==0: return np.zeros((0,2),dtype=np.int_)
+     tree = cKDTree(r2)
+     # candidates within a slightly generous radius; the exact
+     # 0.99<dr^2<1.01 criterion is applied below since query_ball_point's
+     # own radius test (dr^2<=r^2) is a different (inclusive) boundary.
+     # No workers= kwarg here: pyproject.toml doesn't pin a scipy floor,
+     # and workers= only exists from scipy>=1.6 -- single-threaded is a
+     # small fraction of a second even at 1e5 sites, not worth requiring it
+     candidates = tree.query_ball_point(r1,r=np.sqrt(1.01))
+     rows,cols = [],[]
+     for i,js in enumerate(candidates):
+         if len(js)==0: continue
+         js = np.array(sorted(js),dtype=np.int_)
+         dr = r2[js]-r1[i]
+         dr2 = np.sum(dr*dr,axis=1)
+         sel = js[(dr2>0.99) & (dr2<1.01)]
+         rows.extend([i]*len(sel))
+         cols.extend(sel.tolist())
+     if len(rows)==0: return np.zeros((0,2),dtype=np.int_)
+     return np.array([rows,cols],dtype=np.int_).T
+
+@jit(nopython=True)
+def number_neighbors_jit(r1,r2):
+    """Number of neighbors"""
+    out = 0
+    for i in range(len(r1)):
+      for j in range(len(r2)):
+         ri = r1[i]
+         rj = r2[j]
+         dr = ri-rj
+         dr2 = dr[0]*dr[0] + dr[1]*dr[1] + dr[2]*dr[2]
+         if 0.99<dr2<1.01: out += 1 # increase
+    return out # number of neighbors
+
+@jit(nopython=True)
+def find_first_neighbor_jit(r1,r2,pairs):
+    """Find the first neighbors"""
+    out = 0
+    for i in range(len(r1)):
+      for j in range(len(r2)):
+         ri = r1[i]
+         rj = r2[j]
+         dr = ri-rj
+         dr2 = dr[0]*dr[0] + dr[1]*dr[1] + dr[2]*dr[2]
+         if 0.99<dr2<1.01:
+             pairs[out,0] = i
+             pairs[out,1] = j
+             out += 1 # increase
+    return pairs # indexes of the neighbors
+
+
+def find_first_neighbor_bruteforce(r1,r2):
+    """O(N^2) reference implementation of find_first_neighbor, kept for
+    testing the KD-tree version above against (see
+    tests/geometry/test_neighbor_kdtree.py)."""
+    r1 = np.array(r1,dtype=np.float64).real
+    r2 = np.array(r2,dtype=np.float64).real
+    nn = number_neighbors_jit(r1,r2)
+    out = np.zeros((nn,2),dtype=np.int_)
+    return find_first_neighbor_jit(r1,r2,out)
+
+
+
+
+
+
+def connections(r1,r2,dr=1.0):
+  """Return a list with the connections of each atom"""
+  pairs = find_first_neighbor(r1,r2) # get the pairs of first neighbors
+  out = [[] for i in range(len(r1))] # output list
+  for p in pairs:
+    out[int(p[0])].append(int(p[1])) 
+  return out # return list
+
+
+
+
+
+def parametric_hopping(r1,r2,fc,is_sparse=False):
+  """ Generates a parametric hopping based on a function.
+
+  The result is the hopping from the r1 sites to the r2 sites, so it has
+  len(r1) rows and len(r2) columns. Both dimensions used to be taken from
+  r2, which only happens to be right when the two lists have the same
+  length -- the rectangular case (a lead-to-central coupling, see
+  multiterminal.Device.biterminal) came back square, with the rows beyond
+  len(r1) left at zero."""
+  if is_sparse: # sparse matrix
+    # This should be made more efficient
+#    print("Sparse parametric hopping")
+    rows,cols,data = [],[],[]
+    for i in range(len(r1)):
+      for j in range(len(r2)):
+        val = fc(r1[i],r2[j]) # add hopping based on function
+        if abs(val) > minimum_hopping: # retain this hopping
+            data.append(val)
+            rows.append(i)
+            cols.append(j)
+    m = csc_matrix((data,(rows,cols)),shape=(len(r1),len(r2)),
+                    dtype=np.complex128)
+  #  if not is_sparse: m = m.todense() # dense matrix
+    return m
+  else:
+    m = np.array(np.zeros((len(r1),len(r2)),dtype=np.complex128)) # complex matrix
+    for i in range(len(r1)):
+      for j in range(len(r2)):
+        m[i,j] = fc(r1[i],r2[j])
+    return m
+
+ 
+
+
+
+
+
+def parametric_hopping_spinful(r1,r2,fc,is_sparse=False):
+    """ Generates a parametric hopping based on a function, that returns
+    a 2x2 matrix"""
+    m = [[None for i in range(len(r2))] for j in range(len(r1))]
+    for i in range(len(r1)):
+      for j in range(len(r2)):
+        val = fc(r1[i],r2[j]) # add hopping based on function
+        m[i][j] = val # store this result
+    m = algebra.bmat(m) # convert to matrix
+    if not is_sparse: m = algebra.todense(m) # dense matrix
+    return m
+
+
+# this is a potential speed-up
+#
+#def generate_parametric_hopping(h,f=None,mgenerator=None,
+#             spinful_generator=False):
+#    """Generate a parametric hopping"""
+#    if f is not None and not spinful_generator:
+#        from .specialhopping import entry2matrix
+#        mgen = entry2matrix(f) # create an mgenerator
+#    return generate_parametric_hopping_old(h,f=None,mgenerator=mgen,
+#             spinful_generator=spinful_generator)
+#
+
+
+
+def generate_parametric_hopping(h,f=None,mgenerator=None,
+             spinful_generator=False):
+    """ Adds a parametric hopping to the hamiltonian
+    based on an input function"""
+    rs = h.geometry.r # positions
+    g = h.geometry # geometry
+    has_spin = h.has_spin # check if it has spin
+    is_sparse = h.is_sparse
+    if mgenerator is None: # no matrix generator given on input
+      if f is None: # no function given on input
+        raise ValueError("a parametric hopping needs either a hopping "
+                "function f or a matrix generator mgenerator")
+      if spinful_generator:
+        h.has_spin = True
+        generator = parametric_hopping_spinful
+      else:
+        h.has_spin = False
+        generator = parametric_hopping
+      def mgenerator(r1,r2):
+        return generator(r1,r2,f,is_sparse=is_sparse)
+    else:
+      if h.dimensionality==3:
+        raise NotImplementedError("a matrix generator is not supported for 3d "
+                "Hamiltonians, pass a hopping function f instead")
+    h.intra = mgenerator(rs,rs)
+    if h.dimensionality == 0: pass
+    elif h.dimensionality == 1:
+      dr = g.a1
+      h.inter = mgenerator(rs,rs+dr)
+    elif h.dimensionality == 2:
+      h.tx = mgenerator(rs,rs+g.a1)
+      h.ty = mgenerator(rs,rs+g.a2)
+      h.txy = mgenerator(rs,rs+g.a1+g.a2)
+      h.txmy = mgenerator(rs,rs+g.a1-g.a2)
+    elif h.dimensionality == 3:
+      if spinful_generator:
+        raise NotImplementedError("a spinful hopping generator is not "
+                "implemented for 3d Hamiltonians")
+      h.is_multicell = True # multicell Hamiltonian
+      from . import multicell
+      multicell.parametric_hopping_hamiltonian(h,fc=f)
+    else:
+      raise ValueError("the parametric hopping needs a dimensionality between "
+              "0 and 3")
+    # check that the sparse mde is set ok
+    if is_sparse and not algebra.issparse(h.intra):
+      h.is_sparse = False
+      h.turn_sparse() # turn the matrix sparse
+    if not is_sparse and algebra.issparse(h.intra):
+      h.is_sparse = True
+      h = h.get_dense() # turn the matrix dense
+    if spinful_generator: # spin generator, assume it has spin
+        h.has_spin = True
+    else: # spinless generator, add the spin degree by hand
+        if has_spin: # Hamiltonian should be spinful
+            h.has_spin = False
+            h.turn_spinful()
+    return h
+
+
+
+
+def neighbor_distances(g,n=4):
+    """Return distances to neighbors:
+    - n: number of neighbors wanted"""
+    nsuper = max([n//len(g.r)+3,3])
+    g = g.supercell(nsuper) # create supercell
+    r = g.r # positions
+    n = len(r)
+    out = np.zeros(n*n) # empty array
+    out = neighbor_distances_jit(r,out) # distances
+    out = np.round(out,6) # unique distances
+    out = np.unique(out) # unique distances
+    return np.array([out[i+1] for i in range(len(out)-1)])[0:n] # return
+
+
+@jit(nopython=True)
+def neighbor_distances_jit(r,out):
+    n = len(r) # number of sites
+    k = 0
+    for i in range(n):
+        for j in range(n):
+            dr = r[i]-r[j]
+            dis = dr[0]*dr[0]+dr[1]*dr[1]+dr[2]*dr[2]
+            dis = np.sqrt(dis) # square root
+            out[k] = dis # store
+            k+=1 # increase
+    return out
+
+
+
+def neighbor_cells(num,dim=3):
+  """Return indexes of neighboring cells,
+  ordered from closer to further"""
+  cells = [] # empty list
+  if dim==0: return cells
+  elif dim==1:
+    for i in range(-num,num+1): cells.append([i,0,0])
+  elif dim==2:
+    for i in range(-num,num+1):
+      for j in range(-num,num+1):
+        cells.append([i,j,0])
+  elif dim==3:
+    for i in range(-num,num+1):
+      for j in range(-num,num+1):
+        for k in range(-num,num+1):
+          cells.append([i,j,k])
+  # now order the cells
+  dis = [np.array(a).dot(np.array(a)) for a in cells] # distances
+  cells = [y for (x,y) in zip(dis,cells)] # sort
+  return cells # return the indexes
+
+
+
+def neighbor_directions(g,cutoff=3):
+    """Return the vectors pointing to neighbors"""
+    dirs = []
+    if g.dimensionality==0: return [[0.,0.,0.]] # zero dimensional
+    elif g.dimensionality==1: # one dimensional
+      for i1 in range(-cutoff,cutoff+1): dirs.append([i1,0,0])
+    elif g.dimensionality==2: # two dimensional
+      for i1 in range(-cutoff,cutoff+1):
+        for i2 in range(-cutoff,cutoff+1):
+          dirs.append([i1,i2,0])
+    elif g.dimensionality==3: # three dimensional
+      for i1 in range(-cutoff,cutoff+1):
+        for i2 in range(-cutoff,cutoff+1):
+          for i3 in range(-cutoff,cutoff+1):
+            dirs.append([i1,i2,i3])
+    else:
+      raise ValueError("the neighbor directions need a geometry of "
+              "dimensionality between 0 and 3")
+    dirs = [np.array(d) for d in dirs]
+    return dirs # return directions
+

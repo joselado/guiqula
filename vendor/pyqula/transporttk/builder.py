@@ -1,0 +1,125 @@
+from ..heterostructures import create_leads_and_central_list
+from ..heterostructures import Heterostructure
+from ..algebra import dagger
+import numpy as np
+
+
+def build(left=None,right=None,central=None,**kwargs):
+    """Create a heterostructure, works also for 2d"""
+  #  if central is None: central = [h1,h2] # list
+    if left is None or right is None:
+        raise ValueError("a heterostructure needs both leads, pass them as "
+                "left and right")
+    h1,h2 = left,right
+    if central is None: central = [] # list
+    # make the Hamiltonians compatible
+    from ..htk.mode import make_compatible
+    h1 = make_compatible(h1,h2)
+    h2 = make_compatible(h2,h1)
+    central = [make_compatible(hi,h1) for hi in central]   
+    ###############
+    if h1.dimensionality==h2.dimensionality: # same dimensionality
+        if h1.dimensionality==1: # one dimensional
+          return create_leads_and_central_list(h2,h1,central,**kwargs) # standard way
+        elif h1.dimensionality==2:  # two dimensional
+          def fun(k,lc=1.0,rc=1.0,delta=1e-3):
+              # evaluate at a particular k point
+              h1p = h1.get_1dh(k)
+              h2p = h2.get_1dh(k)
+              centralp = [hc.get_1dh(k) for hc in central]
+              out = create_leads_and_central_list(h2p,h1p,centralp,**kwargs) # standard way
+              out.scale_lc = lc
+              out.scale_rc = rc
+              out.delta = delta
+              return out # return 1d heterostructure
+          hout = Heterostructure() # create
+          hout.Hr = h2.copy() # store Hamiltonian
+          hout.Hl = h1.copy() # store Hamiltonian
+          hout.dimensionality = 2 # two dimensional
+          hout.generate = create_generator(hout,fun) # create the generator
+          # function that generates the heterostructure
+          return hout # function that return a heterostructure
+        else:
+            raise NotImplementedError("a 2d heterostructure needs both leads "
+                    "to be 2d")
+    else:
+  # this is a temporal fix
+        if h1.dimensionality==1 and h2.dimensionality==2: # 1D to 2D
+            if len(central)!=0:
+                raise NotImplementedError("a central region is not "
+                        "implemented for a 1d lead coupled to a 2d one")
+            h2t = h2.get_1dh(0.) # create a 1D Hamiltonian
+            HT = build(h1,h2t,central=central,**kwargs) # create a fake HT
+            HT0 = HT.copy() # copy the HT
+            def get_selfenergy(energy,nk=40,lead=0,delta=HT.delta,**kwargs):
+                if lead==0: return HT0.get_selfenergy(energy,lead=lead,
+                                            delta=delta,
+                                         **kwargs) # default
+                elif lead==1:
+                    from .. import green
+                    gf = green.bloch_selfenergy(h2,energy=energy,
+                                           nk=nk,mode="adaptive",
+                                           delta=delta)[0]
+                    gamma = dagger(HT0.left_inter)
+                    return gamma@gf@dagger(gamma)
+                else:
+                    raise ValueError("a heterostructure has two leads, so "
+                            "lead must be 0 or 1")
+            HT.get_selfenergy = get_selfenergy # overwrite
+            HT.block_diagonal = False # block diagonal
+            HT.central_intra = h1.intra # intra cell
+            HT.right_coupling = dagger(HT.left_coupling)
+            return HT
+        raise NotImplementedError("this combination of lead dimensionalities "
+                "is not implemented; the leads must both be 1d, both be 2d, "
+                "or be a 1d one coupled to a 2d one")
+
+
+
+
+def create_generator(HT,fun):
+    """Create a function that creates a generator for 2d structures"""
+    def outf(k):
+        HT1 = fun(k) # evaluate
+        # overwrite some parameters
+        HT1.delta = HT.delta
+        HT1.scale_rc = HT.scale_rc
+        HT1.scale_lc = HT.scale_lc
+        return HT1
+    return outf # return function
+
+
+
+
+
+
+
+
+def get_reflection_normal_lead(ht,s):
+    """Get reflection matrix of the normal lead"""
+    r1,r2 = s[0][0],s[1][1] # get the reflection matrices
+    get_eh = ht.get_eh_sector # function to read either electron or hole
+    # select the normal lead
+    # r1 is normal
+    if np.sum(np.abs(get_eh(ht.left_intra,i=0,j=1)))<0.0001: r = r1
+    elif np.sum(np.abs(get_eh(ht.right_intra,i=0,j=1)))<0.0001: r = r2
+    else:
+        raise ValueError("the normal-lead reflection matrix needs one of the "
+                "two leads to be normal, and both of them are superconducting")
+    return r
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

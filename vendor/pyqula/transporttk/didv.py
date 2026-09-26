@@ -1,0 +1,408 @@
+from ..parallel import pcall
+import numpy as np
+from ..integration import simpson
+from scipy.integrate import quad
+from .. import parallel
+
+
+
+def generic_didv(self,temp=None,**kwargs):
+    """Wrapper to compute the dIdV at finite temperature.
+
+    The temperature is `temp`; `T` and `temperature` are accepted as
+    aliases, because they are how the rest of the library spells it. They
+    used to be swallowed by **kwargs, silently returning the zero
+    temperature result. The one exception is a LocalProbe, whose `T` is
+    its probe transparency: LocalProbe.didv/didv_curve take that argument
+    themselves, so it never reaches this alias loop."""
+    from ..utilities import rename_kwarg
+    for alias in ["T","temperature"]:
+        if alias in kwargs:
+            if temp is not None:
+                raise TypeError("got both 'temp' and its alias '"+alias
+                  +"'; pass only one of them")
+            kwargs = rename_kwarg(kwargs,alias,"temp")
+            temp = kwargs.pop("temp")
+    if temp is None: temp = 0. # default, zero temperature
+    if temp==0.: return zero_T_didv(self,**kwargs) # zero temperature
+    else: # finite temperature
+        return finite_T_didv(self,temp=temp,**kwargs)
+
+from .thermaldidv import finite_T_didv
+
+def zero_T_didv(self,delta=None,**kwargs):
+    """Zero temperature dIdV"""
+    if delta is None: delta = self.delta # set the own delta
+    if self.dimensionality==1: # one dimensional
+        return zero_T_didv_1D(self,delta=delta,**kwargs)
+    elif self.dimensionality==2: # two dimensional
+        return zero_T_didv_2D(self,delta=delta,**kwargs)
+    else:
+        raise NotImplementedError("the dIdV is only implemented for 1d and 2d "
+                "junctions")
+
+
+
+
+
+def zero_T_didv_1D(self,energy=0.0,delta=None,**kwargs):
+    """Wrapper for the dIdV in one dimension"""
+    if delta is None: delta = self.delta # set the own delta
+    if not self.dimensionality==1: # only for one dimensional
+        raise ValueError("zero_T_didv_1D is only for 1d junctions")
+    return didv(self,energy=energy,delta=delta,**kwargs)
+
+quadepsrel = 1e-2
+quadlimit = 30
+
+def zero_T_didv_2D(self,energy=0.0,delta=None,nk=10,
+                   imode="quad",**kwargs):
+    """Wrapper for the dIdV in two-dimensions"""
+    if delta is None: delta = self.delta # set the own delta
+    if not self.dimensionality==2: # only for two dimensional
+        raise ValueError("zero_T_didv_2D is only for 2d junctions")
+    # function to integrate
+    print("Computing",energy)
+    f = lambda k: self.generate(k,self.scale_lc,self.scale_rc).didv(energy=energy,delta=delta,**kwargs)
+    if imode=="grid":
+        out = pcall(f,np.linspace(0.,1.,nk,endpoint=False))
+        return np.trapezoid(out,dx=1./nk)
+    elif imode=="simpson":
+        return simpson(f,eps=1e-4,xlim=[0.,1.])
+    elif imode=="quad":
+        return quad(f,0.,1.,epsrel=quadepsrel,limit=quadlimit)[0]
+    else: 
+        raise ValueError("unknown imode "+str(imode)+"; the accepted ones "
+                "are 'mesh', 'simpson' and 'quad'")
+
+
+
+from .smatrix import get_smatrix
+from .. import algebra
+dagger = algebra.dagger
+
+
+
+def _lead_is_superconducting(h):
+    """Whether a lead Hamiltonian carries an actual (nonzero) pairing
+    amplitude -- as opposed to merely being written in the Nambu basis
+    with zero pairing, e.g. via turn_nambu())."""
+    if h is None or not getattr(h,"has_eh",False): return False
+    return not h.get_anomalous_hamiltonian().is_zero()
+
+
+def _is_localprobe(ht):
+    from .localprobe import LocalProbe
+    return isinstance(ht,LocalProbe)
+
+
+def _both_leads_superconducting(ht):
+    """Whether `ht` is a two-lead heterostructure (Heterostructure.Hl/Hr
+    set by heterostructures.build) with both leads superconducting, or a
+    LocalProbe whose probe (`ht.lead`) and sample (`ht.H`) are both
+    superconducting -- the case where the Floquet-Keldysh formalism
+    applies."""
+    if _is_localprobe(ht):
+        return _lead_is_superconducting(ht.lead) and _lead_is_superconducting(ht.H)
+    if not (hasattr(ht,"Hl") and hasattr(ht,"Hr")): return False
+    return _lead_is_superconducting(ht.Hl) and _lead_is_superconducting(ht.Hr)
+
+
+def keldysh_didv(ht,voltage=0.0,delta=1e-6,dv=None,use_qtci=False,
+                  use_aaa=False,**kwargs):
+    """Zero/finite-bias differential conductance dI/dV at bias `voltage`,
+    obtained as a central finite-difference derivative of the
+    Floquet-Keldysh DC current (Heterostructure.get_dc_current), see
+    keldyshtk/current.py and San-Jose, Cayao, Prada, Aguado, NJP 15, 075019
+    (2013). Supported for two-lead heterostructures with no explicit
+    central region (heterostructures.build(h1,h2)), and for a LocalProbe
+    (transporttk.localprobe.LocalProbe) whose probe lead is itself
+    superconducting -- the probe and the sample site it couples to play
+    the role of the two leads.
+
+    `use_aaa=True` (NOT the default -- see dc_current's own
+    selfenergy_method docstring for why) builds one aaatk.selfenergy_aaa.
+    SelfenergyAAA interpolant per lead (see keldyshtk.current.
+    build_selfenergy_aaa) once here, covering both voltage+dv and
+    voltage-dv's sideband window, and shares it between the Ip and Im
+    dc_current calls below instead of each independently building (and
+    discarding) its own. This is a real speedup where it's accurate (see
+    aaatk/selfenergy_aaa.py's module docstring), but the finite difference
+    below divides by `Ip-Im`, which can be much smaller than `Ip`/`Im`
+    themselves -- documentation/keldysh_sideband_decimation_plan.md found
+    this amplifies AAA's per-branch error (which itself grows with the
+    sideband window/nmax_max, not fully explained yet) by up to ~10x in
+    the resulting dI/dV. Only turn this on if you have independently
+    checked it against use_aaa=False for your own system/parameter range.
+
+    `use_qtci=True` instead builds a qtcitk.selfenergy_qtci.SelfenergyQTCI
+    interpolant the same way (overrides `use_aaa`). Kept for comparison/
+    debugging only -- measured NOT to help for a LocalProbe's Sancho-Rubio
+    self-energy (see qtcitk.selfenergy_qtci's module docstring for the
+    benchmark).
+
+    Ip and Im also share one converged adaptive-nmax value: Ip runs
+    dc_current's normal adaptive nmax search, then Im is solved once at
+    that same nmax (dc_current's fixed_nmax) instead of re-running its own
+    independent search. `voltage+dv` and `voltage-dv` differ by only `2*dv`
+    (~1-2% of voltage), so they converge at the same nmax in practice --
+    skipping Im's own search avoids redoing ~O(log nmax_max) redundant
+    chain re-solves, and differencing two same-nmax evaluations also
+    cancels systematic truncation error that could otherwise show up as
+    numerical noise in the derivative (see documentation/
+    keldysh_sideband_decimation_plan.md). Only applies when the caller
+    hasn't already fixed nmax explicitly (an explicit `fixed_nmax` in
+    kwargs is left untouched, applying identically to both Ip and Im, same
+    as passing it straight to dc_current would)."""
+    from ..keldyshtk.current import (dc_current, build_selfenergy_qtci,
+                                      build_selfenergy_aaa)
+    if dv is None: dv = max(abs(voltage)*1e-2,1e-3)
+    # Only auto-build a shared interpolant if the caller hasn't already
+    # passed their own selfenergy_qtci -- otherwise this would silently
+    # discard it in favor of a freshly built one every time, defeating the
+    # explicit-override escape hatch documented above and in dc_current.
+    if "selfenergy_qtci" not in kwargs:
+        if use_qtci:
+            nmax_max = kwargs.get("nmax_max", 40)
+            kwargs["selfenergy_qtci"] = build_selfenergy_qtci(
+                    ht, abs(voltage)+dv, nmax_max, delta=delta)
+        elif use_aaa:
+            nmax_max = kwargs.get("nmax_max", 40)
+            shared = build_selfenergy_aaa(ht, abs(voltage)+dv, nmax_max, delta=delta)
+            if all(s.converged for s in shared.values()):
+                kwargs["selfenergy_qtci"] = shared
+    if "fixed_nmax" in kwargs:
+        Ip = dc_current(ht,voltage+dv,delta=delta,**kwargs)
+        Im = dc_current(ht,voltage-dv,delta=delta,**kwargs)
+    else:
+        Ip, nmax_shared = dc_current(ht,voltage+dv,delta=delta,return_nmax=True,**kwargs)
+        Im = dc_current(ht,voltage-dv,delta=delta,fixed_nmax=nmax_shared,**kwargs)
+    return (Ip-Im)/(2*dv)
+
+
+def didv(ht,energy=0.0,energies=None,delta=1e-6,opl=None,opr=None,
+         method="auto",**kwargs):
+    """Calculate differential conductance.
+
+    `method` selects the transport formalism used:
+      - "smatrix": zero-temperature scattering-matrix (Landauer/BTK)
+        conductance (the BdG smatrix formula is used automatically when
+        `ht.has_eh` is True). For a LocalProbe this evaluates the probe's
+        self-energy frozen at absolute energy 0 (a grounded, wide-band
+        tip) and drops the entire bias across the sample only.
+      - "keldysh": Floquet-Keldysh dI/dV, see `keldysh_didv`. Only valid
+        for a two-lead heterostructure with no explicit central region and
+        both leads superconducting, or a LocalProbe with a superconducting
+        probe and sample.
+      - "auto" (default): "keldysh" if both leads of `ht` are
+        superconducting, otherwise "smatrix" -- this matches the physical
+        case each method is built for (Keldysh MAR/Josephson physics needs
+        two superconducting leads; a single/no superconducting lead is
+        already handled exactly by the smatrix formula).
+
+    For a LocalProbe, forcing method="keldysh" where "auto" would pick
+    "smatrix" (i.e. a normal, or negligibly-paired, probe lead) *is*
+    consistent with the "smatrix" result: keldyshtk.current.
+    _prepare_bias_target grounds a normal probe (freezes its self-energy
+    at absolute energy 0, matching "smatrix"'s own convention for it)
+    specifically so the two methods agree there. This is a wide-band-lead
+    approximation, exact only in that limit -- for a probe with genuine
+    band structure over the relevant bias window (e.g. a plain 1D chain,
+    not literally wide-band) expect a residual of a few percent, not
+    perfect agreement (see the tolerance discussion in
+    tests/keldysh/test_localprobe_keldysh.py's
+    test_localprobe_normal_junction_matches_static_bias_reference).
+
+    Do NOT extend that expectation to a two-lead Heterostructure or to a
+    LocalProbe whose probe genuinely is superconducting: `dc_current`
+    there evaluates the probe's self-energy at each Floquet sideband's
+    actual (non-frozen) energy -- letting it float with the bias like a
+    second, comparable electrode is required for correct AC-Josephson/MAR
+    physics through the probe's own gap (grounding it instead pins every
+    evaluation at that gap's center, confirmed to suppress the current by
+    over an order of magnitude for examples/transport/
+    decay_constant_keldysh's parameters) and for a Heterostructure's
+    validated normal-normal rigid-bias reduction (tests/keldysh/
+    test_normal_junction_gauge_invariance.py). Forcing method="keldysh"
+    there where "auto" would pick "smatrix" computes a genuinely
+    different bias convention (confirmed to disagree by a non-vanishing
+    O(1) factor, e.g. ratio 1.18-1.24 well above the gap, as the extra
+    lead's pairing amplitude is taken to zero), not an approximation of
+    it -- and forced sub-gap comparisons are further complicated by a
+    real physical (not numerical) effect: any nonzero pairing, however
+    small, opens a hard gap exactly at the Fermi level, which
+    `dc_current`'s quasienergy integral always samples (it starts at 0),
+    so its zero-pairing limit there does not equal the exactly-normal
+    self-energy either.
+
+    `energy` and `energies` are mutually exclusive: `energy` (the default
+    path) is a single scalar bias; `energies`, if given, is an array of
+    them, and dispatches straight to `didv_curve` (see its own docstring
+    for the shared-AAA-interpolant behavior when `use_aaa=True` is also
+    passed) instead of computing a single dI/dV at `energy` -- `energy`
+    itself is then ignored. Passing an array directly as `energy` is not
+    supported (it fails, on the smatrix path with a numpy broadcasting
+    error, on the keldysh path with an "ambiguous truth value" error from
+    keldysh_didv's own scalar arithmetic) -- use `energies=` instead."""
+    if energies is not None:
+        return didv_curve(ht, energies, delta=delta, opl=opl, opr=opr,
+                           method=method, **kwargs)
+    if method=="auto":
+        method = "keldysh" if _both_leads_superconducting(ht) else "smatrix"
+    if method=="keldysh":
+        return keldysh_didv(ht,voltage=energy,delta=delta,**kwargs)
+    elif method!="smatrix":
+        raise ValueError("Unknown didv method '"+str(method)+"', expected"
+                          " 'auto', 'smatrix' or 'keldysh'")
+    if ht.has_eh: # for systems with electons and holes
+        return didv_BdG(ht,energy=energy,delta=delta,**kwargs)
+    else:
+        # options that only steer the Keldysh solver are legitimately
+        # inert here (didv_curve sets them for whichever method "auto"
+        # ends up choosing); anything else is a keyword nobody consumes,
+        # which used to be dropped in silence
+        keldysh_only = ["use_aaa","use_qtci","selfenergy_qtci","dv",
+                        "nmax_max","fixed_nmax"]
+        unknown = [k for k in kwargs if k not in keldysh_only]
+        if len(unknown)>0:
+            raise TypeError("unexpected keyword argument(s) "
+              +str(sorted(unknown))+" for didv with method='smatrix' on a "
+              +"normal (non-superconducting) heterostructure")
+        s = get_smatrix(ht,energy=energy,delta=delta) # get the smatrix
+        if opl is not None or opr is not None: # some projector given
+          raise NotImplementedError("opl/opr projectors are not implemented for didv")
+        r1,r2,t = s[0][0],s[1][1],s[0][1] # get the reflection matrices
+        # select a normal lead (both of them are)
+        # r1 is normal
+        ree = r1
+        Ree = np.trace(dagger(ree)@ree) # total e-e reflection 
+        G1 = (ree.shape[0] - Ree).real # conductance
+        G2 = np.trace(s[0][1]@dagger(s[0][1])).real # total e-e transmission
+        return (G1+G2)/2.
+
+
+def didv_curve(ht, energies, **kwargs):
+    """Convenience wrapper: dI/dV evaluated over an array of energies, in
+    parallel (see parallel.pcall) -- the array-native equivalent of the
+    `[ht.didv(energy=e) for e in es]` loop every example in this repo uses.
+    `didv(energies=...)` (note the plural, distinct from and mutually
+    exclusive with its scalar `energy=...`) dispatches straight here, so
+    calling this directly is only needed for callers who want the array
+    entry point without going through `didv`. Routed through `generic_didv`
+    per energy (like `Heterostructure.didv`/`LocalProbe.didv` themselves)
+    rather than the bare method-selecting `didv()`, so an unspecified
+    `delta` still defaults to `ht.delta` and a `temp` kwarg still reaches
+    `finite_T_didv` correctly, matching those methods' own conventions.
+
+    If the sweep resolves to the Keldysh path (see `method` below), this
+    builds ONE shared AAA self-energy interpolant up front (keldyshtk.
+    current.build_shared_selfenergy), sized to cover every energy in
+    `energies`, and reuses it for every keldysh_didv call in the sweep --
+    mirroring keldyshtk.current.iv_curve's own sharing (a `dc_current`
+    sweep), extended here to a `didv` sweep. `use_aaa` defaults to `True`
+    HERE (opposite of a single `didv`/`keldysh_didv` call's own default),
+    since an energy sweep is exactly the workload the AAA build cost is
+    meant to amortize -- a raw loop of `didv(energy=e, use_aaa=True)`
+    calls, by contrast, builds (and discards) an independent interpolant
+    at every single energy, since keldysh_didv's own sharing is scoped to
+    just its own Ip/Im pair within one call -- expensive (each build alone
+    can cost several to tens of seconds, see aaatk/selfenergy_aaa.py), and
+    exactly the trap this function exists to avoid. Pass
+    `use_aaa=False` explicitly to opt back out. Skipped if the caller
+    already passed `selfenergy_qtci` explicitly (an explicit opt-out, so
+    building a shared fit here would silently override the caller's own
+    choice) -- matching `iv_curve`'s own behavior, or if the shared fit
+    doesn't converge within budget (falls back to `use_aaa=False`
+    automatically). Only applies at `temp=0` (the default): a finite-`temp`
+    sweep goes through `finite_T_didv` at every energy independently, each
+    with its own internal thermal-quadrature sharing already, a separate
+    concern from sharing across THIS function's energy array.
+
+    `method="auto"` (the default, matching `didv`'s own default) is
+    resolved once, up front, from `ht` alone rather than per energy: the
+    same physical system is being swept over energy, so the keldysh-vs-
+    smatrix choice cannot differ from one energy to the next."""
+    method = kwargs.pop("method", "auto")
+    if method == "auto":
+        method = "keldysh" if _both_leads_superconducting(ht) else "smatrix"
+    if (method == "keldysh" and kwargs.get("temp", 0.) == 0.
+            and "selfenergy_qtci" not in kwargs
+            and kwargs.get("use_aaa", True) and len(energies)):
+        from ..keldyshtk.current import build_shared_selfenergy
+        nmax_max = kwargs.get("nmax_max", 40)
+        emax = max(abs(e) for e in energies)
+        shared = build_shared_selfenergy(ht, emax, nmax_max=nmax_max,
+                                          delta=kwargs.get("delta"),
+                                          dv=kwargs.get("dv"))
+        if shared is not None:
+            kwargs["selfenergy_qtci"] = shared
+    return np.array(pcall(lambda e: generic_didv(ht, energy=e, method=method,
+                                                   **kwargs),
+                           energies))
+
+
+def didv_kmap(self,kpath=None,energies=None,
+           write=True,**kwargs):
+    """Compute the momentum-resolved dIdV"""
+    def fun(k,e):
+        if self.dimensionality==2: # 2D heterostructure
+            HT1 = self.generate(k) # generate heterostructure
+            return HT1.didv(energy=e,**kwargs)
+        else:
+            raise NotImplementedError("the k-resolved dIdV is only "
+                    "implemented for 2d junctions")
+    if kpath is None: kpath = np.linspace(0.,1.,40)
+    if energies is None: energies = np.linspace(-1.0,1.,40)
+    from ..parallel import pcall
+    kout,eout,dout = [],[],[]
+    ds = pcall(lambda k: [fun(k,e) for e in energies],kpath) # call in parallel
+    for (k,d) in zip(kpath,ds): # loop over kpoints
+        kout = np.concatenate([kout,energies*0.+k]) # store kpoint
+        eout = np.concatenate([eout,energies]) # store energies
+        dout = np.concatenate([dout,d]) # store DOS
+    if write:
+        np.savetxt("DIDV_MAP.OUT",np.array([kout,eout,dout]).T)
+    return (kout,eout,dout)
+
+
+
+
+
+def didv_BdG(ht,energy=0.0,delta=None,component=None,**kwargs):
+    """Calculate differential conductance in the presence of e-h.
+
+    `component` selects which part of the current is returned: None (the
+    default) gives the full BTK conductance, "electron" the normal
+    transmission and "hole"/"Andreev" the Andreev one.
+
+    `delta` defaults to the junction's own broadening, as get_smatrix
+    does (didv itself always passes one down explicitly)."""
+    # delta used to be declared here and never forwarded, unlike the
+    # normal branch in didv above, so the broadening of a BdG junction
+    # could only be set through its attribute
+    s = get_smatrix(ht,energy=energy,delta=delta,check=True) # get the smatrix
+    r1,r2 = s[0][0],s[1][1] # get the reflection matrices
+    get_eh = ht.get_eh_sector # function to read either electron or hole
+    # select the normal lead
+    # r1 is normal
+    r = ht.get_reflection_normal_lead(s) # return the reflection
+    ree = get_eh(r,i=0,j=0) # reflection e-e
+    reh = get_eh(r,i=0,j=1) # reflection e-h
+    Ree = np.trace(dagger(ree)@ree) # total e-e reflection 
+    Reh = np.trace(dagger(reh)@reh) # total e-h reflection 
+    if component is None: # return all the current
+        G = (ree.shape[0] - Ree + Reh).real # conductance
+    elif component=="electron":
+        G = (ree.shape[0] - Ree - Reh).real # electron conductance
+    elif component in ["hole","Andreev"]:
+        G = 2*Reh.real # hole conductance
+    else:
+        raise ValueError("unknown component '"+str(component)+"' for the "
+                "BdG dIdV; the accepted ones are None (the full current), "
+                "'electron', and 'hole'/'Andreev'")
+    return G
+
+
+
+
+

@@ -1,0 +1,283 @@
+
+# special band structures
+
+from __future__ import print_function
+import scipy.linalg as lg
+from scipy.sparse import csc_matrix
+import scipy.sparse.linalg as slg
+from scipy.sparse import issparse
+import numpy as np
+from . import timing
+from . import klist
+from . import topology
+from . import operators
+from .algebra import braket_wAw
+from . import algebra
+
+from .limits import densedimension as maxdim
+arpack_tol = 1e-8
+arpack_maxiter = 10000
+
+
+def berry_bands(h,klist=None,mode=None,operator=None):
+  """Calculate band structure resolved with Berry curvature"""
+  ks = [] # list of kpoints
+  if mode is not None: # get the mode
+    if mode=="sz": operator = operators.get_sz(h)
+    else:
+      raise ValueError("unknown mode; berry_bands accepts 'sz', or an "
+              "explicit operator")
+
+  fo = open("BANDS.OUT","w")
+  for ik in range(len(klist)): # loop over kpoints
+    (es,bs) = topology.operator_berry_bands(h,k=klist[ik],operator=operator)
+    for (e,b) in zip(es,bs):
+      fo.write(str(ik)+"    "+str(e)+"    "+str(b)+"\n")
+  fo.close()
+
+
+
+def current_bands(h,klist=None):
+  """Calcualte the band structure, with the bands"""
+  if h.dimensionality != 1: # only 1 dimensional
+    raise ValueError("the current-resolved bands are only implemented for 1d "
+            "Hamiltonians")
+  # go for the rest
+  hkgen = h.get_hk_gen() # get generator of the hamiltonian
+  if klist is None:  klist = np.linspace(0,1.,100) # generate k points
+  fo = open("BANDS.OUT","w") # output file
+  from . import current
+  fj = current.current_operator(h) # function that generates the operator
+  from .htk.eigenvectors import peigh_bloch
+  # peigh_bloch densifies every H(k) first: stacking them with np.array
+  # instead raises "must be real number, not csc_matrix" on a sparse
+  # Hamiltonian
+  es_batch,ws_batch = peigh_bloch(hkgen,[[k,0.,0.] for k in klist]) # batched eigh
+  for ik,k in enumerate(klist): # loop over kpoints
+    jk = fj([k,0.,0.]) # get current operator
+    evals,evecs = es_batch[ik],ws_batch[ik] # eigenvectors and eigenvalues
+    evecs = np.transpose(evecs) # transpose eigenvectors
+    for (e,w) in zip(evals,evecs): # do the loop
+        waw = braket_wAw(w,jk).real # product
+        fo.write(str(k)+"    "+str(e)+"   "+str(waw)+"\n")
+  fo.close()
+
+
+
+
+
+
+
+
+
+def ket_Aw(A,w):
+  return A@w
+
+
+
+
+def get_bands(self,**kwargs):
+    """Compute n-dimensional bandstructures"""
+    if self.non_hermitian: # non Hermitian Hamiltonians
+        from .nonhermitiantk.nhmethods import get_bands as get_bands_NH
+        return get_bands_NH(self,**kwargs)
+    else: # for hermitian Hamiltonians
+        return get_bands_nd(self,**kwargs)
+
+
+
+
+def get_bands_nd(h,kpath=None,operator=None,num_bands=None,
+                    callback=None,central_energy=0.0,nk=400,
+                    ewindow=None,
+                    output_file="BANDS.OUT",write=True,
+                    silent=True):
+    """
+    Get an n-dimensional bandstructure
+
+    operator: None, a single operator spec, or a list of operator specs
+        (each spec may be a string name, matrix, Operator instance, or
+        callable, exactly as accepted for a single operator). If a list is
+        given, the expectation value of every operator is computed for each
+        eigenstate, and the returned array gains one extra row per operator
+        (k, e, c1, c2, ...) instead of just (k, e, c).
+
+    ewindow: None, or a callable taking an energy and returning whether to
+        keep that band. Applied on every code path (with and without an
+        operator, batched or not); the callback, if any, still sees the
+        full unfiltered set of energies at each k-point.
+    """
+    if num_bands is not None:
+      # ARPACK finds at most N-2 eigenpairs of a complex N x N matrix
+      # (eigsh hands a complex one to eigs, which needs k<N-1), so
+      # N-1 bands used to get past this and raise TypeError there
+      if num_bands>=(h.intra.shape[0]-1): num_bands=None
+    if isinstance(operator,(list,)):
+        operator = [h.get_operator(o) for o in operator]
+    elif operator is not None: operator = h.get_operator(operator)
+    if isinstance(operator,(list,)): num_waw = len(operator)
+    else: num_waw = 1 # number of operator expectation values per band
+    if num_bands is None: # all the bands
+      if operator is not None:
+        def diagf(m): # diagonalization routine
+            return algebra.eigh(m) # all eigenvals and eigenfuncs
+      else:
+        def diagf(m): # diagonalization routine
+            return algebra.eigvalsh(m) # all eigenvals
+    else: # using arpack
+      h = h.copy()
+      h.turn_sparse() # sparse Hamiltonian
+      def diagf(m):
+        # arpack_eigh rather than eigsh: an operator weight summed over a
+        # degenerate level needs its eigenvectors orthonormal, and eigsh
+        # does not return them so for a complex H(k)
+        eig,eigvec = algebra.arpack_eigh(m,k=num_bands,which="LM",
+                sigma=central_energy,tol=arpack_tol,maxiter=arpack_maxiter)
+        if operator is None: return eig
+        else: return (eig,eigvec)
+    # open file and get generator
+    hkgen = h.get_hk_gen() # generator hamiltonian
+    kpath = h.geometry.get_kpath(kpath,nk=nk) # generate kpath
+    ncols = 2+num_waw if operator is not None else 2 # k, e, (operators)
+    def kes2rows(k,es):
+      """Pack a k-point's energies into output rows, dropping the bands
+      that the energy window rejects"""
+      if callable(ewindow): es = np.array([e for e in es if ewindow(e)])
+      out = np.empty((len(es),ncols))
+      out[:,0] = k
+      out[:,1] = es
+      return out
+    def getek(k):
+      """Compute this k-point, returning a numpy array with one row per
+      band: [k_index, energy, (operator expectation values...)]"""
+      hk = hkgen(kpath[k]) # get hamiltonian
+      if operator is None:
+        es = diagf(hk)
+        es = np.sort(es) # sort energies
+        if callback is not None: callback(k,es) # call the function
+        return kes2rows(k,es)
+      else:
+        es,ws = diagf(hk)
+        ws = ws.transpose() # transpose eigenvectors
+        def evaluate(w,k,A): # evaluate the operator
+            if type(A)==operators.Operator:
+                waw = A.braket(w,k=kpath[k]).real
+            elif callable(A):
+              try: waw = A(w,k=kpath[k]) # call the operator
+              except:
+                print("Check out the k optional argument in operator")
+                waw = A(w) # call the operator
+            else: waw = braket_wAw(w,A).real # calculate expectation value
+            return waw # return the result
+        rows = [] # rows for this k-point
+        for (e,w) in zip(es,ws):  # loop over waves
+          if callable(ewindow):
+              if not ewindow(e): continue # skip iteration
+          if isinstance(operator, (list,)): # input is a list
+              waws = [evaluate(w,k,A) for A in operator]
+          else: waws = [evaluate(w,k,operator)]
+          rows.append([k,e]+waws)
+        # callback function in each iteration
+        if callback is not None: callback(k,es,ws) # call the function
+        if len(rows)==0: return np.empty((0,ncols))
+        return np.array(rows)
+    ### Now evaluate the function
+    from . import parallel
+    if num_bands is None and operator is None and not h.is_sparse:
+      # common case (plain diagonalization, no operator): batch every
+      # k-point's H(k) into one numba eigh call instead of pcall-ing
+      # algebra.eigvalsh per k-point
+      from .htk.eigenvectors import peigvalsh_bloch
+      es_batch = np.sort(peigvalsh_bloch(hkgen,kpath),axis=1) # (nk,n) sorted
+      esk = [] # list of per-k arrays, same shape as the old getek(k) output
+      for k in range(len(kpath)):
+        es = es_batch[k]
+        if callback is not None: callback(k,es) # call the function
+        esk.append(kes2rows(k,es))
+    else:
+      esk = parallel.pcall(getek,range(len(kpath))) # compute all
+    esk = np.concatenate(esk,axis=0) if len(esk)>0 else np.empty((0,ncols))
+    if write:
+      with open(output_file,"w") as f: np.savetxt(f,esk) # write in file
+  #  print("\nBANDS finished")
+    return esk.T # return data
+
+
+
+def smalleig(m,numw=10,evecs=False,e0=0.):
+  """
+  Return the smallest eigenvalues using arpack
+  """
+  tol = arpack_tol
+  if not evecs: # eigenvalues only
+    return slg.eigsh(m,k=numw,which="LM",sigma=e0,tol=tol,
+                       maxiter=arpack_maxiter,return_eigenvectors=False)
+  eig,eigvec = algebra.arpack_eigh(m,k=numw,which="LM",sigma=e0,
+                                  tol=tol,maxiter=arpack_maxiter)
+  return eig,eigvec.transpose()  # return eigenvectors
+
+
+def lowest_bands(h,nkpoints=100,nbands=10,operator = None,
+                   info = False,kpath = None,discard=None):
+  """
+  Returns the lowest eigenvaleus of the system
+  """
+  from scipy.sparse import csc_matrix
+  if kpath is None: 
+    # nkpoints used to be declared and never read, so the path length was
+    # klist.default's own default whatever was asked for
+    k = klist.default(h.geometry,nk=nkpoints) # default path
+  else: k = kpath
+  import gc # garbage collector
+  fo = open("BANDS.OUT","w")
+  if operator is None: # if there is not an operator
+    if h.dimensionality==0:  # dot
+      eig,eigvec = algebra.arpack_eigh(csc_matrix(h.intra),k=nbands,
+              which="LM",sigma=0.0,tol=arpack_tol,maxiter=arpack_maxiter)
+      eigvec = eigvec.transpose() # transpose
+      iw = 0
+      for i in range(len(eig)):
+        if discard is not None: # use the function
+          v = eigvec[i] # eigenfunction
+          if discard(v): continue
+        fo.write(str(iw)+"     "+str(eig[i])+"\n")
+        iw += 1 # increase counter
+    elif h.dimensionality>0: 
+      hkgen = h.get_hk_gen() # get generator
+      for ik in k:  # ribbon
+        hk = hkgen(ik) # get hamiltonians
+        gc.collect() # clean memory
+        eig,eigvec = slg.eigsh(hk,k=nbands,which="LM",sigma=0.0)
+        del eigvec # clean eigenvectors
+        del hk # clean hk
+        for e in eig:
+          fo.write(str(ik)+"     "+str(e)+"\n")
+        if info:  print("Done",ik,end="\r")
+    else: # ups
+      raise ValueError("the Hamiltonian must have a non-negative "
+              "dimensionality")
+  else:  # if there is an operator
+    if h.dimensionality==1:
+      hkgen = h.get_hk_gen() # get generator
+      for ik in k:
+        hk = hkgen(ik) # get hamiltonians
+        eig,eigvec = algebra.arpack_eigh(hk,k=nbands,which="LM",sigma=0.0)
+        eigvec = eigvec.transpose() # tranpose the matrix
+        if info:  print("Done",ik,end="\r")
+        for (e,v) in zip(eig,eigvec): # loop over eigenvectors
+          a = braket_wAw(v,operator)
+          fo.write(str(ik)+"     "+str(e)+"     "+str(a)+"\n")
+  fo.close()
+
+
+
+
+def get_bands_map(h,n=0,**kwargs):
+    """Get a 2d map of the band structure"""
+    hk = h.get_hk_gen() # Hamiltonian generator
+    def f(k):
+        e = algebra.eigvalsh(hk(k))[n]
+        return e
+    from .spectrum import reciprocal_map
+    return reciprocal_map(h,f,filename="BANDS_2D.OUT",**kwargs) 
+

@@ -1,0 +1,99 @@
+import numpy as np
+from numba import jit
+
+from ..algebra import todense
+
+def bloch_hamiltonian_generator_dense(h,hopping,**kwargs):
+    """Return generator of a Bloch Hamiltonian"""
+    if h.is_sparse:
+        raise ValueError("the dense Bloch generator needs a dense "
+                "Hamiltonian; call h.get_dense() first")
+    ms,ds = [h.intra],[[0.,0.,0.]] # initialize
+    for t in hopping: # loop over matrices
+        ds.append(t.dir)
+        ms.append(t.m)
+    ms = [todense(m) for m in ms] # to dense, just in case
+    return bloch_matrix_generator(ms,ds,dim=h.dimensionality,**kwargs)
+
+
+
+def bloch_matrix_generator(ms,ds,dim=1,use_jax=False):
+    """Return a function that generates the Bloch Hamiltonian"""
+    ms = np.array(ms,dtype=np.complex128)
+    ds = np.array(ds,dtype=np.float64)
+    if dim==0: return lambda k: ms[0]
+    ds = ds[:,0:dim] # crop to the dimension
+    ds = np.ascontiguousarray(ds) # for memory efficiency
+    ms = np.ascontiguousarray(ms) # for memory efficiency
+    # k must be coerced to float64 explicitly, exactly as ds is above: the
+    # jitted kernel is compiled for a float64 k, so an all-integer k (e.g.
+    # the natural way to write the Gamma point, h.get_hk_gen()([0,0,0]), or
+    # any np.array of ints) otherwise reaches numba as int64 and fails with
+    # an opaque TypingError instead of just working. A k that is already
+    # float is unaffected -- np.array(..., dtype=float64) on float input is
+    # a plain copy, which this was doing anyway.
+    if use_jax:
+        def f(k,**kwargs):
+            return evaluate_bloch_matrix(ms,ds,
+                    jnp.asarray(k,dtype=jnp.float64)[0:dim]) # call
+    else:
+        def f(k,**kwargs):
+            return evaluate_bloch_matrix_jit(ms,ds,
+                    _real_momentum(k)[0:dim]) # call
+    # The hopping matrices and their lattice vectors, carried on the
+    # generator itself so that a caller evaluating it over a whole k-mesh
+    # can rebuild the Bloch sum as one batched contraction instead of
+    # calling f once per k -- see htk/eigenvectors.py's peigh_bloch, which
+    # uses this to build the stack on the GPU rather than on the host.
+    # ds is already cropped to the dimensionality, so k must be too.
+    f.bloch_data = (ms,ds)
+    return f
+
+
+def _real_momentum(k):
+    """k as a float64 array. A complex k with a finite imaginary part is
+    refused: the cast to float64 used to drop that part with only a
+    ComplexWarning, and return the Bloch Hamiltonian at the real part"""
+    k = np.asarray(k)
+    if np.iscomplexobj(k):
+        if np.any(k.imag!=0.):
+            raise TypeError("the Bloch Hamiltonian takes a real momentum, "
+              +"and this one is complex, k="+str(k)+"; a complex momentum, "
+              +"as the generalized Brillouin zone of a non-Hermitian chain "
+              +"needs, is not built")
+        k = k.real
+    return np.array(k,dtype=np.float64)
+
+
+@jit(nopython=True,cache=True)
+def evaluate_bloch_matrix_jit(ms,ds,k):
+    """Evaluate the Bloch Hamiltonian"""
+    out = ms[0]*0. # initialize
+    n = len(ms) # number of matrices
+    for i in range(n): # loop
+        out += ms[i]*np.exp(1j*2*np.pi*ds[i].dot(k)) # Bloch phase
+    return out
+
+
+import jax
+import jax.numpy as jnp
+
+def evaluate_bloch_matrix_jax(ms, ds, k):
+    ms_arr = jnp.stack(ms)          
+    ds_arr = jnp.stack(ds)          
+    dk = jnp.dot(ds_arr, k)         
+    phases = jnp.exp(1j * 2 * jnp.pi * dk)   
+    out = jnp.einsum('nij,n->ij', ms_arr, phases)
+    return out
+
+#def evaluate_bloch_matrix_jax(ms,ds,k):
+#    """Evaluate the Bloch Hamiltonian"""
+#    out = ms[0]*0. # initialize
+#    n = len(ms) # number of matrices
+#    for i in range(n): # loop
+#        dk = jnp.sum(ds[i]*k) # dot product
+#        out += ms[i]*jnp.exp(1j*2*jnp.pi*dk) # Bloch phase
+#    return out
+
+evaluate_bloch_matrix = jax.jit(evaluate_bloch_matrix_jax)
+

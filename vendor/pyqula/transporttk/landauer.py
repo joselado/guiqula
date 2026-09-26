@@ -1,0 +1,74 @@
+from .. import algebra
+import numpy as np
+from .. import green
+
+dagger = algebra.dagger
+
+# Landauer Buttiker formula
+
+def landauer(HT,energy=0.0,delta=None,error=1e-9,**kwargs):
+    """ Calculates transmission using Landauer formula"""
+    if len(kwargs)>0:
+        # nothing downstream consumes these; they used to be dropped here
+        raise TypeError("unexpected keyword argument(s) "+str(sorted(kwargs))
+          +" for landauer")
+    if delta is None: delta = HT.delta # the heterostructure's own delta
+    if not HT.block_diagonal:
+      intra = HT.central_intra # central intraterm   
+      dimhc = intra.shape[0] # dimension of the central part
+    if HT.block_diagonal:
+        if len(HT.central_intra)==0: # no central
+            raise ValueError("the Landauer formula as implemented here "
+              +"needs an explicit central region, build the "
+              +"heterostructure with heterostructures.build(h1,h2,"
+              +"central=[...]). For a direct lead-to-lead junction use "
+              +"didv, which goes through the scattering matrix and "
+              +"returns the same transmission for normal leads")
+        intra = HT.central_intra[0][0] # when it is diagonal
+ # dimension of the central part
+        dimhc = len(HT.central_intra)*intra.shape[0]
+    iden = np.array(np.identity(len(intra),dtype=complex)) # create identity
+    selfl = HT.get_selfenergy(energy,lead=0,delta=delta,pristine=False) # left Sigma
+    selfr = HT.get_selfenergy(energy,lead=1,delta=delta,pristine=False) # right Sigma
+    #################################
+    # calculate Gammas 
+    #################################
+    gammar = 1j*(selfr-dagger(selfr))
+    gammal = 1j*(selfl-dagger(selfl))
+ 
+    #################################
+    # dyson equation for the center
+    #################################
+    # central green function
+    intra = HT.central_intra
+    # full matrix
+    if not HT.block_diagonal:
+        heff = intra + selfl + selfr
+        HT.heff = heff
+        gc = (energy+1j*delta)*iden - heff
+        gc = algebra.inv(gc) # calculate inverse
+        G = np.trace(gammar@gc@gammal@dagger(gc)).real
+        return G
+    # reduced matrix
+    if HT.block_diagonal:
+        from copy import deepcopy
+        heff = deepcopy(intra)
+        heff[0][0] = intra[0][0] + selfl
+        heff[-1][-1] = intra[-1][-1] + selfr
+        for i in range(len(intra)):  # add the diagonal energy part
+          # each block gets its own identity, blocks can have different sizes
+          dd = (energy+1j*delta)*np.identity(intra[i][i].shape[0],dtype=complex)
+          heff[i][i] = heff[i][i] - dd  # this has the wrong sign!!
+       # now change the sign
+        for i in range(len(intra)):
+          for j in range(len(intra)):
+            if heff[i][j] is not None:
+              heff[i][j] = -heff[i][j]
+        # calculate green function
+        gauss_inverse = green.gauss_inverse  # routine to invert the matrix
+        # calculate only some elements of the central green function
+        gcn1 = gauss_inverse(heff,len(heff)-1,0) # calculate element 1,n
+        # and apply Landauer formula
+        G = np.trace(gammar@gcn1@gammal@dagger(gcn1)).real
+    return G # return transmission
+

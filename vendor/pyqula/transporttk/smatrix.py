@@ -1,0 +1,258 @@
+import numpy as np
+from ..green import gauss_inverse # calculate the desired green functions
+from ..algebra import dagger,sqrtm
+
+delta_smatrix = 1e-12 # delta for the smatrix
+
+
+def _lead_selfenergies(ht,energy,delta_lead,delta_max):
+    """The two lead selfenergies, at the smallest broadening that actually
+    resolves them.
+
+    The S-matrix wants the leads evaluated as close to the real axis as
+    possible: a finite broadening adds an anti-Hermitian piece to the lead
+    selfenergy that is not real coupling, so Gamma = i(Sigma - Sigma^dag)
+    stops being the true level width and the Fisher-Lee S-matrix stops
+    being unitary -- which is why `delta_smatrix` is 1e-12 and why the
+    unitarity tolerance below is tied to it.
+
+    But that broadening is not always attainable. On a lead with a state
+    essentially at the evaluated energy the surface Green's function grows
+    like 1/delta, and at delta=1e-12 on a multi-orbital lead the
+    cancellation it needs is ~1e-12 out of numbers of size 1e11, which
+    double precision cannot carry -- greentk.rg refuses it rather than
+    return a wrong Green's function (see its Dyson-residual check). A
+    one-orbital chain never hits this, because the decimation there is
+    exact, which is why the clamp went unchallenged for so long.
+
+    So the broadening is raised only as far as it has to be, and never
+    past the junction's own `delta` -- the value landauer() uses, and the
+    reason landauer works on exactly the fixtures where this used to
+    fail. The caller ties the unitarity tolerance to whatever comes back,
+    so a raised broadening loosens that check honestly instead of
+    silently. If even the junction's own delta will not resolve the lead,
+    greentk's ValueError propagates: there is no answer to give."""
+    import warnings
+    d = delta_lead
+    while True:
+        try:
+            selfl = ht.get_selfenergy(energy,delta=d,lead=0,pristine=True)
+            selfr = ht.get_selfenergy(energy,delta=d,lead=1,pristine=True)
+        except ValueError:
+            if not d<delta_max: raise # nothing left to try, report it
+            d = min(d*100.,delta_max) # escalate, bounded by the junction's
+            continue
+        if d!=delta_lead: # tell the caller the S-matrix is less unitary
+            warnings.warn("the lead selfenergies could not be resolved at "
+                "delta=%g at energy %g, so the S-matrix was evaluated at "
+                "delta=%g instead (the junction's own delta is %g). The "
+                "Fisher-Lee S-matrix is only unitary in the limit of small "
+                "lead broadening, so this result is correspondingly less "
+                "unitary; the unitarity check is loosened to match."
+                %(delta_lead,energy,d,delta_max))
+        return selfl,selfr,d
+
+
+
+def get_smatrix(ht,energy=0.0,delta=None,as_matrix=False,check=True):
+    """Calculate the S-matrix of an heterostructure.
+
+    `delta` is the broadening, and defaults to the junction's own `delta`
+    attribute. Passing it explicitly is exactly equivalent to building the
+    junction with that attribute: the broadening is read in several places
+    below (the lead selfenergies, the central Green's function, and for a
+    LocalProbe also the bulk_delta of the sample Green's function), so an
+    explicit value is applied by rebinding the attribute on a copy rather
+    than threaded into each of them one by one -- threading it reached
+    only the lead selfenergies, where it is clamped to delta_smatrix
+    anyway, so the keyword had no effect on the answer at all.
+
+    Two cheap perf fixes applied here (2026-07-31, no behavior change,
+    verified bit-identical against the previous implementation): sqrtm(Γ_L)
+    and sqrtm(Γ_R) are each computed once and reused for both blocks that
+    need them (previously computed twice each), and unitarize.check_and_fix
+    checks unitarity via S@S^H≈I instead of a full scipy.linalg.inv(S)
+    (equivalent condition, avoids an explicit matrix inverse on every call
+    since check=True is the default).
+
+    Not done here, left as a follow-up: g11/g12/g21/g22 are each obtained
+    via an independent call to gauss_inverse, which internally redoes a
+    full forward or backward sweep over all blocks from scratch every time
+    -- for ht.block_diagonal=True (long/disordered central regions split
+    into many cells) that's ~4x more block inversions than a proper
+    single-pass recursive-Green's-function sweep needs. Not worth it for
+    the common 3-block (non-block_diagonal) case. No test currently
+    exercises get_smatrix with block_diagonal=True, so that rewrite would
+    need new correctness tests first."""
+    # now do the Fisher Lee trick
+    if delta is not None and delta!=ht.delta: # explicit, different delta
+        ht = ht.with_delta(delta) # rebind it, see the docstring above
+    delta = ht.delta # the heterostructure's own delta
+    delta_lead = delta # delta for the leads and the unitarity check
+    if delta_lead>delta_smatrix: delta_lead = delta_smatrix # small delta is critical!
+    smatrix = [[None,None],[None,None]] # smatrix in list form
+    # get the selfenergies, using the same coupling as the lead
+    (selfl,selfr,delta_lead) = _lead_selfenergies(ht,energy,delta_lead,delta)
+    # get the central Green's function
+    gmatrix = ht.get_central_gmatrix(selfl=selfl,selfr=selfr,
+                                   energy=energy)
+    # gamma functions
+    test_gauss = True # gauss only works with square matrices
+    gammar = 1j*(selfr-dagger(selfr))
+    gammal = 1j*(selfl-dagger(selfl))
+    # calculate the relevant terms of the Green function
+    g11 = gauss_inverse(gmatrix,0,0,test=test_gauss)
+    g12 = gauss_inverse(gmatrix,0,-1,test=test_gauss)
+    g21 = gauss_inverse(gmatrix,-1,0,test=test_gauss)
+    g22 = gauss_inverse(gmatrix,-1,-1,test=test_gauss)
+    ######## now build up the s matrix with the fisher trick
+    # left and right leads can have different dimensions, so each
+    # diagonal block needs its own identity matrix
+    iden11 = np.array(np.identity(g11.shape[0],dtype=complex)) # create identity
+    iden22 = np.array(np.identity(g22.shape[0],dtype=complex)) # create identity
+    sqgl = sqrtm(gammal) # only need this once
+    sqgr = sqrtm(gammar) # only need this once
+    smatrix[0][0] = -iden11 + 1j*sqgl@g11@sqgl # matrix
+    smatrix[0][1] = 1j*sqgl@g12@sqgr # transmission matrix
+    smatrix[1][0] = 1j*sqgr@g21@sqgl # transmission matrix
+    smatrix[1][1] = -iden22 + 1j*sqgr@g22@sqgr # matrix
+    if check: # check whether the matrix is unitary
+        from .unitarize import check_and_fix
+        smatrix = check_and_fix(smatrix,error=100*delta_lead)
+    if as_matrix:
+      from scipy.sparse import bmat,csc_matrix
+      smatrix2 = [[csc_matrix(smatrix[i][j]) for j in range(2)] for i in range(2)]
+      smatrix = bmat(smatrix2).todense()
+    return smatrix
+
+
+def get_central_gmatrix(ht,selfl=None,selfr=None,energy=0.0):
+    """Return the inverse of the central Green's function"""
+    delta = ht.delta
+    if selfl is None: selfl = ht.get_selfenergy(energy,
+        delta=delta,lead=0,pristine=True)
+    if selfr is None: selfr = ht.get_selfenergy(energy,
+        delta=delta,lead=1,pristine=True)
+    if ht.block_diagonal:
+        ht2 = enlarge_hlist(ht) # get the enlaged hlist with the leads
+        gmatrix = effective_tridiagonal_hamiltonian(ht2.central_intra,
+                                      selfl,selfr,
+                                      energy=energy,
+                                      delta=delta + ht.extra_delta_central)
+    else: # not block diagonal
+        gmatrix = build_effective_hlist(ht,energy=energy,delta=delta,
+                                       selfl=selfl,
+                                      selfr=selfr)
+    return gmatrix
+
+
+
+
+def effective_tridiagonal_hamiltonian(intra,selfl,selfr,
+                                        energy = 0.0, delta=1e-5):
+    """ Calculate effective Hamiltonian"""
+    if not type(intra) is list: # assume is list
+        raise TypeError("the effective tridiagonal Hamiltonian takes the "
+                "central part as a list of blocks")
+    n = len(intra) # number of blocks
+    iout = [[None for i in range(n)] for j in range(n)] # empty list
+    ce = energy +1j*delta # complex energy
+    for i in range(n):
+      # each block gets its own identity, blocks can have different sizes
+      ez = np.identity(intra[i][i].shape[0],dtype=np.complex128)*ce
+      iout[i][i] = ez - intra[i][i] # simply E -H
+    for i in range(n-1):
+      iout[i][i+1] = -intra[i][i+1] # simply E -H
+      iout[i+1][i] = -intra[i+1][i] # simply E -H
+    # and now the selfenergies
+    iout[0][0] = iout[0][0] -selfl
+    iout[-1][-1] = iout[-1][-1] -selfr
+    return iout
+
+
+
+
+def enlarge_hlist(ht):
+    """Add a single cell of the leads to the central part"""
+    ho = ht.copy() # copy heterostructure
+    if not ht.block_diagonal: # check that is in block diagonal form
+        raise ValueError("enlarge_hlist needs a junction with a "
+                "block-diagonal central part")
+    nc = len(ht.central_intra) # number of cells in the central
+    hcentral = [[None for i in range(nc+2)] for j in range(nc+2)]
+    for i in range(nc): # intraterm
+      hcentral[i+1][i+1] = ht.central_intra[i][i].copy() # common
+    for i in range(nc-1): # interterm
+      hcentral[i+1][i+2] = ht.central_intra[i][i+1].copy() # common
+      hcentral[i+2][i+1] = ht.central_intra[i+1][i].copy() # common
+    # now the new terms
+    hcentral[0][0] = ht.left_intra.copy() # left
+    hcentral[-1][-1] = ht.right_intra.copy() # right
+    if nc>0: # more than two cells in the center
+        hcentral[0][1] = dagger(ht.left_coupling)*ht.scale_lc # left
+        hcentral[1][0] = ht.left_coupling*ht.scale_lc # left
+        hcentral[-2][-1] = ht.right_coupling*ht.scale_rc # right
+        hcentral[-1][-2] = dagger(ht.right_coupling)*ht.scale_rc # right
+    else: # no original central part
+        if ht.left_coupling.shape != ht.right_coupling.shape:
+            raise ValueError("No central Hamiltonian was provided, but "
+                "the left and right leads have different dimensions "
+                "("+str(ht.left_coupling.shape)+" vs "
+                +str(ht.right_coupling.shape)+"), so their couplings "
+                "cannot be averaged -- pass an explicit `central` region "
+                "to bridge leads of different size")
+        # here the average of the two hoppings will be performed
+        # if the Hamiltonian of the scattering region is not provided
+        # this may be not the optimal intuitive choice
+        # perhaps square root of the product is more natural
+        # gamma = sqrtm(dagger(ht.left_coupling)@ht.right_coupling)?
+        hcentral[0][1] = dagger(ht.left_coupling) # left
+        hcentral[1][0] = ht.left_coupling.copy() # left
+        hcentral[-2][-1] += ht.right_coupling # right
+        hcentral[-1][-2] += dagger(ht.right_coupling) # right
+        hcentral[0][1] *= ht.scale_rc*ht.scale_lc/2. # factor 1/2 for DC
+        hcentral[1][0] *= ht.scale_rc*ht.scale_lc/2. # factor 1/2 for DC
+    # store in the object
+    ho.central_intra = hcentral
+    # and redefine the new lead couplings
+    ho.right_coupling = ht.right_inter
+    ho.left_coupling = ht.left_inter
+    return ho # return the new heterostructure
+
+
+
+
+
+
+
+
+
+
+
+def build_effective_hlist(ht,energy=0.0,delta=0.0001,selfl=None,selfr=None):
+    """ Calculate list of effective Hamiltonian which will be inverted"""
+    if (selfl is None) or (selfr is None):
+        (selfl,selfr) = get_surface_selfenergies(ht,energy=energy,delta=delta,
+                        pristine=True)
+    intra = ht.central_intra # central intracell hamiltonian
+    if len(ht.central_intra)==0: # no central part provided
+        ht.central_intra = (ht.left_intra + ht.right_intra)/2.
+        print("Generating a dummy central cell, you may want to use a different geometry")
+    ce = energy +1j*delta # complex energy
+    idenc = np.array(np.identity(ht.central_intra.shape[0],dtype=complex))*ce
+    idenl = np.array(np.identity(ht.left_intra.shape[0],dtype=complex))*ce
+    idenr = np.array(np.identity(ht.right_intra.shape[0],dtype=complex))*ce
+    hlist = [[None for i in range(3)] for j in range(3)] # list of matrices
+    # set up the different elements
+    # first the intra terms
+    hlist[0][0] = idenl - ht.left_intra - selfl
+    hlist[1][1] = idenc - ht.central_intra
+    hlist[2][2] = idenr - ht.right_intra - selfr
+    # now the inter cell
+    hlist[0][1] = -dagger(ht.left_coupling)*ht.scale_lc
+    hlist[1][0] = -ht.left_coupling*ht.scale_lc
+    hlist[2][1] = -dagger(ht.right_coupling)*ht.scale_rc
+    hlist[1][2] = -ht.right_coupling*ht.scale_rc
+#    for h in hlist: print(h)
+    return hlist
+

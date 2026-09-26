@@ -1,0 +1,497 @@
+
+# TODO
+# - renormalization algorithm for long range intercell (2nd at least)
+
+from __future__ import print_function
+import numpy as np
+import scipy.linalg as lg
+from . import multicell
+from . import algebra
+from .algebra import dagger
+from numba import jit
+from .greentk.rg import green_renormalization
+from .greentk.selfenergy import bloch_selfenergy
+from .greentk.kchain import green_kchain
+from .greentk.kchain import get1dhamiltonian
+from .greentk.kchain import green_kchain_evaluator
+from .algebra import dagger
+
+
+class gf_convergence():
+   """ Class to manage the convergence  options
+   of the green functions """
+   refinement = False
+   guess = True # use old green function
+   def __init__(self,mode):
+     if mode=="fast":   # fast mode,used for coule to finite systems 
+       self.eps = 0.001
+       self.max_error = 1.0
+       self.num_rep = 10
+       self.mixing = 1.0
+     if mode=="lead":
+       self.eps = 0.001
+       self.max_error = 0.00001
+       self.num_rep = 3
+       self.mixing = 0.8
+     if mode=="hundred":  
+       self.eps = 0.001
+       self.max_error = 1.0
+       self.num_rep = 100
+       self.mixing = 1.0
+
+
+
+def dyson(intra,inter,energy=0.0,gf=None,is_sparse=False,initial = None):
+  """ Solves the dyson equation for a one dimensional
+  system with intra matrix 'intra' and inter to the nerest cell
+  'inter'"""
+  # get parameters
+  if gf is None: gf = gf_convergence("lead")
+  mixing = gf.mixing
+  eps = gf.eps
+  max_error = gf.max_error
+  num_rep = gf.num_rep
+  try:
+    intra = intra.todense()
+    inter = inter.todense()
+  except:
+    a = 1
+  if initial is None:  # if green not provided. initialize at zero
+    from numpy import zeros
+
+    g_guess = intra*0.0j
+  else:
+    g_guess = initial
+  g_old = g_guess # first iteration
+  iden = np.array(np.identity(len(intra),dtype=complex)) # create identity
+  e = iden*(energy+1j*eps) # complex energy
+  while True: # loop over iterations
+    self = inter@g_old@dagger(inter) # selfenergy
+    g = algebra.inv(e - intra - self) # dyson equation
+    if np.max(np.abs(g-g_old))<gf.max_error: break
+    g_old = mixing*g + (1.-mixing)*g_old # new green function
+  if is_sparse:
+    from scipy.sparse import csc_matrix
+    g = csc_matrix(g)
+  return g
+
+
+
+
+
+
+
+
+
+
+
+def read_matrix(f):
+  """Read green function from a file"""
+  m = np.genfromtxt(f)
+  d = int(max(m.transpose()[0]))+1 # dimension of the green functions
+  g = np.array([[0.0j for i in range(d)] for j in range(d)]) # create matrix
+  for r in m:
+    i = int(r[0])
+    j = int(r[1])
+    ar = r[2]
+    ai = r[3]
+    g[i,j] = ar +1j*ai # store element
+  return g # return green function
+
+
+
+def write_matrix(f,g):
+  """Write green function from a file"""
+  fw = open(f,"w") # open file to write
+  n = len(g) # dimension of the matrix
+  for i in range(n):
+    for j in range(n):
+      fw.write(str(i)+"  ")
+      fw.write(str(j)+"  ")
+      fw.write(str(g[i,j].real)+"  ")
+      fw.write(str(g[i,j].imag)+"\n")
+  fw.close()   # close file
+
+
+# detect non vanishing elements of a matrix
+def nv_el(m):
+  """ get the non vanishing elments of a matrix"""
+  from scipy.sparse import csc_matrix as csc
+  mc = csc(m) # to coo_matrixi
+  mc.eliminate_zeros()
+  mc = mc.tocoo()
+  data = mc.data # get data
+  col = mc.col # get column index
+  row = mc.row # get row index
+  nv = []
+  nt=len(data)
+  for i in range(nt):
+   # save the nonvanishing values
+   nv.append([row[i]+1,col[i]+1,data[i].real,data[i].imag])
+  return nv
+
+
+def write_sparse(f,g):
+  """ Write a sparse matrix in a file"""
+  fw = open(f,"w") # open the file
+  fw.write("# dimension = "+str(g.shape[0])+"\n")
+  nv=nv_el(g)
+  for iv in range(len(nv)):
+    fw.write(str(int(nv[iv][0]))+'   ')
+    fw.write(str(int(nv[iv][1]))+'   ')
+    fw.write('{0:.8f}'.format(float(nv[iv][2]))+'   ')
+    fw.write('{0:.8f}'.format(float(nv[iv][3]))+'   ')
+    fw.write('  !!!  i  j   Real   Imag\n')
+  fw.close()
+
+
+
+
+def read_sparse(f,sparse=True):
+  """Read green function from a file"""
+  l = open(f,"r").readlines()[0] # first line
+  d = int(l.split("=")[1])
+  m = np.genfromtxt(f)
+  if not sparse:
+# create matrix  
+    g = np.array([[0.0j for i in range(d)] for j in range(d)])
+    for r in m:
+      i = int(r[0])-1
+      j = int(r[1])-1
+      ar = r[2]
+      ai = r[3]
+      g[i,j] = ar +1j*ai # store element
+  if sparse:
+    from scipy.sparse import coo_matrix
+    g = coo_matrix([[0.0j for i in range(d)] for j in range(d)]) 
+    row = np.array([0 for i in range(len(m))])
+    col = np.array([0 for i in range(len(m))])
+    data = np.array([0j for i in range(len(m))])
+    for i in range(len(m)):
+      r = m[i]
+      row[i] = int(r[0])-1
+      col[i] = int(r[1])-1
+      ar = r[2]
+      ai = r[3]
+      data[i] = ar +1j*ai # store element
+    g.col = col
+    g.row = row
+    g.data = data
+  return g # return green function
+
+
+mode_block_inverse = "gauss" # or "full"
+#mode_block_inverse = "full" 
+
+
+def gauss_inverse(m,i=0,j=0,test=False):
+    """ Calculates the inverse of a block diagonal
+        matrix. This uses brute force inversion,
+        so very demanding for large matrices."""
+    if mode_block_inverse=="gauss":
+        from .algebratk.gaussinv import gauss_inverse as ginv
+        return ginv(m,i=i,j=j)
+    elif mode_block_inverse=="full":
+        return block_inverse(m,i=i,j=j)
+
+
+
+
+def block_inverse(m,i=0,j=0):
+    """ Calculate a certain element of the inverse of a block matrix
+    using full inversion of the matrix. Very demanding for large systems."""
+    from scipy.sparse import csc_matrix,bmat
+    nb = len(m) # number of blocks
+#    if i<0: i += nb 
+#    if j<0: j += nb 
+    i = i%nb # periodic boundaries
+    j = j%nb # periodic boundaries
+    mt = [[None for ii in range(nb)] for jj in range(nb)]
+    for ii in range(nb): # diagonal part
+      mt[ii][ii] = csc_matrix(m[ii][ii])
+    for ii in range(nb-1): # first off diagonal
+      mt[ii][ii+1] = csc_matrix(m[ii][ii+1])
+      mt[ii+1][ii] = csc_matrix(m[ii+1][ii])
+    mt = algebra.bmat(mt) # convert to dense matrix
+    # select which elements you need
+    ilist = [m[ii][ii].shape[0] for ii in range(i)] 
+    jlist = [m[jj][jj].shape[1] for jj in range(j)] 
+    imin = int(np.sum(ilist))
+    jmin = int(np.sum(jlist))
+    mt = algebra.inv(mt) # calculate inverse
+    imax = imin + m[i][i].shape[0]
+    jmax = jmin + m[j][j].shape[1]
+    mo = [ [mt[ii,jj] for jj in range(jmin,jmax)] for ii in range(imin,imax) ]
+    mo = np.array(mo)
+    return mo
+
+
+
+def full_inverse(m):
+    """ Calculate a certain element of the inverse of a block matrix"""
+    from scipy.sparse import csc_matrix,bmat
+    nb = len(m) # number of blocks
+    if i<0: i += nb
+    if j<0: j += nb
+    mt = [[None for ii in range(nb)] for jj in range(nb)]
+    for ii in range(nb): # diagonal part
+      mt[ii][ii] = csc_matrix(m[ii][ii])
+    for ii in range(nb-1):
+      mt[ii][ii+1] = csc_matrix(m[ii][ii+1])
+      mt[ii+1][ii] = csc_matrix(m[ii+1][ii])
+    mt = bmat(mt).todense() # create dense matrix
+    return algebra.inv(mt) # calculate inverse
+
+
+
+
+
+def green_surface_cells(gs,hop,ons,delta=1e-2,e=0.0,n=0):
+    """Compute the surface Green's function for several unit cells"""
+    hopH = algebra.H(hop) # Hermitian
+    ez = (e+1j*delta)*np.identity(ons.shape[0]) # energy
+    gt = np.zeros(ons.shape[0],dtype=np.complex128) # energy
+    sigmar = hop@gs@algebra.H(hop) # of the infinite right part
+    out = []
+    for i in range(n):
+      sigmal = algebra.H(hop)@gt@hop # selfenergy
+      # couple infinite right to finite left
+      gemb = algebra.inv(ez - ons - sigmal- sigmar) # full dyson equation
+      # compute surface spectral function of the left block only
+      gt = algebra.inv(ez - ons - sigmal) # return Dyson equation
+      out.append(gemb) # store this green's function
+    return out # return green's functions
+
+
+
+
+
+def interface(h1,h2,k=[0.0,0.,0.],energy=0.0,delta=0.01):
+  """Get the Green function of an interface"""
+  from scipy.sparse import csc_matrix as csc
+  from scipy.sparse import bmat
+  gs1,sf1 = green_kchain(h1,k=k,energy=energy,delta=delta,
+                   only_bulk=False,reverse=True) # surface green function 
+  gs2,sf2 = green_kchain(h2,k=k,energy=energy,delta=delta,
+                   only_bulk=False,reverse=False) # surface green function 
+  #############
+  ## 1  C  2 ##
+  #############
+  # Now apply the Dyson equation
+  (ons1,hop1) = get1dhamiltonian(h1,k,reverse=True) # get 1D Hamiltonian
+  (ons2,hop2) = get1dhamiltonian(h2,k,reverse=False) # get 1D Hamiltonian
+  havg = (algebra.dagger(hop1) + hop2)/2. # average hopping
+  ons = bmat([[csc(ons1),csc(havg)],[csc(dagger(havg)),csc(ons2)]]) # onsite
+  self2 = bmat([[csc(ons1)*0.0,None],[None,csc(hop2@sf2@dagger(hop2))]])
+  self1 = bmat([[csc(hop1@sf1@dagger(hop1)),None],[None,csc(ons2)*0.0]])
+  # Dyson equation
+  ez = (energy+1j*delta)*np.identity(ons1.shape[0]+ons2.shape[0]) # energy
+  ginter = (ez - ons - self1 - self2).I # Green function
+  # now return everything, first, second and hybrid
+  return (gs1,sf1,gs2,sf2,ginter)
+
+
+def interface_multienergy(h1,h2,k=[0.0,0.,0.],energies=[0.0],delta=0.01,
+        dh1=None,dh2=None):
+  """Get the Green function of an interface"""
+  from scipy.sparse import csc_matrix as csc
+  from scipy.sparse import bmat
+  fun1 = green_kchain_evaluator(h1,k=k,delta=delta,hs=None,
+                   only_bulk=False,reverse=True) # surface green function 
+  fun2 = green_kchain_evaluator(h2,k=k,delta=delta,hs=None,
+                   only_bulk=False,reverse=False) # surface green function 
+  out = [] # output
+  for energy in energies: # loop
+    gs1,sf1 = fun1(energy)
+    gs2,sf2 = fun2(energy)
+    #############
+    ## 1  C  2 ##
+    #############
+    # Now apply the Dyson equation
+    (ons1,hop1) = get1dhamiltonian(h1,k,reverse=True) # get 1D Hamiltonian
+    (ons2,hop2) = get1dhamiltonian(h2,k,reverse=False) # get 1D Hamiltonian
+    havg = (algebra.dagger(hop1) + hop2)/2. # average hopping
+    if dh1 is not None: ons1 = ons1 + dh1
+    if dh2 is not None: ons2 = ons2 + dh2
+    ons = bmat([[csc(ons1),csc(havg)],[csc(dagger(havg)),csc(ons2)]]) # onsite
+    self2 = bmat([[csc(ons1)*0.0,None],[None,csc(hop2@sf2@dagger(hop2))]])
+    self1 = bmat([[csc(hop1@sf1@dagger(hop1)),None],[None,csc(ons2)*0.0]])
+    # Dyson equation
+    ez = (energy+1j*delta)*np.identity(ons1.shape[0]+ons2.shape[0]) # energy
+    ginter = algebra.inv(ez - ons - self1 - self2) # Green function
+    # now return everything, first, second and hybrid
+    out.append([gs1,sf1,gs2,sf2,ginter])
+  return out # return output
+
+
+
+
+
+def surface_multienergy(h1,k=[0.0,0.,0.],energies=[0.0],reverse=True,**kwargs):
+  """Get the Green function of an interface"""
+  from scipy.sparse import csc_matrix as csc
+  from scipy.sparse import bmat
+  fun1 = green_kchain_evaluator(h1,k=k,
+                   only_bulk=False,reverse=reverse,
+                   **kwargs) # surface green function 
+  out = [] # output
+  from . import parallel
+  def fp(x):
+      gs1,sf1 = fun1(x)
+      return [sf1,gs1]
+  out = parallel.pcall(fp,energies)
+#  for energy in energies: # loop
+#    gs1,sf1 = fun1(energy)
+#    out.append([sf1,gs1])
+  return out # return output
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def supercell_selfenergy(h,e=0.0,delta=1e-3,nk=100,nsuper=[1,1],
+                             gtype="bulk",
+                             gf_mode="renormalization"):
+  """Calculates the selfenergy of a certain supercell """
+  h = h.get_dense() # dense mode
+  if nsuper==1: # a single unit cell 
+      return bloch_selfenergy(h,energy=e,delta=delta,nk=nk,
+              mode=gf_mode,gtype=gtype)
+  if gtype!="bulk": raise NotImplementedError("supercell_selfenergy only implemented for gtype='bulk'")
+  if h.dimensionality>2: raise NotImplementedError("supercell_selfenergy only implemented for dimensionality<=2")
+  try:   # if two number given
+    nsuper1 = nsuper[0]
+    nsuper2 = nsuper[1]
+  except: # if only one number given
+    nsuper1 = nsuper
+    nsuper2 = nsuper
+#  print("Supercell",nsuper1,"x",nsuper2)
+  ez = e + 1j*delta # create complex energy
+  from . import dyson
+  g = dyson.dyson(h,[nsuper1,nsuper2],nk,ez)
+  g = np.array(g) # convert to array
+  # create hamiltonian of the supercell
+  from .embedding import onsite_supercell
+  intrasuper = onsite_supercell(h,nsuper)
+  eop = np.array(np.identity(g.shape[0],dtype=np.complex128))*(ez)
+  selfe = eop - intrasuper - algebra.inv(g)
+  return g,selfe
+
+
+
+
+
+
+
+def green_generator(h,nk=20):
+  """Returns a function capable of calculating the Green function
+  at a certain energy, by explicity summing the k-dependent Green functions"""
+  if h.dimensionality != 2: # only for 2d
+    raise ValueError("green_generator is only implemented for 2d Hamiltonians")
+  shape = h.intra.shape # shape
+  hkgen = h.get_hk_gen() # get the Hamiltonian generator
+  wfs = np.zeros((nk*nk,shape[0],shape[0]),dtype=np.complex128) # allocate vector
+  es = np.zeros((nk*nk,shape[0])) # allocate vector, energies
+  ks = np.zeros((nk*nk,2)) # allocate vector, energies
+  ii = 0 # counter
+  for ik in np.linspace(0.,1.,nk,endpoint=False): # loop
+    for jk in np.linspace(0.,1.,nk,endpoint=False): # loop
+      estmp,wfstmp = algebra.eigh(hkgen([ik,jk])) # get eigens
+#      estmp,wfstmp = lg.eigh(hkgen(np.random.random(2))) # get eigens
+      es[ii,:] = estmp.copy() # copy
+      ks[ii,:] = np.array([ik,jk]) # store
+      wfs[ii,:,:] = wfstmp.transpose().copy() # copy
+      ii += 1 # increase counter
+  # All the wavefunctions have been calculate
+  # Now create the output function
+  from scipy.integrate import simps
+  def getgreen(energy,delta=0.001):
+    """Return the Green function"""
+    zero = np.array(np.zeros(shape,dtype=np.complex128)) # zero matrix
+    zero = getgreen_jit(wfs,es,energy,delta,zero)
+    ediag = np.array(np.identity(shape[0]))*(energy + delta*1j)
+    selfenergy = ediag - h.intra - algebra.inv(zero)
+    return zero,selfenergy
+  return getgreen # return function
+
+@jit(nopython=True)
+def getgreen_jit(wfs,es,energy,delta,zero):
+    """Jit summation of Bloch Green's function"""
+    shape = wfs[0].shape
+    for ii in range(len(es)): # loop over kpoints
+      v = energy + delta*1j - es[ii,:] # array
+      C = zero*0.0 # initilaize
+      for j in range(len(v)): C[j,j] = 1./v[j]
+      A = wfs[ii,:,:] # get the matrix with wavefunctions
+      zero += np.conjugate(A).T@C@A # add contribution
+    zero /= len(es) # normalize
+    return zero
+
+
+
+
+def green_operator(h0,operator=None,e=0.0,delta=1e-3,nk=100,
+        gmode="adaptive"):
+    """Return the integration of an operator times the Green function
+
+    nk is the k-mesh of the Brillouin-zone sum, and it used to be declared
+    here and never forwarded to bloch_selfenergy, which then quietly used
+    its own default. Note that with the default gmode="adaptive" the
+    integration is error-controlled rather than performed on a fixed mesh,
+    so nk only bites for gmode="full" and gmode="renormalization"."""
+    if operator is not None: # get the operator
+        operator = h0.get_operator(operator)
+    h = h0.copy()
+    h = h.get_dense()
+    if operator is None: # no operator
+        g = bloch_selfenergy(h,energy=e,delta=delta,nk=nk,mode=gmode)[0] 
+        out = -np.trace(np.array(g)).imag
+    else: # finite operator
+        if operator.matrix is None: # no matrix, assume a momentum dependent
+            raise NotImplementedError("green_operator needs an operator with "
+                    "a matrix representation, a momentum-dependent one is not "
+                    "implemented")
+#            hkgen = h.get_hk_gen() # get generator
+#            iden = np.identity(h.intra.shape[0],dtype=np.complex128)
+#            from . import klist
+#            ks = klist.kmesh(h.dimensionality,nk=nk) # klist
+#            out = 0.0 # output
+#            for k in ks: # loop over kpoints
+#              hk = hkgen(k) # Hamiltonian
+#              o0 = algebra.inv(iden*(e+1j*delta) - hk) # Green's function
+#              o1 = operator.get_matrix(k=k)
+#              out += -np.trace(o0@o1).imag # Add contribution
+#            out /= len(ks) # normalize
+        else: # operator is a matrix
+            op = operator.get_matrix()
+            g = bloch_selfenergy(h,energy=e,delta=delta,nk=nk,mode=gmode)[0] 
+            out = -np.trace(np.array(g)@op).imag
+    return out
+
+
+
+def GtimesO(g,o,k=[0.,0.,0.]):
+    """Green function times operator"""
+    if o is None: return g # return Green function
+    # callables first: algebra.todense would have tried to build an array out
+    # of the operator itself and raised, so this branch used to be unreachable
+    if callable(o): return o(g,k=k) # call the operator
+    o = algebra.todense(o) # convert to dense operator if possible
+    if type(o)==type(g): return g@o # return
+    else:
+        raise TypeError("cannot multiply the Green function (a "+
+                str(type(g))+") by this operator (a "+str(type(o))+"); it "
+                "must be a matrix of the same type or a callable")
+
+
+

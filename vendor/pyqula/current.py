@@ -1,0 +1,121 @@
+import numpy as np
+import scipy.sparse.linalg as lg
+import scipy.linalg as lg
+from .algebra import braket_wAw
+
+
+def current_operator(h):
+  """Get the current operator"""
+  h = h.get_multicell()
+  def fj(k0):
+      return derivative(h,k0,order=[1])
+  return fj
+
+
+
+def gs_current(h,nk=400):
+  return weighted_current(h,nk=nk)
+
+
+
+
+def fermi_current(h,nk=400,delta=0.5):
+  def fun(e):
+    return delta/(delta**2+e**2)*2/np.pi
+  return weighted_current(h,nk=nk,fun=fun)
+
+
+
+def weighted_current(h,nk=400,fun=None):
+  """Calculate the Ground state current"""
+  if fun is None:
+    delta = 0.01
+    def fun(e): return (-np.tanh(e/delta) + 1.0)/2.0
+  jgs = np.zeros(h.intra.shape[0]) # current array
+  hkgen = h.get_hk_gen() # generator
+  fj = current_operator(h) # current operator
+  # a bare float k reaches htk.bloch's generator as a 0-d array and is
+  # indexed there, so it has to be a sequence -- the same scalar-vs-array
+  # k defect that dos1d_ewindow and current_bands were repaired for
+  ks = [[k,0.,0.] for k in np.linspace(0.0,1.0,nk,endpoint=False)]
+  for k in ks: # loop
+    hk = hkgen(k) # Hamiltonian
+    (es,ws) = lg.eigh(hk) # diagonalize
+    ws = ws.transpose() # transpose
+    jk = fj(k) # get the generator
+    for (e,w) in zip(es,ws): # loop
+      weight = fun(e) # weight
+      # this used to call ket_Aw, which is defined in bandstructure.py and
+      # was never imported here, so every call raised NameError -- the
+      # whole of gs_current/fermi_current/weighted_current was unreachable.
+      # ket_Aw(A,w) is A@w, inlined rather than imported for one matmul.
+      # np.asarray().ravel() because derivative() returns an np.matrix, so
+      # jk@w is a (1,n) matrix and the elementwise product below would
+      # silently become a matrix product (a shape error on any Hamiltonian
+      # with more than one orbital)
+      d = np.conjugate(w)*np.asarray(jk@w).ravel() # current density
+      jgs += d.real*weight # add contribution
+#      jgs += (np.abs(w)**2*weight).real # add contribution
+  jgs /= nk # normalize
+  # these three used to compute jgs and drop it on the floor -- the value
+  # only ever reached the caller as a printed line and a file
+  np.savetxt("CURRENT1D.OUT",np.array([range(len(jgs)),jgs]).T)
+  return jgs # the current density, site by site
+
+
+
+
+def derivative(h,k,order=None):
+  """Calculate the derivative of the Hamiltonian"""
+  ## The order parameter is kind of weird now, this must be fixed ##
+  from .multicell import turn_multicell
+  h = turn_multicell(h) # read only, called once per k-point
+  if order is None:
+#    order = [1 for i in range(h.dimensionality)] # order of the derivative
+    order = [1,0,0] # default
+  if h.dimensionality == 0: return None
+  elif h.dimensionality == 1: # one dimensional
+      mout = h.intra*0.0 # initialize
+      for t in h.hopping: # loop over matrices
+        phi = np.array(t.dir).dot(k) # phase
+        pref = (t.dir[0]*1j)**order[0] # prefactor
+        tk = pref*t.m * np.exp(1j*np.pi*2.*phi) # k hopping
+        mout = mout + tk # add contribution
+      return mout
+  elif h.dimensionality == 2: # two dimensional
+      k = np.array(k) # convert to array
+      mout = h.intra*0.0 # initialize
+      for t in h.hopping: # loop over matrices
+        d = t.dir
+        d = np.array(d) # vector director of hopping
+        phi = d.dot(k) # phase
+        pref1 = (d[0]*1j)**order[0] # prefactor
+        pref2 = (d[1]*1j)**order[1] # prefactor
+        pref = pref1*pref2 # total prefactor
+        tk = pref*t.m * np.exp(1j*np.pi*2.*phi) # derivative of the first
+        mout = mout + tk # add to the hamiltonian
+      return mout
+  else:
+    raise NotImplementedError("the k-derivative of the Hamiltonian is only "
+            "implemented for 1d and 2d Hamiltonians")
+
+
+def hk_derivative(h,k,order=None):
+  """Physically correct dH/dk_i...dk_j (or a higher mixed derivative, per
+  order). derivative() differentiates each hopping's phase as if it were
+  exp(i*k.R), but the actual Bloch phase convention (exp(i*2*pi*k.R), with
+  k in reduced coordinates) makes its raw output short by a factor of
+  2*pi per derivative order -- see derivative()'s "phi = ...; np.exp(1j*
+  np.pi*2.*phi)" vs its prefactor "(t.dir[i]*1j)**order[i]", which has no
+  matching 2*pi. Existing callers of derivative() (operator_berry,
+  operator_berry_bands, current_operator) already compensate for this
+  locally with their own factor and must keep doing so; this function is
+  the single shared, correctly-normalized wrapper for any *new* code that
+  wants the true derivative directly, instead of re-deriving the
+  compensating factor ad hoc at each new call site."""
+  if order is None: n = 1
+  else: n = sum(order)
+  return derivative(h,k,order=order)*(2.*np.pi)**n
+
+
+
