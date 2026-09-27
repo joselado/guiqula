@@ -12,7 +12,8 @@ Two kinds of operation (decision 14.7):
 Each undo step keeps the Document before and after it, a short text
 (commands/steps.py: "set m of t1", which the Edit menu and the undo
 history show) and the entry it touched. undo(steps) and redo(steps) take
-several steps at once, as one event.
+several steps at once, as one event. A mutation that changes what a lock
+of the Document covers (core/locks.py) is refused, whichever it is.
 
 Every operation is appended to the journal as JSON-serializable data and
 announced to the listeners, which is what the UI, autosave and the future
@@ -24,6 +25,7 @@ import json
 import time
 
 from guiqula.commands import steps as step_texts
+from guiqula.core import locks
 from guiqula.core.document import Document, DocumentError, check
 
 UNDO_LIMIT = 200
@@ -108,6 +110,11 @@ class Dispatcher:
             check(after)
         except (CommandError, DocumentError, ValueError, KeyError, TypeError) as error:
             raise CommandError(f"{name}: {_message(error)}") from None
+        broken = locks.violations(before, after)
+        if broken:
+            raise CommandError(f"{name}: {', '.join(broken)} {'is' if len(broken) == 1 else 'are'}"
+                               f" locked (unlock with the unlock command, or Edit > Unlock "
+                               f"everything)")
         self.document = after
         if merge is not None and merge == self._merge and self._undo:
             self._undo[-1] = dict(self._undo[-1], after=after)

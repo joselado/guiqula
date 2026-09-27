@@ -19,8 +19,9 @@ arguments as the other keys; --commands FILE holds a JSON list of them.
 Window actions work too: select, workspace, tool, select_sites,
 region_from_selection, remove_selected, canvas_view (structure, hamiltonian,
 field), preview (a term's Field on the structure), auto_rerun, theme
-(system, light, dark); and the session's undo, redo (with "steps") and
-history. The driven window never reads or writes the settings file. Every
+(system, light, dark), export_bundle (calculation, path: figure, data and
+script in one folder); the session's undo, redo (with "steps") and
+history; lock and unlock are mutations. The driven window never reads or writes the settings file. Every
 calculation's result has its own view, plot_<calculation id>. After each command the driver
 waits for the rebuild of the geometry, so a selection sees the new sites.
 The report printed last is JSON: the document outline, the builds, job and

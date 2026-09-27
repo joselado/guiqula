@@ -327,6 +327,13 @@ def is_flat(build):
     return int(build["dimensionality"]) < 3 and (len(r) == 0 or float(np.ptp(r[:, 2])) < FLAT)
 
 
+def on_a_line(build):
+    """Whether the sites lie on the x axis direction, with one y and one z
+    (a chain): values on them read better as a curve against x."""
+    r = np.asarray(build["positions"])
+    return len(r) > 1 and float(np.ptp(r[:, 1])) < FLAT and float(np.ptp(r[:, 2])) < FLAT
+
+
 def bond_segments_3d(build):
     """Segments (K, 2, 3) of the bonds touching the central cell."""
     r = np.asarray(build["positions"], dtype=float)

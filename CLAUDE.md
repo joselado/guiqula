@@ -41,6 +41,8 @@ a `Session`.
 - `core/`: `document.py` (pydantic models; ids unique across the document; a quantum
   system's Hamiltonian = construction, terms, mean-field block; a classical system's
   `model` = the model entry's set-up and its terms; `terms_of(system)`), `fields.py` and
+  `locks.py` (what a teaching preset locks: an entry, `t1.m`, `s1/geometry`; the
+  dispatcher refuses any mutation that changes a locked thing, comparing before and after),
   `expressions.py` (Fields: constant, expression, piecewise over regions, from_result,
   profile, interpolated, painted; the
   AST-whitelisted expression evaluator), `regions.py`, `results.py` (the `Result` dataclass
@@ -86,14 +88,15 @@ a `Session`.
 - `io/`: project files (a `.guiqula` zip keeps the results too), presets
   (`src/guiqula/presets/*.json`, loadable by name, described by the Document's `notes`),
   script export (a sweep exports a loop), result files, `autosave.py` (autosave and
-  recovery), `crashreport.py`, `settings.py` (the user's theme, recent files, always
+  recovery), `crashreport.py`, `bundle.py` (Export figure, data and script: one folder
+  per result, the figure drawn by the window in the light theme), `settings.py` (the user's theme, recent files, always
   trust; `$GUIQULA_CONFIG_DIR`; only the interactive program's window, `use_settings=True`,
   reads or writes it).
 - `ui/`: `mainwindow.py` (workspaces, palettes with search boxes from the registry, docks,
   bars, one result view per calculation, the cost guard, auto re-run; the window's own
   dispatcher actions `select`, `workspace`, `tool`, `select_sites`, `region_from_selection`,
   `remove_selected`, `canvas_view`, `preview`, `auto_rerun`, `projection`, `overlay`,
-  `slider`, `set_slider`, `remove_slider`, `paint`, `theme`), `shortcuts.py` (the one
+  `slider`, `set_slider`, `remove_slider`, `paint`, `theme`, `export_bundle`), `shortcuts.py` (the one
   table of keyboard shortcuts: menus, the canvas and outliner keys, the dialog; a test
   refuses ambiguous keys), `outliner.py`, `gallery.py`
   (presets), `sliders.py` (the Sliders dock), `kspace.py` (the Brillouin-zone canvas),
@@ -219,6 +222,10 @@ python tools/drive.py project.guiqula --trust ...   # run the Python nodes of a 
 python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "theme", "name": "dark"}' --shot dark.png
 python tools/drive.py preset --do '{"do": "set_param", ...}' --do '{"do": "undo"}'
                                                    # undo, redo (steps), history
+python tools/drive.py honeycomb_zeeman_rashba --run c1 \
+    --python "session.act('export_bundle', calculation='c1', path='out/c1_bands')"
+                                                   # figure, data, script in one folder
+                                                   # (--do runs before --run, --python after)
 tools/update_vendor.sh                 # refresh vendor/ from upstream pyqula
 ```
 
@@ -228,7 +235,8 @@ path); a `--do`
 object names a mutation or an action with `"do"`, and the driver waits for the rebuild after
 each one. Autosaves and crash reports go to the user data directory, or to
 `$GUIQULA_DATA_DIR` (the test suite sets it); the settings file to the user config
-directory, or `$GUIQULA_CONFIG_DIR` (set by the test suite too). In Python,
+directory, or `$GUIQULA_CONFIG_DIR` (set by the test suite too). Presets with locks are the gallery's
+teaching group (`ssh_chain`, `graphene_basics`); the others are its examples. In Python,
 `Session("honeycomb_zeeman_rashba", warm=False)` gives the same API: `do(...)`, `act(...)`,
 `run_calculation(calc, wait=True)`, `result(calc)`, `status(calc)`, `undo()`, `close()`.
 

@@ -1,0 +1,83 @@
+{
+  "version": 1,
+  "notes": "Graphene: Dirac cones and a gap\nSpinless electrons on the honeycomb lattice with first-neighbour hopping: two bands touching at the K points (c1), a density of states vanishing linearly at zero energy (c2), and no gap (c3). Exercise: give the sublattice imbalance t1 a mass (0.3, say): a gap of twice the mass opens at K and the density of states gets a hole around zero; then add a Haldane coupling from the Hamiltonian palette and compare. The lattice and the calculations are locked.",
+  "locks": ["s1/geometry", "c1", "c2", "c3"],
+  "systems": [
+    {
+      "id": "s1",
+      "name": "graphene",
+      "kind": "quantum",
+      "geometry": {
+        "base": {
+          "kind": "honeycomb_lattice",
+          "params": {}
+        },
+        "ops": []
+      },
+      "regions": [],
+      "hamiltonian": {
+        "construction": {
+          "has_spin": false,
+          "nambu": false,
+          "tij": [1.0],
+          "is_sparse": false
+        },
+        "terms": [
+          {
+            "id": "t1",
+            "kind": "sublattice_imbalance",
+            "enabled": true,
+            "params": {
+              "mass": 0.0
+            },
+            "region": null
+          }
+        ],
+        "meanfield": {
+          "enabled": false,
+          "kind": "interactions",
+          "params": {}
+        }
+      },
+      "model": null
+    }
+  ],
+  "calculations": [
+    {
+      "id": "c1",
+      "system": "s1",
+      "kind": "bands",
+      "params": {
+        "nk": 200,
+        "operator": null,
+        "kpath": null
+      }
+    },
+    {
+      "id": "c2",
+      "system": "s1",
+      "kind": "dos",
+      "params": {
+        "emin": -3.2,
+        "emax": 3.2,
+        "ne": 400,
+        "delta": 0.05,
+        "nk": 60,
+        "mode": "ED",
+        "operator": null,
+        "seed": 1
+      }
+    },
+    {
+      "id": "c3",
+      "system": "s1",
+      "kind": "gap",
+      "params": {}
+    }
+  ],
+  "ui": {
+    "workspace": "hamiltonian",
+    "selected": "t1",
+    "calculation": "c1"
+  }
+}

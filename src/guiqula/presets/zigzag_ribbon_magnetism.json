@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "notes": "Edge magnetism of a zigzag ribbon\nA graphene zigzag ribbon with a Hubbard interaction solved in the mean field (U = 2, from an antiferromagnetic guess): the flat edge band polarizes, each edge ferromagnetic and the two edges opposite. The bands coloured by Sz (c1) show the gap the magnetism opens; the magnetization on the atoms (c2) sits on the edges. Change U in the mean-field block, or the width of the ribbon.",
+  "locks": [],
+  "systems": [
+    {
+      "id": "s1",
+      "name": "zigzag ribbon",
+      "kind": "quantum",
+      "geometry": {
+        "base": {
+          "kind": "honeycomb_zigzag_ribbon",
+          "params": {
+            "width": 6
+          }
+        },
+        "ops": []
+      },
+      "regions": [],
+      "hamiltonian": {
+        "construction": {
+          "has_spin": true,
+          "nambu": false,
+          "tij": [1.0],
+          "is_sparse": false
+        },
+        "terms": [],
+        "meanfield": {
+          "enabled": true,
+          "kind": "interactions",
+          "params": {
+            "U": 2.0,
+            "V1": 0.0,
+            "V2": 0.0,
+            "V3": 0.0,
+            "J1": 0.0,
+            "J2": 0.0,
+            "J3": 0.0,
+            "fix": "filling",
+            "filling": 0.5,
+            "mu": 0.0,
+            "mf": "antiferro",
+            "seed": 1,
+            "nk": 20,
+            "engine": "numpy",
+            "solver": "newton",
+            "mix": null,
+            "maxerror": 1e-05,
+            "maxite": null,
+            "T": null
+          }
+        }
+      },
+      "model": null
+    }
+  ],
+  "calculations": [
+    {
+      "id": "c1",
+      "system": "s1",
+      "kind": "bands",
+      "params": {
+        "nk": 150,
+        "operator": "sz",
+        "kpath": null
+      }
+    },
+    {
+      "id": "c2",
+      "system": "s1",
+      "kind": "magnetization",
+      "params": {
+        "nk": 20
+      }
+    }
+  ],
+  "ui": {
+    "workspace": "calculate",
+    "calculation": "c2"
+  }
+}

@@ -26,6 +26,8 @@ SHORTCUTS = (
     ("save_as", ("Ctrl+Shift+S",), "window", "save as"),
     ("export_script", ("Ctrl+E",), "window",
      "export the pyqula script of the selected calculation"),
+    ("export_bundle", ("Ctrl+Shift+E",), "window",
+     "export the figure, data and script of the selected calculation's result"),
     ("quit", ("Ctrl+Q",), "window", "quit"),
     ("undo", ("Ctrl+Z",), "window", "undo"),
     ("redo", ("Ctrl+Shift+Z", "Ctrl+Y"), "window", "redo"),

@@ -10,7 +10,9 @@ Kinds (the ``kind`` of a Result's plot spec, which also names the arrays):
   grid is recognised and drawn as cells) or as a (len(x), len(y)) array;
   ``symmetric`` centres a diverging colour map at zero (Berry curvature);
 - ``structure_scalar``: one value per site drawn on the atoms (LDOS,
-  density), from the geometry the Result carries (Result.structure);
+  density), from the geometry the Result carries (Result.structure); on a
+  chain (every site on one line along x) a curve of the values against x,
+  since the atoms of a long chain are too small to read colours from;
 - ``structure_vector``: one vector per site, arrows for the in-plane part
   and dots for the z part (magnetization);
 - ``scalar``: numbers in a table (Chern number, gap), ``rows`` naming
@@ -123,9 +125,22 @@ def _site_points(ax, build, values):
     return r[:, 0], r[:, 1], values
 
 
+def along_a_line(result):
+    """Whether a result on the atoms is drawn as a curve against x."""
+    return result.plot["kind"] == "structure_scalar" and result.structure is not None and \
+        structure_tools.on_a_line(result.structure)
+
+
 def _structure_scalar(ax, result):
     build, plot = _on_structure(result), result.plot
     values = np.asarray(result.arrays[plot["values"]], dtype=float).ravel()
+    if along_a_line(result) and getattr(ax, "name", "") != "3d":
+        x = np.asarray(build["positions"])[:, 0]
+        order = np.argsort(x)
+        ax.plot(x[order], values[order], color=theme.MUTED, linewidth=1.0, zorder=1)
+        ax.scatter(x, values, c=values, cmap=structure_tools.SEQUENTIAL_MAP, s=18, zorder=2)
+        ax.set_ylabel(plot.get("clabel", plot["values"]))
+        return x, values, values
     _draw_on(ax)(ax, build, site_values={
         "values": values, "label": plot.get("clabel", plot["values"]),
         "symmetric": plot.get("symmetric", False)})
@@ -234,7 +249,9 @@ def _draw(figure, result, title, overlays):
     overlays = [o for o in overlays if can_overlay(result, o[1], o[2])]
     if overlays:
         points = _draw_overlays(ax, result, overlays) or points
-    if plot["kind"] in ON_STRUCTURE and not three_d:
+    if along_a_line(result) and not three_d:
+        ax.set_xlabel("x")
+    elif plot["kind"] in ON_STRUCTURE and not three_d:
         ax.set_xlabel("x")
         ax.set_ylabel("y")
     elif plot["kind"] != "scalar":
@@ -260,6 +277,7 @@ class PlotView(QWidget):
     one calculation (calc_id)."""
 
     save_requested = Signal(str)          # calculation id
+    export_requested = Signal(str)        # figure, data and script (io/bundle.py)
     detach_requested = Signal(str)
     overlay_menu_requested = Signal(str)      # the window fills the Overlay menu
 
@@ -285,7 +303,15 @@ class PlotView(QWidget):
         self.detach.setToolTip("show this result in a window of its own, to compare it with "
                                "another; Attach puts it back")
         self.detach.clicked.connect(lambda: self.detach_requested.emit(self.calc_id))
+        self.export = QToolButton()
+        self.export.setText("Export")
+        self.export.setObjectName(f"export{suffix}")
+        self.export.setToolTip("the figure (PNG and PDF, on white), the data (.npz, .csv) and "
+                               "the pyqula script reproducing them, in one folder "
+                               "(Ctrl+Shift+E)")
+        self.export.clicked.connect(lambda: self.export_requested.emit(self.calc_id))
         self.toolbar.addSeparator()
+        self.toolbar.addWidget(self.export)
         self.toolbar.addWidget(self.save_data)
         self.toolbar.addWidget(self.detach)
         self.overlay = QToolButton()
@@ -320,6 +346,7 @@ class PlotView(QWidget):
 
     def _update_buttons(self):
         self.save_data.setEnabled(self.result is not None and bool(self.calc_id))
+        self.export.setEnabled(self.result is not None and bool(self.calc_id))
         self.detach.setVisible(bool(self.calc_id))
         self.overlay.setVisible(bool(self.calc_id))
         self.overlay.setEnabled(self.result is not None and self.result.plot["kind"] in CURVES)
@@ -365,6 +392,8 @@ class PlotView(QWidget):
             what = plot.get("clabel", plot.get("values", plot.get("vectors")))
             if plot["kind"] == "structure_vector":
                 what = f"|{what}|"
+            if along_a_line(self.result):
+                return f"site {i} at x = {_number(x[i])} · {what} {_number(c[i])}"
             return f"site {i} at ({_number(x[i])}, {_number(y[i])}) · {what} {_number(c[i])}"
         text = (f"{plot.get('xlabel', plot.get('x'))} {_number(x[i])} · "
                 f"{plot.get('ylabel', plot.get('y'))} {_number(y[i])}")

@@ -47,7 +47,7 @@ import guiqula
 from guiqula import vendoring
 from guiqula.core import fields
 from guiqula.core import regions as region_tools
-from guiqula.io import crashreport, project, settings
+from guiqula.io import bundle, crashreport, project, settings
 from guiqula.registry import base as registry
 from guiqula.registry import cost, pipeline
 from guiqula.registry.params import VectorFieldParam
@@ -70,7 +70,7 @@ WORKSPACES = ("geometry", "hamiltonian", "calculate")
 # actions of the window itself: they change what is shown, not the Document
 WINDOW_ACTIONS = ("select", "workspace", "tool", "select_sites", "canvas_view", "preview",
                   "auto_rerun", "projection", "overlay", "slider", "set_slider",
-                  "remove_slider", "paint", "theme")
+                  "remove_slider", "paint", "theme", "export_bundle")
 STRUCTURE_TAB = 0
 KSPACE_TAB = 1
 # a new classical system: its lattice, and a supercell the usual orders fit in
@@ -530,6 +530,9 @@ class MainWindow(QMainWindow):
         self._action(file_menu, "&Save", self.save, "save")
         self._action(file_menu, "Save &as...", self.save_as, "save_as")
         self._action(file_menu, "&Export pyqula script...", self.export_script, "export_script")
+        self._action(file_menu, "Export &figure, data and script...",
+                     lambda: self.export_bundle_dialog(self.selected_calculation()),
+                     "export_bundle", "exportBundleAction")
         self._action(file_menu, "&Recover unsaved work...", self.offer_recovery,
                      name="recoverAction")
         self.trust_action = self._action(
@@ -555,6 +558,12 @@ class MainWindow(QMainWindow):
         self.history_menu = edit.addMenu("Undo &history")
         self.history_menu.setObjectName("historyMenu")
         self.history_menu.aboutToShow.connect(self._fill_history)
+        edit.addSeparator()
+        self.unlock_action = self._action(edit, "Un&lock everything", lambda: self._do("unlock"),
+                                          name="unlockAction")
+        self.unlock_action.setToolTip("lift every lock of the document (a teaching preset "
+                                      "locks what its exercise keeps fixed)")
+        edit.setToolTipsVisible(True)
         view = self.menuBar().addMenu("&View")
         for name in WORKSPACES:
             self._action(view, f"{name.capitalize()} workspace",
@@ -646,6 +655,7 @@ class MainWindow(QMainWindow):
         dispatcher.register_action("set_slider", self.set_slider)
         dispatcher.register_action("remove_slider", self.remove_slider)
         dispatcher.register_action("theme", lambda name="system": self.set_theme(name))
+        dispatcher.register_action("export_bundle", self.export_bundle)
         session.view_state = self.view_state
         self.timer.start(POLL_MS)
         self._document_changed()
@@ -1510,6 +1520,7 @@ class MainWindow(QMainWindow):
             self.session.document.calculation(calc)
             view = PlotView(calc)
             view.save_requested.connect(self.save_result_dialog)
+            view.export_requested.connect(self.export_bundle_dialog)
             view.detach_requested.connect(self.toggle_detached)
             view.overlay_menu_requested.connect(self._fill_overlay_menu)
             self.plots[calc] = view
@@ -1751,6 +1762,45 @@ class MainWindow(QMainWindow):
                 self.close_result(calc)
             else:
                 self._draw_result(calc)
+
+    def export_bundle_dialog(self, calc):
+        """Choose a folder; the bundle goes into <calc>_<kind> inside it."""
+        if not calc or self.session.result(calc) is None:
+            self.message(f"{calc or 'no calculation'}: no result to export yet", error=True)
+            return None
+        parent = QFileDialog.getExistingDirectory(self, f"Export {calc}: choose a folder")
+        if not parent:
+            return None
+        kind = self.session.document.calculation(calc).kind
+        return self._act("export_bundle", calculation=calc, path=str(Path(parent) /
+                                                                     f"{calc}_{kind}"))
+
+    def export_bundle(self, calculation, path):
+        """Write the figure (on white), the data and the script of a result
+        into a folder (io/bundle.py); returns the files written."""
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+        from matplotlib.figure import Figure
+        from guiqula.ui import plots as plot_tools
+        result = self.session.result(calculation)
+        if result is None:
+            raise ValueError(f"{calculation} has no result yet")
+        stale = self.session.is_stale(calculation)
+        overlays = [(other, self.session.result(other), mode)
+                    for other, mode in self.overlays.get(calculation, [])
+                    if self.session.result(other) is not None]
+
+        def figure(png, pdf):
+            fig = Figure(figsize=(7, 4.5), dpi=100, layout="constrained")
+            FigureCanvasAgg(fig)
+            plot_tools.draw(fig, result, f"{calculation} · {result.kind} · {result.mode}",
+                            overlays, theme_name="light")
+            fig.savefig(png, dpi=200)
+            fig.savefig(pdf)
+
+        files = bundle.write(path, result, figure, trusted=self.session.trusted,
+                             results=self.session.result_refs(), stale=stale)
+        self.message(f"exported {calculation} to {path}")
+        return [str(f) for f in files]
 
     def save_result_dialog(self, calc):
         path, _ = QFileDialog.getSaveFileName(self, f"Save the data of {calc}", f"{calc}.npz",
@@ -2047,6 +2097,7 @@ class MainWindow(QMainWindow):
         self.redo_action.setEnabled(redo is not None)
         self.undo_action.setText(f"&Undo {undo}" if undo else "&Undo")
         self.redo_action.setText(f"&Redo {redo}" if redo else "&Redo")
+        self.unlock_action.setEnabled(has and bool(self.session.document.locks))
         self.run_button.setEnabled(has and self.calc_box.count() > 0)
         self.add_region_button.setEnabled(has and bool(self.session.document.systems))
         if has:

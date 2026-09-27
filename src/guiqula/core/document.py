@@ -131,6 +131,7 @@ class Calculation(_Model):
 class Document(_Model):
     version: int = SCHEMA_VERSION
     notes: str = ""                # what the document is about (the presets gallery shows it)
+    locks: list[str] = Field(default_factory=list)   # what a teacher locked (core/locks.py)
     systems: list[System] = Field(default_factory=list)
     calculations: list[Calculation] = Field(default_factory=list)
     ui: dict[str, Any] = Field(default_factory=dict)

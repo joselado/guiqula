@@ -80,6 +80,10 @@ def describe(name, args, document):
         return f"change the model of {args.get('system')}"
     if name == "set_notes":
         return "edit the notes"
+    if name == "lock":
+        return f"lock {args.get('target')}"
+    if name == "unlock":
+        return f"unlock {args['target']}" if args.get("target") else "unlock everything"
     return name.replace("_", " ")
 
 

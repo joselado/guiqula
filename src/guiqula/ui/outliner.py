@@ -166,6 +166,7 @@ class Outliner(QTreeWidget):
             calcs = self._add(None, "calculations", ["Calculations", ""])
             for calc in document.calculations:
                 self._add_calculation(session, calcs, calc)
+            self._mark_locks(document)
             self.expandAll()
             for item_id in collapsed & set(self._items):
                 self._items[item_id].setExpanded(False)
@@ -293,6 +294,20 @@ class Outliner(QTreeWidget):
         elif message:
             self._mark_invalid(item, message)
         return item
+
+    def _mark_locks(self, document):
+        """"locked" (or "m locked") in the status of what a lock covers; a
+        lattice parameter's on the base lattice row."""
+        for lock in document.locks:
+            head, _, param = lock.partition(".")
+            if param and "/" not in head and any(s.id == head for s in document.systems):
+                head = f"{head}/base"
+            item = self._items.get(head)
+            if item is not None:
+                text = f"{param} locked" if param else "locked"
+                item.setText(1, f"{item.text(1)} · {text}" if item.text(1) else text)
+                item.setToolTip(1, f"locked ({lock}): unlock it from the context menu or "
+                                   f"with Edit > Unlock everything")
 
     def _mark_invalid(self, item, message):
         item.setText(0, INVALID + item.text(0))
@@ -447,6 +462,16 @@ class Outliner(QTreeWidget):
                                                             {"calculation": obj.id}))
         if family in ("system", "region"):
             menu.addAction("Rename...", self.rename_current)
+        locks = self._session.document.locks if self._session is not None else []
+        targets = [(obj.id, "")] + ([(f"{obj.id}/geometry", " the geometry")]
+                                    if family == "system" else [])
+        for target, what in targets:
+            if target in locks:
+                menu.addAction(f"Unlock{what}", lambda t=target: self.command.emit(
+                    "unlock", {"target": t}))
+            else:
+                menu.addAction(f"Lock{what}", lambda t=target: self.command.emit(
+                    "lock", {"target": t}))
         menu.addAction("Duplicate", self.duplicate_current)
         if family != "system":
             menu.addAction("Move up", lambda: self.move_current(-1))

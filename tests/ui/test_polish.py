@@ -218,3 +218,104 @@ def test_every_toolbar_control_and_palette_entry_has_a_tooltip(window):
         zeeman.toolTip() and "spinful" in zeeman.toolTip()
     spec = registry.get("term", "zeeman")
     assert spec.doc in zeeman.toolTip()
+
+
+def test_locks_in_the_forms_and_the_outliner(window, qtbot):
+    """A teaching preset: its locked parameters are disabled and say so; a
+    parameter's label locks it; the outliner's context menu locks an entry;
+    Edit > Unlock everything lifts them (design item 12)."""
+    session = window.session
+    session.act("load", path="ssh_chain")
+    settle(qtbot, window)
+    assert "s1/geometry" in session.document.locks
+    window.select("op1")                       # the supercell of the finite chain
+    form = window.properties.form
+    assert not form.editors["n"].isEnabled() and form.labels["n"].text().endswith("(locked)")
+    assert "s2/geometry" in form.labels["n"].toolTip()
+    assert not form.enabled.isEnabled()
+    assert "locked" in window.outliner.item("s2/geometry").text(1)
+    window.select("t1")                        # the modulation is free
+    form = window.properties.form
+    assert form.editors["s"].isEnabled() and form.enabled.isEnabled()
+    menu = form._lock_menu(form.editors["s"].param, form.labels["s"], form.labels["s"].rect()
+                           .center())
+    assert [a.text() for a in menu.actions()] == ["Lock this parameter"]
+    menu.actions()[0].trigger()
+    menu.close()
+    assert "t1.s" in session.document.locks
+    form = window.properties.form
+    assert not form.editors["s"].isEnabled() and form.enabled.isEnabled()
+    assert "s locked" in window.outliner.item("t1").text(1)
+    ok, message = window._do("set_param", entry="t1", name="s", value=1.0)
+    assert not ok and "t1.s is locked" in message
+    window.outliner.command.emit("lock", {"target": "c1"})
+    assert "c1" in session.document.locks
+    assert window.unlock_action.isEnabled()
+    window.unlock_action.trigger()
+    assert session.document.locks == [] and not window.unlock_action.isEnabled()
+    assert window.properties.form.editors["s"].isEnabled()
+    window.undo()
+    assert "t1.s" in session.document.locks
+
+
+def test_export_figure_data_and_script(window, qtbot, tmp_path, run_python):
+    """One folder per result: the figure on white even in the dark theme,
+    the arrays, a table of the curves, the script reproducing them, the
+    document (design item 12)."""
+    import json
+    import numpy as np
+    from PIL import Image
+    session = window.session
+    session.act("load", path="honeycomb_zeeman_rashba")
+    settle(qtbot, window)
+    job = session.run_calculation("c1", wait=True, timeout=600)
+    assert job.status == "done", job.error
+    window.set_theme("dark")
+    try:
+        files = session.act("export_bundle", calculation="c1", path=str(tmp_path / "c1_bands"))
+    finally:
+        window.set_theme("light")
+    names = sorted(p.split("/")[-1] for p in files)
+    assert names == ["README.txt", "data.csv", "data.json", "data.npz", "document.json",
+                     "figure.pdf", "figure.png", "script.py"]
+    folder = tmp_path / "c1_bands"
+    image = np.asarray(Image.open(folder / "figure.png").convert("RGB"))
+    assert tuple(image[2, 2]) == (255, 255, 255)                 # white, not the dark theme
+    table = np.loadtxt(folder / "data.csv", delimiter=",", skiprows=1)
+    energies = job.value.arrays["energies"]
+    assert table.shape == (len(energies), 1 + energies.shape[1])
+    assert np.allclose(table[:, 1:], energies)
+    assert json.loads((folder / "document.json").read_text())["systems"][0]["id"] == "s1"
+    run = run_python("import guiqula\n" + (folder / "script.py").read_text()   # finds pyqula
+                     + f"\nnp.save({str(tmp_path / 'e.npy')!r}, np.asarray(energies))")
+    assert run.returncode == 0, run.stderr
+    assert np.allclose(np.load(tmp_path / "e.npy"), energies, atol=1e-8)
+    assert "c1: bands" in (folder / "README.txt").read_text()
+
+
+def test_values_on_a_chain_are_a_curve_against_x(qapp):
+    """The LDOS of a long chain would be dots too small to colour: on a
+    chain a result on the atoms is drawn as a curve against x."""
+    import numpy as np
+    from matplotlib.figure import Figure
+    from guiqula.core.results import Result
+    from guiqula.ui import plots
+    x = np.arange(10, dtype=float) - 4.5
+    structure = {"positions": np.column_stack([x, np.zeros(10), np.zeros(10)]),
+                 "lattice": np.eye(3), "dimensionality": 0, "sublattice": None,
+                 "bonds": np.array([[i, i + 1] for i in range(9)]),
+                 "image_bonds": np.zeros((0, 5), dtype=int)}
+    values = np.exp(-np.abs(x))
+    result = Result(calculation="c9", kind="ldos", key="k", params={},
+                    arrays={"ldos": values},
+                    plot={"kind": "structure_scalar", "values": "ldos", "clabel": "LDOS"},
+                    reports=[], mode="spinless", structure=structure)
+    ax, points = plots.draw(Figure(), result)
+    assert np.allclose(ax.lines[0].get_ydata(), values[np.argsort(x)])
+    assert ax.get_ylabel() == "LDOS" and ax.get_xlabel() == "x"
+    view = plots.PlotView("c9")
+    view.show_result(result)
+    assert view.readout_text(9) == "site 9 at x = 4.5 · LDOS 0.011109"
+    structure["positions"][3, 1] = 0.5                    # not a chain: on the atoms
+    ax, points = plots.draw(Figure(), result)
+    assert not ax.lines and ax.get_ylabel() == "y"

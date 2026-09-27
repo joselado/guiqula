@@ -1250,6 +1250,42 @@ hands `QAction.triggered`'s `checked` to a slot whose parameter has a
 default (`undo(steps=1)` got `steps=False`), so such slots are connected
 through a lambda; offscreen, `QTest.keyClick` on the focused canvas fires
 its widget shortcuts.
+**Part 2 done 2026-09-27.** Built: locks (`core/locks.py`,
+`Document.locks`): a lock names an entry (`t1`), a parameter (`t1.m`;
+`s1.n` for a lattice's) or a system's geometry (`s1/geometry`); the
+dispatcher refuses any mutation that changes what a lock covers, by
+comparing the Document before and after it, so no mutation needs its own
+check; `lock` and `unlock` are undoable mutations; the forms disable what
+is locked and say so on the labels, a parameter's label locks or unlocks
+it (right click), the outliner marks what is locked and its context menu
+locks an entry or a system's geometry, Edit > Unlock everything. Export
+figure, data and script (`io/bundle.py`, the Export button of a result
+view, File menu, Ctrl+Shift+E, the `export_bundle` window action): one
+folder with the figure as PNG and PDF drawn in the light theme whatever
+the window shows (`theme.drawing(figure, "light")` also swaps the colour
+names while it draws), the arrays (.npz and .json), a CSV of the curves or
+of the numbers, the pyqula script and the document, both from the
+result's own snapshot, so a stale result is reproduced as it was, and a
+README. Presets: two teaching presets with locks (`ssh_chain`: the
+infinite chain's bands and a 42-site chain's end states, the modulation
+free; `graphene_basics`: bands, DOS and gap, the terms free), two examples
+(`zigzag_ribbon_magnetism`: Hubbard edge magnetism in the mean field;
+`kagome_flat_band`), and the Haldane preset gained its phase diagram (c4,
+a sweep of the Chern number over the imbalance and the Haldane coupling,
+117 points in 9 s). The gallery groups the presets that lock something
+(teaching) apart from the others (examples). A result on the atoms of a
+chain (every site on one line) is drawn as a curve against x: the atoms of
+a 42-site chain were too small to read a colour from. Tests:
+`tests/core/test_locks.py`, `test_locks_in_the_forms_and_the_outliner`,
+`test_export_figure_data_and_script` (the PNG is white in the dark theme,
+the CSV equals the arrays, the script reproduces them),
+`test_values_on_a_chain_are_a_curve_against_x`, the gallery groups in
+`test_presets_gallery`; `test_every_preset_exports` covers the new
+presets. Facts learned: a 21-cell supercell of `geometry.bichain()` is
+centred on the origin and ends on intracell bonds (a 20-cell one ends on
+intercell bonds), so which chain is topological with a given modulation
+depends on the parity of the supercell; Qt greys out a list item without
+flags, which the gallery uses for its headings.
 
 **Phase 6 — distribution and add-on.** PyPI release, conda file, installers for
 Mac/Windows, plugin entry points and a plugin template, JSON-RPC server + MCP

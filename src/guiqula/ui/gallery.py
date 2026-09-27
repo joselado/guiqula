@@ -1,7 +1,9 @@
 """The presets gallery (PLAN.md section 4, decision 13.16): the documents
 shipped with guiqula, by title, with the description in their notes; Open
 loads one (it stays fully editable). quantum-lattice's modes became these
-presets (decision 5: a convenience, not a one-to-one reproduction)."""
+presets (decision 5: a convenience, not a one-to-one reproduction). Two
+groups: teaching presets, which lock what their exercise keeps fixed
+(core/locks.py), and examples (PLAN.md phase 5, design items 12 and 13)."""
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
                                QPushButton, QVBoxLayout)
@@ -9,11 +11,14 @@ from PySide6.QtWidgets import (QDialog, QHBoxLayout, QLabel, QListWidget, QListW
 from guiqula.io import project
 
 
+GROUPS = (("teaching", "Teaching (some parameters locked)"), ("examples", "Examples"))
+
+
 def preset_notes(name):
-    """(title, description) of a shipped preset."""
-    notes = project.load(name).notes.strip()
-    title, _, description = notes.partition("\n")
-    return title or name, description.strip()
+    """(title, description, group) of a shipped preset."""
+    document = project.load(name)
+    title, _, description = document.notes.strip().partition("\n")
+    return title or name, description.strip(), "teaching" if document.locks else "examples"
 
 
 class Gallery(QDialog):
@@ -31,14 +36,23 @@ class Gallery(QDialog):
         self.description.setWordWrap(True)
         self.description.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self.description.setMinimumWidth(320)
-        self.notes = {}
-        for name in project.presets():
-            title, description = preset_notes(name)
-            self.notes[name] = (title, description)
-            item = QListWidgetItem(title)
-            item.setData(Qt.ItemDataRole.UserRole, name)
-            item.setToolTip(name)
-            self.list.addItem(item)
+        self.notes = {name: preset_notes(name) for name in project.presets()}
+        for group, heading in GROUPS:
+            names = sorted((n for n, notes in self.notes.items() if notes[2] == group),
+                           key=lambda n: self.notes[n][0].lower())
+            if not names:
+                continue
+            header = QListWidgetItem(heading)
+            header.setFlags(Qt.ItemFlag.NoItemFlags)
+            font = header.font()
+            font.setBold(True)
+            header.setFont(font)
+            self.list.addItem(header)
+            for name in names:
+                item = QListWidgetItem("    " + self.notes[name][0])
+                item.setData(Qt.ItemDataRole.UserRole, name)
+                item.setToolTip(name)
+                self.list.addItem(item)
         self.list.currentItemChanged.connect(self._show)
         self.list.itemDoubleClicked.connect(lambda item: self.open(self._name(item)))
         self.open_button = QPushButton("Open")
@@ -57,7 +71,7 @@ class Gallery(QDialog):
         layout = QVBoxLayout(self)
         layout.addLayout(row, 1)
         layout.addLayout(buttons)
-        self.list.setCurrentRow(0)
+        self.list.setCurrentRow(1)
 
     @staticmethod
     def _name(item):
@@ -78,8 +92,12 @@ class Gallery(QDialog):
         if name is None:
             self.description.setText("")
             return
-        title, description = self.notes[name]
-        self.description.setText(f"<b>{title}</b><p>{description}</p><p><i>{name}</i></p>")
+        title, description, group = self.notes[name]
+        locked = ("<p><i>Some parameters are locked for the exercise (their fields are "
+                  "greyed out); Edit &gt; Unlock everything lifts them.</i></p>"
+                  if group == "teaching" else "")
+        self.description.setText(f"<b>{title}</b><p>{description}</p>{locked}"
+                                 f"<p><i>{name}</i></p>")
 
     def open(self, name):
         if name:

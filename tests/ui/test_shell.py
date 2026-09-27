@@ -351,10 +351,20 @@ def test_close_asks_about_unsaved_changes(qtbot, monkeypatch, no_jobs):
 
 def test_presets_gallery(window, qtbot, shot):
     from guiqula.io import project
+    from guiqula.ui.gallery import GROUPS
     gallery = window.show_gallery()
-    assert gallery.list.count() == len(project.presets())
+    assert gallery.list.count() == len(project.presets()) + len(GROUPS)   # and the headings
+    rows = [gallery.list.item(i) for i in range(gallery.list.count())]
+    names = [gallery._name(item) for item in rows]
+    assert names[0] is None and rows[0].text().startswith("Teaching")
+    teaching = names[1:names.index(None, 1)]
+    assert {"ssh_chain", "graphene_basics"} <= set(teaching)
+    assert all(project.load(name).locks for name in teaching)
+    gallery.select("ssh_chain")
+    assert "locked for the exercise" in gallery.description.text()
     gallery.select("majorana_wire")
     assert "Majorana" in gallery.description.text()
+    assert "locked" not in gallery.description.text()
     shot(gallery, "gallery")
     gallery.open_button.click()
     assert window.session.document.notes.startswith("Majorana wire")

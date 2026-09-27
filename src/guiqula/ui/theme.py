@@ -177,8 +177,17 @@ def finish(figure, theme_name=None):
 @contextmanager
 def drawing(figure, theme_name=None):
     """Draw into a figure in a theme (the active one by default): its
-    background, and the colours of what is created inside and of the ticks."""
-    with rc(theme_name):
-        set_figure(figure, theme_name)
-        yield
-        finish(figure, theme_name)
+    background, the colours of what is created inside and of the ticks, and
+    the colour names of this module while inside (an exported figure is
+    drawn in the light theme from a dark window)."""
+    other = theme_name is not None and theme_name != name
+    if other:
+        globals().update(COLORS[theme_name])
+    try:
+        with rc(theme_name):
+            set_figure(figure, theme_name)
+            yield
+            finish(figure, theme_name)
+    finally:
+        if other:
+            globals().update(COLORS[name])

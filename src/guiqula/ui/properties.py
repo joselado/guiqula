@@ -9,6 +9,9 @@ has the same shape (same kind, same regions to choose from) the values are
 updated in place, so an editor in use is never destroyed under the mouse;
 otherwise the form is rebuilt.
 
+Locks (core/locks.py): what a lock covers is shown disabled, its label
+saying so; right-clicking a parameter's label locks or unlocks it.
+
 When the user looks at a Field (focus, typing, its f(r) panel), the panel
 emits preview(entry, parameter); the window draws that Field on the
 structure, with live_value(parameter) while it is being typed.
@@ -16,7 +19,7 @@ structure, with live_value(parameter) while it is being typed.
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QGroupBox, QLabel, QLineEdit,
-                               QPushButton, QScrollArea, QVBoxLayout, QWidget)
+                               QMenu, QPushButton, QScrollArea, QVBoxLayout, QWidget)
 
 from guiqula.core import regions as region_tools
 from guiqula.core.document import DocumentError
@@ -44,10 +47,14 @@ def _quiet(widget, setter, value):
 
 
 class Form(QWidget):
+    lock_owner = None       # what a parameter lock names: "t1" in "t1.m", "s1" in "s1.n"
+
     def __init__(self, panel, item_id, title, doc=""):
         super().__init__()
         self.panel = panel
         self.item_id = item_id
+        self.labels = {}
+        self.guarded = []   # widgets a lock of the whole form disables (enabled, region, ...)
         layout = QVBoxLayout(self)
         self.title = QLabel(title)
         self.title.setObjectName("formTitle")
@@ -98,9 +105,48 @@ class Form(QWidget):
                 editor.preview.connect(lambda p=param: self.panel.preview.emit(self.item_id,
                                                                                p.name))
             label = QLabel(param.label)
+            label.setObjectName(f"label_{param.name}")
             label.setToolTip(param.doc)
+            if self.lock_owner is not None:
+                label.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+                label.customContextMenuRequested.connect(
+                    lambda point, p=param, w=label: self._lock_menu(p, w, point))
             self.rows.addRow(label, editor)
+            self.labels[param.name] = label
             self.editors[param.name] = editor
+
+    # ---- locks
+    def whole_locks(self):
+        """Lock targets that cover every parameter of this form."""
+        return []
+
+    def apply_locks(self):
+        """Disable what the Document's locks cover; say so on the labels."""
+        locks = set(self.session.document.locks)
+        whole = [t for t in self.whole_locks() if t in locks]
+        for name, editor in self.editors.items():
+            own = f"{self.lock_owner}.{name}" if self.lock_owner else None
+            by = whole + ([own] if own in locks else [])
+            editor.setEnabled(not by)
+            label = self.labels.get(name)
+            if label is not None:
+                param = editor.param
+                label.setText(param.label + (" (locked)" if by else ""))
+                label.setToolTip(param.doc + (f"\n\nlocked by {', '.join(by)}; right-click "
+                                              f"to unlock" if by else ""))
+        for widget in self.guarded:
+            widget.setEnabled(not whole)
+
+    def _lock_menu(self, param, label, point):
+        target = f"{self.lock_owner}.{param.name}"
+        menu = QMenu(label)
+        menu.setObjectName("lockMenu")
+        if target in self.session.document.locks:
+            menu.addAction("Unlock this parameter", lambda: self.commit("unlock", target=target))
+        else:
+            menu.addAction("Lock this parameter", lambda: self.commit("lock", target=target))
+        menu.popup(label.mapToGlobal(point))
+        return menu
 
     def live_value(self, name):
         editor = self.editors.get(name)
@@ -140,6 +186,7 @@ class SystemForm(Form):
 
     def __init__(self, panel, system_id):
         system = panel.session.document.system(system_id)
+        self.lock_owner = system_id
         super().__init__(panel, system_id, f"System {system_id}", "")
         self.system_id = system_id
         self.name = QLineEdit()
@@ -181,6 +228,8 @@ class SystemForm(Form):
             form.addRow("neighbour hoppings", self.tij)
             form.addRow("sparse", self.sparse)
             self.layout().insertWidget(3, box)
+        self.guarded = [self.name] + ([self.has_spin, self.nambu, self.sparse, self.tij]
+                                      if system.hamiltonian is not None else [])
         self.info = QLabel()
         self.info.setObjectName("systemInfo")
         self.info.setWordWrap(True)
@@ -206,6 +255,17 @@ class SystemForm(Form):
             _quiet(self.sparse, self.sparse.setChecked, c.is_sparse)
             _quiet(self.tij, self.tij.setText, ", ".join(format_number(t) for t in c.tij))
         self.info.setText(self._info())
+
+    def whole_locks(self):
+        return [self.system_id, f"{self.system_id}/geometry"]
+
+    def apply_locks(self):
+        """The geometry lock covers the lattice; the system's lock everything."""
+        super().apply_locks()
+        locks = self.session.document.locks
+        self.lattice.setEnabled(not any(t in locks for t in self.whole_locks()))
+        for widget in self.guarded:
+            widget.setEnabled(self.system_id not in locks)
 
     def _info(self):
         session, system_id = self.session, self.system_id
@@ -250,6 +310,7 @@ class EntryForm(Form):
 
     def __init__(self, panel, entry_id):
         family, owner, _, _, obj = panel.session.document.find(entry_id)
+        self.lock_owner = entry_id
         try:
             spec = registry.get(FAMILY[family], obj.kind)
         except registry.RegistryError as error:
@@ -288,11 +349,20 @@ class EntryForm(Form):
                              lambda name, value: self.commit("set_param", entry=entry_id,
                                                              name=name, value=value),
                              _regions(owner) if family == "term" else (), self.sources)
+        self.guarded = [w for w in (self.enabled, self.region) if w is not None]
         self.status = QLabel()
         self.status.setObjectName("entryStatus")
         self.status.setWordWrap(True)
         self.layout().insertWidget(self.layout().count() - 2, self.status)
         self.update_values()
+
+    def whole_locks(self):
+        out = [self.item_id]
+        if self.family == "op":
+            out += [self.system_id, f"{self.system_id}/geometry"]
+        elif self.family == "term":
+            out.append(self.system_id)
+        return out
 
     def signature(self):
         found = self.session.document.find(self.item_id)
@@ -376,7 +446,11 @@ class RegionForm(Form):
                                    "them, or to make a region by position from them)")
         self.show_sites.clicked.connect(self._select_sites)
         self.rows.addRow("", self.show_sites)
+        self.guarded = [w for w in (self.name, self.expr, self.tol) if w is not None]
         self.update_values()
+
+    def whole_locks(self):
+        return [self.item_id, self.system_id]
 
     def _select_sites(self):
         region = self.session.document.find(self.item_id)[-1]
@@ -587,6 +661,13 @@ class PropertiesPanel(QScrollArea):
             form = EmptyForm(self)
         self._set_form(form)
         self._signature = self._current_signature()
+        self._apply_locks()
+
+    def _apply_locks(self):
+        try:
+            self.form.apply_locks()
+        except (DocumentError, KeyError, AttributeError):
+            pass
 
     def _current_signature(self):
         try:
@@ -603,3 +684,4 @@ class PropertiesPanel(QScrollArea):
             self.show_item(self.session, self.item_id if signature is not None else "")
             return
         self.form.update_values()
+        self._apply_locks()

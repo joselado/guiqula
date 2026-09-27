@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "notes": "Kagome lattice: a flat band\nFirst-neighbour hopping on the kagome lattice gives two dispersive bands with Dirac points and a band that does not disperse at all (c1), which shows as a sharp peak in the density of states (c2): destructive interference traps the electrons on hexagons. Add a Zeeman field, or a Haldane-like coupling, and see what happens to it.",
+  "locks": [],
+  "systems": [
+    {
+      "id": "s1",
+      "name": "kagome",
+      "kind": "quantum",
+      "geometry": {
+        "base": {
+          "kind": "kagome_lattice",
+          "params": {}
+        },
+        "ops": []
+      },
+      "regions": [],
+      "hamiltonian": {
+        "construction": {
+          "has_spin": false,
+          "nambu": false,
+          "tij": [1.0],
+          "is_sparse": false
+        },
+        "terms": [],
+        "meanfield": {
+          "enabled": false,
+          "kind": "interactions",
+          "params": {}
+        }
+      },
+      "model": null
+    }
+  ],
+  "calculations": [
+    {
+      "id": "c1",
+      "system": "s1",
+      "kind": "bands",
+      "params": {
+        "nk": 200,
+        "operator": null,
+        "kpath": null
+      }
+    },
+    {
+      "id": "c2",
+      "system": "s1",
+      "kind": "dos",
+      "params": {
+        "emin": -2.5,
+        "emax": 4.5,
+        "ne": 500,
+        "delta": 0.04,
+        "nk": 50,
+        "mode": "ED",
+        "operator": null,
+        "seed": 1
+      }
+    }
+  ],
+  "ui": {
+    "workspace": "calculate",
+    "calculation": "c1"
+  }
+}

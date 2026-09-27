@@ -9,6 +9,7 @@ and is flagged by the pipeline planner.
 """
 from guiqula.commands.dispatcher import CommandError, mutation
 from guiqula.core import fields as field_tools
+from guiqula.core import locks as lock_tools
 from guiqula.core import regions as region_tools
 from guiqula.core.document import (CLASSICAL_KINDS, SYSTEM_KINDS, Base, Calculation,
                                    Construction, Entry, Geometry, Hamiltonian, MeanField, Model,
@@ -288,3 +289,28 @@ def set_params(document, entry, params):
     if family not in FAMILY_OF:
         raise CommandError(f"{entry!r} is a {family}, which has no parameters")
     obj.params = _normalize(FAMILY_OF[family], obj.kind, dict(obj.params, **params))
+
+
+# ---- locks (teaching presets, core/locks.py)
+@mutation
+def lock(document, target):
+    """Lock an entry ("t1"), a parameter ("t1.m"; "s1.n" for a lattice's) or
+    a system's geometry ("s1/geometry"): commands that would change it are
+    refused until it is unlocked."""
+    try:
+        lock_tools.check_target(document, target)
+    except lock_tools.LockError as error:
+        raise CommandError(str(error)) from None
+    if target not in document.locks:
+        document.locks.append(target)
+
+
+@mutation
+def unlock(document, target=None):
+    """Unlock one target, or everything (target None)."""
+    if target is None:
+        document.locks.clear()
+    elif target in document.locks:
+        document.locks.remove(target)
+    else:
+        raise CommandError(f"{target!r} is not locked; locked: {document.locks}")
