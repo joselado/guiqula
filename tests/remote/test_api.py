@@ -85,6 +85,19 @@ def test_invalid_entries_are_reported(api):
     assert "invalid" not in call(api, "status")["systems"][0]
 
 
+def test_trust_rebuilds_without_a_window(api):
+    """Trust changes what is built, as an edit does: the reply of the trust
+    action waits for the build the Python op now changes."""
+    call(api, "do", command="trust", args={"enabled": False})
+    reply = call(api, "do", command="add_geometry_op", args={
+        "system": "s1", "kind": "python", "params": {"code": "g = g.get_supercell([2, 1, 1])"}})
+    op = reply["result"]
+    assert reply["systems"]["s1"]["build"]["sites"] == 8                  # skipped
+    build = call(api, "do", command="trust", args={"enabled": True})["systems"]["s1"]["build"]
+    assert build["current"] and build["sites"] == 16
+    call(api, "do", command="remove", args={"entry": op})
+
+
 def test_run_result_plot_script(api):
     reply = call(api, "run", calculation="c1", timeout=600)
     assert reply["status"] == "done", reply

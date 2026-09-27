@@ -53,30 +53,50 @@ def _run(argv):
     parser.add_argument("--trust", action="store_true", help="run the document's Python nodes")
     args = parser.parse_args(argv)
     from guiqula.io import project, results
-    from guiqula.session import Session, trusted_on_open
+    from guiqula.registry import pipeline
+    from guiqula.session import Session
     document = project.load(args.document)
     calcs = args.calc or [c.id for c in document.calculations]
+    for calc in calcs:
+        document.calculation(calc)          # an unknown id, before anything runs
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     failed = 0
-    with Session(document, interactive=False, timeout=args.timeout) as session:
-        session.trusted = args.trust or trusted_on_open(args.document, document)
-        jobs = {c: session.run_calculation(c, cores=args.cores) for c in calcs}
-        for calc, job in jobs.items():
-            session.jobs.wait(job)
-            report = {"calculation": calc, "status": job.status}
-            if job.status == "done":
-                report["files"] = [str(p) for p in results.save(job.value, out / calc)]
-                report.update(job.value.summary())
-                if args.script:
-                    path = out / f"{calc}.py"
-                    session.act("export_script", calculation=calc, path=str(path))
-                    report["files"].append(str(path))
-            else:
-                failed += 1
-                report["error"] = job.error
-            print(json.dumps(report))
+    # opened by path: the results a project file keeps are there for its from_result Fields
+    with Session(args.document, interactive=False, timeout=args.timeout) as session:
+        if args.trust:
+            session.trusted = True
+        for wave in _waves(document, calcs, pipeline):
+            jobs = {c: session.run_calculation(c, cores=args.cores) for c in wave}
+            for calc, job in jobs.items():
+                session.jobs.wait(job)
+                report = {"calculation": calc, "status": job.status}
+                if job.status == "done":
+                    report["files"] = [str(p) for p in results.save(job.value, out / calc)]
+                    report.update(job.value.summary())
+                    if args.script:
+                        path = out / f"{calc}.py"
+                        session.act("export_script", calculation=calc, path=str(path))
+                        report["files"].append(str(path))
+                else:
+                    failed += 1
+                    report["error"] = job.error
+                print(json.dumps(report), flush=True)
     return 1 if failed else 0
+
+
+def _waves(document, calcs, pipeline):
+    """The calculations in groups that run one after the other: one whose
+    system reads the result of another being run (a from_result Field)
+    comes after it, as the window's user would run them."""
+    reads = {c: set(pipeline.result_references(document, document.calculation(c).system))
+             for c in calcs}
+    waves, left = [], list(calcs)
+    while left:
+        wave = [c for c in left if not (reads[c] - {c}) & set(left)] or list(left)   # a cycle
+        waves.append(wave)
+        left = [c for c in left if c not in wave]
+    return waves
 
 
 def _script(argv):

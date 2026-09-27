@@ -1925,6 +1925,9 @@ onward are features (placement per phase at the end of section 7).
 3. **Headless runner and provenance.** `guiqula run project.guiqula --calc
    bands` executes through the same engine with no Qt, so heavy jobs can run
    on a cluster or in a terminal and their results load back into the GUI.
+   It opens a project with its results (a from_result Field reads the one
+   the file keeps), and runs a calculation whose system reads another's
+   result after that one (fixes of 2026-09-27).
    Every result stores its Document snapshot and the vendored pyqula commit,
    and can emit its own reproducing script.
 

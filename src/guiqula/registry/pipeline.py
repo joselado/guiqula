@@ -468,10 +468,13 @@ def calculation_key(document, calc_id, trusted=True, results=None):
     return plan_calculation(document, calc_id, trusted, results).key
 
 
-def result_references(document):
-    """Ids of the calculations whose results the document's Fields read."""
+def result_references(document, system_id=None):
+    """Ids of the calculations whose results the document's Fields read
+    (of one system's Fields, given its id)."""
     params = []
     for system in document.systems:
+        if system_id is not None and system.id != system_id:
+            continue
         params += [term.params for term in terms_of(system)]
         if system.hamiltonian is not None:
             params.append(system.hamiltonian.meanfield.params)

@@ -49,6 +49,11 @@ bridge runs a session of its own. Python nodes run only in a trusted document.""
 
 
 # ---- backends: a running guiqula, or a Session of the bridge's own
+class Lost(ConnectionError):
+    """The connection to a running guiqula broke (not a command's own error,
+    which is an OSError as well when it is a file that cannot be written)."""
+
+
 class Attached:
     def __init__(self, found):
         from guiqula.remote.client import Client
@@ -56,7 +61,10 @@ class Attached:
         self.client = Client(found["port"], found["token"])
 
     def call(self, method, **params):
-        return self.client.call(method, **params)
+        try:
+            return self.client.call(method, **params)
+        except OSError as error:            # ConnectionError, a socket timeout
+            raise Lost(str(error)) from None
 
     def describe(self):
         what = "the window" if self.found.get("window") else "guiqula serve"
@@ -222,7 +230,7 @@ class Bridge:
         backend = self._backend()
         try:
             return backend.call(method, **params)
-        except (ConnectionError, OSError) as error:
+        except Lost as error:            # a command's own OSError (a save) keeps the session
             self.close()
             raise RemoteError(INTERNAL, f"lost {backend.describe()} ({error}); call connect "
                                         f"or try again") from None
@@ -233,9 +241,10 @@ class Bridge:
         if target is None:
             return {"connected": self.backend.describe() if self.backend else None,
                     "running": running}
-        if target == "headless":
+        if target == "headless":         # the new session first: a wrong name keeps the old
+            backend = Headless(document or self.document, self.trust)
             self.close()
-            self.backend = Headless(document or self.document, self.trust)
+            self.backend = backend
             return {"connected": self.backend.describe()}
         found = connection.find(pid)
         if found is None and launch:
@@ -243,8 +252,9 @@ class Bridge:
         if found is None:
             raise RemoteError(INVALID_PARAMS, "no guiqula runs with remote control on" +
                               ("" if launch else "; launch: true opens one"))
+        backend = Attached(found)
         self.close()
-        self.backend = Attached(found)
+        self.backend = backend
         return {"connected": self.backend.describe(), "running": running}
 
     def _launch(self, document):

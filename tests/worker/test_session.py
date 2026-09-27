@@ -336,3 +336,25 @@ def test_an_undo_brings_back_results_that_read_other_results(session):
     session.undo()
     assert session.result("c1") is first_c1 and session.result("c2") is first_c2
     assert session.status("c2") == "done"
+
+
+def test_cli_run_reads_the_results_it_needs(session, tmp_path, repo):
+    """In texture_exchange, c2 runs on s2, whose exchange reads c1's result
+    (a from_result Field). guiqula run runs c1 first, whatever the order
+    asked; and from a project file, it reads the c1 the file keeps."""
+    env = dict(os.environ, PYTHONPATH=str(repo / "src"))
+
+    def run(*args):
+        done = subprocess.run([sys.executable, "-m", "guiqula", "run", *args], cwd=tmp_path,
+                              capture_output=True, text=True, env=env, timeout=900)
+        assert done.returncode == 0, done.stderr
+        return [json.loads(line) for line in done.stdout.splitlines() if line.startswith("{")]
+
+    reports = run("texture_exchange", "--calc", "c2", "--calc", "c1", "--out", "both")
+    assert [r["calculation"] for r in reports] == ["c1", "c2"]
+    assert [r["skipped"] for r in reports] == [[], []]
+    session.act("load", path="texture_exchange")
+    assert session.run_calculation("c1", wait=True, timeout=900).status == "done"
+    session.act("save", path=str(tmp_path / "te.guiqula"))
+    (report,) = run(str(tmp_path / "te.guiqula"), "--calc", "c2", "--out", "file")
+    assert report["status"] == "done" and report["skipped"] == []

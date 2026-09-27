@@ -116,6 +116,11 @@ def test_mcp_with_its_own_session():
         assert json.loads(text_of(added))["result"] == "t3"
         refused = mcp.tool("command", name="add_term", args={"system": "s9", "kind": "haldane"})
         assert refused["isError"] and "s9" in text_of(refused)
+        # a command's own OSError, and a connect to a misspelt document, keep the session
+        unsaved = mcp.tool("command", name="save", args={"path": "no/such/folder/x.guiqula"})
+        assert unsaved["isError"] and "lost" not in text_of(unsaved)
+        assert mcp.tool("connect", target="headless", document="no_such_preset")["isError"]
+        assert '"t3"' in text_of(mcp.tool("status"))
         run = json.loads(text_of(mcp.tool("run_calculation", calculation="c1")))
         assert run["status"] == "done", run
         plot = mcp.tool("plot", calculation="c1")

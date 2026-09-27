@@ -170,14 +170,17 @@ class Server:
         while b"\n" in conn.inbox and conn in self.connections and not conn.closing:
             line, conn.inbox = conn.inbox.split(b"\n", 1)
             if line.strip():
-                self._handle(conn, line)
+                try:
+                    self._handle(conn, line)
+                except Exception as error:     # one request must never stop the server
+                    self._reply(conn, None, error=self._error_of("request", error))
         if len(conn.inbox) > LINE_LIMIT:
             self._close(conn)
 
     def _handle(self, conn, line):
         try:
             request = json.loads(line)
-        except ValueError:
+        except (ValueError, RecursionError):     # RecursionError: nested too deeply
             self._reply(conn, None, error=(PARSE_ERROR, "not JSON"))
             return
         if not isinstance(request, dict) or not isinstance(request.get("method"), str):

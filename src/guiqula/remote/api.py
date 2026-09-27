@@ -169,9 +169,12 @@ class RemoteAPI:
 
     # ---- builds without a window
     def _on_session_event(self, kind, payload):
-        """Rebuild after a change, as the window does (it asks after a pause)."""
-        if kind == "document" and payload["type"] in ("mutation", "undo", "redo", "reset") \
-                and "interactive" in self.session.jobs.workers:
+        """Rebuild after a change, as the window does (it asks after a pause);
+        trust changes the plans as an edit does (Python nodes run or not)."""
+        changed = payload["type"] in ("mutation", "undo", "redo", "reset") or \
+            payload["type"] == "action" and payload.get("name") == "trust" \
+            if kind == "document" else False
+        if changed and "interactive" in self.session.jobs.workers:
             self.session.build_all()
 
     def settled(self):

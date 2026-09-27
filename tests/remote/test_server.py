@@ -111,6 +111,16 @@ def test_malformed_requests(served):
         {"n": 4}
 
 
+def test_deeply_nested_json_does_not_stop_the_server(served):
+    """json.loads raises RecursionError, not ValueError, on it: one line,
+    before any hello, ended `guiqula serve`."""
+    server, _ = served
+    sock, reader = raw(server)
+    assert send(sock, reader, b"[" * 100000)["error"]["code"] == PARSE_ERROR
+    with Client(server.port, server.token) as client:
+        assert client.call("echo", a=1) == {"a": 1}
+
+
 def test_pending_replies_do_not_block_other_clients(served):
     server, toy = served
     replies = {}
