@@ -114,3 +114,20 @@ def test_text_being_typed_survives_a_finished_build(window, qtbot):
     qtbot.waitUntil(lambda: job.done, timeout=300_000)
     qtbot.wait(200)
     assert editor.text() == "0.5"
+
+
+def test_the_jobs_panel_keeps_the_newest_finished_rows(qapp, monkeypatch):
+    from types import SimpleNamespace
+    from guiqula.ui import jobpanel
+    monkeypatch.setattr(jobpanel, "ROWS_KEPT", 3)
+    panel = jobpanel.JobPanel()
+    running = SimpleNamespace(id="j1", kind="run", label="c1", status="running", error=None,
+                              traceback=None, progress=0.5, done=False)
+    panel.update_job(running)
+    for n in range(2, 7):
+        panel.update_job(SimpleNamespace(id=f"j{n}", kind="run", label="c1", status="done",
+                                         error=None, traceback=None, progress=1.0, done=True))
+    assert list(panel.rows) == ["j1", "j5", "j6"]          # the running one stays
+    assert [panel.table.item(r, 0).text() for r in range(3)] == ["j1", "j5", "j6"]
+    panel.update_job(SimpleNamespace(**dict(vars(running), status="done", done=True)))
+    assert panel.table.item(panel.rows["j1"], 2).text() == "done"

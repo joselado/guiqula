@@ -1,10 +1,13 @@
 """The job panel (PLAN.md section 4, decision 14.2): one row per job with
-its progress and a Cancel button, and the state of the worker processes."""
+its progress and a Cancel button, and the state of the worker processes.
+The oldest finished rows go beyond ROWS_KEPT (auto re-run and sliders
+start a job at every step)."""
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (QHeaderView, QLabel, QProgressBar, QTableWidget,
                                QTableWidgetItem, QToolButton, QVBoxLayout, QWidget)
 
 COLUMNS = ("job", "what", "status", "progress", "")
+ROWS_KEPT = 100
 
 
 class JobPanel(QWidget):
@@ -60,6 +63,17 @@ class JobPanel(QWidget):
         self.table.item(row, 2).setToolTip(job.traceback or status)
         self.table.cellWidget(row, 3).setValue(int(round(100 * job.progress)))
         self.table.cellWidget(row, 4).setEnabled(not job.done)
+        if job.done and self.table.rowCount() > ROWS_KEPT:
+            self._prune()
+
+    def _prune(self):
+        """Drop the oldest finished rows beyond ROWS_KEPT."""
+        excess = self.table.rowCount() - ROWS_KEPT
+        finished = [row for row in range(self.table.rowCount())
+                    if not self.table.cellWidget(row, 4).isEnabled()][:excess]
+        for row in reversed(finished):
+            self.table.removeRow(row)
+        self.rows = {self.table.item(row, 0).text(): row for row in range(self.table.rowCount())}
 
     def update_workers(self, infos):
         parts = []
