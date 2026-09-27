@@ -159,6 +159,7 @@ class MainWindow(QMainWindow):
         self.structure.view_chosen.connect(self.set_canvas_view)
         self.structure.projection_chosen.connect(self.set_projection)
         self.structure.paint_stroke.connect(self._paint_stroke)
+        self.structure.navigation_changed.connect(self._navigation_changed)
         self.viewport = QTabWidget()
         self.viewport.setObjectName("viewport")
         self.viewport.setTabsClosable(True)
@@ -1222,6 +1223,19 @@ class MainWindow(QMainWindow):
         for button in self.tool_buttons.buttons():
             button.setChecked(button.objectName() == f"tool_{name}")
         return name
+
+    def _navigation_changed(self, navigating):
+        """While the canvas toolbar pans or zooms, a click on the canvas
+        selects nothing: Pick, Box and Lasso show unchecked, and a click on
+        one of them turns the pan or zoom off (StructureView.set_tool)."""
+        self.tool_buttons.setExclusive(False)
+        for button in self.tool_buttons.buttons():
+            button.setChecked(not navigating
+                              and button.objectName() == f"tool_{self.structure.tool}")
+        self.tool_buttons.setExclusive(True)
+        if navigating:
+            self.message("the canvas pans or zooms, and selects nothing: click Pick, Box or "
+                         "Lasso to select sites again")
 
     def select_sites(self, mode="replace", indices=None, box=None, polygon=None, point=None,
                      positions=None, sublattice=None, edge=False, all=False):

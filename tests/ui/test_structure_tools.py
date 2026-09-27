@@ -90,6 +90,34 @@ def test_box_and_lasso_tools(view):
         view.set_tool("brush")
 
 
+def toolbar_action(view, text):
+    return next(a for a in view.toolbar.actions() if a.text() == text)
+
+
+def test_pan_or_zoom_takes_the_clicks_until_a_tool_is_chosen(view, qtbot):
+    """matplotlib keeps its pan or zoom mode on until its button is clicked
+    again, and meanwhile the canvas selects nothing; choosing a selection
+    tool (the window's Pick, Box, Lasso or their keys) turns it off."""
+    states = []
+    view.navigation_changed.connect(states.append)
+    for text in ("Pan", "Zoom"):
+        toolbar_action(view, text).trigger()                    # the toolbar button
+        qtbot.waitUntil(lambda: states[-1:] == [True])
+        mouse(view, "button_press_event", 1.05, 0.05)
+        mouse(view, "button_release_event", 1.05, 0.05)
+        assert view.selected().tolist() == []                   # the mode took the click
+        view.set_tool("pick")
+        assert str(view.toolbar.mode) == "" and states[-1] is False
+        assert not toolbar_action(view, text).isChecked()
+        mouse(view, "button_press_event", 1.05, 0.05)
+        assert view.selected().tolist() == [4]
+        view.select([], "replace")
+    toolbar_action(view, "Pan").trigger()                       # and off with its own button
+    qtbot.waitUntil(lambda: states[-1:] == [True])
+    toolbar_action(view, "Pan").trigger()
+    qtbot.waitUntil(lambda: states[-1:] == [False])
+
+
 def test_selection_survives_a_rebuild_and_wheel_zooms(view):
     view.select([0, 15])
     view.show_structure("s1", grid_build(), "same geometry again")

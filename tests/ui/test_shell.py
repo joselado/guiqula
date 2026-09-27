@@ -264,6 +264,21 @@ def test_project_remembers_the_view(window, qtbot, tmp_path):
     window.set_workspace("geometry")
 
 
+def test_pan_or_zoom_unchecks_the_selection_tools(window, qtbot):
+    """While the canvas toolbar pans or zooms, no selection tool shows as
+    active and the status bar says why; clicking one turns pan/zoom off."""
+    structure = window.structure
+    pan = next(a for a in structure.toolbar.actions() if a.text() == "Pan")
+    pan.trigger()
+    qtbot.waitUntil(lambda: window.tool_buttons.checkedButton() is None)
+    assert "click Pick, Box or Lasso" in window.statusBar().currentMessage()
+    window.findChild(QToolButton, "tool_box").click()
+    assert str(structure.toolbar.mode) == "" and not pan.isChecked()
+    assert structure.tool == "box"
+    assert window.tool_buttons.checkedButton().objectName() == "tool_box"
+    window.set_tool("pick")
+
+
 def test_report_exception_writes_a_crash_report(window, tmp_path, monkeypatch):
     monkeypatch.setenv("GUIQULA_DATA_DIR", str(tmp_path))
     try:

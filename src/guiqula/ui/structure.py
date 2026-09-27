@@ -41,7 +41,7 @@ from matplotlib.path import Path
 from matplotlib.widgets import LassoSelector, RectangleSelector
 from matplotlib import cm, colors as mcolors
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit,
                                QToolButton, QVBoxLayout, QWidget)
 
@@ -474,6 +474,7 @@ class StructureView(QWidget):
     paint_stroke = Signal(object, bool)      # indices under the brush, the stroke is over
     view_chosen = Signal(str)                # a key of VIEWS, chosen by the user
     projection_chosen = Signal(str)          # "xy" or "3d", chosen with the 3D box
+    navigation_changed = Signal(bool)        # the toolbar's pan or zoom mode went on or off
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -547,6 +548,10 @@ class StructureView(QWidget):
         self._selector = None
         self._caption = ""
         self._drawn = self._overlays = None     # what the figure shows (show_structure)
+        self._was_navigating = False
+        # after the toolbar's own slot has switched the mode (pan, zoom, or off again)
+        self.toolbar.actionTriggered.connect(
+            lambda action: QTimer.singleShot(0, self._check_navigation))
         self.canvas.mpl_connect("button_press_event", self._on_press)
         self.canvas.mpl_connect("motion_notify_event", self._on_paint_motion)
         self.canvas.mpl_connect("button_release_event", self._on_paint_release)
@@ -681,11 +686,30 @@ class StructureView(QWidget):
 
     # ---- tools
     def set_tool(self, tool):
+        """Choose a selection tool; it also turns off the toolbar's pan or
+        zoom mode, which would keep taking the clicks."""
         if tool not in TOOLS:
             raise ValueError(f"unknown tool {tool!r}; tools: {list(TOOLS)}")
+        self.stop_navigating()
         self.tool = tool
         self._install_tool()
         return tool
+
+    def stop_navigating(self):
+        """Turn off the toolbar's pan or zoom mode: matplotlib keeps it on
+        until its button is clicked again, and meanwhile no click selects."""
+        mode = str(getattr(self.toolbar, "mode", ""))
+        if mode == "pan/zoom":
+            self.toolbar.pan()
+        elif mode == "zoom rect":
+            self.toolbar.zoom()
+        self._check_navigation()
+
+    def _check_navigation(self):
+        navigating = self._navigating()
+        if navigating != self._was_navigating:
+            self._was_navigating = navigating
+            self.navigation_changed.emit(navigating)
 
     def _install_tool(self):
         if self._selector is not None:

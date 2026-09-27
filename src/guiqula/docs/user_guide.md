@@ -57,7 +57,9 @@ canvas toolbar switches to the xy projection, where the selection tools work.
 
 On the Structure tab the pick, box and lasso tools select sites (shift adds, ctrl
 toggles); the Select menu selects all, a sublattice, the edge sites (fewer neighbours
-than the rest) or the inverse. With sites selected:
+than the rest) or the inverse. The pan and zoom buttons of the canvas toolbar take the
+clicks while they are on (Pick, Box and Lasso then show unchecked): click one of those three
+to select again; the mouse wheel zooms at any time. With sites selected:
 
 - Remove selected adds (or extends) a Remove atoms op that deletes them by position;
 - Region from selection makes a named region of their positions.
