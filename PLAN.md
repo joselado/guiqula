@@ -1690,8 +1690,10 @@ install, then what guiqula does, then examples by physical regime with screensho
 bands, Chern insulator, quantum spin Hall, quantum Hall, interaction-driven edge
 magnetism, Majorana wire, Aubry-Andre localization, a graphene flake with a gate,
 frustrated classical spins, a classical texture seen by electrons). The images are in
-`docs/images/` (about 1 MB, not in the sdist), linked by absolute URLs so that PyPI shows
-them too, and `tools/readme_images.py` makes them again through `tools/drive.py`. Found
+`docs/images/` (about 2 MB, not in the sdist), linked by absolute URLs so that PyPI shows
+them too, and `tools/readme_images.py` makes them again through `tools/drive.py`: every one
+a screenshot of the whole window (the maintainer asked for the whole GUI rather than the
+figure alone), with the entry that matters selected so its form shows next to the result. Found
 while making them: the `texture_exchange` preset's field `0.6*tanh(x - 10)` assumed a
 ladder from x = 0 to 20, but the finite ladder is centred, so the minimized texture was
 uniform and there was no domain wall: it is `0.6*tanh(x)` now; `tools/drive.py --run`

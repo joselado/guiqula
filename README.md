@@ -106,7 +106,7 @@ dispersive bands touching at Dirac points, and a band that does not disperse at 
 destructive interference traps the electrons on the hexagons, and the density of states
 shows it as a sharp peak.
 
-<img src="https://raw.githubusercontent.com/joselado/guiqula/master/docs/images/kagome_bands.png" width="49%" alt="kagome bands"> <img src="https://raw.githubusercontent.com/joselado/guiqula/master/docs/images/kagome_dos.png" width="49%" alt="kagome density of states">
+![guiqula with the kagome bands: two dispersive bands with Dirac points and a flat band](https://raw.githubusercontent.com/joselado/guiqula/master/docs/images/kagome.png)
 
 Try: add a Zeeman field, or a Haldane-like coupling, and see what happens to the flat
 band.
@@ -117,20 +117,20 @@ band.
 coupling, which breaks time-reversal symmetry, and a sublattice imbalance. The Berry
 curvature concentrates at the K and K' points, and the Chern number is ±1 as long as the
 mass stays below about 5 times the Haldane coupling (3√3 times, in the continuum). The
-phase diagram sweeps the Chern number over both parameters.
+phase diagram, shown here with its form, sweeps the Chern number over both parameters.
 
-<img src="https://raw.githubusercontent.com/joselado/guiqula/master/docs/images/haldane_berry.png" width="49%" alt="Berry curvature of the Haldane model"> <img src="https://raw.githubusercontent.com/joselado/guiqula/master/docs/images/haldane_phase.png" width="49%" alt="Chern number phase diagram of the Haldane model">
+![guiqula with the Chern number phase diagram of the Haldane model](https://raw.githubusercontent.com/joselado/guiqula/master/docs/images/haldane.png)
 
 ### Quantum spin Hall effect: the Kane-Mele model
 
 `guiqula kane_mele_ribbon`. A zigzag graphene ribbon with intrinsic spin-orbit coupling: the
-bulk is gapped, and a helical pair of edge states crosses the gap on each edge. The bands
-are coloured by the position across the ribbon (the `yposition` operator; any other, such
-as `sz`, is chosen in the calculation's form), so the states of the two edges come out red
-and blue; the second calculation shows the local density of states inside the gap sitting
-on the edges.
+bulk is gapped, and a helical pair of edge states crosses the gap on each edge. The picture
+at the top shows its bands coloured by the position across the ribbon (the `yposition`
+operator; any other, such as `sz`, is chosen in the calculation's form), so the states of
+the two edges come out red and blue; below, the local density of states inside the gap
+sits on the two edges of the ribbon's cell.
 
-![bands of a Kane-Mele ribbon coloured by the position across it](https://raw.githubusercontent.com/joselado/guiqula/master/docs/images/kane_mele_bands.png)
+![guiqula with the in-gap local density of states of a Kane-Mele ribbon](https://raw.githubusercontent.com/joselado/guiqula/master/docs/images/kane_mele.png)
 
 Try: add an exchange field, which breaks time-reversal symmetry, and watch the edge states
 gap out; Rashba coupling alone leaves them gapless.
@@ -140,7 +140,7 @@ gap out; Rashba coupling alone leaves them gapless.
 `guiqula hofstadter_ribbon`. A square-lattice ribbon in an out-of-plane magnetic field
 (Peierls phases): flat Landau levels in the bulk, and chiral edge states between them.
 
-![Landau levels and chiral edge states of a Hofstadter ribbon](https://raw.githubusercontent.com/joselado/guiqula/master/docs/images/hofstadter.png)
+![guiqula with the Landau levels and chiral edge states of a Hofstadter ribbon](https://raw.githubusercontent.com/joselado/guiqula/master/docs/images/hofstadter.png)
 
 ### Interaction-driven magnetism: zigzag graphene edges
 
@@ -148,7 +148,7 @@ gap out; Rashba coupling alone leaves them gapless.
 solved in the mean field: the flat edge band polarizes, each edge becomes ferromagnetic
 with the two edges opposite, and a gap opens.
 
-<img src="https://raw.githubusercontent.com/joselado/guiqula/master/docs/images/zigzag_magnetization.png" width="60%" alt="edge magnetization of a zigzag graphene ribbon">
+![guiqula with the mean-field block and the edge magnetization of a zigzag ribbon](https://raw.githubusercontent.com/joselado/guiqula/master/docs/images/zigzag.png)
 
 Try: change U in the mean-field block, the width of the ribbon, or the initial guess. The
 same mean field on the bulk honeycomb lattice gives an antiferromagnet
@@ -160,7 +160,7 @@ same mean field on the bulk honeycomb lattice gives an antiferromagnet
 and s-wave pairing, in the topological phase: a Majorana zero mode at each end, seen in the
 zero-energy local density of states and as a zero-energy peak in the density of states.
 
-<img src="https://raw.githubusercontent.com/joselado/guiqula/master/docs/images/majorana_ldos.png" width="49%" alt="zero-energy local density of states of a Majorana wire"> <img src="https://raw.githubusercontent.com/joselado/guiqula/master/docs/images/majorana_dos.png" width="49%" alt="density of states of a Majorana wire">
+![guiqula with the zero-energy local density of states of a Majorana wire](https://raw.githubusercontent.com/joselado/guiqula/master/docs/images/majorana.png)
 
 Try: lower the exchange field below the pairing, and the end states disappear.
 
@@ -171,16 +171,20 @@ Try: lower the exchange field below the pairing, and the end states disappear.
 local density of states concentrates on a few sites. The onsite energy is written as a
 formula of x, so λ and β are edited directly in it.
 
-<img src="https://raw.githubusercontent.com/joselado/guiqula/master/docs/images/aubry_andre_dos.png" width="49%" alt="density of states of the Aubry-André model"> <img src="https://raw.githubusercontent.com/joselado/guiqula/master/docs/images/aubry_andre_ldos.png" width="49%" alt="local density of states of the Aubry-André model">
+![guiqula with the onsite energy written as a formula and the density of states of the Aubry-André model](https://raw.githubusercontent.com/joselado/guiqula/master/docs/images/aubry_andre.png)
 
 ### Nanostructures: a graphene flake, and a gate on it
 
 `guiqula graphene_island`. A hexagonal graphene flake cut from the lattice: its discrete
-spectrum, and the zero-energy states living on the zigzag parts of its edges. On the right,
-an onsite energy written as a Gaussian of the position, a gate on the centre of the flake,
-drawn on the atoms before anything is computed.
+spectrum, and the zero-energy states living on the zigzag parts of its edges.
 
-<img src="https://raw.githubusercontent.com/joselado/guiqula/master/docs/images/island_ldos.png" width="49%" alt="zero-energy local density of states of a graphene flake"> <img src="https://raw.githubusercontent.com/joselado/guiqula/master/docs/images/field_gate.png" width="49%" alt="a Gaussian gate potential on a graphene flake">
+![guiqula with the island operation and the zero-energy local density of states of a graphene flake](https://raw.githubusercontent.com/joselado/guiqula/master/docs/images/island.png)
+
+Any parameter can depend on the position. Here an onsite energy is written as a Gaussian
+of the position, a gate on the centre of the flake, and drawn on the atoms before anything
+is computed:
+
+![guiqula with an onsite energy written as a Gaussian of the position, drawn on the flake](https://raw.githubusercontent.com/joselado/guiqula/master/docs/images/island_gate.png)
 
 Try: remove atoms by hand on the Structure tab, change the number of edges of the island,
 or restrict a term to a region you draw.
@@ -191,7 +195,7 @@ or restrict a term to a region you draw.
 the triangular lattice cannot all be antiparallel; minimizing the energy gives the
 120-degree order.
 
-<img src="https://raw.githubusercontent.com/joselado/guiqula/master/docs/images/triangular.png" width="60%" alt="120-degree order of classical spins on the triangular lattice">
+![guiqula with the 120-degree order of classical spins on the triangular lattice](https://raw.githubusercontent.com/joselado/guiqula/master/docs/images/triangular.png)
 
 Ising models and lattice gases are there too (`guiqula ising_ferromagnet`,
 `guiqula lattice_gas`).
@@ -204,7 +208,7 @@ ladder whose exchange field reads that texture site by site, for their density o
 and local density of states. Run the classical calculation first; when it changes, the
 electronic results are marked stale.
 
-![a classical domain wall on a ladder: the in-plane spin turns through the out-of-plane direction](https://raw.githubusercontent.com/joselado/guiqula/master/docs/images/texture_spins.png)
+![guiqula with the two systems of the document and the classical domain wall](https://raw.githubusercontent.com/joselado/guiqula/master/docs/images/texture.png)
 
 Also in the gallery: graphene with an exchange field and Rashba coupling
 (`honeycomb_zeeman_rashba`), and two teaching documents with locked parameters: graphene's
