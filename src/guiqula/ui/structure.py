@@ -369,7 +369,8 @@ def cell_edges_3d(build):
     if dimensionality < 2:
         return np.zeros((0, 2, 3))
     lattice = np.asarray(build["lattice"], dtype=float)[:dimensionality]
-    centre = np.asarray(build["positions"], dtype=float).mean(axis=0)
+    r = np.asarray(build["positions"], dtype=float).reshape(-1, 3)
+    centre = r.mean(axis=0) if len(r) else np.zeros(3)      # every site removed
     corner = centre - lattice.sum(axis=0) / 2
     codes = list(itertools.product((0, 1), repeat=dimensionality))
     corners = [corner + np.array(c) @ lattice for c in codes]
@@ -382,7 +383,7 @@ def draw_structure_3d(ax, build, highlight=None, selected=None, removed=None, im
                       site_values=None, arrows=None, hoppings=None):
     """draw_structure for a geometry that is not flat, on an mplot3d Axes;
     returns the scatter of the selected sites (its _offsets3d moves them)."""
-    r = np.asarray(build["positions"], dtype=float)
+    r = np.asarray(build["positions"], dtype=float).reshape(-1, 3)
     n = len(r)
     size = float(np.clip(4000 / max(n, 1), 12, 120))
     colors = site_colors(build)
@@ -570,6 +571,14 @@ class StructureView(QWidget):
             self.view_box.blockSignals(True)
             self.view_box.setCurrentIndex(index)
             self.view_box.blockSignals(False)
+
+    def set_paintable(self, paintable):
+        """Whether the brush can paint here: not when the Field previewed
+        belongs to another system than the one drawn."""
+        for widget in self.paint_widgets:
+            widget.setEnabled(paintable)
+        if not paintable:
+            self.paint.setChecked(False)
 
     def set_projection(self, projection):
         """auto (3D when the geometry is not flat), xy or 3d; the window

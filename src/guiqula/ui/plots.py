@@ -200,9 +200,12 @@ def can_overlay(result, other, mode="overlay"):
     if result is None or other is None or result.plot["kind"] not in CURVES \
             or other.plot["kind"] not in CURVES:
         return False
+    try:
+        (x1, y1), (x2, y2) = curves(result), curves(other)
+    except Exception:                     # arrays that do not make curves
+        return False
     if mode == "overlay":
         return True
-    (x1, y1), (x2, y2) = curves(result), curves(other)
     return x1.shape == x2.shape and y1.shape == y2.shape and np.allclose(x1, x2)
 
 
@@ -349,16 +352,28 @@ class PlotView(QWidget):
         self.export.setEnabled(self.result is not None and bool(self.calc_id))
         self.detach.setVisible(bool(self.calc_id))
         self.overlay.setVisible(bool(self.calc_id))
-        self.overlay.setEnabled(self.result is not None and self.result.plot["kind"] in CURVES)
+        self.overlay.setEnabled(self.result is not None and self.ax is not None
+                                and self.result.plot["kind"] in CURVES)
 
     def show_result(self, result, title="", caption="", stale=False, overlays=()):
+        """Draw a result; one that cannot be drawn (arrays a plugin or a
+        Python calculation shaped otherwise than its plot kind) says why in
+        the caption, and its data can still be saved."""
         self.result = result
         self.stale = stale
         self.overlays = list(overlays)
-        self.ax, self.points = draw(self.figure, result, title, overlays)
+        try:
+            self.ax, self.points = draw(self.figure, result, title, overlays)
+            self.canvas.draw()    # now: the limits and the layout are final for the readout
+        except Exception as error:
+            self.figure.clear()
+            theme.set_figure(self.figure)
+            self.ax = self.points = None
+            self.canvas.draw_idle()
+            caption = " · ".join(filter(None, [
+                f"this result cannot be drawn: {type(error).__name__}: {error}", caption]))
         self.caption.setText(caption)
         self.readout.setText("")
-        self.canvas.draw()        # now: the limits and the layout are final for the readout
         self._update_buttons()
 
     def clear(self, caption=""):

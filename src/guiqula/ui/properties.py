@@ -95,7 +95,12 @@ class Form(QWidget):
         return (self.item_id,)
 
     def update_values(self):
-        pass
+        """Show the Document's values (and update_reports)."""
+        self.update_reports()
+
+    def update_reports(self):
+        """Show what the builds and results say; the editors are left as
+        they are (a build finishing while the user types)."""
 
     def commit(self, command, /, **args):
         ok, out = self.panel.run(command, **args)
@@ -266,6 +271,9 @@ class SystemForm(Form):
             _quiet(self.nambu, self.nambu.setChecked, c.nambu)
             _quiet(self.sparse, self.sparse.setChecked, c.is_sparse)
             _quiet(self.tij, self.tij.setText, ", ".join(format_number(t) for t in c.tij))
+        self.update_reports()
+
+    def update_reports(self):
         self.info.setText(self._info())
 
     def whole_locks(self):
@@ -392,6 +400,9 @@ class EntryForm(Form):
         for name, editor in self.editors.items():
             if name in obj.params:
                 editor.set_value(obj.params[name])
+        self.update_reports()
+
+    def update_reports(self):
         self.status.setText(self._status())
 
     def _status(self):
@@ -489,6 +500,10 @@ class RegionForm(Form):
         else:
             self.count.setText(f"{len(region.select['positions'])} positions")
             _quiet(self.tol, self.tol.setText, format_number(region.select["tol"]))
+        self.update_reports()
+
+    def update_reports(self):
+        _, system, _, _, region = self.session.document.find(self.item_id)
         build = self.session.builds.get(self.system_id)
         if build is not None:
             try:
@@ -569,6 +584,9 @@ class MeanFieldForm(Form):
         for name, editor in self.editors.items():
             if name in block.params:
                 editor.set_value(block.params[name])
+        self.update_reports()
+
+    def update_reports(self):
         self.status.setText(self._status())
 
     def _status(self):
@@ -692,13 +710,18 @@ class PropertiesPanel(QScrollArea):
         except (DocumentError, KeyError):
             return None
 
-    def refresh(self):
-        """After a document change or a finished build."""
+    def refresh(self, values=True):
+        """After a document change (values: the editors show the Document
+        again), or a finished build or run (values false: only what they
+        report changes, and text being typed must stay)."""
         if self.session is None:
             return
         signature = self._current_signature()
         if signature is None or signature != self._signature:
             self.show_item(self.session, self.item_id if signature is not None else "")
             return
-        self.form.update_values()
+        if values:
+            self.form.update_values()
+        else:
+            self.form.update_reports()
         self._apply_locks()

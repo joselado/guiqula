@@ -101,3 +101,42 @@ def test_syntax_errors_are_refused_by_the_command():
     s = d.do("add_system")
     with pytest.raises(Exception, match="syntax error in line 2"):
         d.do("add_term", system=s, kind="python", params={"code": "x = 1\nx = = 2"})
+
+
+def test_calculation_arrays_are_numbers_and_the_plot_fits_them(pyqula):
+    """What a project file keeps (numbers) and what ui/plots.py can draw is
+    checked when the node runs, not when the window draws or a file opens."""
+    d, s, _ = document("pass")
+    c = d.do("add_calculation", system=s, kind="python")
+
+    def run(code):
+        d.do("set_param", entry=c, name="code", value=code)
+        return run_calculation(d.document, c)
+
+    for code, message in [
+            ("arrays = {'gap': 0.5, 'info': {'nk': 10}}", "not a number"),
+            ("arrays = {'note': None}", "not a number"),
+            ("arrays = {'a': [1, [2, 3]]}", "arrays\\['a'\\]"),
+            ("arrays = {'x': np.arange(3.0), 'y': np.arange(4.0)}\n"
+             "plot = {'kind': 'lines', 'x': 'x', 'y': 'y'}", "cannot draw"),
+            ("arrays = {'x': np.arange(3.0)}\nplot = {'kind': 'heatmap', 'x': 'x', 'y': 'x'}",
+             "names c"),
+            ("arrays = {'v': np.arange(5.0)}\nplot = {'kind': 'structure_scalar', "
+             "'values': 'v'}", "each of the 2 sites"),
+            ("arrays = {'g': 1.0}\nplot = {'kind': 'scalar', 'rows': ['g']}", "pairs"),
+            ("exit()", "exit\\(\\)")]:
+        with pytest.raises(CalculationError, match=message):
+            run(code)
+    result = run("arrays = {'gap': 0.5, 'k': np.arange(5), 'e': np.arange(10.0)}")
+    assert result.plot == {"kind": "lines", "x": "k", "y": "e", "xlabel": "k", "ylabel": "e"}
+    from guiqula.registry.python_nodes import CALCULATION_CODE
+    result = run(CALCULATION_CODE)          # the template: a row of bands per k
+    assert result.arrays["energies"].shape == (100, 2) and result.plot["x"] == "k"
+
+
+def test_exit_in_a_node_flags_it_and_the_stack_goes_on(pyqula):
+    d, s, t = document("h.add_onsite(0.1)\nexit()")
+    d.do("add_term", system=s, kind="onsite", params={"mu": 0.3})
+    built = build_system(d.document, s)
+    r = report(built, t)
+    assert r["status"] == "invalid" and "exit()" in r["message"] and "line 2" in r["message"]

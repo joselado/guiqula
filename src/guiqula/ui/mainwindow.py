@@ -207,8 +207,7 @@ class MainWindow(QMainWindow):
             lambda entry, param, component, low, high: self._act(
                 "slider", entry=entry, param=param, component=component, minimum=low,
                 maximum=high))
-        self.sliders_panel.moved.connect(
-            lambda index, value, dragging: self.set_slider(index, value, dragging))
+        self.sliders_panel.moved.connect(self._slider_moved)
         self.sliders_panel.removed.connect(lambda index: self._act("remove_slider",
                                                                    index=index))
         outliner_dock = self._dock("Outliner", self.outliner, "outlinerDock",
@@ -749,7 +748,10 @@ class MainWindow(QMainWindow):
             self._job_changed(payload)
         elif kind == "worker":
             self.jobs.update_workers(self.session.jobs.status())
-            if payload["starts"] > 1 and payload["ready"] is False:
+            if payload.get("broken") and payload["pid"] is None:
+                self.message(f"the {payload['role']} worker cannot start: {payload['broken']}",
+                             error=True)
+            elif payload["starts"] > 1 and payload["ready"] is False:
                 self.message(f"{payload['role']} worker restarted (pid {payload['pid']})")
 
     def _document_changed(self, event=None):
@@ -773,24 +775,30 @@ class MainWindow(QMainWindow):
             return
         if self.selected and not self._exists(self.selected):
             self.selected = ""
-        self._refresh_calculations()
-        self.outliner.refresh(self.session)
-        self.outliner.set_current(self.selected)
-        if self.properties.session is None or self.properties.item_id != self.selected:
-            self.properties.show_item(self.session, self.selected)
-        else:
-            self.properties.refresh()
-        self._refresh_structure()
-        self._update_actions()
-        self._refresh_results()
-        if self.sliders:
-            self.sliders_panel.show_values([self._slider_value(sl) for sl in self.sliders])
-        self._update_status()
-        self.build_timer.start(BUILD_DELAY_MS)
-        self._update_title()
+        try:
+            self._refresh_calculations()
+            self.outliner.refresh(self.session)
+            self.outliner.set_current(self.selected)
+            if self.properties.session is None or self.properties.item_id != self.selected:
+                self.properties.show_item(self.session, self.selected)
+            else:
+                self.properties.refresh()
+            self._refresh_structure()
+            self._refresh_results()
+            self._prune_sliders()
+            if self.sliders:
+                self.sliders_panel.show_values([self._slider_value(sl) for sl in self.sliders])
+            self._update_status()
+        finally:
+            # a view that fails to draw must not stop the rebuild, Undo or the title
+            self.build_timer.start(BUILD_DELAY_MS)
+            self._update_actions()
+            self._update_title()
         if event is not None and event["type"] == "reset":      # new, open, recover
             self.apply_view_state(self.session.document.ui)
             self._update_trust()
+            for text in self.session.dropped_results:
+                self.message(text, error=True)
 
     def _update_title(self):
         path = self.session.path
@@ -833,7 +841,7 @@ class MainWindow(QMainWindow):
             system = job.payload["system"]
             if job.status == "done" and self.builds.get(system) is job.value:
                 self.outliner.refresh(self.session)
-                self.properties.refresh()
+                self.properties.refresh(values=False)
                 if system == self.current_system():
                     self._refresh_structure()
                 self._update_status()
@@ -858,7 +866,7 @@ class MainWindow(QMainWindow):
             else:
                 self.message(f"{job.id} {job.label} {job.status}")
             self.outliner.refresh(self.session)
-            self.properties.refresh()
+            self.properties.refresh(values=False)
             if job.status == "done" and job.kind == "run":
                 if job.label in pipeline.result_references(self.session.document):
                     self.build_timer.start(0)      # the systems that read it change
@@ -1032,11 +1040,19 @@ class MainWindow(QMainWindow):
         return len(indices)
 
     def _paint_stroke(self, indices, finished):
+        """The canvas brush: indices are sites of the system drawn, which
+        must be the one of the Field painted."""
         value, _, component = self.structure.brush()
         try:
+            if self.field_preview is not None:
+                system = self._field_entry(*self.field_preview)[0]
+                if system.id != self.current_system():
+                    raise ValueError(f"{self.field_preview[0]} belongs to {system.id}, not to "
+                                     f"the system drawn")
             self.paint(value, indices=indices, component=component, done=finished)
-        except (ValueError, KeyError, registry.RegistryError) as error:
+        except (ValueError, KeyError, IndexError, registry.RegistryError) as error:
             self.message(f"paint: {error}", error=True)
+            self.session.dispatcher.end_merge()
 
     def _preview_requested(self, entry, param):
         """A Field editor is being looked at (debounced: typing redraws)."""
@@ -1075,7 +1091,9 @@ class MainWindow(QMainWindow):
         except (ValueError, KeyError, registry.RegistryError) as error:
             return {}, str(error).strip("\"'")
         if system.id != system_id:
-            return {}, f"{entry} belongs to {system.id}"
+            return {}, f"{entry} belongs to {system.id}: select it to see or paint it"
+        if not len(build["positions"]):
+            return {}, f"{system_id} has no sites"
         param = spec.param_map[name]
         value = params.get(name, param.default)
         form = self.properties.form
@@ -1086,10 +1104,10 @@ class MainWindow(QMainWindow):
         regions = {r.id: r.select for r in system.regions}
         results = self.session.result_refs()
         weight = np.ones(len(positions))
-        if region is not None and param.native:
-            weight = region_tools.evaluate_positions(region.select, positions).astype(float)
         label = f"{entry} {param.label}"
         try:
+            if region is not None and param.native:
+                weight = region_tools.evaluate_positions(region.select, positions).astype(float)
             if isinstance(param, VectorFieldParam):
                 vectors = np.stack([fields.evaluate_positions(v, positions, regions, results)
                                     for v in value], axis=1) * weight[:, None]
@@ -1097,10 +1115,10 @@ class MainWindow(QMainWindow):
                 size = np.linalg.norm(vectors, axis=1)
                 return overlays, f"{label}: |value| from {size.min():.4g} to {size.max():.4g}"
             values = fields.evaluate_positions(value, positions, regions, results) * weight
+            text = f"{label}: from {values.min():.4g} to {values.max():.4g}"
         except Exception as error:
             return {}, f"{label}: {error}"
-        return ({"site_values": {"values": values, "label": label}},
-                f"{label}: from {values.min():.4g} to {values.max():.4g}")
+        return {"site_values": {"values": values, "label": label}}, text
 
     def _hamiltonian_overlay(self, build):
         view = build.get("hamiltonian")
@@ -1111,6 +1129,8 @@ class MainWindow(QMainWindow):
         if view is None:
             return {}, (f"the Hamiltonian view is not computed for this size (dense "
                         f"dimension above {cost.DENSE_DIMENSION})")
+        if not len(view["onsite"]):
+            return {}, "the geometry has no sites"
         overlays = {"site_values": {"values": view["onsite"], "label": "onsite energy"},
                     "hoppings": view}
         parts = [f"onsite {np.min(view['onsite']):.3g} to {np.max(view['onsite']):.3g}"]
@@ -1375,6 +1395,7 @@ class MainWindow(QMainWindow):
             extra, text = self._hamiltonian_overlay(build)
         elif self.canvas_view == "field":
             extra, text = self._field_overlay(system, build)
+            self.structure.set_paintable(bool(extra))     # the Field drawn is this system's
         else:
             extra, text = {}, ""
         overlays.update(extra)
@@ -1737,12 +1758,22 @@ class MainWindow(QMainWindow):
 
     def add_slider(self, entry, param, component=None, minimum=0.0, maximum=1.0):
         """Attach a parameter to a slider; returns its index."""
+        from guiqula.core import locks
         from guiqula.registry import sweeps
-        problem = sweeps.check_target(self.session.document, entry, param, component)
+        document = self.session.document
+        problem = sweeps.check_target(document, entry, param, component)
         if problem:
             raise ValueError(problem)
         if not maximum > minimum:
             raise ValueError("the range needs a maximum above its minimum")
+        probe = sweeps.with_value(document, entry, param, component,
+                                  float(maximum if self._slider_value(
+                                      {"entry": entry, "param": param, "component": component})
+                                        == minimum else minimum))
+        broken = locks.violations(document, probe)
+        if broken:
+            raise ValueError(f"{', '.join(broken)} {'is' if len(broken) == 1 else 'are'} "
+                             f"locked: unlock it to move {entry}.{param} with a slider")
         self.sliders.append({"entry": entry, "param": param, "component": component,
                              "min": float(minimum), "max": float(maximum)})
         self._show_sliders()
@@ -1752,6 +1783,24 @@ class MainWindow(QMainWindow):
     def remove_slider(self, index):
         del self.sliders[index]
         self._show_sliders()
+
+    def _prune_sliders(self):
+        """Drop the sliders whose entry was removed."""
+        from guiqula.registry import sweeps
+        kept = [spec for spec in self.sliders
+                if sweeps.check_target(self.session.document, spec["entry"], spec["param"],
+                                       spec["component"]) is None]
+        if len(kept) != len(self.sliders):
+            self.sliders = kept
+            self._show_sliders()
+
+    def _slider_moved(self, index, value, dragging):
+        """The Sliders dock: a refusal (a lock) is reported, not raised."""
+        try:
+            self.set_slider(index, value, dragging)
+        except (ValueError, KeyError, IndexError) as error:     # CommandError is a ValueError
+            self.message(f"slider: {error}", error=True)
+            self.sliders_panel.show_values([self._slider_value(s) for s in self.sliders])
 
     def set_slider(self, index, value, dragging=False):
         """Set a slider's parameter; the steps of one drag are one undo step."""

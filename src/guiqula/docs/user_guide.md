@@ -164,7 +164,9 @@ path goes back to pyqula's. The k-path of a calculation's form takes the same pa
 
 A Python op, term or calculation runs its code in the worker with `g` (the geometry), `h`
 (the Hamiltonian), `np` and `pyqula`: whatever pyqula can do and the palettes do not offer.
-An error flags the node with the line of its code and the rest carries on.
+An error flags the node with the line of its code and the rest carries on. A calculation
+sets `arrays`, numbers and arrays of numbers (what a project file keeps), and may set
+`plot`; a plot that does not fit its arrays is refused when the code runs.
 
 A document built in the program, or a shipped preset, is trusted. A file opened with
 Python nodes is not: its nodes are skipped until you trust it (the bar at the top, or
