@@ -4,7 +4,7 @@ This directory holds a **read-only local copy** of pyqula used by guiqula
 during development. Never edit anything under `vendor/pyqula/`; refresh
 the whole copy instead.
 
-- Source: a local checkout of upstream pyqula (working tree, not git HEAD)
+- Source: a local checkout of https://github.com/joselado/pyqula (working tree, not git HEAD)
 - Upstream HEAD at copy time: `f8087b43e9011228dddf17e62a6809dde77e14dc` (2026-09-26 17:57:58 +0300)
 - Copied on: 2026-09-26
 - Uncommitted upstream changes that were included in this copy:
@@ -27,6 +27,6 @@ Upstream runtime dependencies at copy time (mirror them in guiqula's
     - jax>=0.8.1
 
 Refresh with `tools/update_vendor.sh` (re-runs the same rsync and rewrites
-this file). The upstream repository at the source path above must never be
+this file). The upstream checkout it is copied from must never be
 modified from a guiqula session: no edits, no `pip install -e`, no running
 scripts with the cwd inside it (pyqula writes `.OUT` files to the cwd).

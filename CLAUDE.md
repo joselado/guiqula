@@ -7,8 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 guiqula is a graphical workbench for pyqula, the maintainer's Python tight-binding library:
 one window in which the geometry, the Hamiltonian terms and the calculations are freely
 composable (Blender/Inkscape-style non-destructive pipeline). It is a new program, not a
-refactor of the maintainer's older `quantum-lattice` GUI (a local checkout of quantum-lattice, one fixed
-form per lattice "mode"); see `PLAN.md` section 9 for what it keeps and what it drops.
+refactor of the maintainer's older `quantum-lattice` GUI
+(https://github.com/joselado/quantum-lattice, one fixed form per lattice "mode"); see `PLAN.md` section 9 for what it keeps and what it drops.
 
 **`PLAN.md` is the design reference**: requirements as the maintainer stated them, the
 decisions made on 2026-09-26 (PySide6; matplotlib embedded in Qt; pyqula vendored inside the
@@ -169,15 +169,20 @@ a `Session`.
 
 ## Hard rules
 
-- **The upstream pyqula repository (a local checkout of upstream pyqula) is read-only from this
-  project.** Never edit it, never `pip install -e` it (that writes egg-info into it), never run
-  anything with the cwd inside it (pyqula writes `.OUT` files to the cwd). The same applies to
-  a local checkout of quantum-lattice.
+- **A local checkout of upstream pyqula (https://github.com/joselado/pyqula) is read-only
+  from this project.** Never edit it, never `pip install -e` it (that writes egg-info into
+  it), never run anything with the cwd inside it (pyqula writes `.OUT` files to the cwd). The
+  same applies to a checkout of quantum-lattice. Where they are on this machine is in
+  `CLAUDE.local.md` (gitignored), if present.
+- **The repository is public** (github.com/joselado/guiqula, no CI): nothing private goes in
+  it. No paths of the maintainer's computer in tracked files (they belong in
+  `CLAUDE.local.md`), no Claude session links in commit messages (a commit ends with the
+  `Co-Authored-By` line only).
 - `vendor/pyqula/` is a copy of upstream's working tree, and (decision 3) the copy that ships
   inside releases as `guiqula/_vendor/pyqula`, imported as top-level `pyqula` through a
   `sys.path` shim because pyqula imports itself absolutely. Never hand-edit it;
   refresh the whole copy with `tools/update_vendor.sh`, which also rewrites `vendor/VENDOR.md`
-  (source path, upstream commit, uncommitted upstream files that were included, upstream's
+  (upstream URL and commit, uncommitted upstream files that were included, upstream's
   runtime dependencies to mirror in `pyproject.toml`) and then runs the help tests. Commit a
   refresh on its own; the one exception is the fix of registry `guide=` anchors that a
   renamed upstream guide section forces (decision 13.13), which may join it. `vendor/pyqula_user_guide.md` is upstream's user guide and
@@ -293,7 +298,7 @@ python -m build && twine check --strict dist/*   # sdist and wheel (packaging/RE
 python tools/make_icons.py             # the PNG, ICO and ICNS from resources/guiqula.svg
 <venv>/bin/pyinstaller packaging/pyinstaller/guiqula.spec --noconfirm   # dist/guiqula/
 GUIQULA_FROZEN_PYTHON=<venv>/bin/python python -m pytest tests/test_frozen.py  # build + drive
-tools/update_vendor.sh                 # refresh vendor/ from upstream pyqula
+tools/update_vendor.sh /path/to/pyqula  # refresh vendor/ from upstream pyqula ($PYQULA_SRC)
 ```
 
 `drive.py` prints a JSON report last (document outline, builds, jobs, result summaries,

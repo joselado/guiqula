@@ -11,6 +11,6 @@ dist/
 *.pkl
 
 # local state
-.claude/settings.local.md
+.claude/settings.local.json
 CLAUDE.local.md
 ui_dump/

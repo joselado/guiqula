@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
-# Refresh vendor/ from the local upstream pyqula working tree (read-only source).
+# Refresh vendor/ from a local checkout of upstream pyqula (read-only source,
+# https://github.com/joselado/pyqula), given as the argument or $PYQULA_SRC.
 # Usage: tools/update_vendor.sh [/path/to/pyqula]
 set -euo pipefail
-SRC="${1:-/path/to/pyqula}"
+SRC="${1:-${PYQULA_SRC:-}}"
+if [ -z "$SRC" ]; then
+    echo "usage: tools/update_vendor.sh /path/to/pyqula (or set PYQULA_SRC)" >&2
+    exit 1
+fi
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 DST="$HERE/vendor"
 GUIDE="$SRC/documentation/user_guide.md"
@@ -17,6 +22,9 @@ rsync -a --delete --exclude='__pycache__' --exclude='*.pyc' --exclude='*.OUT' \
       --exclude='*.pkl' --exclude='*.png' --exclude='*.pdf' --exclude='*.npy' \
       "$SRC/examples/" "$DST/pyqula_examples/"
 HEAD=$(git -C "$SRC" rev-parse HEAD)
+# the upstream repository's public URL, never the local path (the repository is public)
+ORIGIN=$(git -C "$SRC" remote get-url origin 2>/dev/null \
+         | sed -e 's#^git@github.com:#https://github.com/#' -e 's#\.git$##' || true)
 DATE=$(git -C "$SRC" log -1 --format=%ci)
 MOD=$(git -C "$SRC" status --short src | sed 's/^/    /')
 DEPS=$(python3 - "$SRC/pyproject.toml" <<'PY'
@@ -32,7 +40,7 @@ This directory holds a **read-only local copy** of pyqula used by guiqula
 during development. Never edit anything under \`vendor/pyqula/\`; refresh
 the whole copy instead.
 
-- Source: \`$SRC\` (working tree, not git HEAD)
+- Source: a local checkout of ${ORIGIN:-upstream pyqula} (working tree, not git HEAD)
 - Upstream HEAD at copy time: \`$HEAD\` ($DATE)
 - Copied on: $(date +%Y-%m-%d)
 - Uncommitted upstream changes that were included in this copy:
@@ -48,7 +56,7 @@ Upstream runtime dependencies at copy time (mirror them in guiqula's
 $DEPS
 
 Refresh with \`tools/update_vendor.sh\` (re-runs the same rsync and rewrites
-this file). The upstream repository at the source path above must never be
+this file). The upstream checkout it is copied from must never be
 modified from a guiqula session: no edits, no \`pip install -e\`, no running
 scripts with the cwd inside it (pyqula writes \`.OUT\` files to the cwd).
 EOT
