@@ -13,13 +13,14 @@ done on 2026-09-26 and phase 4 on 2026-09-27 (section 7); the maintainer asked
 for phase 5 without commenting on the phase-4 report, so its items stand as
 built. Phase 5 (polish) was done on 2026-09-27; its report (design items 1
 to 14, the first seven being the recommendations for the open points of the
-in-app help in section 11, and decisions 15 to 24) awaits the maintainer's
-answers. Phase 6 (distribution and the add-on) was done on 2026-09-27 in
+in-app help in section 11, and decisions 15 to 24) was not commented on
+(phase 6 was asked for), so its items stand as built. Phase 6 (distribution and the add-on) was done on 2026-09-27 in
 three parts (remote control and the MCP add-on; plugins; distribution,
-verified on Linux); its report, decisions 25 to 45 in section 7, awaits
-the maintainer's answers, as do the PyPI upload, a GitHub remote for the
-CI workflows, and the installers for Windows and macOS, which only those
-workflows can build.
+verified on Linux); the maintainer answered its report (decisions 25 to 45
+in section 7) the same day: a public GitHub repository without CI, pip as
+the only installer (the frozen builds dropped), Python 3.12 and 3.13, the
+plugin recorded in the documents, and 0.0.1 as the first release, which
+the maintainer uploads.
 
 ## 1. Requirements (as stated by the maintainer)
 
@@ -1660,6 +1661,27 @@ Decisions for the maintainer:
     headless run); the CI matrix covers all three once it runs;
 45. the icon: a honeycomb ring in the sublattice colours (easy to replace:
     the SVG and `tools/make_icons.py`).
+
+Maintainer's answers to the phase-6 report (2026-09-27, asked one by one,
+the ten most urgent first; numbered as reported): the repository goes to
+GitHub, public, as `joselado/guiqula`, with nothing private in it: the
+paths of the maintainer's computer are kept in `CLAUDE.local.md`
+(gitignored), the history was rewritten before the first push to drop them
+and the Claude session links of the commit messages (new commits carry no
+session link), and the public email is jose.lado@aalto.fi; 25, 27, 34 and
+35 stand as built; 33, the add-on is registered for the maintainer only
+(`claude mcp add --scope local`), no `.mcp.json` is committed; 37, the
+documents record which plugin an entry came from (an optional `plugin`
+field, the plugin's name and version, on every entry of a plugin kind), so
+a missing one is reported by name; 38, the first release is 0.0.1, built
+by hand (`python -m build`, `twine check`) and uploaded by the maintainer,
+without GitHub CI: the workflows are deleted, so nothing runs on the
+repository; 39 to 42 are withdrawn: the frozen builds are dropped
+(PyInstaller spec, launcher, Inno Setup script, their test and the
+`sys.frozen` code paths), pip is the only way to install, `guiqula
+desktop` keeps its icons (ICO, ICNS) for pip installs on Windows and
+macOS; 44, Python 3.12 and 3.13 only (what has run: the full suite on
+both); 26, 28 to 32, 36, 40, 43 and 45 were not asked and stand as built.
 
 ### Where the section 13 items land
 

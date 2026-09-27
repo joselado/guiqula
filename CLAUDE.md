@@ -32,13 +32,14 @@ the remaining Fields and the brush); the maintainer asked for phase 5 without co
 on its report, so its items stand as built. Phase 5 (polish) is done (2026-09-27, in four
 parts: settings, themes, shortcuts, undo; teaching exports and locks; performance; the in-app
 help); its report, numbered design items 1 to 14 and decisions 15 to 24 (PLAN.md section 7,
-end of phase 5; items 1 to 7 are the in-app help's open points of section 11), awaits the
-maintainer's answers. Phase 6 (distribution and the add-on) is under way: part 1, remote
-control and the MCP add-on, part 2, plugins, and part 3, distribution (README, PyPI
-metadata, sdist, conda file, `guiqula desktop`, icons, the PyInstaller folder, the Windows
-installer script and the CI workflows, which have never run: there is no remote), are done
-(2026-09-27; PLAN.md section 7); its report, decisions 25 to 45, awaits the maintainer's
-answers. Nothing is uploaded or pushed without the maintainer.
+end of phase 5; items 1 to 7 are the in-app help's open points of section 11), was not
+commented on (phase 6 was asked for), so its items stand as built. Phase 6 (distribution
+and the add-on) is done (2026-09-27, in three parts: remote control and the MCP add-on;
+plugins; distribution: README, PyPI metadata, sdist and wheel, conda file, `guiqula
+desktop`, icons), and the maintainer answered its report, decisions 25 to 45 (PLAN.md
+section 7): a public GitHub repository without CI, pip as the only installer (no frozen
+builds), Python 3.12 and 3.13, 0.0.1 as the first release. Nothing is uploaded or pushed
+without the maintainer.
 
 ## Code map
 
