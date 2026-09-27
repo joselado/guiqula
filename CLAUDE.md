@@ -28,8 +28,10 @@ report (PLAN.md section 7 says what each phase built, what was left for later, a
 answers). Phase 4 is done (2026-09-27, in parts 1 to 4b: the breadth of the registry and the
 plot kinds, Python nodes, trust and the console, classical systems and `from_result` Fields,
 results in projects, presets gallery, overlays, sweeps, sliders, the Brillouin-zone canvas,
-the remaining Fields and the brush); its report, with numbered decisions, awaits the
-maintainer's answers (PLAN.md section 7, end of phase 4). Phase 5 (polish) is next.
+the remaining Fields and the brush); the maintainer asked for phase 5 without commenting
+on its report, so its items stand as built. Phase 5 (polish) is in progress, in four parts
+(PLAN.md section 7: its numbered design, items 1 to 7 being the recommendations for the
+open points of the in-app help at the end of section 11, awaits confirmation).
 
 ## Code map
 

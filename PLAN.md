@@ -9,8 +9,10 @@ Status: **all decisions in sections 12 and 13 made on 2026-09-26 (13.13, in-app
 help from pyqula's documentation, decided after phase 1, with open design
 points in section 11); the plan review of the same day is in section 14
 (decided items) and at the end of section 11 (items still open).** Phases 0 to 3 were
-done on 2026-09-26 and phase 4 on 2026-09-27 (section 7); the phase-4 report
-awaits the maintainer's answers, phase 5 is next.
+done on 2026-09-26 and phase 4 on 2026-09-27 (section 7); the maintainer asked
+for phase 5 without commenting on the phase-4 report, so its items stand as
+built. Phase 5 (polish) is in progress; its design, with recommendations for
+the open points of the in-app help (section 11), awaits confirmation.
 
 ## 1. Requirements (as stated by the maintainer)
 
@@ -525,7 +527,9 @@ One window, one document, three workspaces switched by tabs in the header
   those go through the same dispatcher, so they are undoable and journaled.
 - **Presets**: quantum-lattice's seventeen modes become a gallery of presets
   (documents) so the old workflows are one click away, while remaining fully
-  editable. quantum-lattice's tooltips and formula images can be reused.
+  editable. Tooltips are the registry's one-line docs and formula images;
+  the longer help is pyqula's own documentation (13.13), in a Help dock
+  tabbed with Properties (F1 shows the help of the selected entry).
 
 ## 5. What the user can change (initial registry scope)
 
@@ -1154,11 +1158,56 @@ add_valley_exchange and add_crystal_field, the sign of Geometry.shift,
 the .OUT files written without a write= switch, and smaller points) were
 sent to the pyqula Claude session on 2026-09-27, at the maintainer's
 request; the pyqula repository itself was not touched. Items 11 to 13 settle
-three questions of section 11 once confirmed.
+three questions of section 11 once confirmed. The maintainer then asked for
+phase 5 (2026-09-27) without commenting on items 1 to 17, so they stand as
+built, as the uncommented items of phase 2 did; an answer later still changes
+them.
 
 **Phase 5 — polish.** Undo everywhere, keyboard shortcuts, theming (light and
-dark), tooltips and formulas (reuse quantum-lattice's), user guide, example
-projects, performance passes (pyqtgraph canvas for large islands).
+dark), tooltips (the registry's one-line docs and formula images), in-app
+help from pyqula's own documentation (13.13), guiqula's user guide, example
+projects, teaching presets and exports (13.16), performance passes
+(pyqtgraph canvas for large islands, if the measurements ask for it).
+Built in four parts, the help last so that the answers to its open points
+(section 11) can arrive meanwhile: (1) a settings file, light and dark
+themes, keyboard shortcuts, undo, tooltips; (2) teaching exports, locked
+parameters, example and teaching presets; (3) performance; (4) the in-app
+help and guiqula's user guide.
+Design (2026-09-27), numbered for the maintainer; items 1 to 7 are the
+recommendations for the open points of 13.13 at the end of section 11:
+8. a settings file (JSON in the user config directory,
+   `$GUIQULA_CONFIG_DIR` for the tests and drivers) holds the theme, the
+   recent files and 13.7's "always trust" preference (off by default; it
+   was phase-4 item 8);
+9. themes light, dark, and following the desktop (the default when Qt
+   reports the desktop's scheme, else light); the canvas, the plots, the
+   formula images and the console follow; exported figures keep a white
+   background;
+10. undo: the Undo and Redo entries name the step, an undo history jumps
+    back several steps, Ctrl+Y redoes too, the selection follows the step
+    undone; a calculation keeps its last few results by key, so undoing an
+    edit brings back the result that matched it without a re-run; the view
+    state (selection, workspace, sliders, overlays, theme) stays outside
+    undo, as in Blender;
+11. shortcuts: one table that the menus, a Help > Keyboard shortcuts
+    dialog and the user guide share; the canvas tools take single keys only
+    while the canvas has focus; a test refuses ambiguous shortcuts;
+12. teaching (13.16): Export figure, data and script, one folder per
+    result (the figure as PNG and PDF, the arrays as .npz and, for curves,
+    .csv, the pyqula script, the document); locked parameters (`lock` and
+    `unlock` mutations, a lock in the form, commands refusing a change): a
+    guide for students, not a protection, since unlocking is one command;
+    teaching presets with locks;
+13. example projects are presets (JSON, in the gallery), not `.guiqula`
+    files with results kept in git;
+14. performance: the choice between matplotlib with a level of detail and
+    a pyqtgraph canvas is made from measurements in the window (a
+    20,000-site island through tools/drive.py, and a mutation of a document
+    holding a painted Field of 20,000 values), reported with the numbers.
+    Measured so far (agg, no window): the canvas draws a 21,600-site island
+    in 0.25 s and a 60,000-site one in 0.7 s, data-unit circles being half
+    of it (a scatter of the same points: 0.03 s); pyqula's island op takes
+    10 s and 77 s to build them.
 
 **Phase 6 — distribution and add-on.** PyPI release, conda file, installers for
 Mac/Windows, plugin entry points and a plugin template, JSON-RPC server + MCP
@@ -1194,8 +1243,9 @@ wrapper (the Claude add-on).
 ## 9. Relation to quantum-lattice
 
 guiqula is a new program, not a refactor. It keeps quantum-lattice's good
-ideas (tooltips with physics, formula images, the "pyqula code" view, the
-atom picker, the presets) and drops what limited it: one form per mode, `.ui`
+ideas (formula images, the "pyqula code" view, the atom picker, the
+presets; its hand-written physics tooltips give way to pyqula's own
+documentation, 13.13) and drops what limited it: one form per mode, `.ui`
 files, plotting through `.OUT` files and subprocesses, cwd-based state, a
 hand-maintained applicability table. Per decision 5, guiqula does not need to
 supersede quantum-lattice; both can coexist.
@@ -1281,6 +1331,52 @@ supersede quantum-lattice; both can coexist.
      VENDOR.md; with `GUIQULA_PYQULA_PATH` set, the help and the running code
      come from different pyqula versions; section 4's layout has no place
      for a help panel.
+
+  Recommendations (2026-09-27, phase-5 design; numbered as the points, and
+  items 1 to 7 of the phase-5 design in section 7):
+  1. Read the docstrings statically in the UI process, from the source of
+     the pyqula copy in use (an AST parse, lazily at the first help
+     request): `helptk.get_docstring(f)` is a decorator that copies `f`'s
+     docstring, which the parser follows. No worker round trip (a long
+     build would delay the help) and no generated file. A test compares
+     the result with `inspect.getdoc` of the imported pyqula for every
+     pyqula call behind a registry entry.
+  2. `setup.py` copies `vendor/pyqula_user_guide.md` into the wheel next to
+     the vendored package (`guiqula/_vendor/pyqula_user_guide.md`);
+     `vendor/` stays an exact copy; the wheel test checks the guide is there.
+  3. An entry's help is assembled, not written: its label, formula and
+     one-line doc; its parameters (from the declarations); the pyqula code
+     it generates with the current values (quantum-lattice's "pyqula code"
+     view, section 9); the docstrings of the pyqula calls behind it (the
+     Call's target, or `pyqula=` on a custom entry); and the guide sections
+     it names (`guide=`; none when the guide has none). The concepts that
+     are guiqula's own (systems, Fields, regions, Python nodes, sweeps, the
+     console, trust) are described in guiqula's user guide, shipped with the
+     package and shown by the same panel; it describes the program, never
+     pyqula's physics.
+  4. Qt's Markdown renderer (`QTextBrowser`, in PySide6-Essentials) with
+     every equation drawn by mathtext after a few rewrites (`\tfrac`, an
+     unbraced `\mathbf k`, `\mod`), and its LaTeX source shown as code when
+     mathtext cannot draw it (matrices, multi-line environments). Measured
+     before the rewrites: mathtext draws 56 of the 69 display equations and
+     897 of the 931 inline ones.
+  5. `tools/update_vendor.sh` runs the help tests (anchors, docstrings)
+     after copying and prints what broke; the anchor fixes a renamed upstream
+     section forces may join the refresh commit, nothing else (CLAUDE.md's
+     "commit a refresh on its own" says so).
+  6. Sections 4, 7 and 9 are corrected (2026-09-27). An entry's `doc` stays
+     guiqula's one-line summary (tooltip, palette, search) and its
+     `formula` the image; neither replaces pyqula's text. 3.2's declaration
+     gains `guide=` and `pyqula=`.
+  7. An anchor is a heading's text as written in the guide, found outside
+     fenced code blocks; a heading used twice is addressed as "Parent >
+     Heading", and the test refuses an ambiguous one. The refresh script
+     fails when the upstream guide is missing, before writing anything.
+     With `$GUIQULA_PYQULA_PATH` set, the help reads the guide and the
+     docstrings from that tree when it has them, and says which copy it
+     shows. The help is a dock tabbed with Properties, opened by F1 or a ?
+     button on each form, with Help > pyqula user guide and guiqula user
+     guide for the whole texts.
 
 ## 12. Decisions (made by the maintainer, 2026-09-26)
 
