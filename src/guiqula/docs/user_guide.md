@@ -8,8 +8,8 @@ of every entry quotes (F1).
 
 ## Getting started
 
-Install it with `pip install guiqula` (or `pipx install guiqula`), or with an installer
-for Windows or macOS, and start the program with `guiqula` (from a source checkout,
+Install it with `pip install guiqula` (or `pipx install guiqula`) and start the program
+with `guiqula` (from a source checkout,
 `PYTHONPATH=src python -m guiqula`), optionally followed by a project file or the name of a
 preset. `guiqula desktop` adds it to the desktop's application menu, with its icon, and
 lets `.guiqula` files open with it (`guiqula desktop --remove` undoes it). File > Presets

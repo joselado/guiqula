@@ -127,7 +127,9 @@ def test_mcp_with_its_own_session():
         assert "add_haldane" in text_of(mcp.tool("help", kind="haldane"))
         assert "get_bands" in text_of(mcp.tool("script", calculation="c1"))
         out = mcp.tool("console", code="print('from the console', h.intra.shape)")
-        assert "from the console (16, 16)" in text_of(out)
+        assert "from the console (16, 16)" in text_of(out) and not out["isError"]
+        failed = mcp.tool("console", code="1/0")
+        assert failed["isError"] and "ZeroDivisionError" in text_of(failed)
         undo = json.loads(text_of(mcp.tool("command", name="undo")))
         assert undo["result"]["redo"][0].startswith("add")      # the history after it
     finally:

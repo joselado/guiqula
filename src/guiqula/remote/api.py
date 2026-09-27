@@ -457,8 +457,11 @@ class RemoteAPI:
         job = self.session.console(code, system)
 
         def finish(timed_out):
-            out = {"status": job.status, "output": list(job.log), "value": job.value,
-                   "error": job.error}
+            # the worker's reply is {"ok", "error"}: code that raised still ends the job
+            # normally (its traceback is in the output), so the error is read from it
+            value = job.value if isinstance(job.value, dict) else {}
+            out = {"status": job.status, "output": list(job.log),
+                   "error": job.error or value.get("error")}
             if timed_out:
                 out["note"] = f"still running after {timeout:g} s"
             return jsonable(out)

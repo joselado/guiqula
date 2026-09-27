@@ -1,7 +1,7 @@
 # A guiqula plugin (guiqula's PLAN.md 3.2, phase 6): copy this directory, rename the
 # package, and declare your module in the entry point group "guiqula.plugins".
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -9,7 +9,7 @@ name = "guiqula-example-plugin"
 version = "0.1.0"
 description = "An example guiqula plugin: the chiral Kekule hopping of pyqula"
 requires-python = ">=3.11"
-license = {text = "GPL-3.0-or-later"}
+license = "GPL-3.0-or-later"
 # guiqula brings pyqula (vendored), numpy and the rest
 dependencies = ["guiqula"]
 

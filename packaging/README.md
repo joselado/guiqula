@@ -6,7 +6,7 @@ repository has a GitHub remote.
 
 | what | built by | verified |
 |---|---|---|
-| sdist and wheel (PyPI) | `python -m build` (the wheel is built from the sdist) | Linux: `tests/test_packaging.py`; a clean venv installs the wheel from PyPI's dependencies and runs |
+| sdist and wheel (PyPI) | `python -m build` (the wheel is built from the sdist) | Linux: `tests/test_packaging.py` (builds without isolation: it needs setuptools 77 or newer and `build`, in the `test` extra); a clean venv installs the wheel from PyPI's dependencies and runs |
 | conda environment | `environment.yml` (conda-forge stack, guiqula and Qt from PyPI) | the file's list is checked against `pyproject.toml`; not solved here |
 | menu entry, icon, file type | `guiqula desktop` (`src/guiqula/desktop.py`) | Linux (`tests/test_desktop.py`, `desktop-file-validate`); Windows and macOS: the files are tested as text, never applied |
 | application folder | `pyinstaller packaging/pyinstaller/guiqula.spec` | Linux: the frozen `guiqula-cli run`, `serve` and the window, driven through the remote API |

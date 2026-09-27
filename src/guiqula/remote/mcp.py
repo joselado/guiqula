@@ -291,6 +291,8 @@ class Bridge:
             if code == INTERNAL and data:
                 text += "\n" + str(data)[-2000:]
             return _error_content(text)
+        if isinstance(content, dict):           # a tool's own error result (the console's)
+            return content
         return {"content": content, "isError": False}
 
     def tool_status(self):
@@ -343,13 +345,10 @@ class Bridge:
 
     def tool_console(self, code, system=None, timeout=120):
         value = self._call("console", code=code, system=system, timeout=timeout)
-        parts = list(value.get("output") or [])
-        if value.get("value") is not None:
-            parts.append(repr(value["value"]) if not isinstance(value["value"], str)
-                         else value["value"])
-        if value.get("error"):
-            return _error_content("\n".join(parts + [value["error"]]))
-        return [_text("\n".join(parts) or f"({value['status']}, no output)")]
+        output = "\n".join(value.get("output") or [])
+        if value.get("error"):                   # the traceback is in the output already
+            return _error_content(output or value["error"])
+        return [_text(output or f"({value['status']}, no output)")]
 
     def tool_connect(self, target=None, pid=None, launch=False, document=None):
         return [_text(_json(self.connect(target, pid, launch, document)))]

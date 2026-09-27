@@ -136,6 +136,10 @@ def test_help(api):
 def test_console_and_journal(api):
     reply = call(api, "console", code="print(h.intra.shape)\n2 + 3", timeout=300)
     assert reply["status"] == "done" and "(16, 16)" in "\n".join(reply["output"])
+    assert reply["output"][-1] == "5" and reply["error"] is None
+    failed = call(api, "console", code="1/0", timeout=300)
+    assert failed["error"] == "ZeroDivisionError: division by zero"
+    assert "Traceback" in failed["output"][0]
     journal = call(api, "journal", limit=5)
     assert journal["commands"] and "log" not in journal
 
