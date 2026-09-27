@@ -185,8 +185,10 @@ def main(conn, config):
     from guiqula.engine.build import BuildCache, build_system
     from guiqula.engine.calculations import run_calculation
     from pyqula import parallel
+    from pyqula.limits import densedimension
 
     cache = BuildCache()
+    build_cache = BuildCache()    # the build jobs': their large Hamiltonians are sparse
     state = {"cores": 1}
     if config.get("warm"):
         with contextlib.redirect_stdout(open(os.devnull, "w")):
@@ -230,11 +232,13 @@ def main(conn, config):
                                    results=payload.get("results"))
         if kind == "build":
             document = Document.from_json(payload["document"])
-            built = build_system(document, payload["system"], cache, meanfield=False,
+            built = build_system(document, payload["system"], build_cache, meanfield=False,
                                  trusted=payload.get("trusted", False),
-                                 results=payload.get("results"))
+                                 results=payload.get("results"), sparse_above=densedimension)
             quantum = hasattr(built.h, "intra")        # else a classical model
-            view = bool(payload.get("view")) and quantum
+            # a Hamiltonian built sparse for the canvas is not drawn: pyqula's sparse and
+            # dense matrices of position-dependent couplings differ (PLAN.md phase 5, part 3)
+            view = bool(payload.get("view")) and quantum and not built.sparse_for_canvas
             return dict(structure.describe(built.g), view=view,
                         hamiltonian=structure.hamiltonian_view(built.h) if view else None,
                         system=payload["system"], key=built.key, mode=built.mode,
@@ -242,7 +246,8 @@ def main(conn, config):
                         upgraded_by=built.plan.upgraded_by, sites=len(built.g.r),
                         dimension=int(built.h.intra.shape[0]) if quantum else len(built.g.r),
                         kspace=structure.kspace(built.g),
-                        cache={"hits": cache.hits, "misses": cache.misses, "size": len(cache)})
+                        cache={"hits": build_cache.hits, "misses": build_cache.misses,
+                               "size": len(build_cache)})
         if kind == "sleep":
             steps = max(int(payload.get("seconds", 1.0) / 0.05), 1)
             for i in range(steps):

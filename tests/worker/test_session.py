@@ -242,3 +242,24 @@ def test_an_undo_brings_back_the_earlier_result(no_jobs):
     session.do("remove", entry="c1")
     assert "c1" not in session.earlier_results
     session.close()
+
+
+def test_plans_are_reused_until_something_they_depend_on_changes(no_jobs):
+    """Phase 5, part 3: the Session plans a Document object once per trust
+    and set of results; an edit, a new result or trust plans again."""
+    from types import SimpleNamespace
+    session = Session("honeycomb_zeeman_rashba", jobs=no_jobs)
+    plan = session.plan_system("s1")
+    key = session.calculation_key("c1")
+    assert session.plan_system("s1") is plan and session.calculation_key("c1") == key
+    session.do("set_param", entry="t2", name="c", value=0.3)
+    assert session.plan_system("s1") is not plan and session.calculation_key("c1") != key
+    plan = session.plan_system("s1")
+    session.results["c9"] = SimpleNamespace(key="k")
+    assert session.plan_system("s1") is not plan
+    plan = session.plan_system("s1")
+    session.act("trust", enabled=False)
+    assert session.plan_system("s1") is not plan
+    session.undo()
+    assert session.calculation_key("c1") == key
+    session.close()

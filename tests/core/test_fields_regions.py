@@ -120,3 +120,47 @@ def test_profile_interpolated_and_painted_fields():
                          ({"kind": "painted", "sites": [[0, 0, 1]]}, "x, y, z, value")]:
         with pytest.raises(fields.FieldError, match=message):
             fields.normalize(bad)
+
+
+def test_stored_points_are_found_fast_and_as_before():
+    """Painted and from_result Fields and regions by positions look sites up
+    through core/nearest.py (phase 5, part 3): the bulk evaluation, the
+    compiled function and the exported one agree, for many sites."""
+    import time
+    from guiqula.core.results import ResultRef
+    x, y = np.meshgrid(np.arange(120.0), np.arange(120.0) * 0.9)
+    sites = np.column_stack([x.ravel(), y.ravel(), np.zeros(x.size)])        # 14,400
+    values = np.sin(sites[:, 0]) + sites[:, 1]
+    painted = fields.normalize({"kind": "painted", "tol": 0.2, "default": -1.0,
+                                "sites": np.column_stack([sites, values])[::2].tolist()})
+    queries = sites + 0.05
+    start = time.perf_counter()
+    bulk = fields.evaluate_positions(painted, queries)
+    assert time.perf_counter() - start < 1.0
+    expected = np.where(np.arange(len(sites)) % 2 == 0, values, -1.0)
+    assert np.allclose(bulk, expected)
+    compiled = fields.compile_scalar(painted)
+    assert [compiled(r) for r in queries[:50]] == pytest.approx(expected[:50])
+    ref = ResultRef("key", sites, {"m": np.column_stack([values, 2 * values, 3 * values])})
+    field = {"kind": "from_result", "calculation": "c1", "array": "m", "component": 1,
+             "scale": 0.5, "tol": 0.1}
+    assert np.allclose(fields.evaluate_positions(field, queries, results={"c1": ref}), values)
+    assert np.allclose(fields.evaluate_positions(field, queries + 1.0, results={"c1": ref}), 0)
+    region = {"kind": "positions", "positions": sites[:100].tolist(), "tol": 0.1}
+    inside = regions.evaluate_positions(region, queries)
+    assert inside.sum() == 100 and inside[:100].all()
+    indicator = regions.compile_indicator(region)
+    assert indicator(queries[5]) == 1.0 and indicator(queries[500]) == 0.0
+
+
+def test_painting_many_sites():
+    positions = np.column_stack([np.arange(5000.0), np.zeros(5000), np.zeros(5000)])
+    value = fields.paint(0.25, positions, range(0, 5000, 2), 1.0)
+    assert value["default"] == 0.25 and len(value["sites"]) == 2500
+    value = fields.paint(value, positions, [0, 1, 1, 3], 2.0)      # repaint, and new sites once
+    assert len(value["sites"]) == 2502
+    evaluated = fields.evaluate_positions(value, positions[:5])
+    assert list(evaluated) == [2.0, 2.0, 1.0, 2.0, 1.0]
+    for bad in ([[0, 0, "1", 2]], [[0, 0, True, 2]], [[0, 0, float("nan"), 2]]):
+        with pytest.raises(fields.FieldError, match="painted site"):
+            fields.normalize({"kind": "painted", "sites": bad})

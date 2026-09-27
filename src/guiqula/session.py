@@ -104,6 +104,7 @@ class Session:
         self.path = path         # where the document was loaded from / saved to
         self.build_patience = BUILD_PATIENCE
         self.view_state = None   # callable -> dict saved as the document's ui block (the window)
+        self._plans = None       # plans and keys of the current Document (_planning)
         self._saved_json = _content(self.document)
         self.autosaver = autosave if isinstance(autosave, autosave_files.Autosaver) else \
             autosave_files.Autosaver() if autosave else None
@@ -167,9 +168,38 @@ class Session:
         return lambda: (self._listeners.remove(listener), unsubscribe())
 
     # ---- planning with the Session's trust and results (the keys must match the workers')
+    def _planning(self):
+        """The plans and keys made for this Document object with these
+        results and this trust, reused until one of them changes (a
+        Document is never changed in place: every mutation makes a new one).
+        A document event asks for them from several places (the outliner,
+        the form, the canvas, staleness), and a plan normalizes every
+        parameter: a painted Field of a large system is not cheap to."""
+        document = self.dispatcher.document
+        results = tuple((calc, id(result)) for calc, result in self.results.items())
+        cache = self._plans
+        if cache is None or cache["document"] is not document or \
+                cache["results"] != results or cache["trusted"] != self.trusted:
+            cache = self._plans = {"document": document, "results": results,
+                                   "trusted": self.trusted, "refs": None, "system": {},
+                                   "calculation": {}, "key": {}}
+        return cache
+
+    def _cached(self, table, name, make):
+        cache = self._planning()
+        if name not in cache[table]:
+            cache[table][name] = make()
+        return cache[table][name]
+
     def result_refs(self):
         """{calculation id: ResultRef} of the results the Document's
         from_result Fields read (only the arrays they read)."""
+        cache = self._planning()
+        if cache["refs"] is None:
+            cache["refs"] = self._result_refs()
+        return cache["refs"]
+
+    def _result_refs(self):
         document = self.document
         wanted = pipeline.result_references(document)
         if not wanted:
@@ -184,15 +214,16 @@ class Session:
                 for calc in wanted if calc in self.results}
 
     def plan_system(self, system):
-        return pipeline.plan_system(self.document, system, self.trusted, self.result_refs())
+        return self._cached("system", system, lambda: pipeline.plan_system(
+            self.document, system, self.trusted, self.result_refs()))
 
     def plan_calculation(self, calculation):
-        return pipeline.plan_calculation(self.document, calculation, self.trusted,
-                                         self.result_refs())
+        return self._cached("calculation", calculation, lambda: pipeline.plan_calculation(
+            self.document, calculation, self.trusted, self.result_refs()))
 
     def calculation_key(self, calculation):
-        return pipeline.calculation_key(self.document, calculation, self.trusted,
-                                        self.result_refs())
+        return self._cached("key", calculation, lambda: pipeline.calculation_key(
+            self.document, calculation, self.trusted, self.result_refs()))
 
     def code_entries(self):
         """Ids of the Document's Python nodes."""

@@ -319,3 +319,37 @@ def test_values_on_a_chain_are_a_curve_against_x(qapp):
     structure["positions"][3, 1] = 0.5                    # not a chain: on the atoms
     ax, points = plots.draw(Figure(), result)
     assert not ax.lines and ax.get_ylabel() == "y"
+
+
+def test_a_large_geometry_on_the_canvas(qapp):
+    """Phase 5, part 3: 20,000 sites are drawn, selected and redrawn
+    quickly; an unchanged drawing is not redone (only its caption)."""
+    import time
+    import numpy as np
+    from guiqula.ui.structure import StructureView
+    x, y = np.meshgrid(np.arange(160.0), np.arange(125.0) * 0.9)
+    positions = np.column_stack([x.ravel(), y.ravel(), np.zeros(x.size)])     # 20,000
+    right = np.arange(len(positions)).reshape(125, 160)
+    bonds = np.column_stack([right[:, :-1].ravel(), right[:, 1:].ravel()])
+    build = {"positions": positions, "lattice": np.diag([160.0, 112.5, 1.0]),
+             "dimensionality": 0, "sublattice": None, "bonds": bonds,
+             "image_bonds": np.zeros((0, 5), dtype=int)}
+    view = StructureView()
+    view.resize(900, 700)
+    start = time.perf_counter()
+    view.show_structure("s1", build, "first")
+    view.canvas.draw()
+    first = time.perf_counter() - start
+    ax = view.ax
+    start = time.perf_counter()
+    view.show_structure("s1", build, "updating…")
+    assert view.ax is ax and view.caption.text() == "updating…"       # not redrawn
+    assert time.perf_counter() - start < 0.2
+    start = time.perf_counter()
+    assert view.select(range(len(positions))) == len(positions)
+    view.select(range(0, len(positions), 3), "toggle")
+    view.canvas.draw()
+    assert time.perf_counter() - start < 3.0
+    assert first < 5.0
+    view.show_structure("s1", build, "a region", highlight=np.arange(len(positions)) < 10)
+    assert view.ax is not ax                                          # something changed

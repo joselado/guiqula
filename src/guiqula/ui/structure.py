@@ -45,12 +45,14 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit,
                                QToolButton, QVBoxLayout, QWidget)
 
+from guiqula.core.nearest import nearest_indices
 from guiqula.ui import theme
 
 IMAGE_LIMIT = 3000       # above this many sites the neighbouring cells are not drawn
 RADIUS = 0.22            # of an atom, in pyqula's length unit (first neighbours at 1)
 PICK_RADIUS = 0.5        # a click selects the nearest site within this distance
 SAME_SITE = 1e-3         # positions closer than this are the same site
+OUTLINE_PIXELS = 6       # circles narrower than this on the screen are drawn without outline
 TOOLS = ("pick", "box", "lasso")
 MODES = ("replace", "add", "toggle", "remove")
 VIEWS = {"structure": "Sites and bonds", "hamiltonian": "Hamiltonian", "field": "Field preview"}
@@ -128,20 +130,34 @@ def combine(current, new, mode="replace"):
 
 def match_positions(positions, stored, tol=SAME_SITE):
     """Indices of the sites at the stored positions (those still there)."""
-    positions = np.asarray(positions, dtype=float)
     stored = np.asarray(stored, dtype=float).reshape(-1, 3)
-    if len(stored) == 0 or len(positions) == 0:
-        return np.zeros(0, dtype=int)
-    d = np.linalg.norm(positions[:, None, :] - stored[None, :, :], axis=2)
-    return np.nonzero(d.min(axis=1) < tol)[0]
+    return np.nonzero(nearest_indices(stored, positions, tol) >= 0)[0]
+
+
+class DataCircles(EllipseCollection):
+    """Circles of a radius in data units, whose outlines are drawn only
+    while a circle is at least OUTLINE_PIXELS wide on the screen: zoomed
+    out, an outline is a smudge, and stroking thousands of them was half of
+    a redraw of a large geometry (PLAN.md phase 5, part 3)."""
+
+    def __init__(self, radius, **kwargs):
+        super().__init__(2 * radius, 2 * radius, 0.0, units="xy", **kwargs)
+        self.radius = radius
+        self.outline = self.get_linewidths()
+
+    def draw(self, renderer):
+        if self.axes is not None:
+            x0, x1 = self.axes.transData.transform([(0.0, 0.0), (self.radius, 0.0)])[:, 0]
+            wide = 2 * abs(x1 - x0) >= OUTLINE_PIXELS
+            self.set_linewidths(self.outline if wide else 0.0)
+        super().draw(renderer)
 
 
 def circles(ax, xy, radius, zorder, autolim=False, **style):
     """Circles of a radius in data units (they grow when zooming in), one
     per row of xy; set_offsets() moves them later."""
-    collection = EllipseCollection(2 * radius, 2 * radius, 0.0, units="xy",
-                                   offsets=np.asarray(xy, dtype=float).reshape(-1, 2),
-                                   offset_transform=ax.transData, zorder=zorder, **style)
+    collection = DataCircles(radius, offsets=np.asarray(xy, dtype=float).reshape(-1, 2),
+                             offset_transform=ax.transData, zorder=zorder, **style)
     ax.add_collection(collection, autolim=autolim)
     return collection
 
@@ -439,6 +455,17 @@ def draw_structure_3d(ax, build, highlight=None, selected=None, removed=None, im
     return selection
 
 
+def _same(a, b):
+    """Equality of overlay values (dicts, lists, numpy arrays, numbers)."""
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(_same(a[k], b[k]) for k in a)
+    if isinstance(a, np.ndarray) or isinstance(b, np.ndarray):
+        return np.shape(a) == np.shape(b) and bool(np.array_equal(a, b))
+    if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
+        return len(a) == len(b) and all(_same(x, y) for x, y in zip(a, b))
+    return type(a) is type(b) and a == b
+
+
 class StructureView(QWidget):
     """A matplotlib canvas with its navigation toolbar (pan, zoom, save)
     and the site-selection tools."""
@@ -519,6 +546,7 @@ class StructureView(QWidget):
         self._selection_artist = None
         self._selector = None
         self._caption = ""
+        self._drawn = self._overlays = None     # what the figure shows (show_structure)
         self.canvas.mpl_connect("button_press_event", self._on_press)
         self.canvas.mpl_connect("motion_notify_event", self._on_paint_motion)
         self.canvas.mpl_connect("button_release_event", self._on_paint_release)
@@ -557,9 +585,17 @@ class StructureView(QWidget):
     def show_structure(self, system_id, build, caption="", **overlays):
         """Redraw; keeps the zoom (or the 3D viewing angle) when the same
         geometry is shown again, and the selection when its sites are
-        still there. Drawn in the active theme."""
+        still there. Drawn in the active theme. When nothing drawn changed
+        (an edit whose rebuild is on its way: only the caption says
+        "updating…"), only the caption is updated."""
+        drawing = (system_id, id(build), self.in_3d(build), theme.name)
+        if self.ax is not None and drawing == self._drawn and _same(overlays, self._overlays):
+            self._caption = caption
+            self._update_selection()
+            return
         with theme.drawing(self.figure):
             self._show_structure(system_id, build, caption, **overlays)
+        self._drawn, self._overlays = drawing, overlays
 
     def _show_structure(self, system_id, build, caption, **overlays):
         three_d = self.in_3d(build)
@@ -601,6 +637,7 @@ class StructureView(QWidget):
         self._update_selection()
 
     def clear(self, caption=""):
+        self._drawn, self._overlays = None, None
         self.system_id, self.build, self.ax = None, None, None
         self._selector = self._selection_artist = None
         self.selected_positions = np.zeros((0, 3))

@@ -1286,6 +1286,58 @@ centred on the origin and ends on intracell bonds (a 20-cell one ends on
 intercell bonds), so which chain is topological with a given modulation
 depends on the parity of the supercell; Qt greys out a list item without
 flags, which the gallery uses for its headings.
+**Part 3 done 2026-09-27** (performance). Measured in the window
+offscreen (a honeycomb island of 21,600 sites, `island` n = 60, through
+the interactive worker, and a painted Field on every site), before and
+after:
+| step | before | after |
+|---|---|---|
+| first build and draw | 79.5 s | 12.0 s (pyqula's island op: 10 s) |
+| an edit: UI process / rebuild and redraw | 469 ms / 38.9 s | 20 ms / 0.7 s |
+| select all / a box, and redraw | 26.3 s / 6.1 s | 0.16 s / 0.13 s |
+| canvas redraw (zoom) | 173 ms | 103 ms |
+| set a painted Field of 21,600 sites / next edit | 11.8 s / 13.4 s | 0.41 s / 0.2 s |
+| 9,600 sites, three terms: worker memory after 3 edits | 10.5 GB, growing | 4.8 GB, bounded |
+What changed: `core/nearest.py` finds the stored point nearest to a
+position within a tolerance through a hash of cells of that size (27 cells
+per lookup), one position at a time (`nearest_site`, pure Python, which
+the engine's compiled Fields and the exported scripts use) or many with
+numpy (`nearest_indices`); the canvas selection, regions by positions and
+painted and from_result Fields used it quadratically before (an N x M
+distance matrix, or a scan per site). A painted Field's sites are checked
+with numpy. The Session reuses the plans and keys of a Document object
+until the Document, the results or the trust change (a document event
+planned the same system five times). The interactive worker builds a
+Hamiltonian above pyqula's dense limit (`limits.densedimension`, 10,000)
+with sparse matrices (`build_system(sparse_above=...)`, the construction
+report says so), with a cache of its own, and does not draw its
+Hamiltonian view; the calculations build as the construction says. The
+build cache is bounded by memory (an eighth of the machine's, 1 to 8 GB,
+`engine/build.nbytes`), not only by count: a dense Hamiltonian of 9,600
+sites is 1.5 GB and every edit added one. The canvas redraws nothing when
+only its caption changed (an edit waiting for its rebuild), and draws the
+white outlines of the atoms only when they are at least 6 pixels wide
+(stroking them was half of a redraw). Decision for the maintainer
+(design item 14): no pyqtgraph canvas: matplotlib draws 21,600 sites in
+0.1 s, and what was slow was elsewhere; the build of such an island is
+pyqula's (10 s for 21,600 sites, 77 s for 60,000 in `islands.get_geometry`).
+Tests: `tests/core/test_nearest.py`, the fast lookups in
+`tests/core/test_fields_regions.py`,
+`test_interactive_builds_are_sparse_above_the_dense_limit`,
+`test_the_cache_is_bounded_by_memory`,
+`test_plans_are_reused_until_something_they_depend_on_changes`,
+`test_a_large_geometry_on_the_canvas`,
+`test_sparse_storage_warns_for_position_dependent_couplings`. Facts
+learned: pyqula builds a position-dependent Haldane, Rashba, Kane-Mele,
+anti Kane-Mele or modified Haldane coupling differently with
+`is_sparse=True` than dense (H(k) of a 2x2 honeycomb supercell differs by
+up to 0.14 for the Rashba coupling, and the sparse Haldane one is not
+Hermitian; constant couplings agree); the planner now warns when a
+document asks for sparse storage with such a term, and the canvas never
+draws a Hamiltonian it built sparse. Worth fixing upstream. matplotlib's
+EllipseCollection and CircleCollection draw thousands of filled circles
+equally fast: the outlines cost the time. `islands.get_geometry` is most
+of the time of a large island (10 s for 21,600 sites).
 
 **Phase 6 — distribution and add-on.** PyPI release, conda file, installers for
 Mac/Windows, plugin entry points and a plugin template, JSON-RPC server + MCP

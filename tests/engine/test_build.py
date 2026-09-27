@@ -88,3 +88,44 @@ def test_seeded_disorder_reproduces_and_differs_by_seed(pyqula):
     d.do("set_param", entry=t, name="seed", value=4)
     c = build_system(d.document, s).h
     assert not np.allclose(a.intra, c.intra)
+
+
+def test_interactive_builds_are_sparse_above_the_dense_limit(pyqula):
+    """PLAN.md phase 5, part 3: a Hamiltonian above the limit is built sparse
+    for the canvas (and says so), the same Hamiltonian as the dense one."""
+    d = Dispatcher()
+    s = d.do("add_system", lattice="honeycomb_lattice")
+    d.do("add_geometry_op", system=s, kind="supercell", params={"n": [3, 3, 1]})
+    d.do("add_term", system=s, kind="zeeman", params={"m": [0.0, 0.0, "0.1*x"]})
+    dense = build_system(d.document, s)
+    assert not dense.h.is_sparse                     # 18 sites spinful: 36
+    sparse = build_system(d.document, s, sparse_above=30)
+    assert sparse.h.is_sparse
+    construction = next(r for r in sparse.reports if r["stage"] == "construction")
+    assert "sparse matrices for the canvas (dimension 36" in construction["warnings"][0]
+    assert_same_hamiltonian(dense.h, sparse.h)
+    assert sparse.sparse_for_canvas and not dense.sparse_for_canvas
+    assert not build_system(d.document, s, sparse_above=36).h.is_sparse
+
+
+def test_the_cache_is_bounded_by_memory(pyqula):
+    """A dense Hamiltonian of 10,000 sites is 1.5 GB: the cache counts bytes
+    (PLAN.md phase 5, part 3)."""
+    from guiqula.engine.build import nbytes
+    d, s, op, t1, t2 = graphene()
+    built = build_system(d.document, s)
+    size = nbytes(built.h)
+    assert size >= built.h.intra.nbytes > 0 and nbytes(built.g) > 0
+    cache = BuildCache(memory=2.5 * size)
+    cache.put("a", built.h, {})
+    cache.put("b", built.h, {})
+    assert len(cache) == 2 and cache.bytes == 2 * size
+    cache.put("c", built.h, {})                      # the oldest goes
+    assert len(cache) == 2 and cache.get("a") is None and cache.get("b") is not None
+    cache.put("b", built.h, {})                      # again: counted once
+    assert cache.bytes == 2 * size
+    small = BuildCache(memory=size / 2)
+    small.put("big", built.h, {})                    # larger than the budget: not kept
+    assert len(small) == 0 and small.bytes == 0
+    small.put("geometry", built.g, {})
+    assert len(small) == 1

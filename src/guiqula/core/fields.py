@@ -48,6 +48,7 @@ import math
 import numbers
 
 from guiqula.core import regions as region_tools
+from guiqula.core.nearest import nearest_indices, nearest_site
 from guiqula.core.expressions import Expression, ExpressionError
 
 LATER_KINDS = ()
@@ -139,6 +140,24 @@ def _normalize_interpolated(value):
     return {"kind": "interpolated", "points": out, "length": length}
 
 
+def _sites(sites):
+    """[[x, y, z, value]] as floats, checked (fast for the plain numbers a
+    Document holds: a painted Field can have one row per site of a large
+    system)."""
+    import numpy as np
+    for site in sites:
+        if not isinstance(site, (list, tuple)) or len(site) != 4:
+            raise FieldError(f"a painted site is [x, y, z, value], not {site!r}")
+    plain = all(type(c) is float or type(c) is int for site in sites for c in site)
+    if not plain:
+        return [[_finite("a painted site", c) for c in site] for site in sites]
+    array = np.asarray(sites, dtype=float).reshape(-1, 4)
+    if not np.isfinite(array).all():
+        bad = next(site for site in sites if not np.isfinite(site).all())
+        raise FieldError(f"a painted site must be finite numbers, not {bad!r}")
+    return array.tolist()
+
+
 def _normalize_painted(value):
     extra = set(value) - {"kind", "sites", "tol", "default"}
     if extra:
@@ -146,11 +165,7 @@ def _normalize_painted(value):
     sites = value.get("sites") or []
     if not isinstance(sites, (list, tuple)):
         raise FieldError("the sites of a painted Field are a list of [x, y, z, value]")
-    out = []
-    for site in sites:
-        if not isinstance(site, (list, tuple)) or len(site) != 4:
-            raise FieldError(f"a painted site is [x, y, z, value], not {site!r}")
-        out.append([_finite("a painted site", c) for c in site])
+    out = _sites(sites)
     tol = _finite("tol", value.get("tol", 0.1))
     if not tol > 0:
         raise FieldError("tol must be positive")
@@ -296,15 +311,13 @@ def site_values(ref, array, component):
 def site_field(positions, values, tol, scale=1.0):
     """A function of position: scale times the value of the site nearest to
     it, when that site is closer than tol, else 0 (a from_result Field;
-    exported scripts define this same function)."""
-    import numpy as np
-    positions = np.asarray(positions, dtype=float).reshape(-1, 3)
-    values = np.asarray(values, dtype=float).reshape(-1)
+    exported scripts define this same function, with nearest_site)."""
+    values = [float(v) for v in values]
+    find = nearest_site(positions, tol)
 
     def f(r):
-        d = np.linalg.norm(positions - np.asarray(r, dtype=float), axis=1)
-        i = int(np.argmin(d))
-        return scale * float(values[i]) if d[i] < tol else 0.0
+        i = find(r)
+        return scale * values[i] if i >= 0 else 0.0
     return f
 
 
@@ -326,15 +339,12 @@ def painted_field(sites, tol, default=0.0):
     """A function of position: the value painted on the site nearest to it,
     when that site is closer than tol, else the default (a painted Field;
     exported scripts define this same function)."""
-    import numpy as np
-    sites = np.asarray(sites, dtype=float).reshape(-1, 4)
+    values = [float(site[3]) for site in sites]
+    find = nearest_site(sites, tol)
 
     def f(r):
-        if not len(sites):
-            return default
-        d = np.linalg.norm(sites[:, :3] - np.asarray(r, dtype=float), axis=1)
-        i = int(np.argmin(d))
-        return float(sites[i, 3]) if d[i] < tol else default
+        i = find(r)
+        return values[i] if i >= 0 else default
     return f
 
 
@@ -354,26 +364,27 @@ def paint(value, positions, indices, painted, regions=None, results=None):
         old = evaluate_positions(value, positions, regions, results)
         sites = [list(map(float, r)) + [float(v)] for r, v in zip(positions, old)]
         tol, default = 0.1, 0.0
-    for i in indices:
-        r = [float(c) for c in positions[int(i)]]
-        for site in sites:
-            if np.linalg.norm(np.array(site[:3]) - r) < tol:
-                site[3] = float(painted)
-                break
-        else:
-            sites.append(r + [float(painted)])
+    targets = positions[np.asarray(list(indices), dtype=int)].reshape(-1, 3)
+    found = nearest_indices(np.asarray(sites, dtype=float).reshape(-1, 4), targets, tol)
+    for i in found[found >= 0]:
+        sites[i][3] = float(painted)
+    new = targets[found < 0]
+    for i in np.nonzero(nearest_indices(new, new, tol) == np.arange(len(new)))[0]:
+        sites.append([float(c) for c in new[i]] + [float(painted)])     # one per site
     return {"kind": "painted", "sites": sites, "tol": tol, "default": default}
 
 
 HELPERS = {"from_result": site_field, "interpolated": interpolated_field,
            "painted": painted_field}
+NEEDS = {site_field: (nearest_site,), painted_field: (nearest_site,)}   # for exported scripts
 
 
 def helpers_of(value):
     """The functions (of HELPERS) a Field's compiled form needs, for any
     JSON value (a Field, a vector of them, a dict of parameters)."""
     if isinstance(value, dict) and value.get("kind") in HELPERS:
-        return {HELPERS[value["kind"]]}
+        helper = HELPERS[value["kind"]]
+        return {helper, *NEEDS.get(helper, ())}
     if isinstance(value, dict):
         return {f for v in value.values() for f in helpers_of(v)}
     if isinstance(value, (list, tuple)):
@@ -555,11 +566,19 @@ def evaluate_positions(value, positions, regions=None, results=None):
     if not isinstance(value, dict):
         return _evaluate_simple(value, positions)
     if value["kind"] == "from_result":
-        f = _result_function(value, results)
-        return np.array([f(r) for r in positions], dtype=float)
+        if results is None or value["calculation"] not in results:
+            raise FieldError(f"the result of {value['calculation']} is not available")
+        ref = results[value["calculation"]]
+        values = site_values(ref, value["array"], value["component"])
+        found = nearest_indices(ref.positions, positions, value["tol"])
+        return np.where(found >= 0, value["scale"] * values[found], 0.0)
     if value["kind"] == "profile":
         return _evaluate_simple(profile_expression(value), positions)
-    if value["kind"] in ("interpolated", "painted"):
+    if value["kind"] == "painted":
+        sites = np.asarray(value["sites"], dtype=float).reshape(-1, 4)
+        found = nearest_indices(sites, positions, value["tol"])
+        return np.where(found >= 0, sites[found, 3] if len(sites) else 0.0, value["default"])
+    if value["kind"] == "interpolated":
         f = _array_function(value)
         return np.array([f(r) for r in positions], dtype=float)
     out = _evaluate_simple(value["default"], positions)

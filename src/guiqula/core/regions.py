@@ -21,6 +21,7 @@ as Python source for script export.
 import numpy as np
 
 from guiqula.core.expressions import Expression, ExpressionError
+from guiqula.core.nearest import nearest_indices, nearest_site
 
 
 class RegionError(ValueError):
@@ -57,11 +58,10 @@ def compile_indicator(select):
     if select["kind"] == "expression":
         expression = Expression(select["expr"])
         return lambda r, e=expression: float(bool(e.at(r)))
-    points = np.array(select["positions"])
-    tol = select["tol"]
-    if len(points) == 0:
+    if not select["positions"]:
         return lambda r: 0.0
-    return lambda r, p=points, t=tol: float(np.min(np.linalg.norm(p - np.asarray(r), axis=1)) < t)
+    find = nearest_site(select["positions"], select["tol"])
+    return lambda r: float(find(r) >= 0)
 
 
 def code_indicator(select):
@@ -81,8 +81,4 @@ def evaluate_positions(select, positions):
     if select["kind"] == "expression":
         values = Expression(select["expr"]).evaluate_positions(positions)
         return values.astype(bool)
-    points = np.array(select["positions"])
-    if len(points) == 0:
-        return np.zeros(len(positions), dtype=bool)
-    distances = np.linalg.norm(positions[:, None, :] - points[None, :, :], axis=2)
-    return distances.min(axis=1) < select["tol"]
+    return nearest_indices(select["positions"], positions.reshape(-1, 3), select["tol"]) >= 0

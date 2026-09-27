@@ -18,6 +18,12 @@ content key. Execution:
 - the mean field (the last stage) runs only when asked for: the
   calculations ask, the interactive builds do not (``meanfield=False``),
   and then report it as "deferred";
+- the interactive builds (``sparse_above``, pyqula's dense limit) build a
+  Hamiltonian larger than that with sparse matrices, whatever the
+  construction says: they only check the terms and draw, and a dense
+  matrix of 20,000 sites takes gigabytes and half a minute a rebuild; the
+  calculations build it as the Document says, and the construction report
+  says so (PLAN.md phase 5, part 3);
 - a classical system builds its model from the geometry (the "model"
   stage, seeded like a stochastic term) and applies its terms to copies of
   the model; ``Built.h`` is then the model (it has ``geometry`` too).
@@ -37,12 +43,47 @@ class BuildError(RuntimeError):
     """The system cannot be built at all."""
 
 
-class BuildCache:
-    """Objects after each applied stage, keyed by stage key (LRU)."""
+def _memory_budget():
+    """An eighth of the machine's memory (a session runs two or three
+    workers), between 1 and 8 GB (2 GB when it cannot be told): what the
+    cached objects of a worker may take."""
+    import os
+    try:
+        total = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+    except (AttributeError, ValueError, OSError):
+        return 2e9
+    return min(max(total / 8, 1e9), 8e9)
 
-    def __init__(self, size=128):
+
+MEMORY = _memory_budget()
+
+
+def nbytes(obj):
+    """Roughly the memory of a geometry, Hamiltonian or model: its arrays
+    and matrices (dense or sparse), and those of its hoppings."""
+    total = 0
+    parts = list(vars(obj).values()) if hasattr(obj, "__dict__") else []
+    for value in parts + [getattr(h, "m", None) for h in getattr(obj, "hopping", None) or []
+                          if hasattr(h, "m")]:
+        if hasattr(value, "nbytes") and isinstance(getattr(value, "nbytes"), int):
+            total += value.nbytes                                    # numpy
+        elif hasattr(value, "data") and hasattr(value, "indices"):    # scipy sparse
+            total += value.data.nbytes + value.indices.nbytes + value.indptr.nbytes
+    return total
+
+
+class BuildCache:
+    """Objects after each applied stage, keyed by stage key (LRU), at most
+    size of them and at most memory bytes together: a dense Hamiltonian of
+    10,000 sites takes 1.5 GB, and a cache counting entries only grew by
+    that much at every edit (PLAN.md phase 5, part 3). An object larger
+    than the budget is not kept."""
+
+    def __init__(self, size=128, memory=MEMORY):
         self.size = size
+        self.memory = memory
         self._items = OrderedDict()
+        self.bytes = 0
         self.hits = 0
         self.misses = 0
 
@@ -59,13 +100,19 @@ class BuildCache:
         return item[0].copy(), dict(item[1])
 
     def put(self, key, obj, info):
-        self._items[key] = (obj.copy(), dict(info))
-        self._items.move_to_end(key)
-        while len(self._items) > self.size:
-            self._items.popitem(last=False)
+        size = nbytes(obj)
+        if key in self._items:
+            self.bytes -= self._items.pop(key)[2]
+        if size > self.memory:
+            return
+        self._items[key] = (obj.copy(), dict(info), size)
+        self.bytes += size
+        while len(self._items) > self.size or self.bytes > self.memory:
+            self.bytes -= self._items.popitem(last=False)[1][2]
 
     def clear(self):
         self._items.clear()
+        self.bytes = 0
 
 
 def mode_of(h):
@@ -85,6 +132,7 @@ class Built:
     reports: list = field(default_factory=list)
     mode: str = ""
     key: str = ""
+    sparse_for_canvas: bool = False    # built sparse against the construction (sparse_above)
 
     @property
     def g(self):
@@ -114,7 +162,7 @@ def _seed(stage):
     seed(stage.spec, stage.params)
 
 
-def _apply_stage(stage, obj):
+def _apply_stage(stage, obj, sparse_above=None):
     """Returns (new object, record). record: message (None if fine),
     output (what pyqula printed), mode after the stage, notes of the entry."""
     record = {"message": None, "output": "", "mode": None, "notes": {}}
@@ -128,6 +176,13 @@ def _apply_stage(stage, obj):
     if stage.stage == "construction":
         c = stage.params
         kwargs = {"has_spin": c["has_spin"], "is_sparse": c["is_sparse"]}
+        dimension = len(obj.r) * (2 if c["has_spin"] else 1) * (2 if c["nambu"] else 1)
+        if sparse_above is not None and not c["is_sparse"] and dimension > sparse_above:
+            kwargs["is_sparse"] = True
+            record["notes"]["sparse"] = (f"built with sparse matrices for the canvas (dimension "
+                                         f"{dimension}, above pyqula's dense limit "
+                                         f"{sparse_above}); the calculations build it dense, "
+                                         f"as the construction says")
         if list(c["tij"]) != [1.0]:        # pyqula's default builder otherwise
             kwargs["tij"] = list(c["tij"])
 
@@ -206,12 +261,15 @@ def double_precision():
     jax.config.update("jax_enable_x64", True)
 
 
-def build_system(document, system_id, cache=None, meanfield=True, trusted=True, results=None):
+def build_system(document, system_id, cache=None, meanfield=True, trusted=True, results=None,
+                 sparse_above=None):
     """Build one system; returns a Built with the Hamiltonian and a report
     per stage: status "ok", "disabled", "invalid" (with the message) or,
     for a mean field left out with meanfield=False, "deferred". trusted:
     whether Python nodes run (PLAN.md 13.7); results: {calculation id:
-    ResultRef} the from_result Fields read."""
+    ResultRef} the from_result Fields read; sparse_above: a Hilbert
+    dimension above which the Hamiltonian is built sparse (the interactive
+    builds; a cache must only ever see one rule)."""
     vendoring.ensure_pyqula_on_path()
     double_precision()
     plan = pipeline.plan_system(document, system_id, trusted, results)
@@ -229,7 +287,7 @@ def build_system(document, system_id, cache=None, meanfield=True, trusted=True, 
     for i, stage in enumerate(stages):
         if i <= resume or not stage.applied:
             continue
-        obj, info[stage.key] = _apply_stage(stage, obj)
+        obj, info[stage.key] = _apply_stage(stage, obj, sparse_above)
         if cache is not None:
             cache.put(stage.key, obj, info)
 
@@ -250,11 +308,15 @@ def build_system(document, system_id, cache=None, meanfield=True, trusted=True, 
             report["output"] = record.get("output", "")
             if record.get("notes"):
                 report["notes"] = record["notes"]
+            if record.get("notes", {}).get("sparse"):
+                report.setdefault("warnings", []).append(record["notes"]["sparse"])
             mode = record.get("mode") or mode
         if stage.stage in ("construction", "term", "meanfield") and plan.kind == "quantum":
             report["mode"] = mode
         if stage.warnings:
-            report["warnings"] = list(stage.warnings)
+            report["warnings"] = list(stage.warnings) + report.get("warnings", [])
         reports.append(report)
     return Built(system_id=system_id, h=obj, plan=plan, reports=reports,
-                 mode=mode_of(obj) or plan.mode, key=plan.key)
+                 mode=mode_of(obj) or plan.mode, key=plan.key,
+                 sparse_for_canvas=any(record.get("notes", {}).get("sparse")
+                                       for record in info.values()))

@@ -169,3 +169,26 @@ def test_cost_estimate():
     with_mf = cost.estimate(d.document, c, {s: {"dimension": 16, "dimensionality": 2, "sites": 8}})
     assert with_mf["meanfield"] > 0 and with_mf["seconds"] > small["seconds"]
     assert cost.describe(0.2) == "under a second" and cost.describe(600) == "about 10 min"
+
+
+def test_sparse_storage_warns_for_position_dependent_couplings():
+    """pyqula's sparse matrices of a position-dependent Haldane, Rashba or
+    Kane-Mele coupling differ from its dense ones (phase 5, part 3): the
+    planner says so when the construction asks for sparse storage."""
+    from guiqula.commands import Dispatcher
+    from guiqula.registry import pipeline
+    d = Dispatcher()
+    s = d.do("add_system", lattice="honeycomb_lattice")
+    t1 = d.do("add_term", system=s, kind="haldane", params={"t": "0.05*x"})
+    t2 = d.do("add_term", system=s, kind="rashba", params={"c": 0.1})
+    t3 = d.do("add_term", system=s, kind="onsite", params={"mu": "0.1*x"})
+
+    def warned():
+        plan = pipeline.plan_system(d.document, s)
+        return [t for t in (t1, t2, t3) if plan.stage(t).warnings]
+    assert warned() == []
+    d.do("set_construction", system=s, is_sparse=True)
+    assert warned() == [t1]
+    r = d.do("add_region", system=s, select={"kind": "expression", "expr": "x > 0"})
+    d.do("set_region", entry=t2, region=r)
+    assert warned() == [t1, t2]

@@ -227,6 +227,21 @@ def _field_results(spec, params, document, system, results, trusted):
     return out, None, sorted(set(warnings))
 
 
+# terms whose pyqula call builds another matrix with sparse storage when its
+# Field depends on the position (measured 2026-09-27, PLAN.md phase 5, part 3)
+SPARSE_DIFFERS = {"haldane", "rashba", "kane_mele", "anti_kane_mele", "modified_haldane"}
+
+
+def _field_values(spec, params):
+    """The scalar Fields among an entry's parameters (vector components too)."""
+    out = []
+    for param in spec.params:
+        if isinstance(param, FieldParam):
+            value = params.get(param.name)
+            out += list(value) if isinstance(value, list) else [value]
+    return out
+
+
 def plan_system(document, system_id, trusted=True, results=None):
     """The plan of a system; trusted: whether Python nodes may run;
     results: {calculation id: core.results.ResultRef} of the results the
@@ -311,6 +326,14 @@ def plan_system(document, system_id, trusted=True, results=None):
         or ("nambu" in s.spec.requires_of(s.params) and not requested.nambu))]
     plan.construction = {"has_spin": has_spin, "nambu": nambu, "tij": list(requested.tij),
                          "is_sparse": requested.is_sparse}
+    if requested.is_sparse:
+        for term in term_stages:
+            if term.applied and term.kind in SPARSE_DIFFERS and (term.region is not None or any(
+                    not fields.is_constant(v) for v in _field_values(term.spec, term.params))):
+                term.warnings = term.warnings + [
+                    "pyqula builds this coupling differently with sparse matrices when it "
+                    "depends on the position (not Hermitian for the Haldane coupling); build "
+                    "the Hamiltonian dense (construction) to trust it"]
     stage = StagePlan("construction", None, "construction", True, None, plan.construction)
     key = content_hash({"prev": key, "stage": "construction", **plan.construction})
     stage.key, stage.applied = key, True

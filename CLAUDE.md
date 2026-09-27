@@ -45,7 +45,9 @@ a `Session`.
   dispatcher refuses any mutation that changes a locked thing, comparing before and after),
   `expressions.py` (Fields: constant, expression, piecewise over regions, from_result,
   profile, interpolated, painted; the
-  AST-whitelisted expression evaluator), `regions.py`, `results.py` (the `Result` dataclass
+  AST-whitelisted expression evaluator), `regions.py`, `nearest.py` (the stored point
+  nearest to a position within a tolerance, by a cell hash: regions by positions, painted
+  and from_result Fields and the canvas selection must use it, never an N x M scan), `results.py` (the `Result` dataclass
   that crosses the process boundary; a result drawn on the atoms carries its geometry in
   `structure`; `ResultRef`, what a from_result Field reads), `hashing.py`.
 - `registry/`: one declaration per lattice, op, term, mean field and calculation
@@ -69,8 +71,9 @@ a `Session`.
 - `commands/`: `Dispatcher` (mutations with snapshot undo, actions journaled only; each undo
   step named by `steps.py`, which a new mutation needs a text in, and `undo(steps)`);
   `mutations.py` lists every mutation. Command arguments are JSON.
-- `engine/`: `build.py` executes a plan (per-stage cache handing out copies, skip on error,
-  seeds; `meanfield=False` for the interactive builds, which defer the mean field),
+- `engine/`: `build.py` executes a plan (per-stage cache handing out copies, bounded by
+  memory too, skip on error, seeds; `meanfield=False` for the interactive builds, which
+  defer the mean field, and `sparse_above` for them: sparse above pyqula's dense limit),
   `calculations.py` runs an adapter and returns a `Result`, `structure.py` gives the canvas
   its arrays (positions, lattice, sublattice, pyqula's first-neighbour bonds, and the
   Hamiltonian view: onsite, exchange, pairing, every hopping's amplitude and phase).
@@ -81,7 +84,9 @@ a `Session`.
 - `session.py`: dispatcher + job manager + results + the latest build of each system
   (coalesced requests; a stuck build is killed when a newer one is asked) + `modified` +
   `trusted` (`always_trust`: the window's setting) + the console (`console(code)`) + a few
-  earlier results per calculation (an undo brings the matching one back); actions `undo`,
+  earlier results per calculation (an undo brings the matching one back) + the plans and
+  keys of the current Document object, reused until it, the results or trust change;
+  actions `undo`,
   `redo`, `history` for drivers; with `autosave=True` (the window's) it
   autosaves from `poll()`. The object tests, `guiqula run`, `tools/drive.py` and the window
   drive.
