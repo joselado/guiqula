@@ -785,9 +785,10 @@ flat: 3D lattices, stacked or twisted layers), with pyqtgraph.opengl as in
 section 2, when the first such lattices and ops arrive (phase 4). Items 2
 (canvas selections stored as positions, no rule-based region kinds), 4
 (no crash report for a worker death), 6 (the close prompt only in the
-interactive program), 7 (recovery offers only autosaves with unsaved
-changes) and 8 (island size from n alone) were not commented on and stand
-as built. Facts
+interactive program; since 2026-09-28 New, Open and Recover ask it too
+when they would replace unsaved changes), 7 (recovery offers only
+autosaves with unsaved changes) and 8 (island size from n alone) were not
+commented on and stand as built. Facts
 learned: with `geo=` given, `islands.get_geometry` still takes the default
 `nedges` from `name="square"` (4), so the entry always passes it, and the
 island size does not depend on the input cell (inradius 1.5 n); PySide6

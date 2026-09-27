@@ -7,6 +7,7 @@ import sys
 
 import pytest
 from PySide6.QtCore import QPoint, Qt, QTimer
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QLabel, QMessageBox, QToolButton
 
 from guiqula.io import autosave, project
@@ -409,6 +410,46 @@ def test_close_asks_about_unsaved_changes(qtbot, monkeypatch, no_jobs):
     assert not window.close() and window.isVisible()
     answers.append(QMessageBox.StandardButton.Discard)
     assert window.close()
+
+
+def test_new_open_and_recover_ask_about_unsaved_changes(qtbot, monkeypatch, no_jobs):
+    """New, Open (the recent files, the presets, the gallery) and Recover
+    replace the document: with unsaved changes the interactive window asks
+    what closing asks, and Cancel keeps the document and its undo."""
+    window = build_main_window(ask_before_close=True)
+    qtbot.addWidget(window)
+    session = Session("honeycomb_zeeman_rashba", jobs=no_jobs)
+    window.attach(session)
+    window.show()
+    asked, answers = [], []
+    monkeypatch.setattr(QMessageBox, "question",
+                        lambda parent, title, text, *rest: asked.append(text) or answers.pop(0))
+    new = next(a for a in window.findChildren(QAction) if a.text() == "&New")     # File > New
+
+    def names():
+        return [s.name for s in session.document.systems]
+
+    try:
+        window.open_document("honeycomb_zeeman_rashba")  # nothing changed: no question
+        assert asked == []
+        session.do("rename", entry="s1", name="an hour of work")
+        answers.extend([QMessageBox.StandardButton.Cancel] * 4)
+        new.trigger()
+        window.open_document("ssh_chain")
+        gallery = window.show_gallery()
+        gallery.select("ssh_chain")
+        gallery.open_button.click()
+        assert window.recover("elsewhere.json") is None
+        assert names() == ["an hour of work"] and session.dispatcher.can_undo()
+        assert asked[0] == "Save the changes to this document before starting a new document?"
+        assert asked[1:3] == ["Save the changes to this document before opening ssh_chain?"] * 2
+        assert asked[3] == "Save the changes to this document before recovering the unsaved work?"
+        answers.append(QMessageBox.StandardButton.Discard)
+        new.trigger()
+        assert names() == [] and not session.modified
+        assert window.close() and asked[4:] == [asked[0]]     # nothing left to ask about
+    finally:
+        window.ask_before_close = False     # qtbot closes it after monkeypatch is undone
 
 
 def test_presets_gallery(window, qtbot, shot):

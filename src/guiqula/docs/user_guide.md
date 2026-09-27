@@ -188,9 +188,11 @@ Interrupt stops it and starts afresh.
 ## Projects, presets and locks
 
 File > Save writes a `.guiqula` project (the document and its results; a `.json` file
-holds the document alone). The program autosaves; after a crash, the next start offers to
-recover the unsaved work. The presets gallery (File > Presets gallery) lists the shipped
-documents: teaching presets, with some parameters locked, and examples.
+holds the document alone). New, Open, the gallery's Open and Recover replace the document:
+with unsaved changes they first ask, as Quit does, whether to save them. The program
+autosaves; after a crash, the next start offers to recover the unsaved work. The presets
+gallery (File > Presets gallery) lists the shipped documents: teaching presets, with some
+parameters locked, and examples.
 
 A lock keeps an entry, one parameter of it, or a system's geometry from changing: its
 fields are greyed out and commands that would change it are refused. Right-click a

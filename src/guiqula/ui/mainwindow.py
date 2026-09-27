@@ -531,7 +531,7 @@ class MainWindow(QMainWindow):
 
     def _build_menus(self):
         file_menu = self.menuBar().addMenu("&File")
-        self._action(file_menu, "&New", lambda: self._act("new"), "new")
+        self._action(file_menu, "&New", self.new_document, "new")
         self._action(file_menu, "&Open...", self.open_dialog, "open")
         self.recent_menu = file_menu.addMenu("Open &recent")
         self.recent_menu.setObjectName("recentMenu")
@@ -713,10 +713,10 @@ class MainWindow(QMainWindow):
             self.session.close()     # a clean close: the autosave is deleted
         super().closeEvent(event)
 
-    def _confirm_discard(self):
+    def _confirm_discard(self, before="closing"):
         name = self.session.path.name if self.session.path else "this document"
         answer = QMessageBox.question(
-            self, "Unsaved changes", f"Save the changes to {name} before closing?",
+            self, "Unsaved changes", f"Save the changes to {name} before {before}?",
             QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard
             | QMessageBox.StandardButton.Cancel)
         if answer == QMessageBox.StandardButton.Cancel:
@@ -2008,8 +2008,21 @@ class MainWindow(QMainWindow):
         self._act("cancel", target=job_id)
 
     # ---- files, recovery and undo
+    def _may_replace(self, before):
+        """New, Open and Recover replace the document: the interactive
+        program first asks what closing it asks, Save, Discard or Cancel
+        (False: cancelled, the document stays)."""
+        if not (self.ask_before_close and self.session is not None and self.session.modified):
+            return True
+        return self._confirm_discard(before)
+
+    def new_document(self):
+        if self._may_replace("starting a new document"):
+            self._act("new")
+
     def open_document(self, path_or_name):
-        self._act("load", path=str(path_or_name))
+        if self._may_replace(f"opening {Path(str(path_or_name)).name}"):
+            self._act("load", path=str(path_or_name))
 
     def show_gallery(self):
         """The presets gallery (non-modal); Open loads the preset chosen."""
@@ -2084,6 +2097,8 @@ class MainWindow(QMainWindow):
              ("Show the code", lambda: self.select(code[0]), "showCodeButton")])
 
     def recover(self, path=None):
+        if not self._may_replace("recovering the unsaved work"):
+            return None
         info = self._act("recover", **({"path": path} if path else {}))
         if info is not None:
             self.recovery_bar.dismiss()
