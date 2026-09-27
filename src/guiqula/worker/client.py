@@ -12,6 +12,14 @@ never pays for it, and restarting it resets the console's namespace. Cancelling 
 job kills only the worker running it, together with the pool pyqula may
 have started inside it; the other workers and their caches are untouched
 (the phase-1 reading of review item 8).
+
+A worker that dies before it is ready (pyqula cannot be imported, say) is
+started again after a pause, at most START_ATTEMPTS times in a row; then
+the jobs of its role fail with the reason it gave, until restart(role).
+poll() reads each worker for at most POLL_BUDGET seconds, so a job that
+prints without end cannot keep the UI's timer from returning. Finished
+jobs are forgotten beyond the newest FINISHED_KEPT (their results are the
+Session's).
 """
 import atexit
 import contextlib
@@ -30,6 +38,10 @@ from guiqula.worker import process
 from guiqula.worker import protocol as P
 
 TERMINAL = ("done", "failed", "cancelled")
+POLL_BUDGET = 0.03       # seconds poll() reads one worker's messages before moving on
+FINISHED_KEPT = 100      # finished jobs kept in JobManager.jobs
+START_ATTEMPTS = 3       # starts in a row of a worker that dies before it is ready
+START_PAUSE = 1.0        # seconds before starting it again (doubled at each attempt)
 
 
 class Job:
@@ -76,6 +88,9 @@ class _Worker:
         self.ready = False
         self.job = None
         self.starts = 0
+        self.failures = 0        # deaths in a row before READY
+        self.broken = None       # why it could not start (its BROKEN message, or exit code)
+        self.start_at = None     # when to start it again after such a death
 
     def start(self):
         self.scratch = tempfile.mkdtemp(prefix=f"guiqula-{self.role}-")
@@ -99,12 +114,13 @@ class _Worker:
         if self.process is None:
             return
         pid = self.process.pid
-        if hasattr(os, "killpg"):
+        if hasattr(os, "killpg") and pid is not None:     # None: the process never started
             with contextlib.suppress(OSError):
                 os.killpg(pid, signal.SIGKILL)   # only exists once the worker called setpgrp
-        with contextlib.suppress(OSError):
+        with contextlib.suppress(OSError, AttributeError):
             self.process.kill()
-        self.process.join(5)
+        with contextlib.suppress(AssertionError):        # a process that never started
+            self.process.join(5)
         self._cleanup()
 
     def stop(self, timeout=2.0):
@@ -134,7 +150,8 @@ class _Worker:
     def info(self):
         return {"role": self.role, "pid": self.process.pid if self.process else None,
                 "alive": self.alive(), "ready": self.ready,
-                "job": self.job.id if self.job else None, "starts": self.starts}
+                "job": self.job.id if self.job else None, "starts": self.starts,
+                "broken": self.broken if self.failures else None}
 
 
 _MANAGERS = weakref.WeakSet()
@@ -164,6 +181,7 @@ class JobManager:
         self.request_handler = None   # (job, name, args) -> value; raises to refuse
         self._ids = itertools.count(1)
         self._listeners = []
+        self._finished = deque()     # ids of finished jobs, oldest first
         self.closed = False
         for worker in self._all_workers():
             worker.start()
@@ -217,9 +235,11 @@ class JobManager:
 
     def restart(self, role):
         """Kill and restart the workers of a role (their jobs are cancelled):
-        for the console, an interrupt that also resets its namespace."""
+        for the console, an interrupt that also resets its namespace. A
+        worker that could not start gets its attempts back."""
         for worker in self.workers.get(role, []):
             job = worker.job
+            worker.failures, worker.start_at = 0, None
             self._restart(worker)
             if job is not None and not job.done:
                 self._finish(job, "cancelled")
@@ -266,7 +286,8 @@ class JobManager:
         ready = multiprocessing.connection.wait(list(connections), timeout) if connections else []
         for conn in ready:
             worker = connections[conn]
-            while worker.process is not None:
+            deadline = time.monotonic() + POLL_BUDGET
+            while worker.process is not None and time.monotonic() < deadline:
                 try:
                     if not conn.poll():
                         break
@@ -280,11 +301,26 @@ class JobManager:
             if worker.process is not None and not worker.alive():
                 code = worker.process.exitcode
                 job = worker.job
-                self._restart(worker)
+                if worker.ready:
+                    self._restart(worker)
+                    why = "it was restarted"
+                else:
+                    self._broke(worker, code)
+                    why = f"it could not start: {worker.broken}"
                 if job is not None and not job.done:
                     self._finish(job, "failed",
                                  error=f"the worker process died (exit code {code}) while "
-                                       f"running this job; it was restarted")
+                                       f"running this job; {why}")
+            elif worker.process is None and worker.start_at is not None:
+                if worker.failures >= START_ATTEMPTS:
+                    for job in list(self.queues[worker.role]):
+                        self.queues[worker.role].remove(job)
+                        self._finish(job, "failed", error=f"the {worker.role} worker cannot "
+                                                          f"start: {worker.broken}")
+                elif time.monotonic() >= worker.start_at:
+                    worker.start_at = None
+                    worker.start()
+                    self._emit("worker", worker.info())
             job = worker.job
             if job is not None and job.timeout and job.started and now - job.started > job.timeout:
                 self._restart(worker)
@@ -346,6 +382,16 @@ class JobManager:
         worker.start()
         self._emit("worker", worker.info())
 
+    def _broke(self, worker, code):
+        """A worker died before it was ready: start it again after a pause
+        (poll does), not at once, and give up after START_ATTEMPTS."""
+        worker.kill()
+        worker.job = None
+        worker.failures += 1
+        worker.broken = worker.broken or f"exit code {code}"
+        worker.start_at = time.monotonic() + START_PAUSE * 2 ** (worker.failures - 1)
+        self._emit("worker", worker.info())
+
     def _finish(self, job, status, value=None, error=None, traceback=None):
         job.status = status
         job.value = value
@@ -354,6 +400,9 @@ class JobManager:
         job.finished = time.time()
         if status == "done":
             job.progress = 1.0
+        self._finished.append(job.id)
+        while len(self._finished) > FINISHED_KEPT:
+            self.jobs.pop(self._finished.popleft(), None)
         self._emit("job", job)
 
     def _dispatch(self):
@@ -389,8 +438,12 @@ class JobManager:
         tag = message[0]
         if tag == P.READY:
             worker.ready = True
+            worker.failures, worker.broken = 0, None
             self.names.update(message[1].get("names", {}))
             self._emit("worker", worker.info())
+            return
+        if tag == P.BROKEN:
+            worker.broken = message[1]
             return
         job = self.jobs.get(message[1])
         if tag == P.REQUEST:

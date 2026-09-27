@@ -263,3 +263,76 @@ def test_plans_are_reused_until_something_they_depend_on_changes(no_jobs):
     session.undo()
     assert session.calculation_key("c1") == key
     session.close()
+
+
+SLOW = "import time\ntime.sleep(5)\narrays = {'x': np.arange(3.0), 'y': np.arange(3.0)}"
+
+
+def test_a_run_never_lands_on_another_calculation(session):
+    """A run belongs to the calculation it was started for: removing that
+    calculation, or opening another Document, cancels it, so its result
+    cannot land on a later calculation that reuses the id. Cancel stops
+    every run of a calculation (Run pressed twice)."""
+    session.act("load", path="honeycomb_zeeman_rashba")
+    slow = session.do("add_calculation", system="s1", kind="python", params={"code": SLOW})
+    first, second = session.run_calculation(slow), session.run_calculation(slow)
+    session.act("cancel", target=slow)
+    assert first.status == second.status == "cancelled"
+    job = session.run_calculation(slow)
+    session.do("remove", entry=slow)
+    assert job.status == "cancelled"
+    assert session.do("add_calculation", system="s1", kind="dos") == slow    # the id again
+    assert session.status(slow) == "none"
+    job = session.run_calculation("c1")
+    session.act("load", path="honeycomb_zeeman_rashba")                     # c1 again
+    assert job.status == "cancelled" and session.status("c1") == "none"
+    assert session.run_calculation("c1", wait=True, timeout=600).status == "done"
+
+
+def test_the_console_cannot_wait_for_itself(session):
+    """do('console') from the console would wait for the console worker,
+    which is waiting for the answer: refused. exit() does not end it."""
+    session.act("load", path="honeycomb_zeeman_rashba")
+    out = session.act("console", code="do('console', code='1 + 1')", timeout=300)
+    assert out["value"]["ok"] is False
+    assert "cannot be run from the console" in "\n".join(out["output"])
+    out = session.act("console", code="exit()", timeout=300)
+    assert out["value"]["ok"] is False and "exit()" in out["output"][-1]
+    assert session.act("console", code="1 + 1", timeout=300)["output"] == ["2"]
+
+
+def test_the_console_builds_h_again_when_trust_changes(session):
+    session.act("load", path="honeycomb_zeeman_rashba")
+    session.do("add_term", system="s1", kind="python", params={"code": "h.add_onsite(1.0)"})
+    trace = "float(np.trace(h.intra).real)"
+    with_node = session.act("console", code=trace, timeout=300)["output"]
+    session.act("trust", enabled=False)
+    without = session.act("console", code=trace, timeout=300)["output"]
+    session.act("trust", enabled=True)
+    assert float(with_node[0]) - float(without[0]) == pytest.approx(16.0)   # 16 orbitals
+    assert session.act("console", code=trace, timeout=300)["output"] == with_node
+
+
+def test_an_undo_brings_back_results_that_read_other_results(session):
+    """c2 reads c1's result (a from_result Field), so its key depends on
+    which result c1 holds: after an undo that brings c1's back, c2's
+    matches again, even when c2 was first run before c1."""
+    from types import SimpleNamespace
+    session.act("load", path="texture_exchange")
+    assert session.build("s1", timeout=300).status == "done"
+    positions = session.builds["s1"]["positions"]
+
+    def computed(calc):                   # what a finished run would store
+        result = SimpleNamespace(key=session.calculation_key(calc),
+                                 structure={"positions": positions},
+                                 arrays={"magnetization": np.ones((len(positions), 3))})
+        session._keep_result(calc, result)
+        return result
+
+    computed("c2")                        # before c1 has a result
+    first_c1, first_c2 = computed("c1"), computed("c2")
+    session.do("set_param", entry="t1", name="J1", value=-0.5)
+    computed("c1"), computed("c2")
+    session.undo()
+    assert session.result("c1") is first_c1 and session.result("c2") is first_c2
+    assert session.status("c2") == "done"

@@ -367,7 +367,9 @@ is what keeps "add a calculation" to one file.
   and a non-modal error bar, never
   an abort; (d) jobs have a timeout and a Cancel button; (e) the worker is
   respawned automatically if it dies, with the error shown next to the
-  calculation that killed it.
+  calculation that killed it; one that dies before it is ready (pyqula
+  does not import) is started again a few times after a pause, then its
+  jobs fail with the reason it gave (fixes of 2026-09-27).
 
 ### 3.6 Testability from Claude Code
 
@@ -976,10 +978,12 @@ refuses an unknown role. The console (14.1): a third worker role,
 `console`, started at the first command; its interpreter keeps a
 namespace for the life of the worker with `doc`, `g` and `h` of the
 selected system (built with the mean field, as the calculations see
-them; rebuilt when the Document or the system changed since the last
-command that used them), `do()`/`act()` for dispatcher commands
-(undoable), `np`, `pyqula`; a final expression is echoed; an error prints
-its traceback from the console's own code and the job still ends normally;
+them; rebuilt when the Document, the system, trust or a result its
+from_result Fields read changed since the last command that used them),
+`do()`/`act()` for dispatcher commands (undoable; not `console` itself,
+which would wait for the worker that asks), `np`, `pyqula`; a final
+expression is echoed; an error prints its traceback from the console's
+own code and the job still ends normally (so does `exit()`);
 Interrupt restarts the worker (the namespace is lost). `Session.console`,
 the `console` and `interrupt_console` actions (drivers get the output
 back), and the Console dock (tabbed with the Log: Enter runs, Shift+Enter

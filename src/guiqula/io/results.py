@@ -15,11 +15,13 @@ STRUCTURE_PREFIX = "structure_"
 
 
 def to_bytes(result):
-    """(npz bytes, json text) of a result, as save() writes them."""
+    """(npz bytes, json text) of a result, as save() writes them. Arrays of
+    Python objects are refused (ValueError): they would be pickled, and
+    loading never unpickles."""
     buffer = io.BytesIO()
     extra = {STRUCTURE_PREFIX + k: v for k, v in (result.structure or {}).items()
              if v is not None}
-    np.savez(buffer, **result.arrays, **extra)
+    np.savez(buffer, allow_pickle=False, **result.arrays, **extra)
     meta = {k: getattr(result, k) for k in ("calculation", "kind", "key", "params", "plot",
                                             "reports", "mode", "meta")}
     meta["document"] = json.loads(result.document) if result.document else None

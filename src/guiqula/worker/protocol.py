@@ -4,7 +4,10 @@ multiprocessing Pipe; everything in them pickles without pyqula).
 UI to worker:  (JOB, job_id, kind, payload) | (QUIT,) | (REPLY, job_id, ok, value)
 worker to UI:  (READY, info) | (STARTED, job_id) | (PROGRESS, job_id, fraction, text)
                | (LOG, job_id, text) | (DONE, job_id, value) | (FAILED, job_id, message, traceback)
-               | (REQUEST, job_id, name, args)
+               | (REQUEST, job_id, name, args) | (BROKEN, message)
+
+BROKEN is the last message of a worker that cannot start (pyqula does not
+import): why, before it exits.
 
 A job may ask the UI process something while it runs (the console's doc
 and do(), decision 14.1): the worker sends REQUEST and waits for the
@@ -33,5 +36,6 @@ DONE = "done"
 FAILED = "failed"
 REQUEST = "request"
 REPLY = "reply"
+BROKEN = "broken"
 
 KINDS = ("run", "build", "console", "sleep", "crash", "request")

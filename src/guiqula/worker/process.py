@@ -79,11 +79,13 @@ class Console:
     as long as the worker: variables persist between commands, and an
     interrupt (a kill) loses them. ``doc`` is the Document, ``g`` and ``h``
     the geometry and Hamiltonian of the chosen system (built with the mean
-    field, as the calculations see them), rebuilt when the Document or the
-    system changed since the last command that used them; ``do(command,
+    field, as the calculations see them), rebuilt when the Document, the
+    system, trust or a result its from_result Fields read changed since the
+    last command that used them; ``do(command,
     **args)`` (and ``act``) runs a command of the window's dispatcher, so a
     mutation is undoable there. The value of a final expression is echoed;
-    an error prints its traceback and the job still ends normally."""
+    an error prints its traceback and the job still ends normally, and so
+    does exit(), which does not end the console."""
 
     def __init__(self, request, build):
         import numpy as np
@@ -91,6 +93,7 @@ class Console:
         self.request, self.build = request, build
         self.namespace = {"np": np, "pyqula": pyqula, "__name__": "__console__"}
         self.document_json = self.system = None
+        self.inputs = None       # (trusted, keys of the results read) of the build
         self.built = False
 
     def _set_document(self, document_json):
@@ -106,6 +109,11 @@ class Console:
         self._set_document(payload["document"])
         if payload.get("system") != self.system:
             self.system, self.built = payload.get("system"), False
+        results = payload.get("results") or {}
+        inputs = (bool(payload.get("trusted", False)),
+                  tuple(sorted((calc, getattr(ref, "key", None)) for calc, ref in results.items())))
+        if inputs != self.inputs:
+            self.inputs, self.built = inputs, False
         self.namespace["do"] = self.namespace["act"] = \
             lambda command, /, **args: self._do(job_id, command, args)
         try:
@@ -128,6 +136,9 @@ class Console:
                     print(repr(value))
         except Quit:
             raise
+        except SystemExit:
+            print("exit() does not close the console; Interrupt starts it afresh")
+            return {"ok": False, "error": "SystemExit"}
         except Exception as error:
             print(self._traceback(error))
             return {"ok": False, "error": f"{type(error).__name__}: {error}"}
@@ -178,22 +189,30 @@ def main(conn, config):
     scratch = config["scratch"]
     os.chdir(scratch)
 
-    from guiqula import vendoring
-    vendoring.ensure_pyqula_on_path()
-    from guiqula.core.document import Document
-    from guiqula.engine import structure
-    from guiqula.engine.build import BuildCache, build_system
-    from guiqula.engine.calculations import run_calculation
-    from pyqula import parallel
-    from pyqula.limits import densedimension
+    try:
+        from guiqula import vendoring
+        vendoring.ensure_pyqula_on_path()
+        from guiqula.core.document import Document
+        from guiqula.engine import structure
+        from guiqula.engine.build import BuildCache, build_system
+        from guiqula.engine.calculations import run_calculation
+        from pyqula import parallel
+        from pyqula.limits import densedimension
+        names = _names()
+    except Exception as error:        # the UI process says why its jobs cannot run
+        pipe.send(P.BROKEN, f"{type(error).__name__}: {error}")
+        raise
 
     cache = BuildCache()
     build_cache = BuildCache()    # the build jobs': their large Hamiltonians are sparse
     state = {"cores": 1}
     if config.get("warm"):
-        with contextlib.redirect_stdout(open(os.devnull, "w")):
-            _warm_up(config["role"])
-    pipe.send(P.READY, {"pid": os.getpid(), "role": config["role"], "names": _names()})
+        try:
+            with contextlib.redirect_stdout(open(os.devnull, "w")):
+                _warm_up(config["role"])
+        except Exception:         # only a head start: the jobs will say what fails
+            pass
+    pipe.send(P.READY, {"pid": os.getpid(), "role": config["role"], "names": names})
 
     def request(job_id, name, args=None):
         """Ask the UI process something and wait for the answer (protocol
@@ -285,6 +304,10 @@ def main(conn, config):
             pipe.send(P.DONE, job_id, value)
         except Quit:
             break
+        except SystemExit as error:    # code of the job's (a plugin, pyqula) called exit()
+            writer.flush()
+            pipe.send(P.FAILED, job_id, f"SystemExit: exit({error.code!r}) was called while "
+                                        f"running this job", traceback.format_exc())
         except Exception as error:
             writer.flush()
             pipe.send(P.FAILED, job_id, f"{type(error).__name__}: {error}",

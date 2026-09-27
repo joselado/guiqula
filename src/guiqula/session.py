@@ -20,7 +20,10 @@ plan with it, so that the keys of the UI process match the workers'.
 Results: the latest of every calculation, and a few earlier ones
 (RESULT_HISTORY, one per key): when the Document matches an earlier result
 again (an undo, a parameter set back), that result becomes the current one
-without a re-run. Project files keep only the current ones.
+without a re-run. Project files keep only the current ones. A run belongs
+to the calculation it was started for: removing that calculation, or
+replacing the Document (new, open, recover), cancels its runs still going,
+so that a result never lands on a later calculation that reuses the id.
 
 The Document's ``ui`` block is view state (the window's workspace,
 selection, canvas selection): the window hands a ``view_state`` callable,
@@ -89,11 +92,12 @@ class Session:
         path = None
         self.trusted = True      # whether Python nodes run (13.7): see trust
         self.always_trust = always_trust    # files open trusted (the user's setting)
+        self.dropped_results = []    # why results of the file last opened were left out
         if isinstance(document, (str, Path)):
             path = _project_path(document)
             source, document = document, project.load(document)
             self.trusted = always_trust or trusted_on_open(source, document)
-            loaded_results = project.load_results(source)
+            loaded_results = project.load_results(source, self.dropped_results)
         else:
             loaded_results = {}
         self.dispatcher = Dispatcher(document or Document())
@@ -102,6 +106,7 @@ class Session:
         self.results = dict(loaded_results)     # calculation id -> latest Result
         self.earlier_results = {}   # calculation id -> [earlier Results], newest first (undo)
         self.calc_jobs = {}      # calculation id -> latest Job
+        self._runs = {}          # job id -> calculation id, of the runs whose result is kept
         self.builds = {}         # system id -> latest build summary (engine/structure.py)
         self.build_errors = {}   # system id -> why the latest build failed
         self._build_times = {}   # system id -> submission time of the stored build
@@ -260,6 +265,8 @@ class Session:
         job = self.jobs.run(self.document.to_json(), calculation, cores=cores,
                             trusted=self.trusted, results=self.result_refs())
         self.calc_jobs[calculation] = job
+        if not job.done:
+            self._runs[job.id] = calculation
         if wait:
             self.jobs.wait(job, timeout)
         return job
@@ -334,10 +341,26 @@ class Session:
         self.jobs.restart("console")
 
     def cancel(self, calculation_or_job):
-        job = self.calc_jobs.get(calculation_or_job) or self.jobs.jobs.get(calculation_or_job)
+        """Cancel a job, or every run of a calculation (Run pressed twice
+        queues two); returns the job, or the calculation's latest one."""
+        job = self.calc_jobs.get(calculation_or_job)
         if job is None:
-            raise CommandError(f"no job for {calculation_or_job!r}")
+            job = self.jobs.jobs.get(calculation_or_job)
+            if job is None:
+                raise CommandError(f"no job for {calculation_or_job!r}")
+            return self.jobs.cancel(job)
+        self._cancel_runs({calculation_or_job})
         return self.jobs.cancel(job)
+
+    def _cancel_runs(self, calculations=None):
+        """Cancel the unfinished runs of these calculations (of all when
+        None); their results would belong to nobody."""
+        for job_id, calc in list(self._runs.items()):
+            if calculations is None or calc in calculations:
+                job = self.jobs.jobs.get(job_id)
+                if job is not None and not job.done:
+                    self.jobs.cancel(job)
+                self._runs.pop(job_id, None)
 
     def poll(self, timeout=0.0):
         """Process worker messages; autosave if due. The window calls this
@@ -379,10 +402,13 @@ class Session:
         for table in (self.results, self.earlier_results):
             for calc in [c for c in table if c not in present]:
                 del table[calc]
+        removed = {c for c in self._runs.values() if c not in present}
+        if removed:
+            self._cancel_runs(removed)
+        for calc in [c for c in self.calc_jobs if c not in present]:
+            del self.calc_jobs[calc]
         if event["type"] in ("mutation", "undo", "redo"):
             self._restore_results()
-        for calc in [c for c, job in self.calc_jobs.items() if c not in present and job.done]:
-            del self.calc_jobs[calc]
         systems = {s.id for s in self.document.systems}
         for table in (self.builds, self.build_errors, self._build_times):
             for system in [s for s in table if s not in systems]:
@@ -395,6 +421,9 @@ class Session:
         if name == "document":
             return {"document": self.document.to_json()}
         if name == "run":
+            if args["command"] in ("console", "interrupt_console"):
+                # the console worker is busy asking: it would wait for itself
+                raise CommandError(f"{args['command']} cannot be run from the console")
             value = self.dispatcher.run(args["command"], **args.get("args", {}))
             return {"value": value, "document": self.document.to_json()}
         raise CommandError(f"unknown request {name!r}")
@@ -402,21 +431,28 @@ class Session:
     def _restore_results(self):
         """A calculation whose Document matches one of its earlier results
         again (an undo, a parameter set back) shows that result, current,
-        without a re-run (PLAN.md phase 5, design item 10)."""
-        for calc, earlier in self.earlier_results.items():
-            current = self.results.get(calc)
-            try:
-                key = self.calculation_key(calc)
-            except Exception:
-                continue
-            if current is not None and current.key == key:
-                continue
-            match = next((r for r in earlier if r.key == key), None)
-            if match is not None:
-                earlier.remove(match)
-                if current is not None:
-                    earlier.insert(0, current)
-                self.results[calc] = match
+        without a re-run (PLAN.md phase 5, design item 10). A key reads the
+        results its from_result Fields read, so a restored result can make
+        another one match: the check is repeated until nothing changes."""
+        for _ in range(len(self.earlier_results) + 1):
+            changed = False
+            for calc, earlier in self.earlier_results.items():
+                current = self.results.get(calc)
+                try:
+                    key = self.calculation_key(calc)
+                except Exception:
+                    continue
+                if current is not None and current.key == key:
+                    continue
+                match = next((r for r in earlier if r.key == key), None)
+                if match is not None:
+                    earlier.remove(match)
+                    if current is not None:
+                        earlier.insert(0, current)
+                    self.results[calc] = match
+                    changed = True
+            if not changed:
+                break
 
     def _keep_result(self, calc, result):
         """Store a new result; the one it replaces joins the earlier ones
@@ -429,9 +465,11 @@ class Session:
         self.earlier_results[calc] = earlier[:RESULT_HISTORY]
 
     def _on_job_event(self, kind, payload):
-        if kind == "job" and payload.kind == "run" and payload.status == "done":
-            if any(c.id == payload.label for c in self.document.calculations):
-                self._keep_result(payload.label, payload.value)
+        if kind == "job" and payload.kind == "run" and payload.done:
+            calc = self._runs.pop(payload.id, None)
+            if payload.status == "done" and calc is not None and \
+                    any(c.id == calc for c in self.document.calculations):
+                self._keep_result(calc, payload.value)
         if kind == "job" and payload.kind == "build" and payload.done:
             self._store_build(payload)
         for listener in list(self._listeners):
@@ -451,6 +489,7 @@ class Session:
     def _replace_document(self, document, path, saved_json, trusted=True, results=None):
         """New, open, recover: a whole new Document (not undoable), with the
         results kept in its file."""
+        self._cancel_runs()          # they belong to the Document being replaced
         self.path = path
         self.trusted = trusted
         self._saved_json = saved_json
@@ -475,12 +514,15 @@ class Session:
 
     def _action_load(self, path):
         document = project.load(path)
+        dropped = []
+        results = project.load_results(path, dropped)
+        self.dropped_results = dropped
         self._replace_document(document, _project_path(path), _content(document),
-                               self.always_trust or trusted_on_open(path, document),
-                               project.load_results(path))
+                               self.always_trust or trusted_on_open(path, document), results)
         return str(project.resolve(path))
 
     def _action_new(self):
+        self.dropped_results = []
         self._replace_document(Document(), None, _content(Document()))
 
     def _action_recover(self, path=None):
@@ -495,8 +537,17 @@ class Session:
             path = candidates[0]["path"]
         document, info = autosave_files.read(path)
         source = Path(info["source"]) if info.get("source") else None
+        # the results its project file keeps (stale where the recovered edits say so):
+        # Save writes back to that file, and must not drop them
+        self.dropped_results = []
+        results = {}
+        if source is not None and source.is_file():
+            try:
+                results = project.load_results(source, self.dropped_results)
+            except Exception as error:
+                self.dropped_results.append(f"{source}: its results cannot be read ({error})")
         self._replace_document(document, source, None,
-                               self.always_trust or not pipeline.code_entries(document))
+                               self.always_trust or not pipeline.code_entries(document), results)
         if self.autosaver is not None:     # claimed at once: not offered again meanwhile
             self.autosaver.adopt(path)
             self.autosaver.write(self.document_for_file(), self.path, self.modified)
@@ -532,6 +583,7 @@ class Session:
         """Let the Document's Python nodes run (or stop them): the builds and
         the results they change become stale (PLAN.md 13.7)."""
         self.trusted = bool(enabled)
+        self._restore_results()            # a result computed with the other trust matches again
         return {"trusted": self.trusted, "code": self.code_entries()}
 
     def _action_list_recoverable(self, include_unmodified=False):

@@ -51,22 +51,28 @@ def resolve(path_or_name):
 
 def load(path_or_name):
     path = resolve(path_or_name)
-    if zipfile.is_zipfile(path):
-        with zipfile.ZipFile(path) as archive:
-            try:
-                text = archive.read("document.json").decode()
-            except KeyError:
-                raise DocumentError(f"{path}: no document.json inside") from None
-    else:
-        text = path.read_text()
+    try:
+        if zipfile.is_zipfile(path):
+            with zipfile.ZipFile(path) as archive:
+                try:
+                    text = archive.read("document.json").decode()
+                except KeyError:
+                    raise DocumentError(f"{path}: no document.json inside") from None
+        else:
+            text = path.read_text()
+    except (zipfile.BadZipFile, UnicodeDecodeError, EOFError, OSError) as error:
+        raise DocumentError(f"{path}: not a guiqula project or document, or damaged "
+                            f"({error})") from None
     try:
         return Document.from_data(json.loads(text))
     except json.JSONDecodeError as error:
         raise DocumentError(f"{path}: not JSON ({error})") from None
 
 
-def load_results(path_or_name):
-    """{calculation id: Result} kept in a .guiqula file (none elsewhere)."""
+def load_results(path_or_name, problems=None):
+    """{calculation id: Result} kept in a .guiqula file (none elsewhere).
+    A result that cannot be read is left out, and why is appended to
+    problems (a list): it must not keep the Document from opening."""
     path = resolve(path_or_name)
     if not zipfile.is_zipfile(path):
         return {}
@@ -77,8 +83,14 @@ def load_results(path_or_name):
             if name.startswith(RESULTS) and name.endswith(".json"):
                 stem = name[:-len(".json")]
                 if stem + ".npz" in names:
-                    result = result_files.from_bytes(archive.read(stem + ".npz"),
-                                                     archive.read(name).decode())
+                    try:
+                        result = result_files.from_bytes(archive.read(stem + ".npz"),
+                                                         archive.read(name).decode())
+                    except Exception as error:
+                        if problems is not None:
+                            problems.append(f"{stem[len(RESULTS):]}: its result cannot be "
+                                            f"read and was left out ({error})")
+                        continue
                     out[result.calculation] = result
     return out
 
@@ -96,7 +108,10 @@ def save(document, path, results=None):
             present = {c.id for c in document.calculations}
             for calc, result in sorted((results or {}).items()):
                 if calc in present:
-                    npz, meta = result_files.to_bytes(result)
+                    try:
+                        npz, meta = result_files.to_bytes(result)
+                    except ValueError:       # arrays that cannot be read back: not kept
+                        continue
                     archive.writestr(f"{RESULTS}{calc}.npz", npz)
                     archive.writestr(f"{RESULTS}{calc}.json", meta)
     else:

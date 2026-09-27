@@ -203,3 +203,57 @@ def test_a_job_asks_the_ui_process(manager):
 def test_unknown_role_is_refused(manager):
     with pytest.raises(ValueError, match="no 'nope' worker"):
         manager.submit("sleep", {}, role="nope")
+
+
+def test_finished_jobs_are_forgotten_beyond_a_few(manager, monkeypatch):
+    from guiqula.worker import client
+    monkeypatch.setattr(client, "FINISHED_KEPT", 3)
+    jobs = [manager.submit("sleep", {"seconds": 0.01}) for _ in range(5)]
+    for job in jobs:
+        manager.wait(job, 60)
+    assert [job.id in manager.jobs for job in jobs] == [False, False, True, True, True]
+
+
+def test_a_job_that_prints_without_end_does_not_hold_poll(manager):
+    """The window writes each line to the console (slower than the worker
+    prints them): one poll must still return quickly."""
+    document = project.load("honeycomb_zeeman_rashba").to_json()
+
+    def slow_listener(kind, job):
+        if kind == "job" and job.kind == "console":
+            time.sleep(0.002)
+
+    unsubscribe = manager.subscribe(slow_listener)
+    try:
+        job = manager.console("for i in range(3000):\n    print(i)", document, None)
+        longest, deadline = 0.0, time.monotonic() + 300
+        while not job.done:
+            assert time.monotonic() < deadline
+            start = time.monotonic()
+            manager.poll(0.05)
+            longest = max(longest, time.monotonic() - start)
+        assert job.status == "done" and len(job.log) == 3000 and longest < 1.0
+    finally:
+        unsubscribe()
+
+
+def test_a_worker_that_cannot_start_is_not_restarted_without_end(monkeypatch, tmp_path):
+    """No pyqula: the worker says why and dies; it is started again a few
+    times, after a pause, then its jobs fail with the reason."""
+    from guiqula.worker import client
+    monkeypatch.setenv("GUIQULA_PYQULA_PATH", str(tmp_path / "no_pyqula_here"))
+    monkeypatch.setattr(client, "START_PAUSE", 0.05)
+    with JobManager(batch=1, interactive=False, warm=False) as m:
+        first = m.wait(m.submit("sleep", {"seconds": 0.1}), 120)
+        assert first.status == "failed" and "could not start" in first.error
+        worker = m.workers["batch"][0]
+        deadline = time.monotonic() + 120
+        while worker.failures < client.START_ATTEMPTS:
+            assert time.monotonic() < deadline
+            m.poll(0.05)
+        later = m.wait(m.submit("sleep", {"seconds": 0.1}), 60)
+        assert later.status == "failed" and "cannot start" in later.error
+        assert "VendoringError" in later.error
+        for _ in range(20):
+            m.poll(0.05)
+        assert worker.starts == client.START_ATTEMPTS and worker.process is None

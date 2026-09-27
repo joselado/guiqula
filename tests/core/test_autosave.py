@@ -176,3 +176,24 @@ def test_failed_write_is_reported_not_raised(tmp_path):
     saver = autosave.Autosaver(directory=blocker / "autosave")   # a file in the way
     assert saver.write(project.load("honeycomb_zeeman_rashba")) is None
     assert "autosave failed" in saver.error
+
+
+def test_recovery_keeps_the_results_of_its_project(data_dir, tmp_path):
+    """Recovered work is saved back to its project file: the results that
+    file kept must survive (they are stale where the recovered edits say so)."""
+    import numpy as np
+    from guiqula.core.results import Result
+    s = session("honeycomb_zeeman_rashba")
+    s._keep_result("c1", Result(calculation="c1", kind="bands", key=s.calculation_key("c1"),
+                                params={}, arrays={"k": np.arange(3.0)},
+                                plot={"kind": "lines", "y": "k"}))
+    path = tmp_path / "work.guiqula"
+    s.act("save", path=str(path))
+    document = project.load(path)
+    document.systems[0].name = "unsaved work"
+    write_orphan(autosave.autosave_dir(), document, dead_pid(), source=path)
+    recovered = session()
+    recovered.act("recover")
+    assert set(recovered.results) == {"c1"} and recovered.status("c1") == "done"
+    recovered.act("save", path=str(recovered.path))
+    assert set(project.load_results(path)) == {"c1"}

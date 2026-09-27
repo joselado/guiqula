@@ -66,3 +66,39 @@ def test_a_preset_name_is_the_preset_beside_a_folder_of_that_name(tmp_path):
     assert project.load("ssh_chain").systems
     with pytest.raises(DocumentError, match="a folder"):
         project.load(str(tmp_path / "ssh_chain"))
+
+
+def _result(arrays):
+    import numpy as np
+    from guiqula.core.results import Result
+    return Result(calculation="c1", kind="bands", key="k", params={},
+                  arrays={k: np.asarray(v) for k, v in arrays.items()},
+                  plot={"kind": "lines", "x": "k", "y": "energies"})
+
+
+def test_a_damaged_result_does_not_keep_a_project_from_opening(tmp_path):
+    """One unreadable result is left out, and said why; the Document still
+    opens. Arrays of Python objects are not written at all (loading never
+    unpickles), and a damaged file is a DocumentError, not a raw traceback."""
+    import zipfile
+    good = project.save(small(), tmp_path / "good.guiqula",
+                        {"c1": _result({"k": [0.0, 1.0], "energies": [0.0, 1.0]})})
+    assert set(project.load_results(good)) == {"c1"}
+    damaged = tmp_path / "damaged.guiqula"
+    with zipfile.ZipFile(good) as source, zipfile.ZipFile(damaged, "w") as target:
+        for name in source.namelist():
+            data = source.read(name)
+            target.writestr(name, data[:len(data) // 2] if name.endswith(".npz") else data)
+    problems = []
+    assert project.load(damaged) == small()
+    assert project.load_results(damaged, problems) == {} and "c1" in problems[0]
+    with pytest.raises(ValueError, match="allow_pickle"):
+        from guiqula.io import results as result_files
+        result_files.to_bytes(_result({"k": [0.0], "info": {"nk": 10}}))
+    kept = project.save(small(), tmp_path / "objects.guiqula",
+                        {"c1": _result({"k": [0.0], "info": {"nk": 10}})})
+    assert project.load(kept) == small() and project.load_results(kept) == {}
+    truncated = tmp_path / "truncated.guiqula"
+    truncated.write_bytes(good.read_bytes()[:40])
+    with pytest.raises(DocumentError, match="damaged"):
+        project.load(truncated)
