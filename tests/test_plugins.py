@@ -172,6 +172,9 @@ def test_files_in_the_plugins_folder(tmp_path, with_plugins):
               call=Call("h.add_onsite", "v"))
     """))
     (folder / "broken.py").write_text("raise ImportError('not today')\n")
+    # a script, not a plugin: it parses the command line, which exits (loaded before gate.py)
+    (folder / "exits.py").write_text("import argparse\n"
+                                     "argparse.ArgumentParser().parse_args(['--nope'])\n")
     out = with_plugins("""
         import json
         from guiqula import registry
@@ -192,6 +195,7 @@ def test_files_in_the_plugins_folder(tmp_path, with_plugins):
     assert all(abs(e - 0.25) < 2.0 + 1e-9 for e in out["energies"])
     problems = {p["distribution"]: p for p in out["state"]["problems"]}
     assert problems["plugins/broken.py"]["error"] == "ImportError: not today"
+    assert problems["plugins/exits.py"]["error"].startswith("SystemExit")
 
 
 def test_the_template_tests_pass(site, run_python, repo, tmp_path):

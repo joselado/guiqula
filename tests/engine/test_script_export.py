@@ -127,7 +127,8 @@ def test_piecewise_pairing_and_mean_field(pyqula, repo, tmp_path):
          params={"U": -1.0, "mf": "random", "seed": 4, "nk": 3, "mix": 0.5})
     c = d.do("add_calculation", system=s, kind="bands", params={"nk": 12})
     source = export_script(d.document, c)
-    assert "h = g.get_hamiltonian(has_spin=True)\nh.turn_nambu()" in source
+    assert "h = g.get_hamiltonian(has_spin=True)\n" in source      # Nambu at the pairing:
+    assert "h.turn_nambu()\nh.add_swave(" in source                  # as the engine
     assert "np.random.seed(4)" in source and "get_mean_field_hamiltonian(U=-1.0" in source
     result = assert_reproduces(d.document, c, repo, tmp_path)
     assert result.mode == "nambu" and result.reports[-1]["notes"]["total_energy"] < 0

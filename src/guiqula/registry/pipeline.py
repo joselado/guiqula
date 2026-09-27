@@ -66,6 +66,8 @@ class StagePlan:
     regions: dict = field(default_factory=dict)   # {id: selection} of its piecewise Fields
     results: dict = field(default_factory=dict)   # {calculation id: ResultRef} it reads
     warnings: list = field(default_factory=list)  # what is worth knowing (a stale result read)
+    turn_nambu: bool = False    # the Hamiltonian turns Nambu before this entry (the first
+                                # that needs it, as pyqula does in the stack's order)
 
     def describe(self):
         return {"stage": self.stage, "id": self.id, "kind": self.kind,
@@ -328,8 +330,15 @@ def plan_system(document, system_id, trusted=True, results=None):
     plan.upgraded_by = [s.id for s in term_stages if s.applied and (
         ("spin" in s.spec.requires_of(s.params) and not requested.has_spin)
         or ("nambu" in s.spec.requires_of(s.params) and not requested.nambu))]
-    plan.construction = {"has_spin": has_spin, "nambu": nambu, "tij": list(requested.tij),
-                         "is_sparse": requested.is_sparse}
+    # spin is set before the first term; Nambu before the first entry that needs it (unless
+    # the construction asks for it): the terms above a pairing term are applied as pyqula
+    # applies them in this order, and some of them (a spin spiral, Kekule hopping) cannot
+    # take a Nambu Hamiltonian
+    plan.construction = {"has_spin": has_spin, "nambu": requested.nambu,
+                         "tij": list(requested.tij), "is_sparse": requested.is_sparse}
+    if nambu and not requested.nambu:
+        next(s for s in term_stages if s.applied
+             and "nambu" in s.spec.requires_of(s.params)).turn_nambu = True
     if requested.is_sparse:
         for term in term_stages:
             if term.applied and term.kind in SPARSE_DIFFERS and (term.region is not None or any(
@@ -347,7 +356,8 @@ def plan_system(document, system_id, trusted=True, results=None):
         if stage.applied:
             key = content_hash({"prev": key, "stage": stage.stage, "kind": stage.kind,
                                 "params": _hashed(stage.params, stage.regions, stage.results),
-                                "region": stage.region})
+                                "region": stage.region,
+                                **({"turn_nambu": True} if stage.turn_nambu else {})})
         stage.key = key
         plan.stages.append(stage)
     return plan
@@ -372,7 +382,8 @@ def _plan_classical(plan, system, key, term_stages):
         if stage.applied:
             key = content_hash({"prev": key, "stage": stage.stage, "kind": stage.kind,
                                 "params": _hashed(stage.params, stage.regions, stage.results),
-                                "region": stage.region})
+                                "region": stage.region,
+                                **({"turn_nambu": True} if stage.turn_nambu else {})})
         stage.key = key
         plan.stages.append(stage)
     return plan

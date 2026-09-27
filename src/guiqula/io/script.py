@@ -169,6 +169,8 @@ def _parts(plan, skipped=None):
             if stage.stage != "meanfield":     # every system has one, disabled by default
                 lines += _comment(stage, "disabled")
             continue
+        if stage.turn_nambu:                   # the first entry that needs it (the engine's)
+            lines.append("h.turn_nambu()")
         if stage.problem or stage.id in skipped:
             lines += _comment(stage, f"skipped, {stage.problem or skipped[stage.id]}")
             continue

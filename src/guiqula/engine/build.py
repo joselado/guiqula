@@ -211,6 +211,18 @@ def _apply_stage(stage, obj, sparse_above=None):
         return new, record
     ctx = ApplyContext(stage.spec, stage.params, region=stage.region, regions=stage.regions,
                        results=stage.results)
+    if stage.turn_nambu and not getattr(obj, "has_eh", False):
+        # the first entry that needs Nambu (the plan's pre-scan): Nambu from here on, even
+        # when the entry itself fails, so the mode is the plan's
+        def nambu():
+            h = obj.copy()
+            h.turn_nambu()
+            return h
+        try:
+            obj, _ = _run(nambu)
+        except Exception as error:
+            raise BuildError(f"turning the Hamiltonian Nambu before {stage.id}: "
+                             f"{type(error).__name__}: {error}") from None
     if stage.stage == "meanfield":
         def solve():
             _seed(stage)
@@ -238,13 +250,19 @@ def _apply_stage(stage, obj, sparse_above=None):
         new = stage.spec.apply(work, ctx)       # a term changes h, or returns a new one
         if new is None:
             return work
-        if not hasattr(new, "intra"):
-            raise TypeError(f"{stage.kind} returned {type(new).__name__}, not a Hamiltonian")
+        quantum = hasattr(obj, "intra")        # else a classical model, returned as it is
+        if (not hasattr(new, "intra")) if quantum else (type(new) is not type(obj)):
+            what = "a Hamiltonian" if quantum else f"a {type(obj).__name__}"
+            raise TypeError(f"{stage.kind} returned {type(new).__name__}, not {what}")
         return new
     try:
         new, record["output"] = _run(step)
     except Exception as error:
         record["message"] = f"{type(error).__name__}: {error}"
+        if stage.stage == "term" and mode_of(obj) == "nambu" and not stage.turn_nambu:
+            record["message"] += (" (the Hamiltonian is in Nambu form here, which pyqula may "
+                                  "not take for this term: place it above the pairing term, "
+                                  "or untick Nambu in the construction)")
         new = obj
     if stage.stage == "term":
         record["mode"] = mode_of(new)

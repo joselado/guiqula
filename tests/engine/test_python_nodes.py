@@ -140,3 +140,15 @@ def test_exit_in_a_node_flags_it_and_the_stack_goes_on(pyqula):
     built = build_system(d.document, s)
     r = report(built, t)
     assert r["status"] == "invalid" and "exit()" in r["message"] and "line 2" in r["message"]
+
+
+def test_a_python_term_of_a_classical_system(pyqula):
+    """On a classical system the term sees the model as model (decision
+    13.5) and hands it back: it is not "not a Hamiltonian"."""
+    d = Dispatcher()
+    s = d.do("add_system", lattice="triangular_lattice", kind="classical_spin")
+    t = d.do("add_term", system=s, kind="python", params={"code": "x = len(model.geometry.r)"})
+    assert report(build_system(d.document, s), t)["status"] == "ok"
+    d.do("set_param", entry=t, name="code", value="model = 3")
+    r = report(build_system(d.document, s), t)
+    assert r["status"] == "invalid" and "not a SpinModel" in r["message"]

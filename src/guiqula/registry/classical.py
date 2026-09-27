@@ -130,6 +130,7 @@ def _tensor(model, ctx):
                                              v=np.array(ctx.value("v"), dtype=float))
     if ctx.value("images") and model.geometry.dimensionality == 2:
         model.add_tensor_2d(fun, ncells=1)
+        model.j = np.real_if_close(model.j)    # complex (zero imaginary part): energy() fails
     elif ctx.value("images") and model.geometry.dimensionality != 0:
         raise ValueError("couplings to the neighbouring cells are only available in two "
                          "dimensions (pyqula's add_tensor_2d); make the system finite, or two-"
@@ -139,9 +140,10 @@ def _tensor(model, ctx):
 
 
 def _tensor_script(ctx):
-    call = "model.add_tensor_2d(fun, ncells=1)" if ctx.value("images") else "model.add_tensor(fun)"
+    call = ["model.add_tensor_2d(fun, ncells=1)", "model.j = np.real_if_close(model.j)"] \
+        if ctx.value("images") else ["model.add_tensor(fun)"]
     return [f"fun = classicalspin.generating_functions(name={ctx.code('coupling')}, "
-            f"J={ctx.code('J')}, v=np.array({ctx.code('v')}, dtype=float))", call]
+            f"J={ctx.code('J')}, v=np.array({ctx.code('v')}, dtype=float))"] + call
 
 
 entry("term", "spin_tensor", "Exchange tensor",

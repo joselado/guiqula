@@ -113,7 +113,7 @@ def _load_one(name, distribution, version, load, catalogue, tagging):
         loaded = load()
         if callable(loaded):
             loaded()
-    except Exception as error:
+    except (Exception, SystemExit) as error:    # a script that parses sys.argv, or exits
         for family, table in catalogue.items():         # left out whole
             table.clear()
             table.update(before[family])

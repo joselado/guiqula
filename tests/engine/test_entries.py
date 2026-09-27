@@ -592,6 +592,45 @@ def test_calculation(pyqula, kind, case):
         assert check(result.arrays), result.arrays
 
 
+def test_terms_above_a_pairing_are_applied_before_nambu(pyqula):
+    """The Hamiltonian turns Nambu at the first entry that needs it, as in
+    pyqula in the stack's order: a spin spiral and Kekule hopping above a
+    pairing term apply (they cannot take a Nambu Hamiltonian); below it,
+    the flag says why."""
+    from pyqula import geometry
+    d, s, (_, spiral, kekule, swave) = system(ops=[("supercell", {"n": [3, 3, 1]})], terms=[
+        ("zeeman", {"m": [0, 0, 0.3]}), ("spin_spiral", {"axis": [0, 0, 1], "q": [0.5, 0, 0]}),
+        ("kekule", {"t": 0.1}), ("swave", {"delta": 0.1})])
+    built = build_system(d.document, s)
+    terms = [r for r in built.reports if r["stage"] == "term"]
+    assert [r["status"] for r in terms] == ["ok"] * 4, terms
+    assert [r["mode"] for r in terms] == ["spinful"] * 3 + ["nambu"]
+    h = geometry.honeycomb_lattice().get_supercell([3, 3, 1]).get_hamiltonian(has_spin=True)
+    h.add_zeeman([0.0, 0.0, 0.3])
+    h.generate_spin_spiral(vector=[0.0, 0.0, 1.0], qspiral=[0.5, 0.0, 0.0])
+    h.add_kekule(0.1)
+    h.add_swave(0.1)
+    assert_same_hamiltonian(built.h, h)
+    d.do("move", entry=swave, index=0)
+    reports = {r["id"]: r for r in build_system(d.document, s).reports}
+    assert reports[swave]["mode"] == "nambu"
+    assert reports[spiral]["status"] == "invalid"
+    assert "place it above the pairing term" in reports[spiral]["message"]
+
+
+def test_optical_conductivity_of_a_sparse_construction(pyqula):
+    """pyqula's k-space generator takes a dense Hamiltonian only: the entry
+    hands it one, and the result is the dense construction's."""
+    d, s, h = calc_system("haldane")
+    c = d.do("add_calculation", system=s, kind="optical_conductivity",
+             params={"ne": 5, "nk": 6, "component": "xy"})
+    dense = run_calculation(d.document, c)
+    d.do("set_construction", system=s, is_sparse=True)
+    sparse = run_calculation(d.document, c)
+    for key in ("omega", "real", "imag"):
+        assert np.allclose(sparse.arrays[key], dense.arrays[key], rtol=0, atol=1e-10), key
+
+
 # ---- classical systems (decision 13.5)
 def classical(kind, lattice, n, terms=(), model_params=None, finite=False):
     """A classical system through commands."""
@@ -683,6 +722,24 @@ def test_classical_term(pyqula, kind, case):
     direct = direct_model(system_kind, lattice, 3, finite=finite)
     direct_term(direct)
     assert_same_model(built.h, direct)
+
+
+def test_a_tensor_with_the_neighbouring_cells_minimizes(pyqula):
+    """pyqula's add_tensor_2d makes the couplings complex (with a zero
+    imaginary part), which its energy cannot take: the entry keeps them
+    real, and Minimize runs."""
+    d, s, _ = classical("classical_spin", "triangular_lattice", 2,
+                        [("spin_tensor", {"coupling": "Heisenberg", "J": 1.0, "images": True})])
+    built = build_system(d.document, s)
+    assert all(r["status"] == "ok" for r in built.reports), built.reports
+    direct = direct_model("classical_spin", "triangular_lattice", 2)
+    direct.add_tensor_2d(pq("classicalspin").generating_functions(
+        name="Heisenberg", J=1.0, v=np.array([0.0, 0.0, 1.0])), ncells=1)
+    direct.j = direct.j.real
+    assert not np.iscomplexobj(built.h.j)
+    assert_same_model(built.h, direct)
+    c = d.do("add_calculation", system=s, kind="minimize_spins")
+    assert np.isfinite(run_calculation(d.document, c).arrays["magnetization"]).all()
 
 
 def test_a_term_of_another_kind_is_refused():

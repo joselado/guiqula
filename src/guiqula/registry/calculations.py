@@ -462,6 +462,7 @@ COMPONENTS = ("xx", "xy", "yx", "yy")
 
 def _optical(h, ctx):
     import numpy as np
+    h = h.get_dense()          # pyqula's k-space generator fails on a sparse construction
     omega, sigma = h.get_optical_conductivity(energies=_energies(ctx), nk=ctx.value("nk"),
                                               T=ctx.value("T"), delta=ctx.value("delta"))
     a, b = ("xyz".index(c) for c in ctx.value("component"))
@@ -480,6 +481,7 @@ entry("calculation", "optical_conductivity", "Optical conductivity",
                            "of e^2/hbar (pyqula's get_optical_conductivity); one- and "
                            "two-dimensional systems.",
       apply=_optical, script=lambda ctx: [
+          "h = h.get_dense()",
           f"omega, sigma = h.get_optical_conductivity(energies={_energies_code(ctx)}, "
           f"nk={ctx.code('nk')}, T={ctx.code('T')}, delta={ctx.code('delta')})",
           f"a, b = ('xyz'.index(c) for c in {ctx.code('component')})",

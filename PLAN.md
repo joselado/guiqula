@@ -232,7 +232,13 @@ Semantics, borrowed from Blender's modifier stack:
   mode, not the source of truth. The engine pre-scans the declared
   `requires` of the whole term stack and sets the mode once, before the first
   term, and the outliner shows the mode after each entry (spinless, spinful,
-  Nambu) so an upgrade is never invisible. A mid-stack `turn_spinful` on a
+  Nambu) so an upgrade is never invisible. Nambu is the exception (changed
+  2026-09-27, after the bug hunt): unless the construction asks for it, the
+  Hamiltonian turns Nambu just before the first entry that needs it, as in
+  pyqula in the stack's order, because some terms (the spin spiral, Kekule
+  hopping) cannot take a Nambu Hamiltonian and were skipped in any stack
+  with a pairing term; a term that fails below the pairing says so. The
+  exported script does the same (`h.turn_nambu()` before that entry). A mid-stack `turn_spinful` on a
   sparse Hamiltonian goes dense, spinful, sparse again (`htk/mode.py:55`),
   which the cost guard (13.12) counts.
 - **Every numeric parameter is a Field** (section 3.8): a constant, an
