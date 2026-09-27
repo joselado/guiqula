@@ -40,14 +40,17 @@ class Param:
 class FieldParam(Param):
     """A scalar Field (constant, expression of position, piecewise).
     minimum and maximum bound its constant values (an expression is checked
-    by pyqula when it runs)."""
+    by pyqula when it runs). bond: pyqula evaluates it at the midpoints of
+    the bonds, where a Field known on the sites only is made of the values
+    at the bond's ends (core/bonds.py)."""
     type_name = "field"
 
     def __init__(self, name, default=0.0, label=None, doc="", native=True, minimum=None,
-                 maximum=None):
+                 maximum=None, bond=False):
         super().__init__(name, default, label, doc)
         self.native = native
         self.minimum, self.maximum = minimum, maximum
+        self.bond = bond
 
     def _check_bounds(self, value):
         constants = [value] if fields.is_constant(value) else []
@@ -70,15 +73,16 @@ class FieldParam(Param):
 
     def describe(self):
         return dict(super().describe(), native=self.native, minimum=self.minimum,
-                    maximum=self.maximum)
+                    maximum=self.maximum, bond=self.bond)
 
 
 class VectorFieldParam(FieldParam):
     """A vector Field: one scalar Field per component."""
     type_name = "vector_field"
 
-    def __init__(self, name, default=(0.0, 0.0, 0.0), label=None, doc="", native=True, length=3):
-        super().__init__(name, list(default), label, doc, native)
+    def __init__(self, name, default=(0.0, 0.0, 0.0), label=None, doc="", native=True, length=3,
+                 bond=False):
+        super().__init__(name, list(default), label, doc, native, bond=bond)
         self.length = length
 
     def normalize(self, value):
@@ -277,7 +281,7 @@ class ConditionParam(Param):
     def compile(value):
         from guiqula.core.expressions import Expression
         expression = Expression(value)
-        return lambda r, e=expression: bool(e.at(r))
+        return lambda r: bool(expression.at(r))
 
     @staticmethod
     def code(value):

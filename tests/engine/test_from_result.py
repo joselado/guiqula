@@ -74,6 +74,33 @@ def test_the_key_follows_the_result_read(pyqula):
     assert pipeline.plan_system(d.document, s2, results=refs).stage(t).warnings == []
 
 
+def test_a_result_keeps_what_it_read(pyqula, repo, tmp_path):
+    """A result keeps the results its from_result Fields read (the arrays
+    read only), through a save and a load: the bundle of a stale reader
+    reproduces it after its source ran again with another field and the
+    term stopped reading it (its script read the current result, or
+    commented the term out)."""
+    from guiqula.core.document import Document, terms_of
+    from guiqula.io import bundle
+    from guiqula.io import results as result_files
+    d, s1, s2, c1, t, c2 = bridge()
+    refs = {c1: ResultRef.of(run_calculation(d.document, c1))}
+    reader = run_calculation(d.document, c2, results=refs)
+    assert set(reader.reads) == {c1} and set(reader.reads[c1].arrays) == {"magnetization"}
+    reader = result_files.load(result_files.save(reader, tmp_path / "c2")[0])
+    field = terms_of(d.document.system(s1))[1].id
+    d.do("set_param", entry=field, name="b", value=[0.0, 0.0, 3.0])
+    now = {c1: ResultRef.of(run_calculation(d.document, c1))}
+    d.do("set_param", entry=t, name="m", value=[0.0, 0.0, 0.1])
+    snapshot = Document.from_json(reader.document)
+    assert pipeline.calculation_key(snapshot, c2, results=now) != reader.key
+    assert pipeline.calculation_key(snapshot, c2, results=reader.reads) == reader.key
+    bundle.write(tmp_path / "bundle", reader, None, results=now, stale=True)   # as the window
+    source = (tmp_path / "bundle" / "script.py").read_text()
+    arrays = run_scripts([source], repo, tmp_path)[0]
+    assert np.allclose(arrays["energies"], reader.arrays["energies"], rtol=0, atol=1e-10)
+
+
 def test_references_that_cannot_work(pyqula):
     d, s1, s2, c1, t, c2 = bridge()
     refs = {c1: ResultRef.of(run_calculation(d.document, c1))}

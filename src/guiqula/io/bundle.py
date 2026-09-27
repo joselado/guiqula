@@ -9,8 +9,9 @@ for a report, a course or a paper.
 - ``data.npz`` and ``data.json``: the arrays and everything else
   (io/results.py), ``data.csv`` too for curves (one column per curve);
 - ``script.py``: the pyqula script that computes the arrays, exported
-  from the Document the result was computed with (its snapshot), so a
-  stale result is reproduced as it is, not as the Document now reads;
+  from the Document the result was computed with (its snapshot) and the
+  results its from_result Fields read then (Result.reads), so a stale
+  result is reproduced as it is, not as the Document now reads;
 - ``document.json``: that Document, which guiqula opens;
 - ``README.txt``: what each file is.
 """
@@ -58,7 +59,10 @@ def scalar_rows(result):
 def write(folder, result, figure=None, trusted=True, results=None, stale=False):
     """Write the bundle of a result into folder (made if needed); returns
     the paths written. figure(png_path, pdf_path) draws the plot (the
-    window's); results: the ResultRefs a from_result Field reads."""
+    window's); results: the ResultRefs a from_result Field reads now,
+    for a result that does not keep those it read (result.reads, which
+    win: a stale result read another result of that calculation, or one
+    the Document no longer reads)."""
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
     written = []
@@ -71,7 +75,7 @@ def write(folder, result, figure=None, trusted=True, results=None, stale=False):
     if table is not None:
         header, rows = table
         path = folder / "data.csv"
-        with path.open("w", newline="") as handle:
+        with path.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
             writer.writerow(header)
             writer.writerows(rows.tolist())
@@ -79,7 +83,7 @@ def write(folder, result, figure=None, trusted=True, results=None, stale=False):
     numbers = scalar_rows(result)
     if numbers is not None:
         path = folder / "data.csv"
-        with path.open("w", newline="") as handle:
+        with path.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
             writer.writerow(["quantity", "value"])
             writer.writerows(numbers)
@@ -89,12 +93,13 @@ def write(folder, result, figure=None, trusted=True, results=None, stale=False):
         skipped = {r["id"]: r["message"] for r in result.skipped}
         script = folder / "script.py"
         script.write_text(export_script(document, result.calculation, skipped, trusted,
-                                        results or {}))
+                                        {**(results or {}), **result.reads}),
+                          encoding="utf-8")
         path = folder / "document.json"
-        path.write_text(document.to_json())
+        path.write_text(document.to_json(), encoding="utf-8")
         written += [script, path]
     readme = folder / "README.txt"
-    readme.write_text(_readme(result, [p.name for p in written], stale))
+    readme.write_text(_readme(result, [p.name for p in written], stale), encoding="utf-8")
     written.append(readme)
     return written
 

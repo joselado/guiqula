@@ -167,6 +167,33 @@ def test_island(pyqula, repo, tmp_path):
     assert_reproduces(d.document, c, repo, tmp_path)
 
 
+def test_fields_known_on_the_sites_at_the_bonds(pyqula, repo, tmp_path):
+    """Bond terms restricted to a region by positions, over it piecewise,
+    painted, and a Kekule hopping restricted to a region: the script hands
+    pyqula the same functions of the bond midpoints (bond_field)."""
+    from guiqula.core import fields
+    from guiqula.engine.build import build_system
+    d = Dispatcher()
+    s = d.do("add_system", lattice="honeycomb_lattice")
+    d.do("add_geometry_op", system=s, kind="supercell", params={"n": [3, 3, 1]})
+    c = d.do("add_calculation", system=s, kind="bands", params={"nk": 6})
+    g = build_system(d.document, s).g
+    right = g.r[g.r[:, 0] > 0].tolist()
+    picked = d.do("add_region", system=s, select={"kind": "positions", "positions": right,
+                                                  "tol": 0.05})
+    upper = d.do("add_region", system=s, select={"kind": "expression", "expr": "y > 0"})
+    d.do("add_term", system=s, kind="haldane", params={"t": 0.05}, region=picked)
+    d.do("add_term", system=s, kind="rashba", params={"c": {
+        "kind": "piecewise", "default": 0.02, "pieces": [{"region": picked, "value": "0.1*y"}]}})
+    d.do("add_term", system=s, kind="kekule", params={"t": 0.1}, region=upper)
+    d.do("add_term", system=s, kind="strain", params={
+        "s": fields.paint(1.0, g.r, range(0, len(g.r), 3), 1.2)})
+    source = export_script(d.document, c)
+    assert "bond_field(" in source and "h.geometry" in source
+    result = assert_reproduces(d.document, c, repo, tmp_path)
+    assert result.skipped == []
+
+
 def test_skipped_entry_is_commented(pyqula, repo, tmp_path):
     d = Dispatcher()
     s = d.do("add_system", lattice="triangular_lattice")

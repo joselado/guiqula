@@ -22,7 +22,7 @@ the value.
 from guiqula.core.document import DocumentError
 from guiqula.registry import base as registry
 from guiqula.registry.base import ALL_SYSTEMS, entry
-from guiqula.registry.params import (FieldParam, FloatParam, IntParam, TextParam,
+from guiqula.registry.params import (FieldParam, FloatParam, IntParam, ParamError, TextParam,
                                      VectorFieldParam)
 
 
@@ -69,17 +69,37 @@ def check_target(document, target, param, component):
     return None
 
 
-def with_value(document, target, param, component, value):
-    """A copy of the Document with one parameter set to value."""
-    document = document.copy_deep()
-    _, params = locate(document, target)
+def _set(params, param, component, value):
     if component is None:
         params[param] = value
     else:
         current = list(params.get(param) or [0.0, 0.0, 0.0])
         current[component] = value
         params[param] = current
+
+
+def with_value(document, target, param, component, value):
+    """A copy of the Document with one parameter set to value."""
+    document = document.copy_deep()
+    _, params = locate(document, target)
+    _set(params, param, component, value)
     return document
+
+
+def check_values(document, target, param, component, values):
+    """None if the entry takes every value, else why not: a value outside
+    the parameter's bounds (a filling above 1) would make the entry
+    invalid at that point, and the point would be computed without it."""
+    spec, params = locate(document, target)
+    declared = spec.param_map[param]
+    for value in values:
+        changed = dict(params)
+        _set(changed, param, component, float(value))
+        try:
+            declared.normalize(changed[param])
+        except ParamError as error:
+            return f"{target} cannot take every value of the sweep: {error}"
+    return None
 
 
 def axes(params):
@@ -101,16 +121,30 @@ def _numbers(result):
 
 def _sweep(document, ctx, run):
     """Run the inner calculation at every value; the arrays are the values
-    ("value", "value2") and one array per number of its result."""
+    ("value", "value2") and one array per number of its result. A point at
+    which a swept entry is skipped (pyqula rejects the value) fails the
+    sweep: it would be computed without it. The other entries skipped at
+    some point are the sweep's reports (ctx.note "reports"), as those of a
+    calculation are."""
     import numpy as np
     grid = axes(ctx.params)
     shape = tuple(len(axis[3]) for axis in grid)
-    total, collected, done = int(np.prod(shape)), {}, 0
+    total, collected, done, skipped = int(np.prod(shape)), {}, 0, {}
+    swept_ids = {target for target, _, _, _ in grid}
     for index in np.ndindex(*shape):
         swept = document
         for (target, param, component, values), i in zip(grid, index):
             swept = with_value(swept, target, param, component, float(values[i]))
-        numbers = _numbers(run(swept))
+        point = ", ".join(f"{label(t, p, c)} = {float(values[i]):g}"
+                          for (t, p, c, values), i in zip(grid, index))
+        result = run(swept)
+        for report in result.skipped:
+            if report["id"] in swept_ids:
+                raise SweepError(f"{report['id']} is skipped at {point} ({report['message']}), "
+                                 f"so that point would be computed without it")
+            skipped.setdefault(report["id"], dict(report, message=f"at {point}: "
+                                                                   f"{report['message']}"))
+        numbers = _numbers(result)
         if not numbers:
             raise SweepError(f"{ctx.params['calculation']} gives no number to collect (its "
                              f"arrays are not scalars); sweep a gap, a Chern number, an energy, "
@@ -119,6 +153,7 @@ def _sweep(document, ctx, run):
             collected.setdefault(name, np.full(shape, np.nan))[index] = value
         done += 1
         ctx.progress(done / total)
+    ctx.note("reports", list(skipped.values()))
     arrays = {"value": grid[0][3]}
     if len(grid) == 2:
         arrays["value2"] = grid[1][3]

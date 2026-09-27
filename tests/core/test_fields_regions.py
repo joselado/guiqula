@@ -176,6 +176,17 @@ def test_a_from_result_field_is_refused_where_it_would_break_a_key():
             fields.normalize(bad)
 
 
+def test_the_code_of_a_result_not_computed_says_so():
+    """The help writes an entry's pyqula code: a from_result Field whose
+    result is not there says so, as the engine does, not KeyError: 'c1'."""
+    field = {"kind": "from_result", "calculation": "c1", "array": "m"}
+    for results in (None, {}):
+        with pytest.raises(fields.FieldError, match="the result of c1 is not available"):
+            fields.code_scalar(field, results=results)
+        with pytest.raises(fields.FieldError, match="the result of c1 is not available"):
+            fields.compile_scalar(field, results=results)
+
+
 def test_painting_many_sites():
     positions = np.column_stack([np.arange(5000.0), np.zeros(5000), np.zeros(5000)])
     value = fields.paint(0.25, positions, range(0, 5000, 2), 1.0)

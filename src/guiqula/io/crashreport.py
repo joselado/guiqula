@@ -38,7 +38,8 @@ def versions():
 
 
 def write(traceback_text, document_json=None, log_text="", extra=None, directory=None):
-    """Write a report; returns its folder."""
+    """Write a report; returns its folder. The files are UTF-8 whatever the
+    locale (a Greek letter in a message cannot be written in cp1252)."""
     base = Path(directory) if directory is not None else reports_dir()
     stamp = time.strftime("%Y%m%d-%H%M%S")
     folder = base / f"{stamp}-{os.getpid()}"
@@ -47,13 +48,14 @@ def write(traceback_text, document_json=None, log_text="", extra=None, directory
         n += 1
         folder = base / f"{stamp}-{os.getpid()}-{n}"
     folder.mkdir(parents=True)
-    (folder / "traceback.txt").write_text(traceback_text)
+    (folder / "traceback.txt").write_text(traceback_text, encoding="utf-8")
     if document_json:
-        (folder / "document.json").write_text(document_json)
-    (folder / "log.txt").write_text(log_text or "")
+        (folder / "document.json").write_text(document_json, encoding="utf-8")
+    (folder / "log.txt").write_text(log_text or "", encoding="utf-8")
     info = {"time": time.strftime("%Y-%m-%d %H:%M:%S"), "argv": sys.argv,
             "versions": versions(), **(extra or {})}
-    (folder / "report.json").write_text(json.dumps(info, indent=2, default=str))
+    (folder / "report.json").write_text(json.dumps(info, indent=2, default=str),
+                                        encoding="utf-8")
     prune(base)
     return folder
 

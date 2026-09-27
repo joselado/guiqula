@@ -59,7 +59,7 @@ def load(path_or_name):
                 except KeyError:
                     raise DocumentError(f"{path}: no document.json inside") from None
         else:
-            text = path.read_text()
+            text = path.read_text(encoding="utf-8")
     except (zipfile.BadZipFile, UnicodeDecodeError, EOFError, OSError) as error:
         raise DocumentError(f"{path}: not a guiqula project or document, or damaged "
                             f"({error})") from None
@@ -102,19 +102,23 @@ def save(document, path, results=None):
     path = Path(path)
     temporary = path.with_name(path.name + ".tmp")
     text = document.to_json()
-    if path.suffix == ".guiqula":
-        with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            archive.writestr("document.json", text)
-            present = {c.id for c in document.calculations}
-            for calc, result in sorted((results or {}).items()):
-                if calc in present:
-                    try:
-                        npz, meta = result_files.to_bytes(result)
-                    except ValueError:       # arrays that cannot be read back: not kept
-                        continue
-                    archive.writestr(f"{RESULTS}{calc}.npz", npz)
-                    archive.writestr(f"{RESULTS}{calc}.json", meta)
-    else:
-        temporary.write_text(text + "\n")
-    temporary.replace(path)
+    try:
+        if path.suffix == ".guiqula":
+            with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr("document.json", text)
+                present = {c.id for c in document.calculations}
+                for calc, result in sorted((results or {}).items()):
+                    if calc in present:
+                        try:
+                            npz, meta = result_files.to_bytes(result)
+                        except ValueError:       # arrays that cannot be read back: not kept
+                            continue
+                        archive.writestr(f"{RESULTS}{calc}.npz", npz)
+                        archive.writestr(f"{RESULTS}{calc}.json", meta)
+        else:
+            temporary.write_text(text + "\n", encoding="utf-8")
+        temporary.replace(path)
+    except BaseException:
+        temporary.unlink(missing_ok=True)       # a failed save leaves nothing behind
+        raise
     return path

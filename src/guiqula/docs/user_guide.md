@@ -67,7 +67,10 @@ to select again; the mouse wheel zooms at any time. With sites selected:
 A region can also be an expression of x, y, z and r (Add region). A term restricted to a
 region (the region box of its form) acts only there; a Field can take one value per
 region (piecewise). A region is kept by position, so it follows the geometry as long as
-its sites are still there.
+its sites are still there. A term between sites (Rashba, Haldane, Kane-Mele, Kekule, a
+pairing, the hopping modulation) restricted to a region made of selected sites acts on
+the bonds whose two ends are in it; an expression region holds the bonds whose midpoint
+it holds.
 
 ## Terms and the Hamiltonian
 
@@ -101,6 +104,8 @@ Every number of a term is a Field. The f(r) button next to it opens the Field ed
 
 While a Field is being edited the canvas previews it on the atoms. A parameter that
 pyqula takes as a number only is marked constant: it accepts no function of position.
+pyqula evaluates the Field of a term between sites at the middle of each bond: a painted
+or from-result Field gives a bond the mean of the values at its two ends.
 
 ## The mean field
 
@@ -139,7 +144,8 @@ A Sweep is a calculation that runs another one at every value of a parameter (or
 of two) and draws the numbers it gives: the gap against a field, a Chern number against
 two couplings. Name the calculation, the entry holding the parameter (a term, an op, a
 calculation, `<system>/meanfield`, `<system>/model`, or the system for its lattice), the
-parameter and its range.
+parameter and its range. A range the parameter cannot take (a filling above 1) is refused,
+and a sweep fails at a value pyqula rejects: no point is computed without its entry.
 
 The Sliders dock attaches a slider to any number of the document: dragging it changes the
 parameter (one undo step per drag), and with the automatic re-run on, cheap results follow.

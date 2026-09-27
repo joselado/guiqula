@@ -6,7 +6,7 @@ import numpy as np
 
 import guiqula
 from guiqula import vendoring
-from guiqula.core.results import Result
+from guiqula.core.results import Result, ResultRef
 from guiqula.engine import structure
 from guiqula.engine.build import BuildError, build_system, seed
 from guiqula.engine.context import ApplyContext
@@ -56,9 +56,37 @@ def _run_document_level(document, plan, cache, progress, trusted, results):
     arrays = {k: np.asarray(v) for k, v in arrays.items()}
     return Result(calculation=plan.calc_id, kind=plan.kind, key=plan.key, params=plan.params,
                   arrays=arrays, plot=plot_spec(plan.spec, plan.params, arrays),
-                  mode=plan.system.mode, document=document.to_json(),
+                  reports=ctx.notes.get("reports", []),
+                  mode=plan.system.mode, document=document.to_json(), reads=reads(plan.system),
                   meta={"seconds": time.perf_counter() - start, "cores": parallel.cores,
                         "guiqula": guiqula.__version__, "pyqula": provenance()})
+
+
+def reads(system_plan):
+    """{calculation id: ResultRef} the from_result Fields of a system read
+    (the applied entries', with the arrays they read only): a result keeps
+    them, so that its script can be exported as it was computed after that
+    calculation ran again."""
+    names, refs = {}, {}
+    for stage in system_plan.stages:
+        if stage.applied and stage.results:
+            refs.update(stage.results)
+            _arrays_read(stage.params, names)
+    return {calc: ResultRef(ref.key, ref.positions,
+                            {k: v for k, v in ref.arrays.items() if k in names.get(calc, ())})
+            for calc, ref in refs.items()}
+
+
+def _arrays_read(value, out):
+    """Collect {calculation: set of array names} the from_result Fields read."""
+    if isinstance(value, dict) and value.get("kind") == "from_result":
+        out.setdefault(value["calculation"], set()).add(value["array"])
+    elif isinstance(value, dict):
+        for v in value.values():
+            _arrays_read(v, out)
+    elif isinstance(value, (list, tuple)):
+        for v in value:
+            _arrays_read(v, out)
 
 
 def plot_spec(spec, params, arrays):
@@ -104,7 +132,7 @@ def run_calculation(document, calc_id, cache=None, progress=None, trusted=True, 
     return Result(calculation=calc_id, kind=plan.kind, key=plan.key, params=plan.params,
                   arrays=arrays, plot=plot,
                   reports=built.reports, mode=built.mode, document=document.to_json(),
-                  structure=geometry,
+                  structure=geometry, reads=reads(built.plan),
                   meta={"seconds": seconds, "build_seconds": build_seconds,
                         "cores": parallel.cores,
                         "guiqula": guiqula.__version__, "pyqula": provenance()})

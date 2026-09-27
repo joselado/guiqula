@@ -37,7 +37,7 @@ def path():
 def load():
     """The settings, defaults filled in for what is missing or invalid."""
     try:
-        stored = json.loads(path().read_text())
+        stored = json.loads(path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         stored = {}
     if not isinstance(stored, dict):
@@ -58,7 +58,7 @@ def save(values):
     target = path()
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_suffix(".tmp")
-    temporary.write_text(json.dumps(values, indent=2, sort_keys=True))
+    temporary.write_text(json.dumps(values, indent=2, sort_keys=True), encoding="utf-8")
     os.replace(temporary, target)
 
 

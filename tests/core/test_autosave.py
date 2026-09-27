@@ -139,6 +139,22 @@ def test_recoverable_lists_dead_sessions_only(data_dir, tmp_path):
         str(orphan), str(directory / "saved.json")}
 
 
+def test_a_damaged_autosave_hides_no_other(data_dir):
+    """A file with the autosave's marker but no document, or a pid that is
+    not a number, is listed with its error; it raised KeyError out of
+    recoverable(), and no autosave was offered at all."""
+    directory = autosave.autosave_dir()
+    orphan = write_orphan(directory, project.load("honeycomb_zeeman_rashba"), dead_pid())
+    (directory / "nodocument.json").write_text(json.dumps({"format": autosave.FORMAT,
+                                                           "version": 1}))
+    bad_pid = dict(json.loads(orphan.read_text()), pid="me")       # written on this host
+    (directory / "badpid.json").write_text(json.dumps(bad_pid))
+    found = {os.path.basename(e["path"]): e for e in autosave.recoverable()}
+    assert "error" not in found[orphan.name]
+    assert "without its document" in found["nodocument.json"]["error"]
+    assert "error" in found["badpid.json"]
+
+
 def test_recover_action(data_dir, tmp_path):
     clock = Clock()
     s = session(clock=clock)

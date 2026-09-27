@@ -45,6 +45,9 @@ class Result:
     document: str = ""          # JSON snapshot of the Document that was run
     meta: dict = field(default_factory=dict)      # timing, pyqula provenance, cores
     structure: dict | None = None                 # geometry arrays, for plots on the atoms
+    reads: dict = field(default_factory=dict)     # {calculation id: ResultRef} its from_result
+                                                  # Fields read: what its script needs, even
+                                                  # once that calculation has run again
 
     @property
     def skipped(self):

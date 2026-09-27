@@ -5,8 +5,11 @@ Rashba, Haldane, Kekule and pairing at the bond midpoint). The terms whose
 pyqula call takes numbers only (valley exchange, crystal field, the
 orbital magnetic fields, phase disorder) declare their Fields
 ``native=False``, so they are constant and cannot be restricted to a
-region.
+region. The Fields evaluated at the bond midpoints declare ``bond=True``:
+a painted or from_result Field, or a region by positions, is taken there
+from the bond's two ends (core/bonds.py).
 """
+from guiqula.core import fields
 from guiqula.registry.base import H, Call, entry
 from guiqula.registry.params import ChoiceParam, FieldParam, SeedParam, VectorFieldParam
 
@@ -17,7 +20,7 @@ def vector_function(components):
     (pyqula reads a list of functions as something else)."""
     if not any(callable(c) for c in components):
         return list(components)
-    return lambda r, c=components: [f(r) if callable(f) else f for f in c]
+    return lambda r: [f(r) if callable(f) else f for f in components]
 
 
 def vector_function_code(code):
@@ -46,14 +49,16 @@ entry("term", "zeeman", "Zeeman / exchange field",
       guide=("Including an external Zeeman field",))
 
 entry("term", "rashba", "Rashba spin-orbit coupling",
-      FieldParam("c", 0.1, "strength", "Rashba coupling, evaluated at the bond midpoint"),
+      FieldParam("c", 0.1, "strength", "Rashba coupling, evaluated at the bond midpoint",
+                 bond=True),
       group="Spin-orbit", formula=r"i\lambda_R \sum_{\langle ij\rangle} c^\dagger_i "
                                   r"(\vec\sigma\times\vec d_{ij})_z c_j",
       doc="Rashba spin-orbit coupling between first neighbours; breaks inversion.",
       requires=("spin",), call=Call("h.add_rashba", "c"))
 
 entry("term", "haldane", "Haldane coupling",
-      FieldParam("t", 0.05, "strength", "second-neighbour imaginary hopping, at the bond midpoint"),
+      FieldParam("t", 0.05, "strength", "second-neighbour imaginary hopping, at the bond midpoint",
+                 bond=True),
       group="Topology", formula=r"i t_H \sum_{\langle\langle ij\rangle\rangle} \nu_{ij} c^\dagger_i c_j",
       doc="Second-neighbour imaginary hopping of the Haldane model; breaks time reversal.",
       call=Call("h.add_haldane", "t"),
@@ -69,7 +74,7 @@ entry("term", "anderson_disorder", "Anderson disorder",
 
 entry("term", "kane_mele", "Kane-Mele spin-orbit coupling",
       FieldParam("t", 0.05, "strength", "intrinsic spin-orbit coupling between second neighbours, "
-                                        "at the bond midpoint"),
+                                        "at the bond midpoint", bond=True),
       group="Spin-orbit", formula=r"i\lambda_{SO} \sum_{\langle\langle ij\rangle\rangle} \nu_{ij} "
                                   r"c^\dagger_i \sigma_z c_j",
       doc="Intrinsic spin-orbit coupling of the Kane-Mele model: a Haldane coupling of opposite "
@@ -79,7 +84,7 @@ entry("term", "kane_mele", "Kane-Mele spin-orbit coupling",
 
 def _antiferromagnetism(h, ctx):
     components = ctx.value("m")
-    h.add_antiferromagnetism(lambda r, c=components: [f(r) if callable(f) else f for f in c])
+    h.add_antiferromagnetism(lambda r: [f(r) if callable(f) else f for f in components])
 
 
 def _antiferromagnetism_script(ctx):
@@ -108,7 +113,7 @@ entry("term", "swave", "s-wave pairing",
 
 entry("term", "anti_kane_mele", "Anti Kane-Mele coupling",
       FieldParam("t", 0.05, "strength", "second-neighbour spin-orbit coupling of opposite sign "
-                                        "on the two sublattices, at the bond midpoint"),
+                                        "on the two sublattices, at the bond midpoint", bond=True),
       group="Spin-orbit", formula=r"i\lambda \sum_{\langle\langle ij\rangle\rangle} \tau_i "
                                   r"\nu_{ij} c^\dagger_i \sigma_z c_j",
       doc="Kane-Mele coupling whose sign alternates between the sublattices (pyqula's "
@@ -117,7 +122,7 @@ entry("term", "anti_kane_mele", "Anti Kane-Mele coupling",
 
 entry("term", "modified_haldane", "Modified (anti) Haldane coupling",
       FieldParam("t", 0.05, "strength", "second-neighbour imaginary hopping of opposite sign on "
-                                        "the two sublattices, at the bond midpoint"),
+                                        "the two sublattices, at the bond midpoint", bond=True),
       group="Topology", formula=r"i t \sum_{\langle\langle ij\rangle\rangle} \tau_i \nu_{ij} "
                                 r"c^\dagger_i c_j",
       doc="Haldane coupling whose sign alternates between the sublattices (the anti-Haldane "
@@ -126,7 +131,7 @@ entry("term", "modified_haldane", "Modified (anti) Haldane coupling",
 
 entry("term", "kekule", "Kekule hopping",
       FieldParam("t", 0.1, "strength", "hopping added on the Kekule bonds, at the bond "
-                                       "midpoint"),
+                                       "midpoint", bond=True),
       group="Hopping", formula=r"\sum_{\langle ij\rangle \in K} t(\vec r_{ij})\, "
                                r"c^\dagger_i c_j",
       doc="Kekule bond order on the honeycomb lattice: extra hopping on one bond in three, "
@@ -136,17 +141,20 @@ entry("term", "kekule", "Kekule hopping",
 
 def _strain(h, ctx):
     s = ctx.value("s")
-    h.add_strain(s if callable(s) else (lambda r, c=s: c))
+    h.add_strain(s if callable(s) else (lambda r: s))
 
 
 def _strain_script(ctx):
+    # every Field but a constant is written as a callable already (a lambda,
+    # painted_field(...), site_field(...)); a constant becomes one
     s = ctx.code("s")
-    return [f"h.add_strain({s})" if s.startswith("lambda") else f"h.add_strain(lambda r: {s})"]
+    return [f"h.add_strain(lambda r: {s})" if fields.is_constant(ctx.value("s"))
+            else f"h.add_strain({s})"]
 
 
 entry("term", "strain", "Hopping modulation",
       FieldParam("s", 1.1, "factor", "multiplies every matrix element at the bond midpoint "
-                                     "(onsite energies at the site)"),
+                                     "(onsite energies at the site)", bond=True),
       group="Hopping", formula=r"H_{ij} \to s\left(\frac{\vec r_i+\vec r_j}{2}\right) H_{ij}",
       doc="Scale the matrix elements already in the Hamiltonian by a factor that depends on "
           "the position (pyqula's add_strain, scalar mode): a strain or a smooth "
@@ -177,7 +185,7 @@ entry("term", "crystal_field", "Crystal field",
 def _electric_field(h, ctx):
     import numpy as np
     e = np.array(ctx.value("E"), dtype=float)
-    h.add_onsite(lambda r, e=e: float(np.dot(e, r)))
+    h.add_onsite(lambda r: float(np.dot(e, r)))
 
 
 entry("term", "electric_field", "Electric field",
@@ -230,11 +238,11 @@ def _pairing(h, ctx):
 
 
 entry("term", "pairing", "Superconducting pairing",
-      FieldParam("delta", 0.1, "amplitude", "pairing amplitude, at the bond midpoint"),
+      FieldParam("delta", 0.1, "amplitude", "pairing amplitude, at the bond midpoint", bond=True),
       ChoiceParam("mode", "swave", source="pairing_modes", label="symmetry",
                   doc="the pairing symmetry, from pyqula's list (sctk.pairing)"),
       VectorFieldParam("d", (0.0, 0.0, 1.0), "d-vector (dx, dy, dz)",
-                       "direction of a triplet pairing; the singlet modes ignore it"),
+                       "direction of a triplet pairing; the singlet modes ignore it", bond=True),
       group="Superconductivity", formula=r"\sum_{ij} \Delta(\vec r_{ij})\, "
                                          r"c^\dagger_i \hat\Delta_{ij} c^\dagger_j + h.c.",
       doc="Pairing of any symmetry pyqula knows (s, extended s, p, d, f, chiral, triplet "

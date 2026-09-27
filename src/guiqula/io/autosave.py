@@ -99,7 +99,7 @@ class Autosaver:
         try:
             self.directory.mkdir(parents=True, exist_ok=True)
             temporary = self.path.with_name(self.path.name + ".tmp")
-            temporary.write_text(json.dumps(data))
+            temporary.write_text(json.dumps(data), encoding="utf-8")
             temporary.replace(self.path)
         except OSError as error:     # a full disk must not take the program down
             self.error = f"autosave failed: {error}"
@@ -133,11 +133,13 @@ def read(path):
     """(Document, info) of an autosave file; raises DocumentError."""
     path = Path(path)
     try:
-        data = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError) as error:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         raise DocumentError(f"{path}: not a readable autosave ({error})") from None
     if not isinstance(data, dict) or data.get("format") != FORMAT:
         raise DocumentError(f"{path}: not a guiqula autosave")
+    if "document" not in data:
+        raise DocumentError(f"{path}: an autosave without its document")
     document = Document.from_data(data["document"])
     info = {k: v for k, v in data.items() if k != "document"}
     info["path"] = str(path)
@@ -148,7 +150,8 @@ def recoverable(directory=None, include_unmodified=False):
     """Autosaves left behind by sessions that ended without closing
     cleanly, newest first: dicts with path, saved, source, modified,
     systems (names) and calculations (count). Unreadable files are listed
-    with an ``error``."""
+    with an ``error``: one damaged file (another version's, a truncated
+    copy) must not hide the others."""
     directory = Path(directory) if directory is not None else autosave_dir()
     if not directory.is_dir():
         return []
@@ -157,17 +160,26 @@ def recoverable(directory=None, include_unmodified=False):
     for path in directory.glob("*.json"):
         try:
             document, info = read(path)
-        except (DocumentError, ValueError) as error:
-            out.append({"path": str(path), "saved": path.stat().st_mtime, "error": str(error)})
+            running = info.get("host") == host and pid_alive(int(info.get("pid", -1)))
+            info["saved"] = float(info.get("saved", 0))
+        except Exception as error:
+            out.append({"path": str(path), "saved": _mtime(path), "error": str(error)})
             continue
-        if info.get("host") == host and pid_alive(int(info.get("pid", -1))):
+        if running:
             continue                    # another running session's file
         if not info.get("modified") and not include_unmodified:
             continue
         info.update(systems=[s.name or s.id for s in document.systems],
                     calculations=len(document.calculations))
         out.append(info)
-    return sorted(out, key=lambda i: i.get("saved", 0), reverse=True)
+    return sorted(out, key=lambda i: i["saved"], reverse=True)
+
+
+def _mtime(path):
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
 
 
 def discard(path):

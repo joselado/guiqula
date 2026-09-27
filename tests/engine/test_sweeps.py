@@ -99,3 +99,83 @@ def test_key_and_cost(pyqula):
     builds = {s: {"dimension": 2, "dimensionality": 2, "sites": 2}}
     inner = cost.estimate(d.document, c, builds)["seconds"]
     assert cost.estimate(d.document, sweep, builds)["seconds"] == pytest.approx(7 * inner)
+
+
+def test_values_the_entry_cannot_take_are_refused():
+    """A value out of the parameter's bounds would make the entry invalid at
+    that point, which would then be computed without it (a mean field with
+    a filling above 1 as the non-interacting system): the sweep is refused
+    when planned, and its script is not exported."""
+    d = Dispatcher()
+    s = d.do("add_system", lattice="honeycomb_lattice")
+    d.do("set_meanfield", system=s, enabled=True, params={"U": 3.0, "nk": 4})
+    op = d.do("add_geometry_op", system=s, kind="uniaxial_strain", params={"s": 0.0})
+    c = d.do("add_calculation", system=s, kind="total_energy", params={"nk": 4})
+    sweep = d.do("add_calculation", system=s, kind="sweep", params={
+        "calculation": c, "entry": f"{s}/meanfield", "param": "filling", "start": 0.5,
+        "stop": 1.25, "steps": 4})
+    problem = pipeline.plan_calculation(d.document, sweep).problem
+    assert "filling: must be at most 1.0, got 1.25" in problem
+    with pytest.raises(ValueError, match="must be at most 1.0"):
+        export_script(d.document, sweep)
+    d.do("set_params", entry=sweep, params={"stop": 1.0})
+    assert pipeline.plan_calculation(d.document, sweep).problem is None
+    d.do("set_params", entry=sweep, params={"entry2": op, "param2": "s", "start2": 0.0,
+                                            "stop2": 1.2, "steps2": 3})
+    assert "s: must be at most 0.9, got 1.2" in pipeline.plan_calculation(d.document,
+                                                                         sweep).problem
+
+
+def test_a_point_without_the_swept_entry_fails():
+    """pyqula may still reject a value inside the bounds: that point fails
+    the sweep instead of being computed without the entry; the other
+    entries skipped on the way are the sweep's reports."""
+    from guiqula.core.results import Result
+    from guiqula.engine.context import ApplyContext
+    from guiqula.registry import base as registry
+    from guiqula.registry.sweeps import SweepError
+    d, s, t1, t2, c = haldane()
+    spec = registry.get("calculation", "sweep")
+    params = spec.normalize_params({"calculation": c, "entry": t2, "param": "mass",
+                                    "start": 0.0, "stop": 1.0, "steps": 3})
+
+    def run(rejected):
+        """The inner calculation: t9 always skipped, t2 at the rejected masses."""
+        def inner(document):
+            mass = document.find(t2)[4].params["mass"]
+            reports = [{"id": "t9", "stage": "term", "kind": "kekule", "status": "invalid",
+                        "message": "TypeError: no"}]
+            if mass in rejected:
+                reports.append({"id": t2, "stage": "term", "kind": "sublattice_imbalance",
+                                "status": "invalid", "message": "ValueError: too large"})
+            return Result(calculation=c, kind="chern", key="", params={},
+                          arrays={"chern": np.float64(mass)}, plot={}, reports=reports)
+        return inner
+    ctx = ApplyContext(spec, params)
+    arrays = spec.apply(d.document, ctx, run(()))
+    assert np.allclose(arrays["chern"], [0.0, 0.5, 1.0])
+    assert [(r["id"], r["message"]) for r in ctx.notes["reports"]] == [
+        ("t9", "at t2 mass = 0: TypeError: no")]
+    with pytest.raises(SweepError, match=r"t2 is skipped at t2 mass = 1 \(ValueError: too "
+                                         r"large\), so that point would be computed without it"):
+        spec.apply(d.document, ApplyContext(spec, params), run((1.0,)))
+
+
+def test_a_sweep_of_the_island_size_exports_the_island(pyqula, repo, tmp_path):
+    """The script is generated with the swept value set between the first
+    and the last value (one the entry takes: the island's size has a
+    minimum), so it builds the island at every value, as the engine does."""
+    d = Dispatcher()
+    s = d.do("add_system", lattice="honeycomb_lattice")
+    d.do("set_construction", system=s, has_spin=False)
+    island = d.do("add_geometry_op", system=s, kind="island", params={"n": 1.0})
+    d.do("add_term", system=s, kind="sublattice_imbalance", params={"mass": 0.1})
+    c = d.do("add_calculation", system=s, kind="total_energy", params={"nk": 1})
+    sweep = d.do("add_calculation", system=s, kind="sweep", params={
+        "calculation": c, "entry": island, "param": "n", "start": 1.5, "stop": 2.5, "steps": 3})
+    result = run_calculation(d.document, sweep, cache=BuildCache())
+    assert len(set(np.round(result.arrays["energy"], 6))) == 3
+    source = export_script(d.document, sweep)
+    assert "islands.get_geometry(geo=g, n=value," in source and "skipped" not in source
+    got = run_scripts([source], repo, tmp_path)[0]
+    assert np.allclose(got["energy"], result.arrays["energy"], atol=1e-10)

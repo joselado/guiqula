@@ -128,3 +128,17 @@ def test_kill_and_recover(repo, tmp_path):
     assert report["selected"] == "t2" and report["workspace"] == "hamiltonian"   # the view too
     assert (tmp_path / "recovered.png").read_bytes().startswith(PNG_MAGIC)
     assert list(autosaves.glob("*.json")) == []    # the recovering session closed cleanly
+
+
+def test_the_outline_lists_a_classical_model_and_its_terms(repo):
+    """The report's outline read the Hamiltonian's terms only: a classical
+    system showed none."""
+    import importlib.util
+    from guiqula.io import project
+    spec = importlib.util.spec_from_file_location("drive", repo / "tools" / "drive.py")
+    drive_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(drive_module)
+    systems = drive_module.outline(project.load("texture_exchange"))
+    assert systems[0]["model"] == "classical_spin"
+    assert systems[0]["terms"] == ["t1:heisenberg", "t2:spin_field"]
+    assert systems[1]["terms"] == ["t3:zeeman"] and "model" not in systems[1]

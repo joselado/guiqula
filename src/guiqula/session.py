@@ -599,7 +599,7 @@ class Session:
                                self.result_refs())
         if path is None:
             return source
-        Path(path).write_text(source)
+        Path(path).write_text(source, encoding="utf-8")     # whatever the locale's encoding
         return str(path)
 
     def _action_save_result(self, calculation, path):

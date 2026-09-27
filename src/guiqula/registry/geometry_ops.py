@@ -3,6 +3,7 @@ new one (PLAN.md 3.1). pyqula's methods that change a geometry in place
 (center, shift, set_finite, add_strain) are wrapped by in_place(): the
 engine hands every op its own copy, so changing it and returning it is
 the same as returning a new one."""
+from guiqula.core.nearest import nearest_indices, nearest_site
 from guiqula.registry.base import G, Call, entry
 from guiqula.registry.params import (BoolParam, ConditionParam, FloatParam, FloatVectorParam,
                                      IntParam, IntVectorParam, PositionsParam)
@@ -45,21 +46,23 @@ entry("geometry_op", "island", "Island",
       call=Call("islands.get_geometry", geo=G, n="n", nedges="nedges", rot="rot", clean="clean"))
 
 
+# the sites are matched by core.nearest (a cell hash), never by an N x M
+# array of distances: removing half of a 7,200-site flake took 1.7 GB; the
+# exported script defines nearest_site, the same match one site at a time
 def _remove_atoms(g, ctx):
     import numpy as np
     positions = np.array(ctx.value("positions"), dtype=float).reshape(-1, 3)
-    tol = ctx.value("tol")
     if len(positions) == 0:
         return g.copy()
-    d = np.linalg.norm(np.asarray(g.r)[:, None, :] - positions[None, :, :], axis=2)
-    return g.remove([int(i) for i in np.nonzero(d.min(axis=1) < tol)[0]])
+    picked = nearest_indices(positions, g.r, ctx.value("tol")) >= 0
+    return g.remove([int(i) for i in np.nonzero(picked)[0]])
 
 
 def _remove_atoms_script(ctx):
     return [f"removed = np.array({ctx.code('positions')}, dtype=float).reshape(-1, 3)",
             "if len(removed):",
-            "    d = np.linalg.norm(np.asarray(g.r)[:, None, :] - removed[None, :, :], axis=2)",
-            f"    g = g.remove([int(i) for i in np.nonzero(d.min(axis=1) < {ctx.code('tol')})[0]])"]
+            f"    find = nearest_site(removed, {ctx.code('tol')})",
+            "    g = g.remove([i for i, r in enumerate(g.r) if find(r) >= 0])"]
 
 
 entry("geometry_op", "remove_atoms", "Remove atoms",
@@ -68,7 +71,7 @@ entry("geometry_op", "remove_atoms", "Remove atoms",
                  minimum=1e-9),
       group="Sculpt", doc="Remove the sites at the stored positions (they survive a change "
                           "of the supercell upstream, indices would not).",
-      apply=_remove_atoms, script=_remove_atoms_script,
+      apply=_remove_atoms, script=_remove_atoms_script, helpers=(nearest_site,),
       guide=("guiqula: Selections and regions",), pyqula=("g.remove",))
 
 

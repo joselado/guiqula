@@ -130,6 +130,27 @@ def test_geometry_op(pyqula, kind):
     assert np.allclose(g.a1, direct.a1) and np.allclose(g.a2, direct.a2)
 
 
+def test_remove_atoms_matches_sites_by_cells(pyqula):
+    """Remove selected matches the sites through core/nearest.py: an N x M
+    array of distances took 329 MB to remove half of 3,200 sites (1.7 GB
+    for 7,200); the same sites go."""
+    import tracemalloc
+    d, s, _ = system(ops=[("supercell", {"n": [40, 40, 1]})], has_spin=False)
+    d.do("set_construction", system=s, is_sparse=True)
+    g = build_system(d.document, s, meanfield=False).g
+    half = g.r[:, 0] > np.median(g.r[:, 0])
+    d.do("add_geometry_op", system=s, kind="remove_atoms",
+         params={"positions": g.r[half].tolist()})
+    tracemalloc.start()
+    try:
+        left = build_system(d.document, s, meanfield=False).g
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert peak < 50e6, peak
+    assert positions_equal(left, g.remove([int(i) for i in np.nonzero(half)[0]]))
+
+
 def _interpolated(points, length):
     """Gaussian-weighted average of control points, written again here."""
     points = np.array(points, dtype=float)
@@ -142,6 +163,16 @@ def _interpolated(points, length):
 
 def tanh_profile(r):
     return 0.3 * np.tanh(r[0] / 4)
+
+
+def painted_at(value, default):
+    """A painted Field: value on the site at (-1, 0, 0), default elsewhere;
+    and the direct function of a bond pyqula gets for it (by_bond_ends)."""
+    field = {"kind": "painted", "sites": [[-1.0, 0.0, 0.0, value]], "default": default}
+
+    def site(r):
+        return value if np.linalg.norm(np.asarray(r) - [-1.0, 0.0, 0.0]) < 0.1 else default
+    return field, lambda h: by_bond_ends(h.geometry, site)
 
 
 TERM_CASES = {
@@ -160,7 +191,9 @@ TERM_CASES = {
     "zeeman": [({"m": [0.1, 0.0, 0.2]}, lambda h: h.add_zeeman([0.1, 0.0, 0.2])),
                ({"m": [0, 0, "0.3*tanh(x/4)"]}, lambda h: h.add_zeeman([0.0, 0.0, tanh_profile]))],
     "rashba": [({"c": 0.1}, lambda h: h.add_rashba(0.1)),
-               ({"c": "0.1*cos(x)"}, lambda h: h.add_rashba(lambda r: 0.1 * np.cos(r[0])))],
+               ({"c": "0.1*cos(x)"}, lambda h: h.add_rashba(lambda r: 0.1 * np.cos(r[0]))),
+               ({"c": painted_at(0.3, 0.1)[0]},       # at a bond: the mean of its ends
+                lambda h: h.add_rashba(painted_at(0.3, 0.1)[1](h)))],
     "haldane": [({"t": 0.05}, lambda h: h.add_haldane(0.05)),
                 ({"t": "0.05*exp(-r)"}, lambda h: h.add_haldane(lambda r: 0.05 * np.exp(-np.linalg.norm(r))))],
     "anderson_disorder": [({"w": 0.5, "p": 1.0, "seed": 7}, None)],
@@ -182,7 +215,12 @@ TERM_CASES = {
     "kekule": [({"t": 0.1}, lambda h: h.add_kekule(0.1)),
                ({"t": "0.1 + 0.05*x"}, lambda h: h.add_kekule(lambda r: 0.1 + 0.05 * r[0]))],
     "strain": [({"s": 1.1}, lambda h: h.add_strain(lambda r: 1.1)),
-               ({"s": "1 + 0.1*x"}, lambda h: h.add_strain(lambda r: 1 + 0.1 * r[0]))],
+               ({"s": "1 + 0.1*x"}, lambda h: h.add_strain(lambda r: 1 + 0.1 * r[0])),
+               ({"s": {"kind": "interpolated", "points": [[0, 0, 1.0], [3, 0, 1.3]],
+                       "length": 2.0}},             # a callable already: exported unwrapped
+                lambda h: h.add_strain(_interpolated([[0, 0, 1.0], [3, 0, 1.3]], 2.0))),
+               ({"s": painted_at(1.3, 1.0)[0]},     # and the onsite energies at the sites
+                lambda h: h.add_strain(painted_at(1.3, 1.0)[1](h)))],
     "valley_exchange": [({"v": [0.0, 0.1, 0.2]}, lambda h: h.add_valley_exchange([0.0, 0.1, 0.2]))],
     "crystal_field": [({"v": 0.2, "rcut": 4.0}, lambda h: h.add_crystal_field(0.2, rcut=4.0))],
     "electric_field": [({"E": [0.1, 0.0, 0.3]},
@@ -196,7 +234,9 @@ TERM_CASES = {
     "pairing": [({"delta": 0.1, "mode": "dx2y2"}, lambda h: h.add_pairing(delta=0.1, mode="dx2y2")),
                 ({"delta": "0.1*cos(x)", "mode": "triplet", "d": [1, 0, "0.5*y"]},
                  lambda h: h.add_pairing(delta=lambda r: 0.1 * np.cos(r[0]), mode="triplet",
-                                         d=lambda r: [1.0, 0.0, 0.5 * r[1]]))],
+                                         d=lambda r: [1.0, 0.0, 0.5 * r[1]])),
+                ({"delta": painted_at(0.3, 0.1)[0], "mode": "dx2y2"},
+                 lambda h: h.add_pairing(delta=painted_at(0.3, 0.1)[1](h), mode="dx2y2"))],
     "phase_disorder": [({"w": 0.3, "seed": 3}, None)],
     "python": [({"code": "h.add_kane_mele(0.05)", "needs": "spin"},
                 lambda h: h.add_kane_mele(0.05)),
@@ -278,6 +318,102 @@ def test_region_restricts_a_field(pyqula):
     h = geometry.honeycomb_lattice().get_supercell([3, 3, 1]).get_hamiltonian(has_spin=True)
     h.add_onsite(lambda r: 0.4 * float(r[0] > 1))
     assert_same_hamiltonian(build_system(d.document, s).h, h)
+
+
+@pytest.mark.parametrize("value", [0.1, "0.1 + 0.05*y"])
+def test_region_restricts_a_kekule_hopping(pyqula, value):
+    """pyqula's add_kekule reads a callable of two parameters as a function
+    of the two ends of a bond: a Field restricted to a region is a function
+    of one position only (it had default arguments, and the term was
+    skipped with a numpy TypeError)."""
+    from pyqula import geometry
+    d, s, (t,) = system(ops=[("supercell", {"n": [3, 3, 1]})], terms=[("kekule", {"t": value})])
+    r = d.do("add_region", system=s, select={"kind": "expression", "expr": "x > 0"})
+    d.do("set_region", entry=t, region=r)
+    built = build_system(d.document, s)
+    assert next(rep for rep in built.reports if rep["id"] == t)["status"] == "ok"
+    h = geometry.honeycomb_lattice().get_supercell([3, 3, 1]).get_hamiltonian(has_spin=True)
+    h.add_kekule(lambda r: (0.1 if value == 0.1 else 0.1 + 0.05 * r[1]) * float(r[0] > 0))
+    assert_same_hamiltonian(built.h, h)
+
+
+def by_bond_ends(g, site_value, rule=np.mean):
+    """What pyqula gets for a Field known on the sites only, at a bond
+    (core/bonds.py), written again by brute force: at a site, its value;
+    elsewhere the ends of the shortest pairs of sites (of the cell and the
+    cells around) symmetric about the point, their mean (or minimum)."""
+    shifts = [np.zeros(3)]
+    if g.dimensionality == 2:
+        shifts = [i * np.asarray(g.a1) + j * np.asarray(g.a2)
+                  for i in range(-2, 3) for j in range(-2, 3)]
+    cell = np.asarray(g.r, dtype=float)
+    points = np.concatenate([cell + s for s in shifts])
+    values = np.tile([site_value(r) for r in cell], len(shifts))
+
+    def f(m):
+        m = np.asarray(m, dtype=float)
+        d = np.linalg.norm(points - m, axis=1)
+        if d.min() < 1e-6:
+            return values[d.argmin()]
+        pairs = np.linalg.norm(points[:, None] + points[None, :] - 2 * m, axis=2) < 1e-6
+        a, b = np.nonzero(pairs)
+        if not len(a):
+            return site_value(m)
+        best = d[a] < d[a].min() + 1e-6
+        return rule(np.concatenate([values[a[best]], values[b[best]]]))
+    return f
+
+
+BOND_TERMS = [("rashba", "c", "add_rashba"), ("haldane", "t", "add_haldane"),
+              ("kane_mele", "t", "add_kane_mele"), ("kekule", "t", "add_kekule")]
+
+
+@pytest.mark.parametrize("finite", [False, True])
+@pytest.mark.parametrize("kind, name, method", BOND_TERMS)
+def test_fields_known_on_the_sites_at_the_bonds(pyqula, kind, name, method, finite):
+    """pyqula evaluates these at the bond midpoints, where a painted Field
+    or a region by positions found no site: the term did nothing while its
+    report said ok. At a bond, a painted value is the mean of the ends',
+    and a region holds the bonds whose two ends it holds; a region of
+    every site, or the same value painted everywhere, is the constant."""
+    from pyqula import geometry
+    from guiqula.core import fields
+    ops = [("supercell", {"n": [3, 3, 1]})] + ([("finite", {})] if finite else [])
+    d, s, (t,) = system(ops=ops, terms=[(kind, {name: 0.1})])
+    g = build_system(d.document, s).g
+    right = [i for i, r in enumerate(g.r) if r[0] > 0]
+
+    def direct(value):
+        h = geometry.honeycomb_lattice().get_supercell([3, 3, 1])
+        if finite:
+            h.set_finite()
+        h = h.get_hamiltonian(has_spin=True)
+        getattr(h, method)(value)
+        return h
+    constant = build_system(d.document, s).h
+    painted = fields.paint(0.1, g.r, right, 0.3)
+    d.do("set_param", entry=t, name=name, value=painted)
+    built = build_system(d.document, s)
+    assert next(r for r in built.reports if r["id"] == t)["status"] == "ok"
+    assert_same_hamiltonian(built.h, direct(by_bond_ends(g, lambda r: 0.3 if r[0] > 0 else 0.1)))
+    d.do("set_param", entry=t, name=name, value=fields.paint(0.0, g.r, range(len(g.r)), 0.1))
+    assert_same_hamiltonian(build_system(d.document, s).h, constant)
+    d.do("set_param", entry=t, name=name, value=0.1)
+    region = d.do("add_region", system=s, select={"kind": "positions", "tol": 0.05,
+                                                  "positions": g.r[right].tolist()})
+    d.do("set_region", entry=t, region=region)
+    inside = by_bond_ends(g, lambda r: float(r[0] > 0), np.min)
+    assert_same_hamiltonian(build_system(d.document, s).h, direct(lambda r: 0.1 * inside(r)))
+    d.do("set_region", entry=t, region=None)
+    d.do("set_param", entry=t, name=name, value={"kind": "piecewise", "default": 0.02,
+                                                  "pieces": [{"region": region, "value": 0.1}]})
+    assert_same_hamiltonian(build_system(d.document, s).h,
+                            direct(lambda r: 0.1 if inside(r) else 0.02))
+    everywhere = d.do("add_region", system=s, select={"kind": "positions", "tol": 0.05,
+                                                      "positions": g.r.tolist()})
+    d.do("set_param", entry=t, name=name, value=0.1)
+    d.do("set_region", entry=t, region=everywhere)
+    assert_same_hamiltonian(build_system(d.document, s).h, constant)
 
 
 MEANFIELD_CASES = {

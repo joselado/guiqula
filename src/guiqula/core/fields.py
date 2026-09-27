@@ -408,10 +408,15 @@ def _array_code(value):
     return f"painted_field({value['sites']!r}, {value['tol']!r}, {value['default']!r})"
 
 
-def _result_function(value, results):
+def _result_ref(value, results):
+    """The ResultRef a from_result Field reads, or FieldError."""
     if results is None or value["calculation"] not in results:
         raise FieldError(f"the result of {value['calculation']} is not available")
-    ref = results[value["calculation"]]
+    return results[value["calculation"]]
+
+
+def _result_function(value, results):
+    ref = _result_ref(value, results)
     return site_field(ref.positions, site_values(ref, value["array"], value["component"]),
                       value["tol"], value["scale"])
 
@@ -458,10 +463,15 @@ def _compile_simple(value):
     return value if isinstance(value, float) else Expression(value).at
 
 
-def _piecewise_function(value, regions):
+def _piecewise_function(value, regions, bond=None):
     default = _compile_simple(value["default"])
-    pieces = [(region_tools.compile_indicator(_selection(regions, p["region"])),
-               _compile_simple(p["value"])) for p in value["pieces"]]
+    pieces = []
+    for p in value["pieces"]:
+        selection = _selection(regions, p["region"])
+        inside = region_tools.compile_indicator(selection)
+        if bond is not None and selection["kind"] == "positions":
+            inside = bond(inside, "both")              # known on the sites: both ends inside
+        pieces.append((inside, _compile_simple(p["value"])))
 
     def f(r):
         for inside, piece in reversed(pieces):       # the last piece wins
@@ -471,19 +481,23 @@ def _piecewise_function(value, regions):
     return f
 
 
-def compile_scalar(value, weight=None, regions=None, results=None):
+def compile_scalar(value, weight=None, regions=None, results=None, bond=None):
     """A number, or a callable f(position) for pyqula.
 
     weight: optional callable of position multiplying the Field (the
     indicator of a region); a constant then becomes a callable too.
     regions: {id: selection} for the regions a piecewise Field names;
     results: {calculation id: ResultRef} for the results it reads.
+    bond: for a parameter pyqula evaluates at bond midpoints, a function
+    of (a function of position, rule) giving the function of a midpoint
+    (core/bonds.py): what is known on the sites only (painted and
+    from_result Fields, regions by positions) goes through it.
     """
     value = normalize(value)
     if isinstance(value, float):
         if weight is None:
             return value
-        return lambda r, c=value, w=weight: c * w(r)
+        return _weighted(lambda r: value, weight)
     if isinstance(value, dict) and value["kind"] == "from_result":
         function = _result_function(value, results)
     elif isinstance(value, dict) and value["kind"] == "profile":
@@ -491,66 +505,104 @@ def compile_scalar(value, weight=None, regions=None, results=None):
     elif isinstance(value, dict) and value["kind"] in ("interpolated", "painted"):
         function = _array_function(value)
     elif isinstance(value, dict):
-        function = _piecewise_function(value, regions)
+        function = _piecewise_function(value, regions, bond)
     else:
         function = Expression(value).at
+    if bond is not None and kind_of(value) in ("from_result", "painted"):
+        function = bond(function, "mean")
     if weight is None:
         return function
-    return lambda r, f=function, w=weight: f(r) * w(r)
+    return _weighted(function, weight)
 
 
-def compile_vector(value, weight=None, regions=None, results=None):
-    return [compile_scalar(v, weight, regions, results) for v in normalize_vector(value)]
+def _weighted(function, weight):
+    """function times weight, as a function of one position only: pyqula
+    reads a callable of two or more parameters as a function of the two
+    ends of a bond (add_kekule), so no default arguments here."""
+    def f(r):
+        return function(r) * weight(r)
+    return f
+
+
+def compile_vector(value, weight=None, regions=None, results=None, bond=None):
+    return [compile_scalar(v, weight, regions, results, bond) for v in normalize_vector(value)]
 
 
 def _code_simple(value):
     return repr(value) if isinstance(value, float) else f"({Expression(value).to_python('r')})"
 
 
-def _code_body(value, regions):
-    """Python expression of r for a normalized non-constant Field."""
+def _code_body(value, regions, bond=None, bound=None):
+    """Python expression of r for a normalized non-constant Field; with
+    bond, a region by positions is a function of the bond's midpoint,
+    appended to bound as (name, code) to be made once."""
     if not isinstance(value, dict):
         return Expression(value).to_python("r")
     body = _code_simple(value["default"])
     for piece in value["pieces"]:                      # later pieces are tested first
-        inside = region_tools.code_indicator(_selection(regions, piece["region"]))
+        selection = _selection(regions, piece["region"])
+        inside = region_tools.code_indicator(selection)
+        if bond is not None and selection["kind"] == "positions":
+            name = f"inside{len(bound)}"
+            bound.append((name, bond(f"lambda r: {inside}", "both")))
+            inside = f"{name}(r)"
         body = f"{_code_simple(piece['value'])} if {inside} else ({body})"
     return body
 
 
+def _lambda(bound, body):
+    """lambda r: body, with the callables of bound [(name, code)] made once."""
+    if not bound:
+        return f"lambda r: {body}"
+    return (f"(lambda {', '.join(name for name, _ in bound)}: lambda r: {body})"
+            f"({', '.join(code for _, code in bound)})")
+
+
 def _code_result(value, results):
     """site_field(...) with the result's positions and values written out."""
-    ref = results[value["calculation"]]
+    ref = _result_ref(value, results)
     values = site_values(ref, value["array"], value["component"])
     positions = [[float(c) for c in p] for p in ref.positions]
     return (f"site_field(np.array({positions!r}), np.array({[float(v) for v in values]!r}), "
             f"{value['tol']!r}, {value['scale']!r})")
 
 
-def code_scalar(value, weight_code=None, regions=None, results=None):
+def code_scalar(value, weight_code=None, regions=None, results=None, bond=None,
+                weight_function=None):
     """Python source equivalent to compile_scalar (numpy imported as np;
-    a from_result Field calls site_field, which the script defines)."""
+    a from_result Field calls site_field, which the script defines).
+    bond: compile_scalar's, for source: a function of (the source of a
+    function of position, rule) giving that of the function of a bond's
+    midpoint; weight_function: the source of a callable weight, made once
+    (a region by positions at the bonds), instead of weight_code."""
     value = normalize(value)
+    bound = []
+    if weight_function is not None:
+        bound.append(("weight", weight_function))
+        weight_code = "weight(r)"
     if isinstance(value, float):
         if weight_code is None:
             return repr(value)
-        return f"lambda r: {value!r} * ({weight_code})"
+        return _lambda(bound, f"{value!r} * ({weight_code})")
     if isinstance(value, dict) and value["kind"] == "profile":
         value = profile_expression(value)            # an expression from here on
     if isinstance(value, dict) and value["kind"] in ("from_result", "interpolated", "painted"):
         function = _code_result(value, results) if value["kind"] == "from_result" else \
             _array_code(value)
+        if bond is not None and value["kind"] != "interpolated":
+            function = bond(function, "mean")
         if weight_code is None:
             return function
-        return f"(lambda f: lambda r: f(r) * ({weight_code}))({function})"
-    body = _code_body(value, regions)
+        return _lambda([("f", function)] + bound, f"f(r) * ({weight_code})")
+    body = _code_body(value, regions, bond, bound)
     if weight_code is None:
-        return f"lambda r: {body}"
-    return f"lambda r: ({body}) * ({weight_code})"
+        return _lambda(bound, body)
+    return _lambda(bound, f"({body}) * ({weight_code})")
 
 
-def code_vector(value, weight_code=None, regions=None, results=None):
-    return "[" + ", ".join(code_scalar(v, weight_code, regions, results)
+def code_vector(value, weight_code=None, regions=None, results=None, bond=None,
+                weight_function=None):
+    return "[" + ", ".join(code_scalar(v, weight_code, regions, results, bond, weight_function)
                            for v in normalize_vector(value)) + "]"
 
 

@@ -210,7 +210,7 @@ def _apply_stage(stage, obj, sparse_above=None):
             raise BuildError(f"model {stage.kind}: {type(error).__name__}: {error}") from None
         return new, record
     ctx = ApplyContext(stage.spec, stage.params, region=stage.region, regions=stage.regions,
-                       results=stage.results)
+                       results=stage.results, geometry=getattr(obj, "geometry", None))
     if stage.turn_nambu and not getattr(obj, "has_eh", False):
         # the first entry that needs Nambu (the plan's pre-scan): Nambu from here on, even
         # when the entry itself fails, so the mode is the plan's

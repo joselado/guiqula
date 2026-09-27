@@ -488,6 +488,30 @@ refused by the command (the Document check), a broken one flags the entry;
 remaps the ids. Script export writes nested conditional expressions over
 the regions' indicators.
 
+**Fields known on the sites only, at the bonds** (2026-09-28, a review
+finding). pyqula evaluates the Field of a bond term (Rashba, Haldane,
+Kane-Mele and their variants, Kekule, the pairing's amplitude and
+d-vector, the hopping modulation) at the midpoint of each bond. A painted
+or from_result Field, and a region by positions (a term's region, or a
+piece of a piecewise Field), are known on the sites only and found
+nothing there: a term restricted to a region made from a canvas selection,
+or given a painted Field, did nothing while its report said ok. Those
+parameters declare `FieldParam(bond=True)`, and the engine and the
+exported script hand pyqula `core/bonds.bond_field`, which takes a bond's
+value from its two ends, found on the built geometry (the cell's sites and
+their images in the cells around, so a bond crossing the cell's edge has
+its ends too): a painted or from_result value is the **mean** of the
+ends', and a region holds a bond when it holds **both** ends (a term
+restricted to a region acts on the bonds between its sites). At a site
+(an onsite element of the hopping modulation or of an s-wave pairing) the
+value is the site's. Limits, design items for the maintainer: where bonds
+share a midpoint pyqula gives them one value, and the shortest pairs
+through it decide (the two diagonals of a square plaquette take its four
+corners; a long bond whose midpoint is a site takes that site's value); a
+bond longer than 6 (in pyqula's unit, the first-neighbour distance) takes
+the Field at its midpoint as before. The canvas preview of such a Field
+still shows its values at the sites (phase 2, left for later).
+
 ## 4. The user interface
 
 One window, one document, three workspaces switched by tabs in the header
@@ -1440,7 +1464,11 @@ part 3):
     entry is free; `Document.locks` is a new field (the schema version
     stays 1: an older guiqula refuses a file that has it);
 17. an export writes the script and the document of the result's own
-    snapshot (a stale result is reproduced as it was);
+    snapshot (a stale result is reproduced as it was); since 2026-09-28 a
+    result also keeps the results its from_result Fields read
+    (`Result.reads`, in its file under the json's `layout`, with the
+    geometry of a result on the atoms), so its script reads those, not the
+    source calculation's current result or none;
 18. a result on the atoms of a chain is drawn as a curve against x;
 19. the interactive builds use sparse matrices above pyqula's dense limit
     and then draw no Hamiltonian view; the calculations still follow the

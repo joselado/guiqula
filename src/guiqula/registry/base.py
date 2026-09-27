@@ -74,6 +74,8 @@ class EntrySpec:
     cost: Callable | None = None     # calculations: (params, size) -> seconds (registry/cost.py)
     modules: tuple = ()              # pyqula modules a custom script uses ("disorder")
     preamble: tuple = ()             # lines an exported script runs once, after its imports
+    helpers: tuple = ()              # functions a custom script calls, whose source the
+                                     # exported script defines (core.nearest.nearest_site)
     regions: bool = True             # terms: whether a region may restrict it (a factor may not)
     runs_code: bool = False          # a Python node: runs only in a trusted document (13.7)
     document_level: bool = False     # a sweep: apply(document, ctx, run) runs other calculations

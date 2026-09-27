@@ -12,7 +12,7 @@ A classical system's model is the variable ``model``.
 import inspect
 
 import guiqula
-from guiqula.core import fields
+from guiqula.core import bonds, fields
 from guiqula.core import regions as region_tools
 from guiqula.registry import pipeline
 from guiqula.registry.base import G, H
@@ -20,24 +20,39 @@ from guiqula.registry.params import ConditionParam, FieldParam, VectorFieldParam
 
 
 class ScriptContext:
+    """The source of an entry's parameters. helpers: the functions the
+    source calls that fields.helpers_of does not see (bond_field)."""
+
     def __init__(self, spec, params, region=None, regions=None, results=None):
         self.spec = spec
         self.params = params
+        self.region = region
         self.weight = region_tools.code_indicator(region) if region else None
         self.regions = regions or {}
         self.results = results or {}
+        self.helpers = set()
 
     def value(self, name):
         return self.params[name]
 
+    def _bond(self, code, rule):
+        """The engine's ApplyContext._bond, as source: on the geometry of the
+        Hamiltonian being built."""
+        self.helpers.add(bonds.bond_field)
+        return f"bond_field({code}, h.geometry, {rule!r})"
+
     def code(self, name):
         param = self.spec.param_map[name]
         value = self.params[name]
-        weight = self.weight if getattr(param, "native", False) else None
-        if isinstance(param, VectorFieldParam):
-            return fields.code_vector(value, weight, self.regions, self.results)
         if isinstance(param, FieldParam):
-            return fields.code_scalar(value, weight, self.regions, self.results)
+            bond = self._bond if getattr(param, "bond", False) else None
+            weight = self.weight if param.native else None
+            weight_function = None
+            if weight is not None and bond is not None and self.region["kind"] == "positions":
+                weight, weight_function = None, bond(f"lambda r: {self.weight}", "both")
+            code_field = fields.code_vector if isinstance(param, VectorFieldParam) else \
+                fields.code_scalar
+            return code_field(value, weight, self.regions, self.results, bond, weight_function)
         if isinstance(param, ConditionParam):
             return param.code(value)
         return repr(value)
@@ -136,8 +151,8 @@ def _parts(plan, skipped=None):
     for stage in system.stages:
         if stage.applied and stage.params is not None:
             helpers |= fields.helpers_of(stage.params)
-    for helper in sorted(helpers, key=lambda f: f.__name__):   # site_field, painted_field...
-        head += ["", inspect.getsource(helper).rstrip(), "", ""]
+        if stage.applied and stage.spec is not None:
+            helpers |= set(stage.spec.helpers)
     lines = []
     for stage in system.stages:
         if stage.stage == "base":
@@ -185,6 +200,9 @@ def _parts(plan, skipped=None):
             lines.append(f"g = {call_code(stage.spec, ctx)}")
         else:
             lines.append(call_code(stage.spec, ctx))
+        helpers |= ctx.helpers
+    for helper in sorted(helpers, key=lambda f: f.__name__):   # site_field, painted_field...
+        head += ["", inspect.getsource(helper).rstrip(), "", ""]
     lines.append("")
     if plan.spec.seed_param is not None:
         s = plan.params[plan.spec.seed_param.name]
@@ -193,9 +211,11 @@ def _parts(plan, skipped=None):
     return head, lines
 
 
-# values the swept parameters take while their script is generated; they are
-# then replaced by the loop variables
-SENTINELS = (0.123456789012345, 0.234567890123456)
+# where between its first and last value each swept parameter is set while
+# the script is generated (a value the entry takes: a value out of its
+# bounds would make it invalid, and the script would leave it out); that
+# value is then replaced by the loop variable
+FRACTIONS = (0.123456789012345, 0.234567890123456)
 
 
 def _export_sweep(document, plan, skipped, trusted, results):
@@ -204,17 +224,26 @@ def _export_sweep(document, plan, skipped, trusted, results):
     gives (value, value2, one array per number)."""
     from guiqula.registry import sweeps
     grid = sweeps.axes(plan.params)
-    swept = document
-    for (target, param, component, _), sentinel in zip(grid, SENTINELS):
-        swept = sweeps.with_value(swept, target, param, component, sentinel)
+    swept, sentinels = document, []
+    for (target, param, component, values), fraction in zip(grid, FRACTIONS):
+        sentinels.append(float(values[0] + (values[-1] - values[0]) * fraction))
+        swept = sweeps.with_value(swept, target, param, component, sentinels[-1])
     inner = pipeline.plan_calculation(swept, plan.params["calculation"], trusted, results)
     if inner.problem:
         raise ValueError(f"{plan.calc_id}: {inner.problem}")
+    for target, _, _, _ in grid:
+        stage = next((s for s in inner.system.stages if s.id == target), None)
+        if stage is not None and stage.problem:
+            raise ValueError(f"{plan.calc_id}: {target} is invalid at the swept values: "
+                             f"{stage.problem}")
     head, body = _parts(inner, skipped)
     text = "\n".join(body)
     names = ["value", "value2"][:len(grid)]
-    for sentinel, name in zip(SENTINELS, names):
-        if repr(sentinel) not in text:
+    for (_, _, _, values), sentinel, name in zip(grid, sentinels, names):
+        if values[0] == values[-1]:       # the same value at every point: written as it is
+            continue
+        code = [line for line in text.split("\n") if not line.lstrip().startswith("#")]
+        if not any(repr(sentinel) in line for line in code):
             raise ValueError(f"{plan.calc_id}: the swept parameter does not reach the script")
         text = text.replace(repr(sentinel), name)
     function = [f"def compute({', '.join(names)}):",

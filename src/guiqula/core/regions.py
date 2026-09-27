@@ -62,7 +62,7 @@ def compile_indicator(select):
     select = normalize(select)
     if select["kind"] == "expression":
         expression = Expression(select["expr"])
-        return lambda r, e=expression: float(bool(e.at(r)))
+        return lambda r: float(bool(expression.at(r)))
     if not select["positions"]:
         return lambda r: 0.0
     find = nearest_site(select["positions"], select["tol"])

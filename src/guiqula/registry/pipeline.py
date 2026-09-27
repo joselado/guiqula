@@ -449,15 +449,15 @@ def _plan_sweep(document, calc, params, trusted, results):
         return "a sweep runs a calculation, not a sweep", None
     if inner.system != calc.system:
         return f"{inner_id} runs on {inner.system}, the sweep on {calc.system}", None
-    axes = [(params["entry"], params["param"], params["component"])]
-    if params["entry2"]:
-        axes.append((params["entry2"], params["param2"], params["component2"]))
-    for target, param, component in axes:
+    for target, param, component, values in sweeps.axes(params):
         problem = sweeps.check_target(document, target, param, component)
         if problem:
             return problem, None
         if _owner(document, target) != calc.system:
             return f"{target} is not part of {calc.system}, which the sweep runs on", None
+        problem = sweeps.check_values(document, target, param, component, values)
+        if problem:
+            return problem, None
     inner_plan = plan_calculation(document, inner_id, trusted, results)
     if inner_plan.problem:
         return f"{inner_id}: {inner_plan.problem}", None
