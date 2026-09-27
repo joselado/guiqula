@@ -1148,7 +1148,12 @@ say more):
     console), which is nothing for a texture of a few hundred sites and
     will matter for a large result.
 Items 18 and 19 are not decisions: 18 is a fact about pyqula worth
-fixing upstream, 19 lists what phase 4 left out. Items 11 to 13 settle
+fixing upstream, 19 lists what phase 4 left out. The pyqula facts of
+phase 4 (item 18, kdos_bands and write=, the unclear errors of
+add_valley_exchange and add_crystal_field, the sign of Geometry.shift,
+the .OUT files written without a write= switch, and smaller points) were
+sent to the pyqula Claude session on 2026-09-27, at the maintainer's
+request; the pyqula repository itself was not touched. Items 11 to 13 settle
 three questions of section 11 once confirmed.
 
 **Phase 5 — polish.** Undo everywhere, keyboard shortcuts, theming (light and
