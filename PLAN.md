@@ -1371,7 +1371,11 @@ shortcuts, help; its shortcut table is checked against
 F1, a form's ? button, Help > pyqula user guide and guiqula user guide, the
 `help` window action; Markdown in a QTextBrowser whose `loadResource`
 serves the equations (`formula:N`), `help:` links between sections, Back;
-while it shows an item's help it follows the selection. Packaging:
+while it shows an item's help it follows the selection, and a change of
+theme draws its page again (the equations take the text colour). A
+chapter of pyqula's guide (a top-level section with sections, up to 965
+lines) is shown as its introduction and links to its sections: a
+lattice's help quoted all of "Setting up a Hamiltonian" (38 equations). Packaging:
 `setup.py` copies `vendor/pyqula_user_guide.md` into the wheel as
 `guiqula/_vendor/pyqula_user_guide.md`, and guiqula's guide is package
 data; `vendoring.find_guide()` takes the guide of an override's tree when
@@ -1689,7 +1693,8 @@ onward are features (placement per phase at the end of section 7).
    section fails at refresh time. The guide ships with the package next to
    the vendored pyqula. Phase 5. The code review of this decision found
    design points it leaves open; they are listed at the end of section 11
-   and must be settled before phase 5 builds the help.
+   with the recommendations phase 5 built (part 4), for the maintainer to
+   confirm.
 
 14. **Crash reports.** On an unexpected error, write a bundle with log,
    traceback, Document snapshot and versions to the user data directory and

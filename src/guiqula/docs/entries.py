@@ -11,7 +11,6 @@ other sections whose code calls them. Items that are guiqula's own (a
 system, a region, the calculations) show a section of guiqula's user guide.
 Everything is Markdown with $...$ equations; ui/help.py draws it.
 """
-import re
 from pathlib import Path
 from urllib.parse import quote
 
@@ -67,6 +66,18 @@ def guide_of(which):
 
 def link(which, anchor, text=None):
     return f"[{text or anchor}](help:{which}/{quote(anchor, safe='')})"
+
+
+def section_text(which, guide, anchor):
+    """A section as the help shows it: in full, but a chapter (a top-level
+    section with sections of its own, some hundreds of lines long) as its
+    introduction and links to its sections."""
+    section = guide.find(anchor)
+    children = guide.children(anchor)
+    if section.level > 1 or not children:
+        return guide.text(anchor)
+    return guide.own_text(anchor) + "\nIts sections: " + ", ".join(
+        link(which, c.anchor, c.title) for c in children) + ".\n"
 
 
 def reference_anchor(guide, target):
@@ -159,7 +170,7 @@ def entry_help(spec, stage=None):
     if guide is not None:
         for anchor in entry_anchors(spec, guide):
             try:
-                parts.append(guide.text(anchor))
+                parts.append(section_text("pyqula", guide, anchor))
                 shown.add(anchor)
             except guides.GuideError as error:
                 parts.append(f"*{error}*")
@@ -193,7 +204,7 @@ def section_page(which, anchor):
     guide = guide_of(which)
     if guide is None:
         return "pyqula's user guide was not found.\n"
-    return guide.text(anchor) + "\n" + source_note() + "\n"
+    return section_text(which, guide, anchor) + "\n" + source_note() + "\n"
 
 
 def contents(which):
@@ -276,5 +287,3 @@ def anchor_problems():
     return problems
 
 
-__all__ = ["anchor_problems", "contents", "entry_help", "item_help", "pyqula_targets",
-           "section_page", "re"]

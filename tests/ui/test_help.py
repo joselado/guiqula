@@ -89,3 +89,24 @@ def test_mathtext_draws_most_of_the_guides_equations():
             failed.append(tex)
     assert len(equations) > 900
     assert len(failed) / len(equations) < 0.03, failed[:10]
+
+
+def test_the_help_follows_a_change_of_theme(window, qtbot):
+    """The equations are drawn in the text colour of the theme."""
+    from guiqula.ui import theme
+    panel = window.help_panel
+
+    def ink(image):          # the mean lightness of the drawn (opaque) pixels
+        values = [image.pixelColor(x, y).lightness() for x in range(image.width())
+                  for y in range(image.height()) if image.pixelColor(x, y).alpha() > 200]
+        return sum(values) / len(values)
+    window.select("t1")
+    window.show_help()
+    before = ink(panel.browser.loadResource(2, QUrl("formula:0")))
+    window.set_theme("dark")
+    try:
+        assert panel.page == ("item", "t1")
+        assert ink(panel.browser.loadResource(2, QUrl("formula:0"))) > before + 100
+    finally:
+        window.set_theme("light")
+    assert theme.name == "light"

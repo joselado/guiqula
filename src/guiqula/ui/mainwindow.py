@@ -2067,6 +2067,12 @@ class MainWindow(QMainWindow):
             self._refresh_structure()
             for calc in list(self.plots):
                 self._draw_result(calc, force=True)
+        page = self.help_panel.page                  # its equations, in the new text colour
+        if page is not None:
+            {"item": lambda: self.help_panel.show_item(page[1], remember=False),
+             "section": lambda: self.help_panel.show_section(*page[1:], remember=False),
+             "contents": lambda: self.help_panel.show_contents(page[1], remember=False)
+             }[page[0]]()
         return applied
 
     def set_always_trust(self, enabled):

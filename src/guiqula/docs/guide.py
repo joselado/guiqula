@@ -107,6 +107,18 @@ class Guide:
         lines = self.lines[section.start + (0 if with_heading else 1):section.end]
         return "\n".join(lines).strip() + "\n"
 
+    def children(self, anchor):
+        """The sections directly under a section."""
+        section = self.find(anchor)
+        return [s for s in self.sections if s.parent == section.anchor]
+
+    def own_text(self, anchor):
+        """A section's text up to its first subsection."""
+        section = self.find(anchor)
+        end = next((s.start for s in self.sections
+                    if section.start < s.start < section.end), section.end)
+        return "\n".join(self.lines[section.start:end]).strip() + "\n"
+
     def calls(self, name):
         """Anchors of the sections whose own code (not their subsections')
         calls name, e.g. "add_zeeman"."""
