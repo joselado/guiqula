@@ -16,11 +16,20 @@ Names available in an expression:
 - the functions in FUNCTIONS, also as ``np.<name>``.
 
 Integer literals are read as floats, so ``9**9**9`` overflows to an error
-instead of building a huge integer. Comparisons give booleans that combine
-with ``&``, ``|`` and ``~`` and multiply as 0 and 1; ``and``/``or``/``if``
-are not available because they do not act elementwise on arrays. A chained
-comparison ``-2 < x < 2``, which Python evaluates with ``and``, is read as
-``(-2 < x) & (x < 2)``.
+instead of building a huge integer; a literal too large for a float is
+refused. A function takes exactly its number of arguments: a numpy ufunc
+would read one more as the array to write its result into.
+
+One arithmetic holds everywhere, in the engine, the canvas previews and
+the exported scripts alike: a comparison is the number 1.0 where it holds
+and 0.0 elsewhere, so ``(x > 0) + (y > 0)`` counts and ``-(x > 0)``
+negates; ``&``, ``|``, ``^`` and ``~`` are the logical and, or, exclusive
+or and not of such truth values (any nonzero number is true), 1.0 or 0.0
+as well. ``and``/``or``/``if`` are not available because they do not act
+elementwise on arrays. A chained comparison ``-2 < x < 2``, which Python
+evaluates with ``and``, is read as ``(-2 < x) & (x < 2)``. A value that is
+not a real number (a negative number to a fractional power, as in
+``(-8)**(1/3)``) is refused.
 """
 import ast
 import copy
@@ -36,6 +45,11 @@ FUNCTIONS = {name: getattr(np, name) for name in (
     "exp", "log", "log10", "log2", "sqrt", "abs", "sign", "heaviside",
     "floor", "ceil", "minimum", "maximum", "clip", "where", "mod",
 )}
+# the number of arguments of each function: a ufunc takes the array to
+# write into as its next positional argument ("hypot(x, y, z)" would
+# overwrite z), so a call must give exactly these
+ARITY = {name: 3 if name in ("clip", "where") else function.nin
+         for name, function in FUNCTIONS.items()}
 MAX_LENGTH = 1000
 MAX_DEPTH = 40
 
@@ -65,6 +79,13 @@ def _check(node, source, depth=0):
     if isinstance(node, ast.Constant):
         if isinstance(node.value, bool) or not isinstance(node.value, (int, float)):
             raise ExpressionError(f"only numbers are allowed as constants, not {node.value!r}")
+        try:
+            finite = math.isfinite(float(node.value))
+        except OverflowError:                 # an integer literal of more than 308 digits
+            finite = False
+        if not finite:
+            raise ExpressionError("a number in the expression is too large (the largest is "
+                                  "about 1.8e308)")
     elif isinstance(node, ast.Name):      # a called function's name is not visited
         if node.id in FUNCTIONS:
             raise ExpressionError(f"{node.id} is a function: call it, as in {node.id}(x)")
@@ -88,13 +109,26 @@ def _check(node, source, depth=0):
             called = ast.unparse(func)
             raise ExpressionError(f"{called}() cannot be called; the functions are: "
                                   + ", ".join(sorted(FUNCTIONS)))
+        if any(isinstance(arg, ast.Starred) for arg in node.args):
+            raise ExpressionError("*arguments are not allowed in an expression")
+        name = _called(node)
+        if len(node.args) != ARITY[name]:
+            count = ARITY[name]
+            raise ExpressionError(f"{name}() takes {count} argument{'s' * (count > 1)}, "
+                                  f"not {len(node.args)}")
         for arg in node.args:
-            if isinstance(arg, ast.Starred):
-                raise ExpressionError("*arguments are not allowed in an expression")
             _check(arg, source, depth + 1)
         return
+    elif isinstance(node, ast.Compare) and len(node.ops) > MAX_DEPTH - depth:
+        # a chain a < b < c < ... is read as one & per comparison, nested
+        raise ExpressionError("too many comparisons in one chain")
     for child in ast.iter_child_nodes(node):
         _check(child, source, depth + 1)
+
+
+def _called(node):
+    """The name of the function a checked call calls."""
+    return node.func.id if isinstance(node.func, ast.Name) else node.func.attr
 
 
 class _ChainedComparisons(ast.NodeTransformer):
@@ -111,6 +145,55 @@ class _ChainedComparisons(ast.NodeTransformer):
             part = ast.Compare(left, [op], [operands[i + 1]])
             out = part if out is None else ast.BinOp(out, ast.BitAnd(), part)
         return ast.copy_location(out, node)
+
+
+_LOGICAL = {ast.BitAnd: "logical_and", ast.BitOr: "logical_or", ast.BitXor: "logical_xor"}
+
+
+def _np_call(name, *args):
+    return ast.Call(ast.Attribute(ast.Name("np", ast.Load()), name, ast.Load()), list(args), [])
+
+
+def _is_truth(node):
+    """Whether a node gives a truth value: a comparison, or &, |, ^, ~."""
+    return isinstance(node, ast.Compare) or (
+        isinstance(node, ast.BinOp) and type(node.op) in _LOGICAL) or (
+        isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Invert))
+
+
+class _RealArithmetic(ast.NodeTransformer):
+    """One arithmetic for the whole expression: a truth value is the number
+    1.0 or 0.0 wherever it is used as a number. Without this, a comparison
+    between literals is a Python bool and one at a position a numpy bool,
+    whose + is a logical or and whose - fails: "(1 > 0) + (1 > 0)" was 2
+    and "(x > 0) + (y > 0)" 1. Inside &, |, ^, ~ and the condition of where
+    a truth value stays a boolean, since only its truth is read there."""
+
+    def visit(self, node):
+        """node, rewritten as a number."""
+        if _is_truth(node):
+            return ast.copy_location(_np_call("float64", self._truth(node)), node)
+        return super().visit(node)
+
+    def _truth(self, node):
+        """node, rewritten as a truth value (a boolean, or a number whose
+        truth is read)."""
+        if isinstance(node, ast.Compare):
+            node.left = self.visit(node.left)
+            node.comparators = [self.visit(c) for c in node.comparators]
+            return node
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Invert):
+            return ast.copy_location(_np_call("logical_not", self._truth(node.operand)), node)
+        if isinstance(node, ast.BinOp) and type(node.op) in _LOGICAL:
+            return ast.copy_location(_np_call(_LOGICAL[type(node.op)], self._truth(node.left),
+                                              self._truth(node.right)), node)
+        return self.visit(node)
+
+    def visit_Call(self, node):
+        if _called(node) == "where":
+            node.args = [self._truth(node.args[0])] + [self.visit(a) for a in node.args[1:]]
+            return node
+        return self.generic_visit(node)
 
 
 class _FloatConstants(ast.NodeTransformer):
@@ -158,10 +241,13 @@ class Expression:
             raise ExpressionError("expression nested too deeply") from None
         _check(tree, source)
         self.source = source.strip()
-        tree = _ChainedComparisons().visit(tree)
-        self.tree = ast.fix_missing_locations(_FloatConstants().visit(tree))
-        self._code = compile(self.tree, "<expression>", "eval")
         self.names = frozenset(n.id for n in ast.walk(tree) if isinstance(n, ast.Name))
+        try:
+            tree = _RealArithmetic().visit(_ChainedComparisons().visit(tree))
+            self.tree = ast.fix_missing_locations(_FloatConstants().visit(tree))
+            self._code = compile(self.tree, "<expression>", "eval")
+        except RecursionError:
+            raise ExpressionError("expression nested too deeply") from None
 
     def __repr__(self):
         return f"Expression({self.source!r})"
@@ -174,16 +260,20 @@ class Expression:
         namespace = dict(FUNCTIONS)
         namespace.update(CONSTANTS)
         namespace["np"] = _NP
-        # numpy scalars, not Python floats: comparisons then give numpy
-        # booleans, for which ~ is a logical not, as for arrays
+        # numpy scalars, not Python floats, so that an evaluation at one
+        # position (pyqula's, per site) computes as one on arrays does
         x, y, z = (_as_numpy(v) for v in (x, y, z))
         namespace.update(x=x, y=y, z=z)
         if "r" in self.names:
             namespace["r"] = np.sqrt(np.asarray(x) ** 2 + np.asarray(y) ** 2 + np.asarray(z) ** 2)
         try:
-            return eval(self._code, {"__builtins__": {}}, namespace)
+            value = eval(self._code, {"__builtins__": {}}, namespace)
         except (ArithmeticError, ValueError, TypeError) as error:
             raise ExpressionError(f"evaluating {self.source!r}: {error}") from None
+        if np.iscomplexobj(value):
+            raise ExpressionError(f"evaluating {self.source!r}: the value is not a real number "
+                                  f"(a negative number to a fractional power is complex)")
+        return value
 
     def at(self, position):
         """Evaluate at one position (x, y, z): the pyqula callable convention."""
@@ -197,12 +287,13 @@ class Expression:
     def to_python(self, var="r"):
         """Python source of the body of ``lambda <var>: ...`` with ``np`` imported."""
         tree = _ChainedComparisons().visit(ast.parse(self.source, mode="eval"))
-        tree = _ToPython(var).visit(tree)
+        tree = _ToPython(var).visit(_RealArithmetic().visit(tree))
         return ast.unparse(ast.fix_missing_locations(tree))
 
 
 def _as_numpy(value):
-    value = np.asarray(value, dtype=float)
+    # a copy: an expression never writes into the arrays it is given
+    value = np.array(value, dtype=float)
     return value[()] if value.ndim == 0 else value
 
 
@@ -212,7 +303,10 @@ class _Namespace:
         self.__dict__.update(functions)
 
 
-_NP = _Namespace(FUNCTIONS)
+# np in an expression also has what _RealArithmetic writes, which the
+# expression's own text cannot call (_check allows FUNCTIONS only)
+_NP = _Namespace(dict(FUNCTIONS, **{name: getattr(np, name) for name in (
+    "float64", "logical_and", "logical_or", "logical_xor", "logical_not")}))
 
 
 def parse(source):

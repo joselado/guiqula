@@ -116,6 +116,25 @@ def test_text_being_typed_survives_a_finished_build(window, qtbot):
     assert editor.text() == "0.5"
 
 
+def test_neighbour_hoppings_that_are_not_finite_are_refused_in_the_system_form(window, qtbot):
+    """"nan" typed into the System form's neighbour hoppings was stored: the
+    edit was reported as failed although applied, the form raised out of
+    its slot (a crash report) and the system could no longer be built."""
+    start = fresh(qtbot, window)
+    window.select("s1")
+    form = window.properties.form
+    for text in ("nan", "1, inf", "1e999"):
+        form.tij.setText(text)
+        form.tij.editingFinished.emit()
+        assert "must be finite numbers" in form.error.text()
+        assert window.session.document.system("s1").hamiltonian.construction.tij == [1.0]
+        assert form.tij.text() == "1"                     # the form shows the stored value
+    assert not window.session.dispatcher.can_undo()
+    settle(qtbot, window)
+    assert window.session.build_is_current("s1")
+    assert [line for line in errors_since(window, start) if "UNEXPECTED" in line] == []
+
+
 def test_the_jobs_panel_keeps_the_newest_finished_rows(qapp, monkeypatch):
     from types import SimpleNamespace
     from guiqula.ui import jobpanel

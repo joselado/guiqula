@@ -68,6 +68,33 @@ def test_a_preset_name_is_the_preset_beside_a_folder_of_that_name(tmp_path):
         project.load(str(tmp_path / "ssh_chain"))
 
 
+@pytest.mark.parametrize("suffix", [".guiqula", ".json"])
+def test_the_json_layout_never_changes_a_string(tmp_path, suffix):
+    """Short lists are written on one line by a pass over the JSON text,
+    which also rewrote "[1,2]" inside strings: notes, names and a Python
+    node's code came back changed (len("[1,2]") became 6), and the worker,
+    which gets the Document as JSON, keyed a node holding [0,0,0.3]
+    differently from the window: its build was never current and every
+    fresh result was stale."""
+    from guiqula.commands import Dispatcher
+    from guiqula.registry import pipeline
+    d = Dispatcher()
+    d.do("set_notes", notes='Try the mass in [0,1] or [0.1,  0.2]; see "[1,2]"\n[a, b]')
+    s = d.do("add_system", lattice="honeycomb_lattice")
+    d.do("add_region", system=s, select={"kind": "positions", "positions": [[1, 0, 0]]},
+         name="left [1,2]")
+    d.do("add_term", system=s, kind="python", params={
+        "code": 's = "[1,2]"\nh.add_zeeman([0,0,0.3])\nh.add_onsite(float(len(s)))\n',
+        "needs": "spin"})
+    c = d.do("add_calculation", system=s, kind="bands")
+    text = d.document.to_json()
+    assert '"positions": [\n' in text and "[1.0, 0.0, 0.0]" in text     # still one line each
+    assert Document.from_json(text) == d.document
+    assert pipeline.calculation_key(Document.from_json(text), c, True) == \
+        pipeline.calculation_key(d.document, c, True)
+    assert project.load(project.save(d.document, tmp_path / f"p{suffix}")) == d.document
+
+
 def _result(arrays):
     import numpy as np
     from guiqula.core.results import Result

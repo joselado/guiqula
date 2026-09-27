@@ -89,7 +89,9 @@ phase, exchange fields as arrows.
 Every number of a term is a Field. The f(r) button next to it opens the Field editor:
 
 - a number, or an expression of x, y, z and r (numpy functions such as sin, exp, tanh,
-  sqrt, abs, and pi);
+  sqrt, abs, and pi); a comparison is 1 where it holds and 0 elsewhere, so
+  `0.2*((x > 0) - (x < 0))` is a step, and `&`, `|` and `~` combine comparisons
+  (and, or, not);
 - piecewise: one value per region and a default elsewhere;
 - a profile (gaussian, step, disk, plane wave, Aubry-Andre, domain wall) with its numbers;
 - interpolated between control points;

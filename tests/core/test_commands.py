@@ -164,6 +164,96 @@ def test_the_journal_keeps_one_record_per_merged_step_and_is_bounded(monkeypatch
     assert [e["args"]["value"] for e in d.journal] == [5.0, 6.0, 7.0, 8.0, 9.0]
 
 
+def test_one_journal_record_per_merged_step_whatever_actions_come_between():
+    """With auto re-run on, the window runs the stale calculations after
+    the rebuild that follows each slider move: the runs came between the
+    moves, and every move of the drag kept its record."""
+    d = Dispatcher()
+    s = d.do("add_system")
+    t = d.do("add_term", system=s, kind="onsite", params={"mu": 0.1})
+    d.register_action("run_calculation", lambda calculation: None)
+    for stroke in range(2):
+        for step in range(50):
+            d.do_merged("slider", "set_param", entry=t, name="mu", value=step + 100.0 * stroke)
+            d.act("run_calculation", calculation="c1")
+        d.end_merge()
+    mutations = [e["args"].get("value") for e in d.journal if e["type"] == "mutation"]
+    assert mutations == [None, None, 49.0, 149.0]
+    assert sum(e["type"] == "action" for e in d.journal) == 100
+    assert d.journal[-2]["args"]["value"] == 149.0       # the step's record is its last move
+    d.do("set_param", entry=t, name="mu", value=0.5)      # a mutation in between ends a step
+    d.do_merged("slider", "set_param", entry=t, name="mu", value=0.6)
+    assert [e["args"].get("value") for e in d.journal if e["type"] == "mutation"][-3:] == \
+        [149.0, 0.5, 0.6]
+
+
+def test_a_failing_listener_does_not_make_a_done_command_look_refused(monkeypatch):
+    """The mutation is done when the listeners are told: one that raised
+    made do() raise too, so the window logged a refusal for an edit that was
+    applied and on the undo stack, and the listeners after it were never
+    told. Its error goes to sys.excepthook instead."""
+    import sys
+    reported, told = [], []
+    monkeypatch.setattr(sys, "excepthook", lambda kind, value, tb: reported.append(kind))
+    d = Dispatcher()
+    d.subscribe(lambda event: 1 / 0)
+    d.subscribe(told.append)
+    assert d.do("add_system") == "s1"
+    d.undo()
+    assert [e["type"] for e in told] == ["mutation", "undo"]
+    assert reported == [ZeroDivisionError, ZeroDivisionError] and d.can_redo()
+
+
+def test_json_arguments_are_not_coerced():
+    """Arguments come as JSON from the remote API and the console: "false"
+    was read by bool() as true (a request to disable a term left it
+    enabled), and a null note became the text "None". A number that is not
+    finite or too large raised OverflowError instead of a refusal."""
+    from guiqula.io import project
+    d = Dispatcher(project.load("honeycomb_zeeman_rashba"))
+    snapshot = d.document.to_json()
+    for name, args in [("set_enabled", dict(entry="t1", enabled="false")),
+                       ("set_enabled", dict(entry="t1", enabled=0)),
+                       ("set_meanfield", dict(system="s1", enabled="false")),
+                       ("add_term", dict(system="s1", kind="onsite", enabled="false")),
+                       ("set_notes", dict(notes=None)),
+                       ("rename", dict(entry="s1", name=None)),
+                       ("set_param", dict(entry="c1", name="nk", value=float("inf"))),
+                       ("add_term", dict(system="s1", kind="anderson_disorder",
+                                         params={"seed": float("inf")})),
+                       ("add_geometry_op", dict(system="s1", kind="supercell",
+                                                params={"n": [float("inf"), 1, 1]}))]:
+        with pytest.raises(CommandError, match="expected"):
+            d.do(name, **args)
+    assert d.document.to_json() == snapshot
+    d.do("set_enabled", entry="t1", enabled=False)
+    d.do("set_param", entry="c1", name="nk", value=40.0)          # a whole float is an int
+    assert d.document.find("t1")[-1].enabled is False
+    assert d.document.find("c1")[-1].params["nk"] == 40
+
+
+def test_neighbour_hoppings_are_finite():
+    """nan or inf in the construction's hoppings (the System form parses
+    its box with float()) was stored, broke every key of the system with a
+    raw ValueError, and was saved as a bare NaN that loaded again."""
+    import json
+
+    from guiqula.core.document import Document
+    from guiqula.io import project
+    from guiqula.registry import pipeline
+    d = Dispatcher(project.load("honeycomb_zeeman_rashba"))
+    for bad in (float("nan"), float("inf")):
+        with pytest.raises(CommandError, match=r"set_construction: tij: the neighbour "
+                                               r"hoppings must be finite numbers, not (nan|inf)$"):
+            d.do("set_construction", system="s1", tij=[1.0, bad])
+    assert d.document.system("s1").hamiltonian.construction.tij == [1.0] and not d.can_undo()
+    pipeline.calculation_key(d.document, "c1")
+    data = json.loads(d.document.to_json())
+    data["systems"][0]["hamiltonian"]["construction"]["tij"] = [float("nan")]
+    with pytest.raises(ValueError, match="finite"):
+        Document.from_data(data)
+
+
 def test_undo_steps_are_named_and_taken_several_at_once():
     """Phase 5, design item 10: Undo and Redo name their step, the history
     lists them, several steps go back as one event carrying the entry the

@@ -462,9 +462,16 @@ Expressions are evaluated by the AST-whitelisted evaluator of decision
 the origin, not the position vector: subscripts are not allowed, so the
 coordinates are `x, y, z` (phase 1 choice, 2026-09-26). Script export
 writes `x` as `r[0]` and `r` as `np.linalg.norm(r)` inside `lambda r:`.
-The lattice constants are not in scope yet. The engine and the exporter
-accept `constant` and `expression` from phase 1; the UI editor for them
-is phase 3.
+One arithmetic holds in the engine, the canvas previews and the exported
+script alike (the maintainer's decision of 2026-09-28): a comparison is
+1.0 where it holds and 0.0 elsewhere wherever it appears, so
+`(x > 0) + (y > 0)` is 2 where both hold and `-(x > 0)` works; `&`, `|`,
+`^` and `~` are logical on such truth values; a value that is not a real
+number (`(-8)**(1/3)`) is refused when typed and when evaluated; a function
+takes exactly its own arguments (a ufunc would read one more as the array
+to write into). The lattice constants are not in scope yet. The engine
+and the exporter accept `constant` and `expression` from phase 1; the UI
+editor for them is phase 3.
 
 Phase 3 delivers `constant`, `expression` and `piecewise`; phase 4 adds
 `profile`, `interpolated`, `painted` and `from_result`.

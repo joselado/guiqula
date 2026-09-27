@@ -187,14 +187,14 @@ def _normalize_result(value):
     if not isinstance(array, str) or not array:
         raise FieldError("a from_result Field names an array of the result")
     component = value.get("component")
-    if component is not None and (isinstance(component, bool) or component not in (0, 1, 2)):
-        raise FieldError("component is 0, 1, 2 (x, y, z) or null")
-    try:
-        scale, tol = float(value.get("scale", 1.0)), float(value.get("tol", 0.1))
-    except (TypeError, ValueError):
-        raise FieldError("scale and tol are numbers") from None
-    if not math.isfinite(scale) or not tol > 0:
-        raise FieldError("scale is a finite number and tol a positive one")
+    if component is not None:
+        if isinstance(component, bool) or not isinstance(component, numbers.Real) or \
+                component not in (0, 1, 2):
+            raise FieldError("component is 0, 1, 2 (x, y, z) or null")
+        component = int(component)           # 1.0 from a JSON client indexes as 1
+    scale, tol = _finite("scale", value.get("scale", 1.0)), _finite("tol", value.get("tol", 0.1))
+    if not tol > 0:
+        raise FieldError("tol must be positive")
     return {"kind": "from_result", "calculation": calculation, "array": array,
             "component": component, "scale": scale, "tol": tol}
 
@@ -214,7 +214,10 @@ def _normalize_simple(value):
         except ExpressionError as error:
             raise FieldError(str(error)) from None
         if not expression.depends_on_position():
-            constant = expression(0.0, 0.0, 0.0)
+            try:
+                constant = expression(0.0, 0.0, 0.0)
+            except ExpressionError as error:     # 9**9**9, or a complex (-8)**(1/3)
+                raise FieldError(str(error)) from None
             return normalize(float(constant))
         return expression.source
     if isinstance(value, dict):

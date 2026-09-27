@@ -21,18 +21,22 @@ kind a plugin provides records that plugin (``plugin``), so a document
 opened without it says which one is missing.
 """
 import json
+import math
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
+from pydantic import (BaseModel, ConfigDict, Field, field_validator, model_serializer,
+                      model_validator)
 
 from guiqula.core import fields as field_tools
 
 SCHEMA_VERSION = 1
-# a JSON list spread over lines whose items are numbers, strings without
-# commas or brackets, true/false/null
-_LEAF_LIST = re.compile(r'\[\s*((?:-?[\d.eE+-]+|"[^",\[\]{}]*"|true|false|null)'
-                        r'(?:\s*,\s*(?:-?[\d.eE+-]+|"[^",\[\]{}]*"|true|false|null))*)\s*\]')
+# a JSON string, which is left as it is (the characters of a value never
+# change: "[1,2]" in a note or in a Python node's code stays so), or a JSON
+# list spread over lines whose items are numbers, strings without commas or
+# brackets, true/false/null (group 1: its items)
+_LEAF = r'-?[\d.eE+-]+|"(?:[^"\\,\[\]{}]|\\.)*"|true|false|null'
+_LEAF_LIST = re.compile(rf'"(?:[^"\\]|\\.)*"|\[\s*((?:{_LEAF})(?:\s*,\s*(?:{_LEAF}))*)\s*\]')
 SYSTEM_KINDS = ("quantum", "classical_spin", "lattice_gas", "ising")
 CLASSICAL_KINDS = SYSTEM_KINDS[1:]
 
@@ -93,6 +97,16 @@ class Construction(_Model):
     nambu: bool = False            # requested; idem
     tij: list[float] = Field(default_factory=lambda: [1.0])
     is_sparse: bool = False
+
+    @field_validator("tij")
+    @classmethod
+    def _finite_hoppings(cls, tij):
+        """nan or inf would break every key of the system (JSON has neither)
+        and be saved as a bare NaN."""
+        for t in tij:
+            if not math.isfinite(t):
+                raise ValueError(f"the neighbour hoppings must be finite numbers, not {t}")
+        return tij
 
 
 class MeanField(_Kind):
@@ -157,9 +171,11 @@ class Document(_Model):
     # ---- serialization
     def to_json(self, indent=2):
         """Indented JSON with short lists of scalars kept on one line, so
-        that presets and projects diff well in git."""
+        that presets and projects diff well in git. Only the layout between
+        values changes: the worker keys the Document it reads from this
+        text, which must be the Document the window keys."""
         text = json.dumps(self.model_dump(mode="json"), indent=indent)
-        return _LEAF_LIST.sub(lambda m: "[" + ", ".join(
+        return _LEAF_LIST.sub(lambda m: m.group(0) if m.group(1) is None else "[" + ", ".join(
             part.strip() for part in m.group(1).split(",")) + "]", text)
 
     @classmethod

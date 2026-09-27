@@ -155,6 +155,27 @@ def test_stored_points_are_found_fast_and_as_before():
     assert indicator(queries[5]) == 1.0 and indicator(queries[500]) == 0.0
 
 
+def test_a_from_result_field_is_refused_where_it_would_break_a_key():
+    """tol = inf was accepted, raised in every key of the system and was
+    saved as null; a component of 1.0 (JSON clients send floats) was stored
+    as a float and indexed the array with it, a raw IndexError in the
+    planner."""
+    from guiqula.core.results import ResultRef
+    field = {"kind": "from_result", "calculation": "c1", "array": "m", "component": 1.0}
+    assert fields.normalize(field)["component"] == 1
+    assert type(fields.normalize(field)["component"]) is int
+    ref = ResultRef("key", np.eye(3), {"m": np.arange(9.0).reshape(3, 3)})
+    assert fields.evaluate_positions(field, np.eye(3), results={"c1": ref}).tolist() == \
+        [1.0, 4.0, 7.0]
+    for bad, message in [(dict(field, tol=float("inf")), "tol must be a finite number"),
+                         (dict(field, tol=0.0), "tol must be positive"),
+                         (dict(field, scale=float("nan")), "scale must be a finite number"),
+                         (dict(field, component=1.5), "component is 0, 1, 2"),
+                         (dict(field, component=True), "component is 0, 1, 2")]:
+        with pytest.raises(fields.FieldError, match=message):
+            fields.normalize(bad)
+
+
 def test_painting_many_sites():
     positions = np.column_stack([np.arange(5000.0), np.zeros(5000), np.zeros(5000)])
     value = fields.paint(0.25, positions, range(0, 5000, 2), 1.0)

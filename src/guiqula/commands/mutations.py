@@ -3,9 +3,13 @@
 Each receives a private deep copy of the Document plus JSON arguments,
 changes the copy, and returns a JSON result (the id of a new entry, or
 None). Parameters are normalized through the registry, so the Document
-always stores complete, checked parameter sets; an entry whose kind is
-unknown to the registry (a missing plugin) can still be edited as raw JSON
-and is flagged by the pipeline planner.
+always stores complete, checked parameter sets. An entry whose kind is
+unknown to the registry (a missing plugin) is kept as it is and flagged by
+the pipeline planner: it can be enabled or disabled, moved, duplicated or
+removed, but not edited, since its parameters cannot be checked. Arguments
+come as JSON from drivers too (the remote API, the console): a flag must be
+true or false and a text a string, never read through bool() or str(), for
+which "false" is true and null the text "None".
 """
 from guiqula.commands.dispatcher import CommandError, mutation
 from guiqula.core import fields as field_tools
@@ -39,6 +43,18 @@ def _plugin(family, kind):
 
 def _rename_regions(params, mapping):
     return {name: field_tools.rename_regions(value, mapping) for name, value in params.items()}
+
+
+def _flag(name, value):
+    if not isinstance(value, bool):
+        raise CommandError(f"{name}: expected true or false, got {value!r}")
+    return value
+
+
+def _text(name, value):
+    if not isinstance(value, str):
+        raise CommandError(f"{name}: expected a text, got {value!r}")
+    return value
 
 
 def _insert(items, item, index):
@@ -108,7 +124,7 @@ def set_meanfield(document, system, enabled=None, params=None, kind=None):
     kind = block.kind if kind is None else kind
     merged = dict(block.params if kind == block.kind else {}, **(params or {}))
     target.hamiltonian.meanfield = MeanField(
-        enabled=block.enabled if enabled is None else bool(enabled), kind=kind,
+        enabled=block.enabled if enabled is None else _flag("enabled", enabled), kind=kind,
         params=_normalize("meanfield", kind, merged), plugin=_plugin("meanfield", kind))
 
 
@@ -126,7 +142,7 @@ def set_model(document, system, params):
 @mutation
 def set_notes(document, notes):
     """What the document is about: a title line, then a description."""
-    document.notes = str(notes)
+    document.notes = _text("notes", notes)
 
 
 @mutation
@@ -134,7 +150,7 @@ def rename(document, entry, name):
     family, _, _, _, obj = document.find(entry)
     if family not in ("system", "region"):
         raise CommandError(f"only systems and regions have names, {entry!r} is a {family}")
-    obj.name = str(name)
+    obj.name = _text("name", name)
 
 
 # ---- stacks
@@ -142,7 +158,7 @@ def rename(document, entry, name):
 def add_geometry_op(document, system, kind, params=None, index=None, enabled=True):
     """Add a geometry op (at the end, or at index); returns its id."""
     target = document.system(system)
-    op = Entry(id=document.new_id("op"), kind=kind, enabled=enabled,
+    op = Entry(id=document.new_id("op"), kind=kind, enabled=_flag("enabled", enabled),
                params=_normalize("geometry_op", kind, params),
                plugin=_plugin("geometry_op", kind))
     _insert(target.geometry.ops, op, index)
@@ -159,8 +175,8 @@ def add_term(document, system, kind, params=None, region=None, index=None, enabl
     if target.kind not in spec.systems:
         raise CommandError(f"{spec.label} does not apply to a {target.kind} system; it is a "
                            f"term of {', '.join(spec.systems)} systems")
-    term = Entry(id=document.new_id("term"), kind=kind, enabled=enabled, params=params,
-                 region=region, plugin=plugins.origin(spec))
+    term = Entry(id=document.new_id("term"), kind=kind, enabled=_flag("enabled", enabled),
+                 params=params, region=region, plugin=plugins.origin(spec))
     _insert(terms_of(target), term, index)
     return term.id
 
@@ -279,7 +295,7 @@ def set_enabled(document, entry, enabled):
     family, _, _, _, obj = document.find(entry)
     if family not in ("op", "term"):
         raise CommandError(f"only ops and terms can be disabled, {entry!r} is a {family}")
-    obj.enabled = bool(enabled)
+    obj.enabled = _flag("enabled", enabled)
 
 
 @mutation

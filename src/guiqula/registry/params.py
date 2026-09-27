@@ -97,11 +97,17 @@ def _number(name, value, kind, minimum, maximum):
     if isinstance(value, bool) or not isinstance(value, numbers.Real):
         raise ParamError(f"{name}: expected a number, got {value!r}")
     if kind is int:
-        if float(value) != int(value):
+        # an int as it is (float() of one of 309 digits overflows); a float
+        # only when it is a whole number (int() of inf overflows)
+        if not isinstance(value, numbers.Integral) and not (
+                math.isfinite(value) and float(value).is_integer()):
             raise ParamError(f"{name}: expected an integer, got {value!r}")
         value = int(value)
     else:
-        value = float(value)
+        try:
+            value = float(value)
+        except OverflowError:
+            value = math.inf
         if not math.isfinite(value):
             raise ParamError(f"{name}: {value} is not finite")
     if minimum is not None and value < minimum:

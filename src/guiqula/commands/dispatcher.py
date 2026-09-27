@@ -20,13 +20,20 @@ announced to the listeners, which is what the UI, autosave and the future
 remote API bind to. Arguments must be JSON-serializable, so anything the UI
 can do can be written down, replayed and sent over a socket. The journal
 keeps the last JOURNAL_LIMIT operations, and a merged mutation (a slider
-drag, a brush stroke) replaces the one it joins, so a stroke that sets a
-painted Field of every site at each mouse move keeps one copy, not one per
-move.
+drag, a brush stroke) replaces the one it joins, whatever actions came in
+between (the re-runs of auto re-run), so a stroke that sets a painted Field
+of every site at each mouse move keeps one copy, not one per move.
+
+A listener that fails does not undo or refuse what it was told about: the
+mutation is done by then. Its error goes to sys.excepthook (the window's
+error bar and crash report), and the other listeners are still told.
 """
 import inspect
 import json
+import sys
 import time
+
+from pydantic import ValidationError
 
 from guiqula.commands import steps as step_texts
 from guiqula.core import locks
@@ -87,12 +94,19 @@ class Dispatcher:
         record = dict(event, time=time.time())
         if merge is not None:
             record["merge"] = merge
-            if self.journal and self.journal[-1].get("merge") == merge:
-                self.journal.pop()           # the mutation this one joins
+            for index in range(len(self.journal) - 1, -1, -1):
+                if self.journal[index].get("merge") == merge:
+                    del self.journal[index]      # the mutation this one joins
+                    break
+                if self.journal[index]["type"] != "action":
+                    break                        # anything else ends a merged step
         self.journal.append(record)
         del self.journal[:-JOURNAL_LIMIT]
         for listener in list(self._listeners):
-            listener(event)
+            try:
+                listener(event)
+            except Exception:
+                sys.excepthook(*sys.exc_info())
 
     # ---- mutations
     def do(self, name, /, **args):
@@ -120,7 +134,8 @@ class Dispatcher:
         try:
             result = function(after, **args)
             check(after)
-        except (CommandError, DocumentError, ValueError, KeyError, TypeError) as error:
+        except (CommandError, DocumentError, ValueError, KeyError, TypeError,
+                ArithmeticError) as error:      # the copy is dropped: nothing changed
             raise CommandError(f"{name}: {_message(error)}") from None
         broken = locks.violations(before, after)
         if broken:
@@ -218,8 +233,18 @@ class Dispatcher:
 
 
 def _message(error):
+    if isinstance(error, ValidationError):      # the Document's own models: one line each
+        return "; ".join(_validation_message(e) for e in error.errors())
     text = str(error)
     return text.strip("\"'") if isinstance(error, KeyError) else text
+
+
+def _validation_message(error):
+    """"tij: the neighbour hoppings must be ..." for one error of pydantic
+    (whose own text spans lines and ends with a link)."""
+    where = ".".join(str(part) for part in error["loc"])
+    text = str(error.get("ctx", {}).get("error", error["msg"]))
+    return f"{where}: {text}" if where else text
 
 
 def _is_json(value):
