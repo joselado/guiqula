@@ -26,6 +26,16 @@ def user_data_dir():
     return Path(platformdirs.user_data_dir(APP_NAME, appauthor=False))
 
 
+def user_config_dir():
+    """The settings file lives here (io/settings.py). $GUIQULA_CONFIG_DIR
+    overrides it; the test suite points it at a temporary directory, as it
+    does $GUIQULA_DATA_DIR."""
+    override = os.environ.get("GUIQULA_CONFIG_DIR")
+    if override:
+        return Path(override)
+    return Path(platformdirs.user_config_dir(APP_NAME, appauthor=False))
+
+
 def configure_numba_cache():
     """Keep numba's on-disk cache in the user cache directory.
 

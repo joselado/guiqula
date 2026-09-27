@@ -208,3 +208,37 @@ def test_results_are_kept_in_the_project(session, tmp_path, no_jobs):
     assert reopened.results == {}
     reopened = Session(str(path), jobs=no_jobs)
     assert set(reopened.results) == {"c1"}
+
+
+def test_an_undo_brings_back_the_earlier_result(no_jobs):
+    """Phase 5, design item 10: a calculation keeps a few earlier results by
+    key; when the Document matches one again (an undo, a value set back),
+    it is the current result, without a re-run."""
+    from types import SimpleNamespace
+    from guiqula.session import RESULT_HISTORY
+    session = Session("honeycomb_zeeman_rashba", jobs=no_jobs)
+
+    def computed():                       # what a finished run would store
+        result = SimpleNamespace(key=session.calculation_key("c1"))
+        session._keep_result("c1", result)
+        return result
+
+    first = computed()
+    session.do("set_param", entry="t2", name="c", value=0.3)
+    assert session.status("c1") == "stale"
+    second = computed()
+    session.undo()
+    assert session.result("c1") is first and session.status("c1") == "done"
+    session.redo()
+    assert session.result("c1") is second
+    session.do("set_param", entry="t2", name="c", value=0.1)      # a value set back by hand
+    assert session.result("c1") is first
+    for value in (0.4, 0.5, 0.6, 0.7, 0.8):
+        session.do("set_param", entry="t2", name="c", value=value)
+        computed()
+    assert len(session.earlier_results["c1"]) == RESULT_HISTORY
+    session.do("set_param", entry="t2", name="c", value=0.3)      # dropped by now
+    assert session.status("c1") == "stale"
+    session.do("remove", entry="c1")
+    assert "c1" not in session.earlier_results
+    session.close()

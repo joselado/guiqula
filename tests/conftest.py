@@ -6,7 +6,8 @@
 - ``shot(widget, name)`` saves a screenshot under ui_dump/<test>/ for Claude
   to inspect with the Read tool (GUIQULA_SHOT_DIR overrides the directory).
 - Autosaves and crash reports go to a temporary directory
-  ($GUIQULA_DATA_DIR), never to the user's data directory.
+  ($GUIQULA_DATA_DIR), never to the user's data directory; so does the
+  settings file ($GUIQULA_CONFIG_DIR).
 - ``run_python(code)`` runs code in a fresh interpreter that sees src/, for
   checks that need a clean process (startup cost, import side effects).
 """
@@ -32,6 +33,9 @@ os.environ.setdefault("MPLBACKEND", "Agg")   # pyplot never opens a window
 # temporary directory, never to the user's data directory
 os.environ["GUIQULA_DATA_DIR"] = tempfile.mkdtemp(prefix="guiqula-test-data-")
 atexit.register(shutil.rmtree, os.environ["GUIQULA_DATA_DIR"], True)
+# and the settings file (theme, recent files) never is the user's either
+os.environ["GUIQULA_CONFIG_DIR"] = tempfile.mkdtemp(prefix="guiqula-test-config-")
+atexit.register(shutil.rmtree, os.environ["GUIQULA_CONFIG_DIR"], True)
 
 
 @pytest.fixture(autouse=True)

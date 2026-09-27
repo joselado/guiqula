@@ -12,9 +12,15 @@ left behind.
 Trust (PLAN.md 13.7): ``trusted`` says whether the Document's Python
 nodes may run. A document built here, or a shipped preset, is trusted; one
 opened or recovered from a file that holds Python nodes is not, until the
-``trust`` action. The flag is the Session's, never the Document's, and
+``trust`` action, unless the Session was made with ``always_trust`` (the
+window's, when the user chose so in its settings). The flag is the Session's, never the Document's, and
 every job carries it; plan_system, plan_calculation and calculation_key
 plan with it, so that the keys of the UI process match the workers'.
+
+Results: the latest of every calculation, and a few earlier ones
+(RESULT_HISTORY, one per key): when the Document matches an earlier result
+again (an undo, a parameter set back), that result becomes the current one
+without a re-run. Project files keep only the current ones.
 
 The Document's ``ui`` block is view state (the window's workspace,
 selection, canvas selection): the window hands a ``view_state`` callable,
@@ -40,6 +46,7 @@ from guiqula.worker.client import JobManager
 
 
 BUILD_PATIENCE = 10.0    # seconds: a build still running when a newer one is asked is killed
+RESULT_HISTORY = 4       # earlier results kept per calculation, so that an undo finds them
 
 
 def _content(document):
@@ -74,13 +81,14 @@ def trusted_on_open(path_or_name, document):
 
 class Session:
     def __init__(self, document=None, batch=1, interactive=True, warm=True, timeout=None,
-                 jobs=None, autosave=False):
+                 jobs=None, autosave=False, always_trust=False):
         path = None
         self.trusted = True      # whether Python nodes run (13.7): see trust
+        self.always_trust = always_trust    # files open trusted (the user's setting)
         if isinstance(document, (str, Path)):
             path = _project_path(document)
             source, document = document, project.load(document)
-            self.trusted = trusted_on_open(source, document)
+            self.trusted = always_trust or trusted_on_open(source, document)
             loaded_results = project.load_results(source)
         else:
             loaded_results = {}
@@ -88,6 +96,7 @@ class Session:
         self.jobs = jobs if jobs is not None else JobManager(
             batch=batch, interactive=interactive, warm=warm, timeout=timeout)
         self.results = dict(loaded_results)     # calculation id -> latest Result
+        self.earlier_results = {}   # calculation id -> [earlier Results], newest first (undo)
         self.calc_jobs = {}      # calculation id -> latest Job
         self.builds = {}         # system id -> latest build summary (engine/structure.py)
         self.build_errors = {}   # system id -> why the latest build failed
@@ -104,7 +113,7 @@ class Session:
         self.dispatcher.subscribe(self._on_document_event)
         for name in ("run_calculation", "cancel", "save", "load", "new", "export_script",
                      "save_result", "recover", "list_recoverable", "discard_recovery",
-                     "trust", "console", "interrupt_console"):
+                     "trust", "console", "interrupt_console", "undo", "redo", "history"):
             self.dispatcher.register_action(name, getattr(self, "_action_" + name))
 
     # ---- the command API
@@ -144,11 +153,11 @@ class Session:
     def run(self, name, /, **args):
         return self.dispatcher.run(name, **args)
 
-    def undo(self):
-        self.dispatcher.undo()
+    def undo(self, steps=1):
+        self.dispatcher.undo(steps)
 
-    def redo(self):
-        self.dispatcher.redo()
+    def redo(self, steps=1):
+        self.dispatcher.redo(steps)
 
     def subscribe(self, listener):
         """listener(kind, payload): ("document", event) for every dispatcher
@@ -334,8 +343,11 @@ class Session:
             self.build_errors.clear()
             self._build_times.clear()
         present = {c.id for c in self.document.calculations}
-        for calc in [c for c in self.results if c not in present]:
-            del self.results[calc]
+        for table in (self.results, self.earlier_results):
+            for calc in [c for c in table if c not in present]:
+                del table[calc]
+        if event["type"] in ("mutation", "undo", "redo"):
+            self._restore_results()
         for calc in [c for c, job in self.calc_jobs.items() if c not in present and job.done]:
             del self.calc_jobs[calc]
         systems = {s.id for s in self.document.systems}
@@ -354,10 +366,39 @@ class Session:
             return {"value": value, "document": self.document.to_json()}
         raise CommandError(f"unknown request {name!r}")
 
+    def _restore_results(self):
+        """A calculation whose Document matches one of its earlier results
+        again (an undo, a parameter set back) shows that result, current,
+        without a re-run (PLAN.md phase 5, design item 10)."""
+        for calc, earlier in self.earlier_results.items():
+            current = self.results.get(calc)
+            try:
+                key = self.calculation_key(calc)
+            except Exception:
+                continue
+            if current is not None and current.key == key:
+                continue
+            match = next((r for r in earlier if r.key == key), None)
+            if match is not None:
+                earlier.remove(match)
+                if current is not None:
+                    earlier.insert(0, current)
+                self.results[calc] = match
+
+    def _keep_result(self, calc, result):
+        """Store a new result; the one it replaces joins the earlier ones
+        (RESULT_HISTORY of them, one per key)."""
+        old = self.results.get(calc)
+        self.results[calc] = result
+        earlier = [r for r in self.earlier_results.get(calc, []) if r.key != result.key]
+        if old is not None and old.key != result.key:
+            earlier = [old] + [r for r in earlier if r.key != old.key]
+        self.earlier_results[calc] = earlier[:RESULT_HISTORY]
+
     def _on_job_event(self, kind, payload):
         if kind == "job" and payload.kind == "run" and payload.status == "done":
             if any(c.id == payload.label for c in self.document.calculations):
-                self.results[payload.label] = payload.value
+                self._keep_result(payload.label, payload.value)
         if kind == "job" and payload.kind == "build" and payload.done:
             self._store_build(payload)
         for listener in list(self._listeners):
@@ -382,6 +423,7 @@ class Session:
         self._saved_json = saved_json
         self.results.clear()
         self.results.update(results or {})
+        self.earlier_results.clear()
         self.calc_jobs.clear()
         self.dispatcher.reset(document)
 
@@ -401,7 +443,8 @@ class Session:
     def _action_load(self, path):
         document = project.load(path)
         self._replace_document(document, _project_path(path), _content(document),
-                               trusted_on_open(path, document), project.load_results(path))
+                               self.always_trust or trusted_on_open(path, document),
+                               project.load_results(path))
         return str(project.resolve(path))
 
     def _action_new(self):
@@ -419,7 +462,8 @@ class Session:
             path = candidates[0]["path"]
         document, info = autosave_files.read(path)
         source = Path(info["source"]) if info.get("source") else None
-        self._replace_document(document, source, None, not pipeline.code_entries(document))
+        self._replace_document(document, source, None,
+                               self.always_trust or not pipeline.code_entries(document))
         if self.autosaver is not None:     # claimed at once: not offered again meanwhile
             self.autosaver.adopt(path)
             self.autosaver.write(self.document_for_file(), self.path, self.modified)
@@ -437,6 +481,19 @@ class Session:
 
     def _action_interrupt_console(self):
         self.interrupt_console()
+
+    def _action_undo(self, steps=1):
+        """Undo for drivers (--do '{"do": "undo"}'); returns the history."""
+        self.undo(steps)
+        return self.dispatcher.history()
+
+    def _action_redo(self, steps=1):
+        self.redo(steps)
+        return self.dispatcher.history()
+
+    def _action_history(self):
+        """{"undo": [steps, newest first], "redo": [steps, next first]}."""
+        return self.dispatcher.history()
 
     def _action_trust(self, enabled=True):
         """Let the Document's Python nodes run (or stop them): the builds and

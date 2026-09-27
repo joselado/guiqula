@@ -1208,6 +1208,48 @@ recommendations for the open points of 13.13 at the end of section 11:
     in 0.25 s and a 60,000-site one in 0.7 s, data-unit circles being half
     of it (a scatter of the same points: 0.03 s); pyqula's island op takes
     10 s and 77 s to build them.
+**Part 1 done 2026-09-27.** Built: the settings file (`io/settings.py`:
+theme, recent files, always trust; defaults for a missing or broken file,
+unknown keys kept; only the interactive program's window reads and writes
+it, `MainWindow(use_settings=True)`, so tests and drivers never depend on
+it or change it; `$GUIQULA_CONFIG_DIR`, set by the test suite). Themes
+(`ui/theme.py`): light and dark palettes, and "follow the desktop"; the
+colour names of the module are the active theme's (rebound by `apply`),
+every figure is drawn inside `theme.drawing(figure)` (background, rc
+settings, tick colours), and a change of theme redraws the canvas, the
+k-space tab, every result view, the outliner and the formula images; View
+> Theme and the `theme` window action. Keyboard shortcuts (`ui/shortcuts.py`,
+one table): the menus, the outliner keys (F2 rename is new), the canvas
+keys while the canvas has the focus (P, B, L for the tools, Ctrl+A,
+Ctrl+Shift+A, Ctrl+I to select, Del to remove the selected atoms, Home to
+show everything), Ctrl+Y as a second Redo, Ctrl+E export, Ctrl+F the
+palette search of the workspace, Ctrl+W close the result tab, Ctrl+0 the
+Structure tab, Help > Keyboard shortcuts (Ctrl+/). Undo: every step is
+named (`commands/steps.py`; a test fails for a mutation without a text),
+Edit > Undo and Redo say which step, Edit > Undo history goes back or
+forth several steps at once (`undo(steps)`, one event), the selection
+follows the step (its entry, or its system when the entry is gone; the
+viewport stays), and the Session keeps up to 4 earlier results per
+calculation, so that an undo (or a value set back by hand) makes the
+matching one current without a re-run; `undo`, `redo` and `history` are
+session actions for drivers. Tooltips: the palette menus show the entry's
+label, doc, formula image and the Hilbert space it needs (their tooltips
+were set before but never shown: a QMenu hides them unless asked); every
+toolbar control has one, with its keys; a parameter's label carries its
+doc. File > Open recent and File > Always trust Python code in files (the
+Session's `always_trust`). Tests: `tests/core/test_settings.py`, the undo
+steps in `tests/core/test_commands.py`,
+`test_an_undo_brings_back_the_earlier_result`, `tests/ui/test_polish.py`
+(no ambiguous shortcut, every one bound; the canvas keys; the named steps
+and the history; the dark theme by pixels and colours, and back; the
+settings of the program's window; the tooltips). Facts learned:
+matplotlib makes most ticks at the first draw, after an rc context has
+ended, so the theme colours them explicitly; Qt rich text shows `data:`
+image URIs, so a tooltip carries a formula image without files; PySide
+hands `QAction.triggered`'s `checked` to a slot whose parameter has a
+default (`undo(steps=1)` got `steps=False`), so such slots are connected
+through a lambda; offscreen, `QTest.keyClick` on the focused canvas fires
+its widget shortcuts.
 
 **Phase 6 — distribution and add-on.** PyPI release, conda file, installers for
 Mac/Windows, plugin entry points and a plugin template, JSON-RPC server + MCP

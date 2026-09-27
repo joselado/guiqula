@@ -291,9 +291,12 @@ def test_geometry_change_reruns_bands_with_the_same_terms(window, qtbot, shot):
     assert "STALE" not in window.plot.ax.get_title()
     shot(window, "rerun_on_new_geometry")
     session.act("auto_rerun", enabled=False)
-    session.do("set_param", entry="op1", name="n", value=[2, 2, 1])
+    session.do("set_param", entry="op1", name="n", value=[4, 2, 1])
     settle(qtbot, window)
     assert session.status("c1") == "stale"                  # off: waits for Run
+    session.do("set_param", entry="op1", name="n", value=[2, 2, 1])
+    assert session.result("c1") is first                    # the earlier result, current again
+    assert session.status("c1") == "done"
     assert window.view_state().get("auto_rerun") is None
 
 

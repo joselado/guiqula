@@ -37,7 +37,7 @@ def run(argv=None, document=None):
     """Show the main window, start the workers once it is visible, and run
     the event loop; return the exit code."""
     app = create_application(argv)
-    window = build_main_window(ask_before_close=True)
+    window = build_main_window(ask_before_close=True, use_settings=True)
     errors.install(window)
     window.show()
     QTimer.singleShot(0, lambda: window.start_session(document))

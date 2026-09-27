@@ -171,7 +171,12 @@ class KSpaceView(QWidget):
     def show_kspace(self, kspace, calculations, calc, kpath, surface=None, caption=""):
         """kspace: the build's (with dimensionality); calculations: [(id,
         label)] with a k-path; kpath: calc's (normalized, None: default);
-        surface: (points (N, 2) in the plane, weights) or None."""
+        surface: (points (N, 2) in the plane, weights) or None. Drawn in the
+        active theme."""
+        with theme.drawing(self.figure):
+            self._show_kspace(kspace, calculations, calc, kpath, surface, caption)
+
+    def _show_kspace(self, kspace, calculations, calc, kpath, surface, caption):
         self.kspace, self.calc, self.kpath = kspace, calc, kpath
         self.calc_box.blockSignals(True)
         self.calc_box.clear()
@@ -197,10 +202,10 @@ class KSpaceView(QWidget):
             ax.add_patch(Polygon(zone, closed=True, fill=False, edgecolor=theme.CELL,
                                  linewidth=1.5, zorder=1))
         default = to_plane(kspace["default_path"], b)
-        ax.plot(default[:, 0], default[:, 1], "--", color="#9e9e9e", linewidth=1, zorder=2,
+        ax.plot(default[:, 0], default[:, 1], "--", color=theme.MUTED, linewidth=1, zorder=2,
                 label="default path")
         for name, point in special_images(kspace).items():
-            ax.plot(*point, "o", color="#424242", markersize=4, zorder=3)
+            ax.plot(*point, "o", color=theme.POINT, markersize=4, zorder=3)
             ax.annotate(NAMES.get(name, name), point, textcoords="offset points",
                         xytext=(4, 4), fontsize=9)
         self.vertices = path_vertices(kpath, kspace) if kpath else np.zeros((0, 2))
@@ -221,6 +226,7 @@ class KSpaceView(QWidget):
     def clear(self, caption=""):
         self.kspace = self.ax = self._line = None
         self.figure.clear()
+        theme.set_figure(self.figure)
         self.caption.setText(caption)
         self.canvas.draw_idle()
 

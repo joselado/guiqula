@@ -97,7 +97,9 @@ class Form(QWidget):
             if hasattr(editor, "preview"):
                 editor.preview.connect(lambda p=param: self.panel.preview.emit(self.item_id,
                                                                                p.name))
-            self.rows.addRow(param.label, editor)
+            label = QLabel(param.label)
+            label.setToolTip(param.doc)
+            self.rows.addRow(label, editor)
             self.editors[param.name] = editor
 
     def live_value(self, name):

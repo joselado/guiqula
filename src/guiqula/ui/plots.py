@@ -35,6 +35,7 @@ from PySide6.QtWidgets import QLabel, QMenu, QToolButton, QVBoxLayout, QWidget
 
 from guiqula.core.results import PLOT_KINDS as KINDS  # noqa: F401 (the kinds drawn here)
 from guiqula.ui import structure as structure_tools
+from guiqula.ui import theme
 
 READOUT_PIXELS = 12      # the readout names a data point this close to the mouse
 CURVES = ("lines", "colored_scatter")       # plot kinds that overlay
@@ -215,9 +216,15 @@ def _draw_overlays(ax, result, overlays):
     return None
 
 
-def draw(figure, result, title="", overlays=()):
-    """Draw a Result, with the overlays [(label, Result, mode)]; returns the
-    Axes and the points (x, y, c or None) the readout looks up."""
+def draw(figure, result, title="", overlays=(), theme_name=None):
+    """Draw a Result, with the overlays [(label, Result, mode)], in a theme
+    (the active one by default); returns the Axes and the points (x, y, c
+    or None) the readout looks up."""
+    with theme.drawing(figure, theme_name):
+        return _draw(figure, result, title, overlays)
+
+
+def _draw(figure, result, title, overlays):
     figure.clear()
     plot = result.plot
     three_d = plot["kind"] in ON_STRUCTURE and result.structure is not None and \
@@ -240,7 +247,7 @@ def draw(figure, result, title="", overlays=()):
         positions = [float(i) for i, _ in plot["xticks"]]
         ax.set_xticks(positions, [name for _, name in plot["xticks"]])
         for position in positions:
-            ax.axvline(position, color="#9e9e9e", linewidth=0.6, zorder=0)
+            ax.axvline(position, color=theme.MUTED, linewidth=0.6, zorder=0)
     return ax, points
 
 
@@ -331,6 +338,7 @@ class PlotView(QWidget):
         self.result = self.ax = self.points = None
         self.stale = False
         self.figure.clear()
+        theme.set_figure(self.figure)
         self.caption.setText(caption)
         self.readout.setText("")
         self.canvas.draw_idle()

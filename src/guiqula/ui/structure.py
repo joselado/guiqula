@@ -284,20 +284,20 @@ def draw_structure(ax, build, highlight=None, selected=None, removed=None, image
                               autolim=False)
         ax.add_collection(LineCollection(central, colors=bond_colors, linewidths=widths,
                                          zorder=3), autolim=False)
-    circles(ax, xy, RADIUS, 4, autolim=True, facecolors=colors, edgecolors="white",
+    circles(ax, xy, RADIUS, 4, autolim=True, facecolors=colors, edgecolors=theme.ATOM_EDGE,
             linewidths=0.5)
     if arrows is not None:
         vectors = np.asarray(arrows["vectors"], dtype=float).reshape(-1, 3)
         if varies(vectors[:, 2]) or np.any(np.abs(vectors[:, 2]) > 1e-12):
             dots, mappable = value_colors(vectors[:, 2])
-            circles(ax, xy, 0.5 * RADIUS, 5, facecolors=dots, edgecolors="#1e1e1e",
+            circles(ax, xy, 0.5 * RADIUS, 5, facecolors=dots, edgecolors=theme.ARROW,
                     linewidths=0.4)
             colorbar(mappable, f"{arrows.get('label', '')}, z (dots)")
         longest = float(np.max(np.linalg.norm(vectors[:, :2], axis=1))) if n else 0.0
         if longest > 1e-12:
             ax.quiver(xy[:, 0], xy[:, 1], vectors[:, 0], vectors[:, 1], angles="xy",
                       scale_units="xy", scale=longest / 0.8, pivot="middle", width=0.006,
-                      color="#1e1e1e", zorder=8)
+                      color=theme.ARROW, zorder=8)
     outline = cell_outline(build)
     if outline is not None:
         ax.add_patch(Polygon(outline, closed=True, fill=False, edgecolor=theme.CELL,
@@ -388,9 +388,9 @@ def draw_structure_3d(ax, build, highlight=None, selected=None, removed=None, im
     if images and 0 < n <= IMAGE_LIMIT // 4 and int(build["dimensionality"]):
         lattice = np.asarray(build["lattice"], dtype=float)
         ghosts = np.concatenate([r + c @ lattice for c in image_cells(build["dimensionality"])])
-        ax.scatter(ghosts[:, 0], ghosts[:, 1], ghosts[:, 2], s=size * 0.5, c="#9e9e9e",
+        ax.scatter(ghosts[:, 0], ghosts[:, 1], ghosts[:, 2], s=size * 0.5, c=theme.MUTED,
                    alpha=0.15, depthshade=False, linewidths=0)
-    ax.scatter(r[:, 0], r[:, 1], r[:, 2], s=size, c=colors, edgecolors="white",
+    ax.scatter(r[:, 0], r[:, 1], r[:, 2], s=size, c=colors, edgecolors=theme.ATOM_EDGE,
                linewidths=0.4, depthshade=True)
     edges = cell_edges_3d(build)
     if len(edges):
@@ -402,7 +402,7 @@ def draw_structure_3d(ax, build, highlight=None, selected=None, removed=None, im
         if longest > 1e-12:
             v = vectors * (0.8 / longest)
             ax.quiver(r[:, 0] - v[:, 0] / 2, r[:, 1] - v[:, 1] / 2, r[:, 2] - v[:, 2] / 2,
-                      v[:, 0], v[:, 1], v[:, 2], color="#1e1e1e", linewidth=1.2,
+                      v[:, 0], v[:, 1], v[:, 2], color=theme.ARROW, linewidth=1.2,
                       arrow_length_ratio=0.3)
     if highlight is not None and np.any(highlight):
         h = r[np.asarray(highlight, dtype=bool)]
@@ -550,7 +550,11 @@ class StructureView(QWidget):
     def show_structure(self, system_id, build, caption="", **overlays):
         """Redraw; keeps the zoom (or the 3D viewing angle) when the same
         geometry is shown again, and the selection when its sites are
-        still there."""
+        still there. Drawn in the active theme."""
+        with theme.drawing(self.figure):
+            self._show_structure(system_id, build, caption, **overlays)
+
+    def _show_structure(self, system_id, build, caption, **overlays):
         three_d = self.in_3d(build)
         was_3d = self.ax is not None and getattr(self.ax, "name", "") == "3d"
         limits = angles = None
@@ -594,6 +598,7 @@ class StructureView(QWidget):
         self._selector = self._selection_artist = None
         self.selected_positions = np.zeros((0, 3))
         self.figure.clear()
+        theme.set_figure(self.figure)
         self._caption = caption
         self.caption.setText(caption)
         self.canvas.draw_idle()
@@ -735,4 +740,15 @@ class StructureView(QWidget):
                                   (self.ax.get_ylim, self.ax.set_ylim, event.ydata)):
             low, high = get()
             set_(centre - (centre - low) * factor, centre + (high - centre) * factor)
+        self.canvas.draw_idle()
+
+    def fit(self):
+        """Show the whole geometry again (after zooming or panning)."""
+        if self.ax is None:
+            return
+        if self._is_3d():
+            self.ax.autoscale_view()
+        else:
+            self.ax.set_autoscale_on(True)
+            self.ax.autoscale_view()
         self.canvas.draw_idle()

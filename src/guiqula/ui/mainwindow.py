@@ -36,17 +36,18 @@ from pathlib import Path
 
 import numpy as np
 from PySide6.QtCore import Qt, QTimer, QUrl
-from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
-from PySide6.QtWidgets import (QButtonGroup, QComboBox, QCompleter, QDockWidget, QFileDialog,
-                               QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox,
-                               QPlainTextEdit, QPushButton, QTabBar, QTabWidget, QToolBar,
+from PySide6.QtGui import QAction, QActionGroup, QDesktopServices
+from PySide6.QtWidgets import (QApplication, QButtonGroup, QComboBox, QCompleter, QDialog,
+                               QDockWidget, QFileDialog, QHeaderView, QLabel, QLineEdit,
+                               QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QPushButton,
+                               QTabBar, QTableWidget, QTableWidgetItem, QTabWidget, QToolBar,
                                QToolButton, QVBoxLayout, QWidget)
 
 import guiqula
 from guiqula import vendoring
 from guiqula.core import fields
 from guiqula.core import regions as region_tools
-from guiqula.io import crashreport, project
+from guiqula.io import crashreport, project, settings
 from guiqula.registry import base as registry
 from guiqula.registry import cost, pipeline
 from guiqula.registry.params import VectorFieldParam
@@ -60,6 +61,7 @@ from guiqula.ui.plots import PlotView
 from guiqula.ui.properties import PropertiesPanel
 from guiqula.ui import structure as structure_tools
 from guiqula.ui.structure import StructureView
+from guiqula.ui import formulas, shortcuts, theme
 
 POLL_MS = 30
 BUILD_DELAY_MS = 150
@@ -68,7 +70,7 @@ WORKSPACES = ("geometry", "hamiltonian", "calculate")
 # actions of the window itself: they change what is shown, not the Document
 WINDOW_ACTIONS = ("select", "workspace", "tool", "select_sites", "canvas_view", "preview",
                   "auto_rerun", "projection", "overlay", "slider", "set_slider",
-                  "remove_slider", "paint")
+                  "remove_slider", "paint", "theme")
 STRUCTURE_TAB = 0
 KSPACE_TAB = 1
 # a new classical system: its lattice, and a supercell the usual orders fit in
@@ -113,7 +115,7 @@ def search_entries(family, text):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, parent=None, ask_before_close=False, autosave=True):
+    def __init__(self, parent=None, ask_before_close=False, autosave=True, use_settings=False):
         super().__init__(parent)
         self.setObjectName("MainWindow")
         self.setWindowTitle("guiqula")
@@ -121,6 +123,10 @@ class MainWindow(QMainWindow):
         self.session = None
         self.ask_before_close = ask_before_close   # the interactive program asks (ui/app.py)
         self.autosave = autosave
+        # the interactive program reads and writes the settings file (theme, recent files,
+        # always trust); tests and drivers leave it alone (io/settings.py)
+        self.use_settings = use_settings
+        self.theme_choice = theme.name
         self.selected = ""
         self.workspace = "geometry"
         self.last_crash_report = None
@@ -242,6 +248,11 @@ class MainWindow(QMainWindow):
         self.preview_timer.timeout.connect(self._refresh_structure)
         self.set_workspace("geometry")
         self._update_actions()
+        self.theme_actions[self.theme_choice].setChecked(True)
+        if use_settings:
+            stored = settings.load()
+            self.set_theme(stored["theme"])
+            self.always_trust_action.setChecked(stored["always_trust"])
 
     # ---- construction helpers
     def _dock(self, title, widget, name, area):
@@ -272,11 +283,18 @@ class MainWindow(QMainWindow):
                 menu.addSection(group or "other")
             action = menu.addAction(spec.label)
             action.setObjectName(f"{prefix}_{spec.kind}")
-            action.setToolTip(spec.doc)
+            action.setToolTip(formulas.entry_tooltip(spec))
             action.triggered.connect(lambda checked=False, k=spec.kind: handler(k))
+        menu.setToolTipsVisible(True)
         button.setMenu(menu)
         if old is not None:
             old.deleteLater()
+
+    @staticmethod
+    def _tip(widget, text, shortcut=None):
+        """A tooltip, with the keys of a shortcut of the table."""
+        widget.setToolTip(f"{text} ({shortcuts.text(shortcut)})" if shortcut else text)
+        return widget
 
     def _toolbar(self, title, name):
         bar = QToolBar(title)
@@ -289,8 +307,13 @@ class MainWindow(QMainWindow):
         bar = self._toolbar("Workspace", "workspaceToolbar")
         self.workspace_tabs = QTabBar()
         self.workspace_tabs.setObjectName("workspaceTabs")
-        for name in WORKSPACES:
+        for i, name in enumerate(WORKSPACES):
             self.workspace_tabs.addTab(name.capitalize())
+            self.workspace_tabs.setTabToolTip(i, {
+                "geometry": "the lattice, the geometry ops, regions and the site selection",
+                "hamiltonian": "the terms (or a classical model) and the mean field",
+                "calculate": "the calculations and their results"}[name]
+                + f" ({shortcuts.text('workspace_' + name)})")
         self.workspace_tabs.currentChanged.connect(lambda i: self.set_workspace(WORKSPACES[i]))
         bar.addWidget(self.workspace_tabs)
         run = self._toolbar("Run", "runToolbar")
@@ -298,22 +321,27 @@ class MainWindow(QMainWindow):
         self.calc_box = QComboBox()
         self.calc_box.setObjectName("calculationBox")
         self.calc_box.setMinimumWidth(240)
+        self._tip(self.calc_box, "the calculation Run and Cancel act on, and whose result "
+                                 "and cost the window shows")
         self.calc_box.currentIndexChanged.connect(self._calculation_chosen)
         run.addWidget(self.calc_box)
         self.run_button = QPushButton("Run")
         self.run_button.setObjectName("runButton")
         self.run_button.clicked.connect(self.run_selected)
+        self._tip(self.run_button, "run the chosen calculation in a worker", "run")
         run.addWidget(self.run_button)
         self.cancel_button = QPushButton("Cancel")
         self.cancel_button.setObjectName("cancelButton")
         self.cancel_button.clicked.connect(self.cancel_selected)
+        self._tip(self.cancel_button, "stop its job (the worker is restarted)", "cancel")
         run.addWidget(self.cancel_button)
         self.addToolBarBreak()              # the palettes get a row of their own
 
         self.palettes = {}
         geometry = self._toolbar("Geometry", "geometryToolbar")
-        self._menu_button(geometry, "New system", "newSystemButton", _grouped("lattice"),
-                          self.new_system, "newSystem")
+        self._tip(self._menu_button(geometry, "New system", "newSystemButton",
+                                    _grouped("lattice"), self.new_system, "newSystem"),
+                  "a new quantum system on a lattice (a document can hold several)")
         classical = QToolButton()
         classical.setText("New classical system")
         classical.setObjectName("newClassicalButton")
@@ -327,8 +355,10 @@ class MainWindow(QMainWindow):
             action.triggered.connect(lambda checked=False, k=kind: self.new_classical_system(k))
         classical.setMenu(menu)
         geometry.addWidget(classical)
-        self._menu_button(geometry, "Add op", "addOpButton", _grouped("geometry_op"),
-                          self.add_op, "addOp")
+        self._tip(self._menu_button(geometry, "Add op", "addOpButton", _grouped("geometry_op"),
+                                    self.add_op, "addOp"),
+                  "a geometry op after the others of the current system (supercell, ribbon, "
+                  "island, cuts, strain...)")
         self._search_box(geometry, "geometry_op", self.add_op, "opSearch", "find an op")
         self.add_region_button = QPushButton("Add region")
         self.add_region_button.setObjectName("addRegionButton")
@@ -342,7 +372,8 @@ class MainWindow(QMainWindow):
                                 ("lasso", "Lasso", "draw around the atoms")):
             button = QToolButton()
             button.setText(text)
-            button.setToolTip(f"select sites: {tip}")
+            button.setToolTip(f"select sites: {tip} ({shortcuts.text('tool_' + tool)} on "
+                              f"the canvas)")
             button.setObjectName(f"tool_{tool}")
             button.setCheckable(True)
             button.setChecked(tool == "pick")
@@ -353,6 +384,8 @@ class MainWindow(QMainWindow):
         select.setText("Select")
         select.setObjectName("selectSitesButton")
         select.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self._tip(select, "select sites by rule (the canvas keys: Ctrl+A all, Ctrl+Shift+A "
+                          "nothing, Ctrl+I invert)")
         menu = QMenu(select)
         for text, name, args in (("All", "selectAll", {"all": True}),
                                  ("Sublattice A", "selectSublatticeA", {"sublattice": 1}),
@@ -368,10 +401,13 @@ class MainWindow(QMainWindow):
         self.region_button = QPushButton("Region from selection")
         self.region_button.setObjectName("regionFromSelectionButton")
         self.region_button.clicked.connect(lambda: self._act("region_from_selection"))
+        self._tip(self.region_button, "a named region of the selected sites, which any term "
+                                      "can be restricted to")
         geometry.addWidget(self.region_button)
         self.remove_button = QPushButton("Remove selected")
         self.remove_button.setObjectName("removeSelectedButton")
-        self.remove_button.setToolTip("remove the selected atoms (a Remove atoms op, by position)")
+        self._tip(self.remove_button, "remove the selected atoms (a Remove atoms op, by "
+                                      "position; Del on the canvas)")
         self.remove_button.clicked.connect(lambda: self._act("remove_selected"))
         geometry.addWidget(self.remove_button)
         self.palettes["geometry"] = geometry
@@ -380,6 +416,8 @@ class MainWindow(QMainWindow):
         self._palette_kind = "quantum"      # the system kind the palettes offer entries for
         self.term_button = self._menu_button(hamiltonian, "Add term", "addTermButton",
                                              self._offered("term"), self.add_term, "addTerm")
+        self._tip(self.term_button, "a term of the current system's Hamiltonian (or model), "
+                                    "applied after the others")
         self.term_search = self._search_box(hamiltonian, "term", self.add_term, "termSearch",
                                             "find a term")
         hamiltonian.addSeparator()
@@ -395,6 +433,7 @@ class MainWindow(QMainWindow):
         self.calc_button = self._menu_button(calculate, "Add calculation", "addCalculationButton",
                                              self._offered("calculation"), self.add_calculation,
                                              "addCalc")
+        self._tip(self.calc_button, "a calculation on the current system; F5 runs it")
         self.calc_search = self._search_box(calculate, "calculation", self.add_calculation,
                                             "calculationSearch", "find a calculation")
         self.palettes["calculate"] = calculate
@@ -407,6 +446,8 @@ class MainWindow(QMainWindow):
         edit.setPlaceholderText(placeholder)
         edit.setClearButtonEnabled(True)
         edit.setMaximumWidth(220)
+        self._tip(edit, f"{placeholder}: type part of a name, Enter adds the best match",
+                  "find")
         completer = QCompleter([f"{spec.label} ({spec.group})" for spec in self._offered(family)],
                                edit)
         completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
@@ -457,27 +498,38 @@ class MainWindow(QMainWindow):
                 [f"{spec.label} ({spec.group})" for spec in self._offered(family)])
 
     def _action(self, menu, text, slot, shortcut=None, name=None):
+        """A menu entry; shortcut: an id of the shortcut table (ui/shortcuts.py)."""
         action = QAction(text, self)
         if shortcut:
-            action.setShortcut(QKeySequence(shortcut))
+            shortcuts.bind(action, shortcut)
         if name:
             action.setObjectName(name)
         action.triggered.connect(slot)
         menu.addAction(action)
         return action
 
+    def _widget_action(self, widget, text, slot, shortcut):
+        """A shortcut that works while a widget has the focus (the canvas)."""
+        action = shortcuts.bind(QAction(text, widget), shortcut)
+        action.triggered.connect(slot)
+        widget.addAction(action)
+        return action
+
     def _build_menus(self):
         file_menu = self.menuBar().addMenu("&File")
-        self._action(file_menu, "&New", lambda: self._act("new"), QKeySequence.StandardKey.New)
-        self._action(file_menu, "&Open...", self.open_dialog, QKeySequence.StandardKey.Open)
-        self._action(file_menu, "Presets &gallery...", self.show_gallery, "Ctrl+Shift+O",
+        self._action(file_menu, "&New", lambda: self._act("new"), "new")
+        self._action(file_menu, "&Open...", self.open_dialog, "open")
+        self.recent_menu = file_menu.addMenu("Open &recent")
+        self.recent_menu.setObjectName("recentMenu")
+        self.recent_menu.aboutToShow.connect(self._fill_recent)
+        self._action(file_menu, "Presets &gallery...", self.show_gallery, "gallery",
                      "galleryAction")
         presets = file_menu.addMenu("Open &preset")
         for name in project.presets():
             self._action(presets, name, lambda checked=False, n=name: self.open_document(n))
-        self._action(file_menu, "&Save", self.save, QKeySequence.StandardKey.Save)
-        self._action(file_menu, "Save &as...", self.save_as, QKeySequence.StandardKey.SaveAs)
-        self._action(file_menu, "&Export pyqula script...", self.export_script)
+        self._action(file_menu, "&Save", self.save, "save")
+        self._action(file_menu, "Save &as...", self.save_as, "save_as")
+        self._action(file_menu, "&Export pyqula script...", self.export_script, "export_script")
         self._action(file_menu, "&Recover unsaved work...", self.offer_recovery,
                      name="recoverAction")
         self.trust_action = self._action(
@@ -487,22 +539,48 @@ class MainWindow(QMainWindow):
         self.trust_action.setToolTip("let the Python nodes of this document run in the "
                                      "worker (a file with Python code is not trusted when "
                                      "it is opened)")
+        self.always_trust_action = self._action(
+            file_menu, "Always trust Python code in &files",
+            lambda: self.set_always_trust(self.always_trust_action.isChecked()),
+            name="alwaysTrustAction")
+        self.always_trust_action.setCheckable(True)
+        self.always_trust_action.setToolTip("open every file with its Python nodes allowed to "
+                                            "run (PLAN.md 13.7); off by default")
         file_menu.addSeparator()
-        self._action(file_menu, "&Quit", self.close, QKeySequence.StandardKey.Quit)
+        self._action(file_menu, "&Quit", self.close, "quit")
+        file_menu.setToolTipsVisible(True)
         edit = self.menuBar().addMenu("&Edit")
-        self.undo_action = self._action(edit, "&Undo", self.undo, QKeySequence.StandardKey.Undo,
-                                        "undoAction")
-        self.redo_action = self._action(edit, "&Redo", self.redo, "Ctrl+Shift+Z", "redoAction")
+        self.undo_action = self._action(edit, "&Undo", lambda: self.undo(), "undo", "undoAction")
+        self.redo_action = self._action(edit, "&Redo", lambda: self.redo(), "redo", "redoAction")
+        self.history_menu = edit.addMenu("Undo &history")
+        self.history_menu.setObjectName("historyMenu")
+        self.history_menu.aboutToShow.connect(self._fill_history)
         view = self.menuBar().addMenu("&View")
-        for i, name in enumerate(WORKSPACES):
+        for name in WORKSPACES:
             self._action(view, f"{name.capitalize()} workspace",
-                         lambda checked=False, n=name: self.set_workspace(n), f"Ctrl+{i + 1}")
+                         lambda checked=False, n=name: self.set_workspace(n), f"workspace_{name}")
+        self._action(view, "&Structure tab", lambda: self.viewport.setCurrentIndex(STRUCTURE_TAB),
+                     "structure_tab")
+        self._action(view, "&Close result tab", self.close_current_result, "close_result")
+        self._action(view, "&Find in palette", self.focus_search, "find")
+        view.addSeparator()
+        themes = view.addMenu("&Theme")
+        themes.setObjectName("themeMenu")
+        group = QActionGroup(self)
+        self.theme_actions = {}
+        for choice, text in (("system", "Follow the &desktop"), ("light", "&Light"),
+                             ("dark", "&Dark")):
+            action = self._action(themes, text, lambda checked=False, c=choice:
+                                  self._act("theme", name=c), name=f"theme_{choice}")
+            action.setCheckable(True)
+            group.addAction(action)
+            self.theme_actions[choice] = action
         view.addSeparator()
         for dock in self.docks.values():
             view.addAction(dock.toggleViewAction())
         run = self.menuBar().addMenu("&Run")
-        self._action(run, "&Run calculation", self.run_selected, "F5", "runAction")
-        self._action(run, "&Cancel", self.cancel_selected, "Esc", "cancelAction")
+        self._action(run, "&Run calculation", self.run_selected, "run", "runAction")
+        self._action(run, "&Cancel", self.cancel_selected, "cancel", "cancelAction")
         run.addSeparator()
         self.auto_rerun_action = self._action(
             run, "Re-run cheap results &automatically", lambda: self.set_auto_rerun(
@@ -511,17 +589,33 @@ class MainWindow(QMainWindow):
         self.auto_rerun_action.setToolTip(f"a stale result is computed again as soon as the "
                                           f"geometry is rebuilt, when it takes less than "
                                           f"{AUTO_RERUN_SECONDS:g} s")
+        run.setToolTipsVisible(True)
         help_menu = self.menuBar().addMenu("&Help")
+        self._action(help_menu, "&Keyboard shortcuts", self.show_shortcuts, "shortcuts",
+                     "shortcutsAction")
         self._action(help_menu, "&About", lambda: self.message(
             f"guiqula {guiqula.__version__}, {vendoring.describe()}"))
         self._action(help_menu, "Open &crash reports folder", lambda: self._open_folder(
             crashreport.reports_dir()))
+        canvas = self.structure.canvas
+        canvas.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        for tool in structure_tools.TOOLS:
+            self._widget_action(canvas, f"{tool} tool", lambda checked=False, t=tool:
+                                self.set_tool(t), f"tool_{tool}")
+        for shortcut, args in (("select_all", {"all": True}), ("select_none", {"indices": []}),
+                               ("select_invert", {"all": True, "mode": "toggle"})):
+            self._widget_action(canvas, shortcut.replace("_", " "), lambda checked=False, a=args:
+                                self._act("select_sites", **a), shortcut)
+        self._widget_action(canvas, "remove selected", lambda: self._act("remove_selected")
+                            if self.structure.selected().size else None, "remove_selected")
+        self._widget_action(canvas, "show everything", self.structure.fit, "fit")
 
     # ---- session
     def start_session(self, document=None, **options):
         """Create and attach a Session (starts the worker processes)."""
         from guiqula.session import Session
         options.setdefault("autosave", self.autosave)
+        options.setdefault("always_trust", self.always_trust_action.isChecked())
         try:
             session = Session(document, **options)
         except Exception as error:
@@ -551,6 +645,7 @@ class MainWindow(QMainWindow):
         dispatcher.register_action("slider", self.add_slider)
         dispatcher.register_action("set_slider", self.set_slider)
         dispatcher.register_action("remove_slider", self.remove_slider)
+        dispatcher.register_action("theme", lambda name="system": self.set_theme(name))
         session.view_state = self.view_state
         self.timer.start(POLL_MS)
         self._document_changed()
@@ -606,6 +701,11 @@ class MainWindow(QMainWindow):
         if event is not None and event["type"] == "action" and event.get("name") == "trust":
             event = None           # the plans change: refresh like after an edit
             self._update_trust()
+        if event is not None and event["type"] == "action" and self.use_settings \
+                and event.get("name") in ("load", "save") and event.get("result"):
+            self._remember_file(event["result"])
+        if event is not None and event["type"] in ("undo", "redo"):
+            self._follow_step(event)
         if event is not None and event["type"] == "action":
             # actions do not change the Document (new, load and recover reset it, and
             # region_from_selection and remove_selected announce their mutation): only
@@ -1483,9 +1583,10 @@ class MainWindow(QMainWindow):
             return calc
         return f"{calc} {kind}" + (" (stale)" if self.session.is_stale(calc) else "")
 
-    def _draw_result(self, calc):
+    def _draw_result(self, calc, force=False):
         """Draw a calculation's latest result into its view, unless the view
-        already shows exactly that (a redraw would lose the zoom)."""
+        already shows exactly that (a redraw would lose the zoom) and force
+        is false (a new theme)."""
         view = self.plots[calc]
         result = self.session.result(calc)
         stale = self.session.is_stale(calc) if result is not None else False
@@ -1502,7 +1603,7 @@ class MainWindow(QMainWindow):
         overlays = [(other, self.session.result(other), mode)
                     for other, mode in self.overlays.get(calc, [])
                     if self.session.result(other) is not None]
-        if view.result is result and view.stale == stale and \
+        if not force and view.result is result and view.stale == stale and \
                 [(o, id(r), m) for o, r, m in overlays] == \
                 [(o, id(r), m) for o, r, m in view.overlays]:
             return
@@ -1821,18 +1922,131 @@ class MainWindow(QMainWindow):
         self._act("discard_recovery", path=path)
         self.offer_recovery(quiet=True)
 
-    def undo(self):
+    def undo(self, steps=1):
         if self.session.dispatcher.can_undo():
-            self.session.undo()
+            self.session.undo(steps)
 
-    def redo(self):
+    def redo(self, steps=1):
         if self.session.dispatcher.can_redo():
-            self.session.redo()
+            self.session.redo(steps)
+
+    def _follow_step(self, event):
+        """After an undo or a redo, select the entry the step touched (or its
+        system, when the entry is gone); the viewport stays where it is."""
+        for candidate in (event.get("entry"), event.get("system")):
+            if candidate and self._exists(candidate):
+                self.selected = candidate
+                return
+
+    def _fill_history(self):
+        """Undo history: the steps undo would take back (newest first) and
+        those redo would take again; choosing one goes back or forth to it."""
+        menu = self.history_menu
+        menu.clear()
+        history = self.session.dispatcher.history() if self.session else {"undo": [], "redo": []}
+        for i, text in reversed(list(enumerate(history["redo"][:15], 1))):
+            action = menu.addAction(f"redo: {text}")
+            action.triggered.connect(lambda checked=False, n=i: self.redo(n))
+        if history["redo"] and history["undo"]:
+            menu.addSeparator()
+        for i, text in enumerate(history["undo"][:25], 1):
+            action = menu.addAction(f"undo: {text}")
+            action.triggered.connect(lambda checked=False, n=i: self.undo(n))
+        if menu.isEmpty():
+            menu.addAction("nothing to undo").setEnabled(False)
+
+    # ---- theme, settings, shortcuts
+    def set_theme(self, name="system"):
+        """Light, dark, or following the desktop ("system"); what is drawn
+        in colours is drawn again. The interactive program keeps the choice
+        in the settings file. Returns the theme applied."""
+        applied = theme.apply(QApplication.instance(), name)
+        self.theme_choice = name
+        self.theme_actions[name].setChecked(True)
+        if self.use_settings:
+            settings.put("theme", name)
+        if self.session is not None:
+            self.outliner.refresh(self.session)
+            self.properties.show_item(self.session, self.selected)   # its formula images
+            self._refresh_structure()
+            for calc in list(self.plots):
+                self._draw_result(calc, force=True)
+        return applied
+
+    def set_always_trust(self, enabled):
+        """Open every file with its Python nodes allowed to run (13.7's
+        global switch, kept in the settings file)."""
+        self.always_trust_action.setChecked(bool(enabled))
+        if self.session is not None:
+            self.session.always_trust = bool(enabled)
+        if self.use_settings:
+            settings.put("always_trust", bool(enabled))
+
+    def _remember_file(self, path):
+        path = Path(path)
+        if path.parent != project.PRESETS:
+            try:
+                settings.add_recent(path.resolve())
+            except OSError as error:
+                self.message(f"could not write the settings: {error}", error=True)
+
+    def _fill_recent(self):
+        self.recent_menu.clear()
+        recent = settings.load()["recent"] if self.use_settings else []
+        for path in recent:
+            action = self.recent_menu.addAction(Path(path).name)
+            action.setToolTip(path)
+            action.triggered.connect(lambda checked=False, p=path: self.open_document(p))
+        if not recent:
+            self.recent_menu.addAction("no recent files").setEnabled(False)
+
+    def focus_search(self):
+        """Ctrl+F: the search box of the workspace's palette."""
+        edit = {"geometry": "opSearch", "hamiltonian": "termSearch",
+                "calculate": "calculationSearch"}[self.workspace]
+        box = self.findChild(QLineEdit, edit)
+        box.setFocus()
+        box.selectAll()
+        return edit
+
+    def close_current_result(self):
+        tab = self.current_tab()
+        if tab not in ("structure", "kspace"):
+            self.close_result(tab)
+
+    def show_shortcuts(self):
+        """The shortcut table (non-modal)."""
+        dialog = QDialog(self)
+        dialog.setObjectName("shortcutsDialog")
+        dialog.setWindowTitle("Keyboard shortcuts")
+        rows = shortcuts.rows()
+        table = QTableWidget(len(rows), 3, dialog)
+        table.setObjectName("shortcutsTable")
+        table.setHorizontalHeaderLabels(["where", "keys", "what"])
+        table.verticalHeader().hide()
+        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        for i, row in enumerate(rows):
+            for j, text in enumerate(row):
+                table.setItem(i, j, QTableWidgetItem(text))
+        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        table.resizeColumnsToContents()
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel("The canvas and outliner keys work while that widget has "
+                                "the focus (click it first)."))
+        layout.addWidget(table)
+        dialog.resize(640, 560)
+        dialog.show()
+        self.shortcuts_dialog = dialog
+        return dialog
 
     def _update_actions(self):
         has = self.session is not None
-        self.undo_action.setEnabled(has and self.session.dispatcher.can_undo())
-        self.redo_action.setEnabled(has and self.session.dispatcher.can_redo())
+        undo = self.session.dispatcher.undo_text() if has else None
+        redo = self.session.dispatcher.redo_text() if has else None
+        self.undo_action.setEnabled(undo is not None)
+        self.redo_action.setEnabled(redo is not None)
+        self.undo_action.setText(f"&Undo {undo}" if undo else "&Undo")
+        self.redo_action.setText(f"&Redo {redo}" if redo else "&Redo")
         self.run_button.setEnabled(has and self.calc_box.count() > 0)
         self.add_region_button.setEnabled(has and bool(self.session.document.systems))
         if has:

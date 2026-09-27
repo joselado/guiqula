@@ -64,7 +64,8 @@ a `Session`.
   exported and run by `tests/engine/test_script_export.py`). A custom script names the
   pyqula modules it uses (`modules=`); a calculation's `plot` is a dict or a callable of the
   parameters (and the arrays); plot kinds are listed in `ui/plots.py`.
-- `commands/`: `Dispatcher` (mutations with snapshot undo, actions journaled only);
+- `commands/`: `Dispatcher` (mutations with snapshot undo, actions journaled only; each undo
+  step named by `steps.py`, which a new mutation needs a text in, and `undo(steps)`);
   `mutations.py` lists every mutation. Command arguments are JSON.
 - `engine/`: `build.py` executes a plan (per-stage cache handing out copies, skip on error,
   seeds; `meanfield=False` for the interactive builds, which defer the mean field),
@@ -77,26 +78,35 @@ a `Session`.
   timeouts, `request_handler` answering a job's REQUEST), `protocol.py`.
 - `session.py`: dispatcher + job manager + results + the latest build of each system
   (coalesced requests; a stuck build is killed when a newer one is asked) + `modified` +
-  `trusted` + the console (`console(code)`); with `autosave=True` (the window's) it
+  `trusted` (`always_trust`: the window's setting) + the console (`console(code)`) + a few
+  earlier results per calculation (an undo brings the matching one back); actions `undo`,
+  `redo`, `history` for drivers; with `autosave=True` (the window's) it
   autosaves from `poll()`. The object tests, `guiqula run`, `tools/drive.py` and the window
   drive.
 - `io/`: project files (a `.guiqula` zip keeps the results too), presets
   (`src/guiqula/presets/*.json`, loadable by name, described by the Document's `notes`),
   script export (a sweep exports a loop), result files, `autosave.py` (autosave and
-  recovery), `crashreport.py`.
+  recovery), `crashreport.py`, `settings.py` (the user's theme, recent files, always
+  trust; `$GUIQULA_CONFIG_DIR`; only the interactive program's window, `use_settings=True`,
+  reads or writes it).
 - `ui/`: `mainwindow.py` (workspaces, palettes with search boxes from the registry, docks,
   bars, one result view per calculation, the cost guard, auto re-run; the window's own
   dispatcher actions `select`, `workspace`, `tool`, `select_sites`, `region_from_selection`,
   `remove_selected`, `canvas_view`, `preview`, `auto_rerun`, `projection`, `overlay`,
-  `slider`, `set_slider`, `remove_slider`, `paint`), `outliner.py`, `gallery.py`
+  `slider`, `set_slider`, `remove_slider`, `paint`, `theme`), `shortcuts.py` (the one
+  table of keyboard shortcuts: menus, the canvas and outliner keys, the dialog; a test
+  refuses ambiguous keys), `outliner.py`, `gallery.py`
   (presets), `sliders.py` (the Sliders dock), `kspace.py` (the Brillouin-zone canvas),
   `properties.py` + `forms.py` (forms from the parameter declarations; the `f(r)` Field
-  editor), `formulas.py` (mathtext images), `structure.py` (canvas, its three views,
+  editor), `formulas.py` (mathtext images; rich tooltips of the palettes), `structure.py`
+  (canvas, its three views,
   selection tools, and the mplot3d drawing of geometries that are not flat), `plots.py`
   (`PlotView` per calculation, `plot_<id>`; lines, colored_scatter, heatmap,
   structure_scalar, structure_vector, scalar), `jobpanel.py`,
   `console.py` (the console dock), `bars.py` (recovery, error, cost and trust bars),
-  `errors.py` (exception hook), `theme.py`. The window saves its view state as the Document's `ui` block (not a
+  `errors.py` (exception hook), `theme.py` (light and dark: the colour names are the active
+  theme's, rebound by `apply`; every figure is drawn inside `theme.drawing(figure)`). The
+  window saves its view state as the Document's `ui` block (not a
   Command, not an unsaved change) and restores it on open and recovery. The window
   polls the session from a `QTimer` and starts the workers after it is shown; a form or tree
   rebuilt from inside one of its own signals must be deleted later (PLAN.md phase 2 facts).
@@ -206,14 +216,19 @@ python tools/drive.py honeycomb_hubbard --run c1 --widget plot_c1 --shot hubbard
 python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "console", "code": "h.get_gap()"}'
                                                    # the console; its output is in the report
 python tools/drive.py project.guiqula --trust ...   # run the Python nodes of a file (13.7)
+python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "theme", "name": "dark"}' --shot dark.png
+python tools/drive.py preset --do '{"do": "set_param", ...}' --do '{"do": "undo"}'
+                                                   # undo, redo (steps), history
 tools/update_vendor.sh                 # refresh vendor/ from upstream pyqula
 ```
 
 `drive.py` prints a JSON report last (document outline, builds, jobs, result summaries,
-canvas view, tab shown, open result views, selection, log tail, screenshot path); a `--do`
+canvas view, tab shown, open result views, selection, undo steps, log tail, screenshot
+path); a `--do`
 object names a mutation or an action with `"do"`, and the driver waits for the rebuild after
 each one. Autosaves and crash reports go to the user data directory, or to
-`$GUIQULA_DATA_DIR` (the test suite sets it). In Python,
+`$GUIQULA_DATA_DIR` (the test suite sets it); the settings file to the user config
+directory, or `$GUIQULA_CONFIG_DIR` (set by the test suite too). In Python,
 `Session("honeycomb_zeeman_rashba", warm=False)` gives the same API: `do(...)`, `act(...)`,
 `run_calculation(calc, wait=True)`, `result(calc)`, `status(calc)`, `undo()`, `close()`.
 

@@ -9,6 +9,11 @@ Two kinds of operation (decision 14.7):
   cancel a calculation, save, export). They are journaled, not undoable.
   The host (the session, the UI) registers their handlers.
 
+Each undo step keeps the Document before and after it, a short text
+(commands/steps.py: "set m of t1", which the Edit menu and the undo
+history show) and the entry it touched. undo(steps) and redo(steps) take
+several steps at once, as one event.
+
 Every operation is appended to the journal as JSON-serializable data and
 announced to the listeners, which is what the UI, autosave and the future
 remote API bind to. Arguments must be JSON-serializable, so anything the UI
@@ -18,6 +23,7 @@ import inspect
 import json
 import time
 
+from guiqula.commands import steps as step_texts
 from guiqula.core.document import Document, DocumentError, check
 
 UNDO_LIMIT = 200
@@ -104,9 +110,15 @@ class Dispatcher:
             raise CommandError(f"{name}: {_message(error)}") from None
         self.document = after
         if merge is not None and merge == self._merge and self._undo:
-            self._undo[-1] = (name, args, self._undo[-1][2], after)
+            self._undo[-1] = dict(self._undo[-1], after=after)
         else:
-            self._undo.append((name, args, before, after))
+            try:
+                text = step_texts.describe(name, args, before)
+            except Exception:           # a text must never refuse a mutation
+                text = name.replace("_", " ")
+            entry, system = step_texts.touched(name, args, result)
+            self._undo.append({"name": name, "args": args, "before": before, "after": after,
+                               "text": text, "entry": entry, "system": system})
         self._merge = merge
         del self._undo[:-UNDO_LIMIT]
         self._redo.clear()
@@ -119,23 +131,36 @@ class Dispatcher:
     def can_redo(self):
         return bool(self._redo)
 
-    def undo(self):
-        if not self._undo:
-            raise CommandError("nothing to undo")
-        self._merge = None
-        name, args, before, after = self._undo.pop()
-        self._redo.append((name, args, before, after))
-        self.document = before
-        self._emit({"type": "undo", "name": name, "args": args})
+    def undo_text(self):
+        """The step undo() would take back, or None."""
+        return self._undo[-1]["text"] if self._undo else None
 
-    def redo(self):
-        if not self._redo:
-            raise CommandError("nothing to redo")
+    def redo_text(self):
+        return self._redo[-1]["text"] if self._redo else None
+
+    def history(self):
+        """{"undo": [texts, newest first], "redo": [texts, next first]}."""
+        return {"undo": [step["text"] for step in reversed(self._undo)],
+                "redo": [step["text"] for step in reversed(self._redo)]}
+
+    def undo(self, steps=1):
+        """Take back the last steps (one event); raises when there are fewer."""
+        self._step(self._undo, self._redo, steps, "undo", "before")
+
+    def redo(self, steps=1):
+        self._step(self._redo, self._undo, steps, "redo", "after")
+
+    def _step(self, source, target, steps, kind, side):
+        if steps < 1 or steps > len(source):
+            raise CommandError(f"nothing to {kind}" if not source else
+                               f"cannot {kind} {steps} steps; there are {len(source)}")
         self._merge = None
-        name, args, before, after = self._redo.pop()
-        self._undo.append((name, args, before, after))
-        self.document = after
-        self._emit({"type": "redo", "name": name, "args": args})
+        for _ in range(steps):
+            step = source.pop()
+            target.append(step)
+        self.document = step[side]
+        self._emit({"type": kind, "name": step["name"], "args": step["args"], "steps": steps,
+                    "text": step["text"], "entry": step["entry"], "system": step["system"]})
 
     def reset(self, document):
         """Replace the whole Document (new, open, recover); clears undo."""

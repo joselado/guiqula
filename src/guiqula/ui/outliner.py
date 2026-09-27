@@ -18,13 +18,13 @@ that are not entries, and ``calculations``. The mean-field row closes the
 Hamiltonian's list, with its own checkbox (set_meanfield).
 """
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QBrush, QColor, QKeySequence
+from PySide6.QtGui import QAction, QBrush, QColor
 from PySide6.QtWidgets import (QAbstractItemView, QInputDialog, QMenu, QTreeWidget,
                                QTreeWidgetItem)
 
 from guiqula.core import regions as region_tools
 from guiqula.registry import base as registry
-from guiqula.ui import theme
+from guiqula.ui import shortcuts, theme
 from guiqula.ui.plots import scalar_rows
 
 ID_ROLE = Qt.ItemDataRole.UserRole
@@ -109,13 +109,12 @@ class Outliner(QTreeWidget):
         self._session = None
         self._items = {}
         self._refreshing = False
-        for text, shortcut, slot in (("Delete", QKeySequence.StandardKey.Delete, self.delete_current),
-                                     ("Duplicate", "Ctrl+D", self.duplicate_current),
-                                     ("Move up", "Alt+Up", lambda: self.move_current(-1)),
-                                     ("Move down", "Alt+Down", lambda: self.move_current(1))):
-            action = QAction(text, self)
-            action.setShortcut(QKeySequence(shortcut))
-            action.setShortcutContext(Qt.ShortcutContext.WidgetShortcut)
+        for text, shortcut, slot in (("Delete", "delete", self.delete_current),
+                                     ("Rename", "rename", self.rename_current),
+                                     ("Duplicate", "duplicate", self.duplicate_current),
+                                     ("Move up", "move_up", lambda: self.move_current(-1)),
+                                     ("Move down", "move_down", lambda: self.move_current(1))):
+            action = shortcuts.bind(QAction(text, self), shortcut)
             action.triggered.connect(slot)
             self.addAction(action)
 

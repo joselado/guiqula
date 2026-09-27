@@ -143,3 +143,49 @@ def test_merged_mutations_are_one_undo_step():
     d.do_merged("slider:t1.mu", "set_param", entry=t, name="mu", value=0.6)   # after a redo:
     d.undo()                                                                  # a new step
     assert d.document.find(t)[-1].params["mu"] == 0.4
+
+
+def test_undo_steps_are_named_and_taken_several_at_once():
+    """Phase 5, design item 10: Undo and Redo name their step, the history
+    lists them, several steps go back as one event carrying the entry the
+    step touched."""
+    d = Dispatcher()
+    events = []
+    d.subscribe(events.append)
+    assert d.undo_text() is None and d.history() == {"undo": [], "redo": []}
+    s = d.do("add_system", lattice="honeycomb_lattice")
+    t = d.do("add_term", system=s, kind="zeeman")
+    d.do("set_param", entry=t, name="m", value=[0, 0, 0.3])
+    d.do("remove", entry=t)
+    assert d.history()["undo"] == ["remove t1 (zeeman / exchange field)", "set m of t1",
+                                   "add term zeeman / exchange field",
+                                   "new system on the honeycomb lattice"]
+    assert d.undo_text() == "remove t1 (zeeman / exchange field)"
+    d.undo(steps=2)
+    assert events[-1]["type"] == "undo" and events[-1]["steps"] == 2
+    assert events[-1]["entry"] == t and events[-1]["system"] is None
+    assert d.document.find(t)[-1].params["m"] == [0.0, 0.0, 0.1]      # before the set
+    assert d.history()["redo"] == ["set m of t1", "remove t1 (zeeman / exchange field)"]
+    assert d.redo_text() == "set m of t1"
+    d.redo()
+    assert events[-1]["entry"] == t
+    with pytest.raises(CommandError, match="cannot undo 9 steps; there are 3"):
+        d.undo(9)
+    d.undo(3)
+    assert d.document.systems == [] and events[-1]["entry"] == s
+    d.redo(4)
+    assert d.history()["redo"] == [] and len(d.history()["undo"]) == 4
+    with pytest.raises(CommandError, match="nothing to redo"):
+        d.redo()
+
+
+def test_every_mutation_has_a_step_text():
+    """No mutation falls back to its bare name (a new one needs a text in
+    commands/steps.py)."""
+    from guiqula.commands import steps
+    from guiqula.commands.dispatcher import MUTATIONS
+    import inspect
+    source = inspect.getsource(steps.describe)
+    missing = [name for name in MUTATIONS if f'"{name}"' not in source
+               and name not in steps.FAMILY_OF_COMMAND]
+    assert not missing
