@@ -358,3 +358,54 @@ def test_cli_run_reads_the_results_it_needs(session, tmp_path, repo):
     session.act("save", path=str(tmp_path / "te.guiqula"))
     (report,) = run(str(tmp_path / "te.guiqula"), "--calc", "c2", "--out", "file")
     assert report["status"] == "done" and report["skipped"] == []
+    script = subprocess.run([sys.executable, "-m", "guiqula", "script", str(tmp_path / "te.guiqula"),
+                             "--calc", "c2"], cwd=tmp_path, capture_output=True, text=True,
+                            env=env, timeout=120)
+    assert script.returncode == 0, script.stderr       # guiqula script reads it as well
+    assert "h.add_zeeman([site_field(" in script.stdout and "run c1 first" not in script.stdout
+
+
+def test_a_script_comments_out_what_the_current_result_skipped(session, tmp_path, repo):
+    """An entry pyqula rejected (a sublattice imbalance without sublattices)
+    is a comment in the script, from the window's export and from guiqula
+    script on the saved file alike; once the lattice has sublattices the
+    result is stale, and its list no longer says what the Document does."""
+    session.act("new")
+    s = session.do("add_system", lattice="triangular_lattice")
+    t = session.do("add_term", system=s, kind="sublattice_imbalance", params={"mass": 0.3})
+    c = session.do("add_calculation", system=s, kind="bands", params={"nk": 10})
+    assert session.run_calculation(c, wait=True, timeout=600).status == "done"
+    assert [r["id"] for r in session.result(c).skipped] == [t]
+    comment = f"# {t} sublattice_imbalance: skipped, ValueError"
+    assert comment in session.act("export_script", calculation=c)
+    session.act("save", path=str(tmp_path / "tri.guiqula"))
+    script = subprocess.run([sys.executable, "-m", "guiqula", "script", "tri.guiqula", "--calc", c],
+                            cwd=tmp_path, capture_output=True, text=True, timeout=120,
+                            env=dict(os.environ, PYTHONPATH=str(repo / "src")))
+    assert script.returncode == 0 and comment in script.stdout, script.stderr
+    session.do("set_lattice", system=s, lattice="honeycomb_lattice")
+    assert session.status(c) == "stale"
+    assert "\nh.add_sublattice_imbalance(0.3)\n" in session.act("export_script", calculation=c)
+
+
+def test_a_run_that_ends_after_an_undo_keeps_the_matching_result(no_jobs):
+    """Phase 5, design item 10, with a run still going: started after an
+    edit that is undone before it ends, its result joins the earlier ones
+    and the one that matches the Document stays current (a redo brings
+    the late one back)."""
+    from types import SimpleNamespace
+    session = Session("honeycomb_zeeman_rashba", jobs=no_jobs)
+    first = SimpleNamespace(key=session.calculation_key("c1"))
+    session._keep_result("c1", first)
+    session.do("set_param", entry="t2", name="c", value=0.3)
+    late = SimpleNamespace(key=session.calculation_key("c1"))     # what the run computes
+    session._runs["j1"] = "c1"                                      # run_calculation("c1")
+    session.undo()
+    assert session.result("c1") is first
+    session._on_job_event("job", SimpleNamespace(id="j1", kind="run", done=True, status="done",
+                                                 value=late))
+    assert session.result("c1") is first and session.status("c1") == "done"
+    assert session.earlier_results["c1"] == [late]
+    session.redo()
+    assert session.result("c1") is late
+    session.close()

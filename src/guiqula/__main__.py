@@ -10,6 +10,8 @@
 
 A file holding Python nodes is not trusted (PLAN.md 13.7): its nodes are
 skipped unless --trust is given, as in the window until it is trusted.
+A document, calculation or file that cannot be used is reported in one
+line on stderr, with exit status 2 (as argparse does for its own errors).
 
 The Qt application is imported only when the window is requested, so the
 headless commands never load Qt.
@@ -57,8 +59,7 @@ def _run(argv):
     from guiqula.session import Session
     document = project.load(args.document)
     calcs = args.calc or [c.id for c in document.calculations]
-    for calc in calcs:
-        document.calculation(calc)          # an unknown id, before anything runs
+    _check_calculations(document, calcs)    # an unknown id, before anything runs
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     failed = 0
@@ -85,6 +86,15 @@ def _run(argv):
     return 1 if failed else 0
 
 
+def _check_calculations(document, calcs):
+    from guiqula.core.document import DocumentError
+    known = [c.id for c in document.calculations]
+    for calc in calcs:
+        if calc not in known:
+            raise DocumentError(f"no calculation {calc!r} (calculations: "
+                                f"{', '.join(known) or 'none'})")
+
+
 def _waves(document, calcs, pipeline):
     """The calculations in groups that run one after the other: one whose
     system reads the result of another being run (a from_result Field)
@@ -108,12 +118,15 @@ def _script(argv):
                         help="write the document's Python nodes (else skipped, as the engine "
                              "skips them in a document that is not trusted)")
     args = parser.parse_args(argv)
-    from guiqula.io import project
-    from guiqula.io.script import export_script
-    from guiqula.session import trusted_on_open
-    document = project.load(args.document)
-    trusted = args.trust or trusted_on_open(args.document, document)
-    sys.stdout.write(export_script(document, args.calc, trusted=trusted))
+    from guiqula.session import Session
+    # opened by path, as guiqula run does: a from_result Field reads the result the
+    # file keeps, and the entries pyqula rejected in the calculation's result (when it
+    # is current) are written as comments (its batch worker starts and stops unused)
+    with Session(args.document, interactive=False, warm=False) as session:
+        if args.trust:
+            session.trusted = True
+        _check_calculations(session.document, [args.calc])
+        sys.stdout.write(session.act("export_script", calculation=args.calc))
     return 0
 
 
@@ -130,24 +143,28 @@ def _serve(argv):
     from guiqula.remote.api import RemoteAPI
     from guiqula.remote.server import Server
     from guiqula.session import Session
-    stop = []
-    signal.signal(signal.SIGTERM, lambda *_: stop.append(True))
-    with Session(args.document, warm=not args.no_warm) as session:
-        if args.trust:
-            session.act("trust")
-        api = RemoteAPI(session)
-        with Server(api, port=args.port) as server:
-            server.publish(window=False, document=str(session.path) if session.path else None)
-            session.build_all()
-            print(json.dumps({"port": server.port, "pid": os.getpid(),
-                              "connection_file": str(server.file)}), flush=True)
+    # SIGTERM stops it as Ctrl+C does, wherever it is (a flag read by the loop waited
+    # for whatever the loop was busy with); the connection file is deleted on the way out
+    signal.signal(signal.SIGTERM, signal.default_int_handler)
+    try:
+        with Session(args.document, warm=not args.no_warm) as session:
+            if args.trust:
+                session.act("trust")
+            api = RemoteAPI(session)
             try:
-                while not stop:
-                    session.poll(0.02)
-                    server.poll(0.02)
-            except KeyboardInterrupt:
-                pass
-        api.close()
+                with Server(api, port=args.port) as server:
+                    server.publish(window=False,
+                                   document=str(session.path) if session.path else None)
+                    session.build_all()
+                    print(json.dumps({"port": server.port, "pid": os.getpid(),
+                                      "connection_file": str(server.file)}), flush=True)
+                    while True:
+                        session.poll(0.02)
+                        server.poll(0.02)
+            finally:
+                api.close()
+    except KeyboardInterrupt:
+        pass
     return 0
 
 
@@ -176,6 +193,12 @@ def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     commands = {"run": _run, "script": _script, "serve": _serve, "mcp": _mcp,
                 "desktop": _desktop}
+    if argv and argv[0] in ("run", "script", "serve"):
+        try:
+            return commands[argv[0]](argv[1:])
+        except (ValueError, OSError) as error:   # a document, a calculation, a file
+            print(f"guiqula {argv[0]}: {error}", file=sys.stderr)
+            return 2
     if argv and argv[0] in commands:
         return commands[argv[0]](argv[1:])
     return _window(argv)

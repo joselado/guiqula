@@ -15,7 +15,10 @@ Methods (parameters as keywords; every reply is JSON):
 - ``catalogue``: registry entries (lattices, ops, terms, calculations...)
   with their parameters, filtered by family, system kind or a search;
 - ``do``: a command (``command``, ``args``), then waits for the builds it
-  causes (``settle``), so the reply says what the new geometry is;
+  causes (``settle``), so the reply says what the new geometry is; an
+  action that waits for its job (``console``, ``run_calculation`` with
+  ``wait``) only starts it, and the reply waits for the job instead (at
+  most ``timeout`` seconds), so the host goes on serving meanwhile;
 - ``run``: runs a calculation, waiting for it (``wait``, ``timeout``);
   ``wait``: waits for a calculation already running; ``cancel``;
 - ``result``: a result's summary, its arrays' shapes and ranges, and the
@@ -42,7 +45,7 @@ import numpy as np
 
 import guiqula
 from guiqula import registry, vendoring
-from guiqula.registry import plugins
+from guiqula.registry import pipeline, plugins
 from guiqula.core.document import terms_of
 from guiqula.remote.server import INVALID_PARAMS, NO_METHOD, Pending, RemoteError
 
@@ -52,6 +55,9 @@ METHODS = ("hello", "status", "document", "commands", "catalogue", "do", "run", 
            "cancel", "result", "plot", "screenshot", "widgets", "help", "script", "console",
            "journal")
 MAX_VALUES = 5000          # numbers per array a result reply carries by default
+# the Session's actions that can wait for the job they start, with the default of their
+# wait (session.py): do starts the job, and its reply waits for it (a Pending)
+JOB_ACTIONS = {"console": True, "run_calculation": False}
 # the window's own actions (ui/mainwindow.py registers them; tests/remote checks the list),
 # with their parameters, for the command tool's description
 WINDOW_ACTIONS = {
@@ -112,6 +118,18 @@ def thinned(array, max_values):
     return array[::step], step
 
 
+def _seconds(value, name="timeout"):
+    """A timeout parameter in seconds, at most LONGEST_WAIT; one that is not
+    a number of seconds is refused before anything is done."""
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        value = math.nan
+    if not value >= 0:                   # NaN too
+        raise RemoteError(INVALID_PARAMS, f"{name} must be a number of seconds")
+    return min(value, LONGEST_WAIT)
+
+
 def _range(array):
     try:
         array = np.asarray(array)
@@ -170,10 +188,14 @@ class RemoteAPI:
     # ---- builds without a window
     def _on_session_event(self, kind, payload):
         """Rebuild after a change, as the window does (it asks after a pause);
-        trust changes the plans as an edit does (Python nodes run or not)."""
-        changed = payload["type"] in ("mutation", "undo", "redo", "reset") or \
-            payload["type"] == "action" and payload.get("name") == "trust" \
-            if kind == "document" else False
+        trust changes the plans as an edit does (Python nodes run or not),
+        and so does a new result that a from_result Field reads."""
+        if kind == "document":
+            changed = payload["type"] in ("mutation", "undo", "redo", "reset") or \
+                payload["type"] == "action" and payload.get("name") == "trust"
+        else:
+            changed = kind == "job" and payload.kind == "run" and payload.status == "done" \
+                and payload.label in pipeline.result_references(self.session.document)
         if changed and "interactive" in self.session.jobs.workers:
             self.session.build_all()
 
@@ -302,16 +324,46 @@ class RemoteAPI:
     # ---- commands
     def do(self, command, args=None, settle=True, timeout=60.0):
         """Run a mutation or an action; with settle, reply once the builds
-        it causes are done (or timeout seconds went by)."""
+        it causes are done (or timeout seconds went by). An action that
+        waits for its job (JOB_ACTIONS) is run without waiting, and the
+        reply waits for the job instead: waiting inside the action held up
+        the host's loop (no other client served, not even one interrupting
+        the console, and the window frozen)."""
         if not isinstance(command, str):
             raise RemoteError(INVALID_PARAMS, "command must be a name")
         if args is not None and not isinstance(args, dict):
             raise RemoteError(INVALID_PARAMS, "args must be an object")
-        value = jsonable(self.session.run(command, **(args or {})))
+        timeout = _seconds(timeout)
+        args = dict(args or {})
+        waits = False
+        if command in JOB_ACTIONS:
+            waits = args.pop("wait", JOB_ACTIONS[command])
+            if waits and args.get("timeout") is not None:
+                timeout = min(timeout, _seconds(args["timeout"]))
+            args["wait"] = False
+        value = self.session.run(command, **args)
+        if waits:
+            job = self.session.calc_jobs[args["calculation"]] if command == "run_calculation" \
+                else self.session.jobs.jobs[value["job"]]
+            return self._job_done(job, settle, timeout)
+        value = jsonable(value)
         if not settle:
             return {"result": value}
-        return Pending(self.settled, lambda timed_out: self._after(value, timed_out),
-                       min(float(timeout), LONGEST_WAIT))
+        return Pending(self.settled, lambda timed_out: self._after(value, timed_out), timeout)
+
+    def _job_done(self, job, settle, timeout):
+        """The reply of do to an action whose job it waits for: what the
+        action replies once the job is done (and the builds, with settle)."""
+        def finish(timed_out):
+            value = jsonable(self.session.console_reply(job) if job.kind == "console"
+                             else job.summary())
+            out = self._after(value, timed_out) if settle else {"result": value}
+            if not job.done:
+                out["note"] = f"still {job.status} after {timeout:g} s: " + (
+                    "interrupt_console stops it" if job.kind == "console" else
+                    "call wait, or cancel")
+            return out
+        return Pending(lambda: job.done and (not settle or self.settled()), finish, timeout)
 
     def _after(self, value, timed_out):
         out = {"result": value, "systems": {}}
@@ -326,12 +378,14 @@ class RemoteAPI:
 
     # ---- calculations
     def run(self, calculation, wait=True, timeout=600.0, cores=1):
+        timeout = _seconds(timeout)
         job = self.session.run_calculation(calculation, cores=cores)
         if not wait:
             return {"job": job.summary()}
         return self._waiting(calculation, job, timeout)
 
     def wait(self, calculation, timeout=600.0):
+        timeout = _seconds(timeout)
         job = self.session.calc_jobs.get(calculation)
         if job is None:
             raise RemoteError(INVALID_PARAMS, f"{calculation!r} was not run")
@@ -348,7 +402,7 @@ class RemoteAPI:
                 out["note"] = f"still {job.status} after {timeout:g} s: call wait again, " \
                               f"or cancel"
             return jsonable(out)
-        return Pending(lambda: job.done, finish, min(float(timeout), LONGEST_WAIT))
+        return Pending(lambda: job.done, finish, timeout)
 
     def cancel(self, calculation):
         return self.session.act("cancel", target=calculation)
@@ -375,6 +429,12 @@ class RemoteAPI:
     def result(self, calculation, arrays=None, max_values=MAX_VALUES):
         """The summary, and the values of the arrays named (a list, or
         "all"); arrays of a few numbers always come with their values."""
+        try:
+            limit = int(max_values)
+        except (TypeError, ValueError):
+            limit = 0
+        if limit < 1:                 # 0 divided by zero, a negative one reversed the rows
+            raise RemoteError(INVALID_PARAMS, "max_values must be a whole number, at least 1")
         result = self._result(calculation)
         out = self._summary(calculation)
         names = list(result.arrays) if arrays == "all" else list(arrays or [])
@@ -385,7 +445,7 @@ class RemoteAPI:
         values = {}
         for name, array in result.arrays.items():
             if name in names or np.size(array) <= 16:
-                shown, step = thinned(array, int(max_values))
+                shown, step = thinned(array, limit)
                 values[name] = shown
                 if step > 1:
                     out["arrays"][name]["every"] = step
@@ -458,6 +518,7 @@ class RemoteAPI:
         return {"title": "guiqula", "markdown": helptexts.contents("guiqula")}
 
     def console(self, code, system=None, timeout=120.0):
+        timeout = _seconds(timeout)
         job = self.session.console(code, system)
 
         def finish(timed_out):
@@ -469,7 +530,7 @@ class RemoteAPI:
             if timed_out:
                 out["note"] = f"still running after {timeout:g} s"
             return jsonable(out)
-        return Pending(lambda: job.done, finish, min(float(timeout), LONGEST_WAIT))
+        return Pending(lambda: job.done, finish, timeout)
 
     def journal(self, limit=30):
         events = self.session.dispatcher.journal[-int(limit):]

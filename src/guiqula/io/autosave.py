@@ -52,7 +52,17 @@ def pid_alive(pid):
         return False
     except PermissionError:
         return True
-    return True
+    return not _zombie(pid)
+
+
+def _zombie(pid):
+    """Whether the process has ended and waits for its parent to reap it
+    (Linux; elsewhere False): os.kill finds it all the same."""
+    try:
+        with open(f"/proc/{pid}/stat") as stat:
+            return stat.read().rpartition(")")[2].split()[0] == "Z"   # after the name
+    except (OSError, IndexError):
+        return False
 
 
 class Autosaver:

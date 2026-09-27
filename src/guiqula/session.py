@@ -470,6 +470,9 @@ class Session:
             if payload.status == "done" and calc is not None and \
                     any(c.id == calc for c in self.document.calculations):
                 self._keep_result(calc, payload.value)
+                # a run that lands after an undo was computed from the Document before
+                # it: the result that matches the Document stays the current one
+                self._restore_results()
         if kind == "job" and payload.kind == "build" and payload.done:
             self._store_build(payload)
         for listener in list(self._listeners):
@@ -557,7 +560,12 @@ class Session:
     def _action_console(self, code, system=None, wait=True, timeout=None):
         """Run console code; waiting (the default for drivers), the output
         lines come back too."""
-        job = self.console(code, system, wait=wait, timeout=timeout)
+        return self.console_reply(self.console(code, system, wait=wait, timeout=timeout))
+
+    @staticmethod
+    def console_reply(job):
+        """What the console action replies about its job: the output lines
+        once it is done (the remote API waits for the job itself)."""
         out = {"job": job.id, "status": job.status}
         if job.done:
             out.update(output=list(job.log), value=job.value, error=job.error)
@@ -593,8 +601,14 @@ class Session:
         autosave_files.discard(path)
 
     def _action_export_script(self, calculation, path=None):
+        """The pyqula script of a calculation. The entries pyqula rejected in
+        its result are written as comments when that result is current: a
+        stale one was computed from another Document, where an entry may
+        have failed that works now."""
         result = self.results.get(calculation)
-        skipped = {r["id"]: r["message"] for r in result.skipped} if result else None
+        skipped = None
+        if result is not None and not self.is_stale(calculation):
+            skipped = {r["id"]: r["message"] for r in result.skipped}
         source = export_script(self.document, calculation, skipped, self.trusted,
                                self.result_refs())
         if path is None:

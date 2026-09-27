@@ -99,6 +99,25 @@ def test_a_run_shows_in_the_window(window, qtbot):
     remote(qtbot, lambda c: c.call("do", command="tool", args={"name": "box"}))
 
 
+def test_a_console_command_does_not_freeze_the_window(window, qtbot):
+    """do console waited for its job inside the window's timer: the window
+    froze until the code ended, and no client could interrupt it. The
+    reply waits in a Pending now, while the window goes on."""
+    out = {}
+
+    def sleeping():
+        with connect() as client:
+            out.update(client.call("do", command="console",
+                                   args={"code": "import time\ntime.sleep(30)"}, timeout=120))
+    thread = threading.Thread(target=sleeping, daemon=True)
+    thread.start()
+    qtbot.waitUntil(lambda: any(j.kind == "console" and j.status == "running"
+                                for j in window.session.jobs.jobs.values()), timeout=60_000)
+    remote(qtbot, lambda c: c.call("do", command="interrupt_console"))
+    qtbot.waitUntil(lambda: not thread.is_alive(), timeout=60_000)
+    assert out["result"]["status"] == "cancelled"
+
+
 def test_window_actions_are_listed(window):
     registered = set(window.session.dispatcher.actions())
     assert registered - set(ACTIONS) == set(WINDOW_ACTIONS)

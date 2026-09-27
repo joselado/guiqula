@@ -155,6 +155,20 @@ def test_a_damaged_autosave_hides_no_other(data_dir):
     assert "error" in found["badpid.json"]
 
 
+@pytest.mark.skipif(not os.path.exists("/proc/self/stat"), reason="reads /proc (Linux)")
+def test_a_zombie_is_not_alive():
+    """A process that ended and waits for its parent to reap it (a window
+    the MCP bridge launched and never waited for) is gone: os.kill finds
+    it all the same, and its connection file was kept."""
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOWAIT)     # ended, not reaped
+    try:
+        assert not autosave.pid_alive(child.pid)
+    finally:
+        child.wait()
+    assert autosave.pid_alive(os.getppid())
+
+
 def test_recover_action(data_dir, tmp_path):
     clock = Clock()
     s = session(clock=clock)

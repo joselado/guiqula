@@ -216,8 +216,9 @@ guiqula script honeycomb_zeeman_rashba --calc c1
 ```
 
 `run` computes a calculation of a project or preset and writes its arrays (and, with
-`--script`, the pyqula script); `script` prints the script. A file with Python nodes needs
-`--trust`.
+`--script`, the pyqula script); `script` prints the same script. Both read the results a
+project file keeps, which a from-result Field reads. A file with Python nodes
+needs `--trust`.
 
 ## Remote control and the Claude add-on
 

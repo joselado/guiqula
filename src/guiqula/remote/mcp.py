@@ -24,6 +24,7 @@ import os
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import guiqula
 from guiqula.remote import connection
@@ -164,7 +165,7 @@ def tools():
          _schema(dict(CALC, arrays={"description": 'array names, or "all"',
                                     "anyOf": [{"type": "array", "items": {"type": "string"}},
                                               {"type": "string", "enum": ["all"]}]},
-                      max_values={"type": "integer"}), ("calculation",)), True),
+                      max_values={"type": "integer", "minimum": 1}), ("calculation",)), True),
         ("plot", "The figure of a result, as the result view draws it.",
          _schema(CALC, ("calculation",)), True),
         ("screenshot", "A screenshot of the window, or of one of its widgets by name "
@@ -206,6 +207,7 @@ class Bridge:
         self.backend = None
         self.version = VERSIONS[-1]
         self._tools = None
+        self.launched = []         # the windows it opened, reaped when they end
 
     def close(self):
         if self.backend is not None:
@@ -213,12 +215,30 @@ class Bridge:
             self.backend = None
 
     # ---- the backend
+    def _reap(self):
+        """Forget the windows it opened that have ended: poll() reaps them (the
+        pid of a zombie looks alive, so its connection file would be kept)."""
+        self.launched = [process for process in self.launched if process.poll() is None]
+
+    def _find(self, pid=None):
+        """The newest running guiqula (or the one of process pid) that
+        answers, attached; None if none. The connection file of a server
+        that no longer listens (a window that crashed) is deleted: it would
+        be found again at every call."""
+        self._reap()
+        while (found := connection.find(pid)) is not None:
+            try:
+                return Attached(found)
+            except ConnectionRefusedError:
+                Path(found["file"]).unlink(missing_ok=True)
+        return None
+
     def _backend(self):
         if self.backend is not None:
             return self.backend
-        found = connection.find() if self.mode != "headless" else None
-        if found is not None:
-            self.backend = Attached(found)
+        attached = self._find() if self.mode != "headless" else None
+        if attached is not None:
+            self.backend = attached
         elif self.mode == "attach":
             raise RemoteError(INVALID_PARAMS, "no guiqula runs with remote control on: open "
                                               "one with guiqula --remote, or call connect")
@@ -236,6 +256,7 @@ class Bridge:
                                         f"or try again") from None
 
     def connect(self, target=None, pid=None, launch=False, document=None):
+        self._reap()
         running = [{k: v for k, v in item.items() if k != "token"}
                    for item in connection.instances()]
         if target is None:
@@ -246,13 +267,12 @@ class Bridge:
             self.close()
             self.backend = backend
             return {"connected": self.backend.describe()}
-        found = connection.find(pid)
-        if found is None and launch:
-            found = self._launch(document)
-        if found is None:
+        backend = self._find(pid)
+        if backend is None and launch:
+            backend = Attached(self._launch(document))
+        if backend is None:
             raise RemoteError(INVALID_PARAMS, "no guiqula runs with remote control on" +
                               ("" if launch else "; launch: true opens one"))
-        backend = Attached(found)
         self.close()
         self.backend = backend
         return {"connected": self.backend.describe(), "running": running}
@@ -268,6 +288,7 @@ class Bridge:
         else:
             options["start_new_session"] = True
         process = subprocess.Popen(command, **options)
+        self.launched.append(process)
         deadline = time.monotonic() + LAUNCH_PATIENCE
         while time.monotonic() < deadline:
             found = connection.find(process.pid)
@@ -397,18 +418,27 @@ class Bridge:
         return {"jsonrpc": "2.0", "id": rid, "result": result}
 
     def serve(self, reader, writer):
-        """Answer the messages of reader (lines of bytes) on writer until EOF."""
+        """Answer the messages of reader (lines of bytes) on writer until EOF.
+        A message that fails is answered with an error, never the end of
+        the bridge (and of its own session, with every edit in it)."""
         for line in reader:
             if not line.strip():
                 continue
+            rid = None
             try:
-                message = json.loads(line)
-            except ValueError:
-                reply = _error(None, PARSE_ERROR, "not JSON")
-            else:
-                reply = self.handle(message)
-            if reply is not None:
-                writer.write(json.dumps(reply).encode() + b"\n")
+                try:
+                    message = json.loads(line)
+                except (ValueError, RecursionError):     # RecursionError: nested too deeply
+                    reply = _error(None, PARSE_ERROR, "not JSON")
+                else:
+                    if isinstance(message, dict) and isinstance(message.get("id"), (int, str)):
+                        rid = message["id"]
+                    reply = self.handle(message)
+                data = None if reply is None else json.dumps(reply)
+            except Exception as error:
+                data = json.dumps(_error(rid, INTERNAL, f"{type(error).__name__}: {error}"))
+            if data is not None:
+                writer.write(data.encode() + b"\n")
                 writer.flush()
 
 

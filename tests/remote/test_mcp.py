@@ -2,11 +2,14 @@
 processes: the MCP bridge spoken to line by line, with its own session and
 attached to a running server; and the bridge's protocol replies."""
 import base64
+import io
 import json
 import os
 import signal
+import socket
 import subprocess
 import sys
+import threading
 import time
 
 import pytest
@@ -14,6 +17,7 @@ import pytest
 from guiqula.remote import connection
 from guiqula.remote.client import connect
 from guiqula.remote.mcp import VERSIONS, Bridge, tools
+from guiqula.remote.server import INVALID_PARAMS, RemoteError
 
 SRC = os.path.join(os.path.dirname(__file__), "..", "..", "src")
 
@@ -89,6 +93,63 @@ def test_protocol_replies():
                            "params": {"name": "status", "arguments": {"bogus": 1}}})
     assert reply["result"]["isError"] is True           # the model sees what was wrong
     assert bridge.backend is None                       # nothing was started for it
+
+
+def test_a_line_that_fails_does_not_end_the_bridge():
+    """One line of deeply nested JSON (json.loads raises RecursionError, not
+    ValueError) ended guiqula mcp, and its own session with every edit in
+    it: it is a parse error now, and a request that fails is an internal
+    error, as for the server (remote/server.py)."""
+    bridge = Bridge("headless")
+    ping = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"}).encode()
+    out = io.BytesIO()
+    bridge.serve([b"[" * 100000 + b"]" * 100000 + b"\n", ping + b"\n"], out)
+    nested, pong = [json.loads(line) for line in out.getvalue().splitlines()]
+    assert nested["error"]["code"] == -32700 and pong == {"jsonrpc": "2.0", "id": 1, "result": {}}
+    bridge.handle = lambda message: 1 / 0             # whatever fails inside one request
+    out = io.BytesIO()
+    bridge.serve([ping + b"\n", ping + b"\n"], out)
+    replies = [json.loads(line) for line in out.getvalue().splitlines()]
+    assert [r["id"] for r in replies] == [1, 1]
+    assert replies[0]["error"]["code"] == -32603 and "ZeroDivisionError" in replies[0]["error"][
+        "message"]
+    assert bridge.backend is None
+
+
+def test_a_window_that_crashed_is_not_found_again():
+    """The connection file of a window that crashed while its pid still
+    looks alive (a zombie of the bridge that launched it, or a pid used
+    again) names a port nobody listens on: the bridge deletes it and goes
+    on as when none runs, instead of failing every call with
+    ConnectionRefusedError and never launching a new window."""
+    if connection.instances():
+        pytest.skip("another guiqula serves remotely in this run")
+    with socket.socket() as sock:                 # a port nothing listens on
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    path = connection.write(port, "token", window=True)
+    try:
+        status = Bridge("attach").call_tool("status", {})
+        assert status["isError"] and "guiqula --remote" in text_of(status), text_of(status)
+        assert not path.exists()
+        path = connection.write(port, "token", window=True)
+        with pytest.raises(RemoteError) as error:
+            Bridge("auto").connect(target="window")
+        assert error.value.code == INVALID_PARAMS and not path.exists()
+    finally:
+        path.unlink(missing_ok=True)
+
+
+@pytest.mark.skipif(not hasattr(os, "waitid"), reason="os.waitid (POSIX)")
+def test_a_window_it_opened_is_reaped_when_it_ends():
+    """A window the bridge launched and that ended stayed a zombie of the
+    bridge, whose pid looks alive: its connection file was kept."""
+    bridge = Bridge("attach")
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    bridge.launched.append(child)
+    os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOWAIT)      # ended, not reaped
+    bridge.connect()
+    assert child.returncode == 0 and bridge.launched == []
 
 
 @pytest.mark.parametrize("version", ["2024-11-05"])
@@ -173,6 +234,48 @@ def test_serve_and_attach():
     if os.name == "posix":
         assert code == 0, serve.stderr.read()[-3000:]
         assert not os.path.exists(info["connection_file"])     # removed on a clean stop
+
+
+def test_serve_goes_on_while_the_console_runs():
+    """do console waited for its job inside guiqula serve's loop: no other
+    client got an answer, not even interrupt_console, and SIGTERM (a flag
+    read by that loop) did not stop it. The reply waits in a Pending now."""
+    serve = subprocess.Popen([sys.executable, "-m", "guiqula", "serve", "honeycomb_zeeman_rashba",
+                              "--no-warm"], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             env=child_env(), text=True)
+    replies = []
+
+    def endless():
+        try:
+            with connect(info["pid"]) as client:
+                replies.append(client.call("do", command="console",
+                                           args={"code": "while True: pass"}, timeout=300))
+        except (OSError, RemoteError) as error:        # serve stopped under it
+            replies.append(error)
+    try:
+        info = json.loads(serve.stdout.readline())
+        thread = threading.Thread(target=endless, daemon=True)
+        thread.start()
+        time.sleep(2)
+        with connect(info["pid"], timeout=10) as other:
+            assert other.call("status")["systems"][0]["id"] == "s1"
+            other.call("do", command="interrupt_console")
+        thread.join(30)
+        assert replies[0]["result"]["status"] == "cancelled"
+        thread = threading.Thread(target=endless, daemon=True)
+        thread.start()
+        time.sleep(2)
+    finally:
+        serve.send_signal(signal.SIGTERM)
+        try:
+            code = serve.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            serve.kill()
+            serve.wait()
+            raise
+    if os.name == "posix":
+        assert code == 0, serve.stderr.read()[-3000:]
+        assert not os.path.exists(info["connection_file"])
 
 
 def test_attach_without_a_server_says_so():

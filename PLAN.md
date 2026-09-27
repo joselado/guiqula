@@ -1291,8 +1291,10 @@ forth several steps at once (`undo(steps)`, one event), the selection
 follows the step (its entry, or its system when the entry is gone; the
 viewport stays), and the Session keeps up to 4 earlier results per
 calculation, so that an undo (or a value set back by hand) makes the
-matching one current without a re-run; `undo`, `redo` and `history` are
-session actions for drivers. Tooltips: the palette menus show the entry's
+matching one current without a re-run (a run that ends after the undo
+joins the earlier results: the matching one stays current, fix of
+2026-09-28); `undo`, `redo` and `history` are session actions for
+drivers. Tooltips: the palette menus show the entry's
 label, doc, formula image and the Hilbert space it needs (their tooltips
 were set before but never shown: a QMenu hides them unless asked); every
 toolbar control has one, with its keys; a parameter's label carries its
@@ -1507,7 +1509,14 @@ numbers; `plot`: the result's figure drawn with Agg in the light theme;
 `screenshot` and `widgets`; `help`: an item's, an entry's or a guide
 section's Markdown, a heading found by its start; `script`; `console`;
 `journal`). A method that waits returns a `Pending`, which the server
-checks at every poll, so a calculation never holds up the window.
+checks at every poll, so a calculation never holds up the window. `do`
+of an action that waits for its job (`console`, `run_calculation` with
+`wait`) starts the job and its reply waits for it, at most `timeout`
+seconds (a console loop held up `guiqula serve` and the window, and no
+client could interrupt it); a timeout or `max_values` that is not a
+number is refused before anything is done; without a window a result
+that a from_result Field reads rebuilds the systems, as the window does
+(fixes of 2026-09-28).
 `server.py`: JSON-RPC 2.0, one message per line, on 127.0.0.1 (a free
 port), `hello` with the token first or the connection is closed; the host
 polls it from its own loop (the window's 30 ms timer, `guiqula serve`), so
@@ -1529,7 +1538,11 @@ control (kept in the settings file, off by default), `guiqula --remote`
 for one run, a `remote` window action, "remote :port" in the status bar;
 the connection file follows the document opened or saved. `guiqula serve
 [document]`: a session without a window, which asks for the builds after
-every change as the window does. `tools/mcp_check.py` runs the official
+every change as the window does; SIGTERM stops it as Ctrl+C does, wherever
+it is. The bridge answers a line it cannot parse, or a request that fails,
+with an error and goes on; a connection file whose server no longer
+listens (a window that crashed) is deleted, and a window the bridge opened
+is reaped when it ends (fixes of 2026-09-28). `tools/mcp_check.py` runs the official
 MCP SDK's client against the bridge. The user guide has a section on it.
 Tests: `tests/remote/test_server.py` (round trip, the token, malformed
 requests, a pending reply that does not block another client, connection
@@ -1962,7 +1975,11 @@ onward are features (placement per phase at the end of section 7).
    on a cluster or in a terminal and their results load back into the GUI.
    It opens a project with its results (a from_result Field reads the one
    the file keeps), and runs a calculation whose system reads another's
-   result after that one (fixes of 2026-09-27).
+   result after that one (fixes of 2026-09-27). `guiqula script` opens it
+   the same way, so it prints the script `run --script` writes; an entry
+   pyqula rejected is a comment only when the result that says so is
+   current; a document, calculation or output folder that cannot be used
+   is one line on stderr, exit status 2 (fixes of 2026-09-28).
    Every result stores its Document snapshot and the vendored pyqula commit,
    and can emit its own reproducing script.
 

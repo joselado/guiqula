@@ -2,12 +2,14 @@
 client or the MCP bridge gets for each method."""
 import base64
 import math
+import time
 
 import numpy as np
 import pytest
 
+from guiqula.core.results import Result
 from guiqula.remote.api import METHODS, RemoteAPI, jsonable, thinned
-from guiqula.remote.server import INVALID_PARAMS, NO_METHOD, RemoteError, resolve
+from guiqula.remote.server import INVALID_PARAMS, NO_METHOD, Pending, RemoteError, resolve
 from guiqula.commands import CommandError
 from guiqula.session import Session
 
@@ -157,11 +159,85 @@ def test_console_and_journal(api):
     assert journal["commands"] and "log" not in journal
 
 
+def running_console(api, timeout=120):
+    deadline = time.monotonic() + timeout
+    while not any(j.kind == "console" and j.status == "running"
+                  for j in api.session.jobs.jobs.values()):
+        assert time.monotonic() < deadline, "the console never started"
+        api.session.poll(0.05)
+
+
+def test_waiting_commands_do_not_hold_up_the_host(api):
+    """do of an action that waits for its job (the console, run_calculation
+    with wait) replies through a Pending: waiting inside the action held up
+    guiqula serve and the window, so no other client got an answer, not
+    even one sending interrupt_console."""
+    started = time.monotonic()
+    pending = api("do", {"command": "console", "args": {"code": "import time\ntime.sleep(30)"}})
+    assert isinstance(pending, Pending) and time.monotonic() - started < 10
+    running_console(api)
+    call(api, "do", command="interrupt_console")         # served meanwhile
+    assert resolve(pending, api.session.poll)["result"]["status"] == "cancelled"
+    reply = call(api, "do", command="console", args={"code": "import time\ntime.sleep(30)"},
+                 timeout=0.5)                             # the reply comes when its time is up
+    assert reply["result"]["status"] in ("queued", "running") and "still" in reply["note"]
+    call(api, "do", command="interrupt_console")
+    reply = call(api, "do", command="run_calculation", args={"calculation": "c2", "wait": True},
+                 timeout=600)
+    assert reply["result"]["status"] == "done" and api.session.status("c2") == "done"
+
+
 def test_the_window_methods_need_a_window(api):
     for method in ("screenshot", "widgets"):
         with pytest.raises(RemoteError) as error:
             call(api, method)
         assert "window" in error.value.message
+
+
+def test_a_result_that_a_field_reads_rebuilds_without_a_window(api):
+    """texture_exchange: s2's Zeeman field reads c1's magnetization (a
+    from_result Field). Once c1's result lands, s2 is built again, as the
+    window does: its build stayed out of date until the next edit."""
+    call(api, "do", command="load", args={"path": "texture_exchange"})
+    try:
+        assert call(api, "status")["systems"][1]["build"]["current"]
+        assert call(api, "run", calculation="c1", timeout=900)["status"] == "done"
+        resolve(Pending(api.settled, lambda timed_out: timed_out, 300), api.session.poll)
+        s2 = call(api, "status")["systems"][1]
+        assert s2["build"]["current"] and "invalid" not in s2, s2
+    finally:
+        call(api, "do", command="load", args={"path": "honeycomb_zeeman_rashba"})
+
+
+def test_bad_numbers_are_refused_before_anything_is_done(no_jobs):
+    """A timeout that is not a number of seconds, or max_values below 1, is
+    refused as invalid parameters before the command runs: the command was
+    applied first (a client retrying after the error added the term twice),
+    0 values divided by zero and a negative number reversed the rows."""
+    no_jobs.workers, no_jobs.jobs = {}, {}
+    session = Session("honeycomb_zeeman_rashba", jobs=no_jobs)
+    api = RemoteAPI(session)
+    for timeout in ("soon", None, -1.0, math.nan):
+        with pytest.raises(RemoteError) as error:
+            api("do", {"command": "add_term", "args": {"system": "s1", "kind": "onsite"},
+                       "timeout": timeout})
+        assert error.value.code == INVALID_PARAMS
+    with pytest.raises(RemoteError) as error:
+        api("do", {"command": "console", "args": {"code": "1", "timeout": "soon"}})
+    assert error.value.code == INVALID_PARAMS
+    assert len(session.document.system("s1").hamiltonian.terms) == 2
+    assert session.dispatcher.history()["undo"] == []
+    energies = np.arange(100.0).reshape(50, 2)
+    session.results["c1"] = Result("c1", "bands", session.calculation_key("c1"), {},
+                                   {"energies": energies}, {"kind": "lines"})
+    for max_values in (0, -10, "many"):
+        with pytest.raises(RemoteError) as error:
+            api("result", {"calculation": "c1", "arrays": ["energies"], "max_values": max_values})
+        assert error.value.code == INVALID_PARAMS
+    values = api("result", {"calculation": "c1", "arrays": ["energies"], "max_values": 10})
+    assert values["values"]["energies"][:2] == [[0.0, 1.0], [20.0, 21.0]]
+    api.close()
+    session.close()
 
 
 def test_jsonable_and_thinned():
