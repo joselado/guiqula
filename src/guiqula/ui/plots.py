@@ -8,7 +8,8 @@ Kinds (the ``kind`` of a Result's plot spec, which also names the arrays):
   operator);
 - ``heatmap``: c on the points (x, y), given flat (one value per point, a
   grid is recognised and drawn as cells) or as a (len(x), len(y)) array;
-  ``symmetric`` centres a diverging colour map at zero (Berry curvature);
+  a NaN leaves its cell blank; ``symmetric`` centres a diverging colour
+  map at zero (Berry curvature);
 - ``structure_scalar``: one value per site drawn on the atoms (LDOS,
   density), from the geometry the Result carries (Result.structure); on a
   chain (every site on one line along x) a curve of the values against x,
@@ -26,7 +27,8 @@ Detach, Overlay, and a readout of the data point under the mouse.
 Overlays (decision 13.11): the curves of other results drawn on the same
 axes, each in its colour with a legend, or the difference of this result
 and another one with the same x (two densities of states on one energy
-grid); for lines and coloured scatter plots. The window keeps which, and
+grid), drawn as curves instead of the result (no colours, no colour bar);
+for lines and coloured scatter plots. The window keeps which, and
 lists what can be overlaid in the Overlay menu.
 """
 import numpy as np
@@ -54,13 +56,21 @@ def _lines(ax, result):
     return np.repeat(x[:, None], y.shape[1], axis=1).ravel(), y.ravel(), None
 
 
+def _limit(c):
+    """The largest |value| of the finite ones (a colour scale centred at
+    zero), 0 when there is none: one NaN made the scale NaN."""
+    c = np.abs(np.asarray(c, dtype=float)).ravel()
+    c = c[np.isfinite(c)]
+    return float(c.max()) if len(c) else 0.0
+
+
 def _colored_scatter(ax, result):
     arrays, plot = result.arrays, result.plot
     x = np.asarray(arrays[plot["x"]])
     y = np.asarray(arrays[plot["y"]]).reshape(len(x), -1)
     c = np.asarray(arrays[plot["c"]]).reshape(y.shape)
     xs = np.repeat(x[:, None], y.shape[1], axis=1)
-    limit = float(np.max(np.abs(c)))
+    limit = _limit(c)
     if limit < 1e-8:          # all zero up to rounding: do not stretch the noise
         limit = 1.0
     points = ax.scatter(xs.ravel(), y.ravel(), c=c.ravel(), s=6, cmap="coolwarm",
@@ -71,16 +81,20 @@ def _colored_scatter(ax, result):
 
 def grid_of(x, y, c):
     """(xs, ys, C) with C[i, j] the value at (xs[i], ys[j]) when the flat
-    points (x, y, c) fill a regular grid, else None."""
+    points (x, y, c) fill a regular grid, else None. A value that is not a
+    number (a sweep point that gave none) stays in its cell, drawn blank:
+    only a cell without a point breaks the grid."""
     x, y, c = (np.asarray(a, dtype=float).ravel() for a in (x, y, c))
     xs, ix = np.unique(np.round(x, 10), return_inverse=True)
     ys, iy = np.unique(np.round(y, 10), return_inverse=True)
     if len(xs) * len(ys) != len(c) or len(xs) < 2 or len(ys) < 2:
         return None
-    grid = np.full((len(xs), len(ys)), np.nan)
-    grid[ix, iy] = c
-    if np.isnan(grid).any():
+    filled = np.zeros((len(xs), len(ys)), dtype=bool)
+    filled[ix, iy] = True
+    if not filled.all():                 # two points in one cell, so another is empty
         return None
+    grid = np.empty((len(xs), len(ys)))
+    grid[ix, iy] = c
     return xs, ys, grid
 
 
@@ -92,7 +106,7 @@ def _heatmap(ax, result):
         x, y, c = xs.ravel(), ys.ravel(), c.ravel()
     style = {"cmap": plot.get("cmap", "coolwarm" if plot.get("symmetric") else "inferno")}
     if plot.get("symmetric"):
-        limit = float(np.max(np.abs(c))) if len(c) else 1.0
+        limit = _limit(c)
         style.update(vmin=-(limit or 1.0), vmax=limit or 1.0)
     grid = grid_of(x, y, c)
     if grid is not None:
@@ -209,18 +223,19 @@ def can_overlay(result, other, mode="overlay"):
     return x1.shape == x2.shape and y1.shape == y2.shape and np.allclose(x1, x2)
 
 
+def _draw_difference(ax, result, label, other):
+    """The curves of result minus those of other (the same x), drawn
+    instead of result's own drawing; returns the points of the readout."""
+    (x, y), (_, y_other) = curves(result), curves(other)
+    lines = ax.plot(x, y - y_other, color="C3", linewidth=1.2)
+    lines[0].set_label(f"{result.calculation} − {label}")
+    ax.legend(fontsize=8)
+    return np.repeat(x[:, None], y.shape[1], axis=1).ravel(), (y - y_other).ravel(), None
+
+
 def _draw_overlays(ax, result, overlays):
-    """overlays: [(label, Result, mode)]; returns the points of the drawing
-    when a difference replaced it, else None."""
-    difference = [(label, other) for label, other, mode in overlays if mode == "difference"]
-    if difference:
-        label, other = difference[0]
-        (x, y), (_, y_other) = curves(result), curves(other)
-        ax.cla()
-        lines = ax.plot(x, y - y_other, color="C3", linewidth=1.2)
-        lines[0].set_label(f"{result.calculation} − {label}")
-        ax.legend(fontsize=8)
-        return np.repeat(x[:, None], y.shape[1], axis=1).ravel(), (y - y_other).ravel(), None
+    """overlays: [(label, Result, mode)] drawn over result's curves, each
+    in its colour, with a legend."""
     handles = [ax.lines[0]] if ax.lines else []
     if handles:
         handles[0].set_label(result.calculation)
@@ -231,7 +246,6 @@ def _draw_overlays(ax, result, overlays):
         handles.append(lines[0])
     if handles:
         ax.legend(handles=handles, fontsize=8)
-    return None
 
 
 def draw(figure, result, title="", overlays=(), theme_name=None):
@@ -248,10 +262,14 @@ def _draw(figure, result, title, overlays):
     three_d = plot["kind"] in ON_STRUCTURE and result.structure is not None and \
         not structure_tools.is_flat(result.structure)
     ax = figure.add_subplot(111, projection="3d" if three_d else None)
-    points = DRAW[plot["kind"]](ax, result)
     overlays = [o for o in overlays if can_overlay(result, o[1], o[2])]
-    if overlays:
-        points = _draw_overlays(ax, result, overlays) or points
+    difference = [(label, other) for label, other, mode in overlays if mode == "difference"]
+    if difference:          # instead of the result's own drawing, and its colour bar
+        points = _draw_difference(ax, result, *difference[0])
+    else:
+        points = DRAW[plot["kind"]](ax, result)
+        if overlays:
+            _draw_overlays(ax, result, overlays)
     if along_a_line(result) and not three_d:
         ax.set_xlabel("x")
     elif plot["kind"] in ON_STRUCTURE and not three_d:

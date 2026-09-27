@@ -10,7 +10,12 @@ when it has one, is drawn under the zone. The worker hands the geometry of
 k-space in the build summary (engine/structure.kspace), since this process
 cannot call pyqula; the window turns an edit into set_param on the
 calculation's kpath. Drawn for one- and two-dimensional systems (a 3D
-zone is shown by its k3 = 0 cut)."""
+zone is shown by its k3 = 0 cut: the plane of b1 and b2, clipped by every
+reciprocal lattice vector, with the high-symmetry points in that plane; a
+path that leaves it, pyqula's default one for instance, is drawn projected
+onto it)."""
+import itertools
+
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
@@ -28,27 +33,49 @@ CLICK_PIXELS = 3     # a press released this close to where it started is a clic
 NAMES = {"G": "Γ"}
 
 
+def plane_basis(reciprocal):
+    """Orthonormal rows (2, 3) of the plane drawn, the plane of b1 and b2
+    (k3 = 0): x and y when that is the xy plane (every one- and
+    two-dimensional lattice, a cubic one), else b1's direction and the one
+    normal to it in the plane."""
+    b = np.asarray(reciprocal, dtype=float).reshape(3, 3)
+    if np.all(np.abs(b[:2, 2]) < 1e-9):
+        return np.eye(3)[:2]
+    along = b[0] / np.linalg.norm(b[0])
+    across = b[1] - b[1].dot(along) * along
+    return np.array([along, across / np.linalg.norm(across)])
+
+
 def plane(reciprocal):
-    """The in-plane reciprocal vectors (2, 2) of a build's k-space."""
-    return np.asarray(reciprocal, dtype=float)[:2, :2]
+    """The in-plane coordinates (2, 2) of b1 and b2."""
+    b = np.asarray(reciprocal, dtype=float).reshape(3, 3)
+    return b[:2] @ plane_basis(b).T
+
+
+def in_plane(kspace):
+    """The periodic directions drawn: one, or two (the k3 = 0 cut of a 3D
+    lattice)."""
+    return min(int(kspace.get("dimensionality", 2)), 2)
 
 
 def brillouin_zone(reciprocal, dimensionality):
     """Corners (M, 2) of the first Brillouin zone in the plane: the region
-    closer to the origin than to any reciprocal lattice point."""
-    b = plane(reciprocal)
+    closer to the origin than to any reciprocal lattice point; for a 3D
+    lattice the cut of its zone by the plane (every reciprocal lattice
+    vector clips it, not only b1 and b2)."""
+    b = np.asarray(reciprocal, dtype=float).reshape(3, 3)
     if dimensionality == 1:
-        half = b[0] / 2
+        half = plane(b)[0] / 2
         return np.array([-half, half])
-    size = 4 * float(np.max(np.linalg.norm(b, axis=1)))
+    size = 4 * float(np.max(np.linalg.norm(plane(b), axis=1)))
     polygon = [np.array(p) for p in ((-size, -size), (size, -size), (size, size),
                                       (-size, size))]
-    for n1 in range(-2, 3):
-        for n2 in range(-2, 3):
-            if n1 == n2 == 0:
-                continue
-            g = n1 * b[0] + n2 * b[1]
-            polygon = _clip(polygon, g, g.dot(g) / 2)
+    basis = plane_basis(b)
+    for n in itertools.product(range(-2, 3), range(-2, 3),
+                               range(-2, 3) if dimensionality == 3 else (0,)):
+        if any(n):
+            g = np.array(n) @ b
+            polygon = _clip(polygon, basis @ g, g.dot(g) / 2)
     return np.array(polygon)
 
 
@@ -67,9 +94,10 @@ def _clip(polygon, normal, offset):
 
 
 def to_plane(reduced, reciprocal):
-    """Cartesian in-plane coordinates of reduced k-points (N, 3) -> (N, 2)."""
-    return (np.asarray(reduced, dtype=float).reshape(-1, 3) @
-            np.asarray(reciprocal, dtype=float))[:, :2]
+    """In-plane coordinates of reduced k-points (N, 3) -> (N, 2); a point
+    off the plane (k3 != 0 in 3D) lands at its projection."""
+    b = np.asarray(reciprocal, dtype=float).reshape(3, 3)
+    return (np.asarray(reduced, dtype=float).reshape(-1, 3) @ b) @ plane_basis(b).T
 
 
 def to_reduced(point, reciprocal):
@@ -79,14 +107,30 @@ def to_reduced(point, reciprocal):
     return [float(k[0]), float(k[1]) if len(k) > 1 else 0.0, 0.0]
 
 
-def special_images(kspace):
-    """{label: in-plane point} of the high-symmetry points, each taken at
-    its image closest to the origin; pyqula has several names for some
-    points (M, M1, X), and the first one it lists is kept."""
-    b, dimensionality = kspace["reciprocal"], kspace.get("dimensionality", 2)
+def plane_points(kspace):
+    """{label: reduced} of the high-symmetry points in the plane drawn:
+    for a 3D lattice those with k3 = 0 only (Z, at k3 = 1/2, projected onto
+    the plane, sat on an image of another point, which a click stored)."""
     out = {}
     for name, k in kspace["special"].items():
-        k = kpaths.nearest_image(b, k, [0.0, 0.0, 0.0], dimensionality)
+        k = np.asarray(k, dtype=float)
+        if kspace.get("dimensionality", 2) == 3:
+            if abs(k[2] - round(k[2])) > 1e-9:
+                continue
+            k = np.array([k[0], k[1], 0.0])
+        out[name] = k
+    return out
+
+
+def special_images(kspace):
+    """{label: in-plane point} of the high-symmetry points in the plane,
+    each taken at its image in the plane closest to the origin; pyqula has
+    several names for some points (M, M1, X), and the first one it lists
+    is kept."""
+    b = kspace["reciprocal"]
+    out = {}
+    for name, k in plane_points(kspace).items():
+        k = kpaths.nearest_image(b, k, [0.0, 0.0, 0.0], in_plane(kspace))
         point = to_plane(k, b)[0]
         if not any(np.allclose(point, other, atol=1e-6) for other in out.values()):
             out[name] = point
@@ -95,13 +139,13 @@ def special_images(kspace):
 
 def snap(point, kspace):
     """Reduced coordinates of a point, moved onto the high-symmetry point
-    (the image of it) nearby, if any: the vertex stays where it is drawn,
-    and the engine names it after the point it is an image of."""
+    (the image of it in the plane) nearby, if any: the vertex stays where
+    it is drawn, and the engine names it after the point it is an image of."""
     b = kspace["reciprocal"]
     unit = float(np.linalg.norm(plane(b)[0]))
     reduced = to_reduced(point, b)
-    for k in kspace["special"].values():
-        image = kpaths.nearest_image(b, k, reduced, kspace.get("dimensionality", 2))
+    for k in plane_points(kspace).values():
+        image = kpaths.nearest_image(b, k, reduced, in_plane(kspace))
         if np.linalg.norm(to_plane(image, b)[0] - np.asarray(point)) < SNAP * unit:
             return [round(float(c), 9) for c in image]
     return [round(c, 6) for c in reduced]
@@ -227,8 +271,12 @@ class KSpaceView(QWidget):
         margin = 0.15 * float(np.max(high - low)) + 1e-9
         ax.set_xlim(low[0] - margin, high[0] + margin)
         ax.set_ylim(low[1] - margin, high[1] + margin)
-        ax.set_xlabel("kx")
-        ax.set_ylabel("ky")
+        in_xy = np.allclose(plane_basis(b), np.eye(3)[:2])
+        ax.set_xlabel("kx" if in_xy else "k along b1")
+        ax.set_ylabel("ky" if in_xy else "k across b1, in the plane of b1 and b2")
+        if dimensionality == 3:
+            caption += (" · the k3 = 0 cut of the zone (the plane of b1 and b2) and the "
+                        "points in it; a path leaving it is drawn projected")
         self.caption.setText(caption)
         self.canvas.draw()
 

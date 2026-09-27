@@ -146,6 +146,7 @@ class MainWindow(QMainWindow):
         self._auto_keys = {}           # calculation id -> key it was last re-run for
         self._auto_jobs = set()        # ids of the jobs the auto re-run started
         self._searched = (None, 0.0)   # (text, time) of the last palette search
+        self._palette_menus = {}       # menu button -> (entries, handler, prefix) it lists
 
         self.outliner = Outliner()
         self.outliner.selected.connect(self.select)
@@ -287,7 +288,10 @@ class MainWindow(QMainWindow):
         return button
 
     def _fill_menu(self, button, entries, handler, prefix):
-        """(Re)fill a menu button with registry entries by group."""
+        """(Re)fill a menu button with registry entries by group; their
+        tooltips' formulas are drawn in the theme's colours, so set_theme
+        fills them again."""
+        self._palette_menus[button] = (entries, handler, prefix)
         old = button.menu()
         menu = QMenu(button)
         group = None
@@ -1041,8 +1045,8 @@ class MainWindow(QMainWindow):
     def _paint_stroke(self, indices, finished):
         """The canvas brush: indices are sites of the system drawn, which
         must be the one of the Field painted."""
-        value, _, component = self.structure.brush()
         try:
+            value, _, component = self.structure.brush()      # ValueError: not a number
             if self.field_preview is not None:
                 system = self._field_entry(*self.field_preview)[0]
                 if system.id != self.current_system():
@@ -1114,9 +1118,9 @@ class MainWindow(QMainWindow):
                                     for v in value], axis=1) * weight[:, None]
                 overlays = {"arrows": {"vectors": vectors, "label": label}}
                 size = np.linalg.norm(vectors, axis=1)
-                return overlays, f"{label}: |value| from {size.min():.4g} to {size.max():.4g}"
+                return overlays, f"{label}: |value| {structure_tools.value_range(size)}"
             values = fields.evaluate_positions(value, positions, regions, results) * weight
-            text = f"{label}: from {values.min():.4g} to {values.max():.4g}"
+            text = f"{label}: {structure_tools.value_range(values)}"
         except Exception as error:
             return {}, f"{label}: {error}"
         return {"site_values": {"values": values, "label": label}}, text
@@ -1324,8 +1328,9 @@ class MainWindow(QMainWindow):
         last = ops[-1] if ops else None
         if last is not None and last.kind == "remove_atoms" and last.enabled:
             stored = last.params["positions"]
-            new = [p for p in positions if not len(structure_tools.match_positions(
-                [p], stored, structure_tools.SAME_SITE))]
+            known = set(structure_tools.match_positions(positions, stored,        # one lookup
+                                                        structure_tools.SAME_SITE).tolist())
+            new = [p for i, p in enumerate(positions) if i not in known]
             self.session.do("set_param", entry=last.id, name="positions", value=stored + new)
             op = last.id
         else:
@@ -2184,6 +2189,8 @@ class MainWindow(QMainWindow):
         self.theme_actions[name].setChecked(True)
         if self.use_settings:
             settings.put("theme", name)
+        for button, (entries, handler, prefix) in list(self._palette_menus.items()):
+            self._fill_menu(button, entries, handler, prefix)    # the formulas of the tooltips
         if self.session is not None:
             self.outliner.refresh(self.session)
             self.properties.show_item(self.session, self.selected)   # its formula images

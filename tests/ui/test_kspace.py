@@ -34,6 +34,41 @@ def test_hexagonal_zone():
     radii = np.linalg.norm(zone, axis=1)
     assert np.allclose(radii, radii[0], atol=1e-6)
     assert np.isclose(radii[0], np.linalg.norm(b[0, :2]) / np.sqrt(3), atol=1e-6)
+    assert np.allclose(tools.plane_basis(b), np.eye(3)[:2])      # drawn in x and y
+
+
+def test_a_three_dimensional_zone_is_its_k3_0_cut():
+    """The pyrochlore (fcc) as the worker hands it: b1 and b2 leave the xy
+    plane, and Z, R, A, B have k3 = 1/2. The canvas drew the xy projection:
+    'Z' sat on an image of M2, a click on it stored M2, and the zone was a
+    square. It is the k3 = 0 cut now, with the points in that plane only."""
+    import itertools
+    from guiqula.registry import kpaths
+    s = 1 / (2 * np.sqrt(2))
+    b = s * np.array([[-1.0, 1.0, -1.0], [1.0, 1.0, 1.0], [-1.0, -1.0, 1.0]])
+    special = {"G": [0.0, 0.0, 0.0], "M": [0.5, 0.0, 0.0], "M2": [0.0, 0.5, 0.0],
+               "M3": [0.5, 0.5, 0.0], "Z": [0.0, 0.0, 0.5], "R": [0.5, 0.5, 0.5],
+               "A": [0.5, 0.0, 0.5], "B": [0.0, 0.5, 0.5]}
+    kspace = {"reciprocal": b, "special": special, "dimensionality": 3,
+              "default_path": np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.5]])}
+    drawn = tools.special_images(kspace)
+    assert set(drawn) == {"G", "M", "M2", "M3"}
+    clicked = []
+    for name, point in drawn.items():                    # a click on a label stores its point
+        stored = np.array(tools.snap(point + 0.01, kspace))
+        shift = stored - special[name]
+        assert stored[2] == 0 and np.allclose(shift, np.round(shift), atol=1e-9)
+        assert np.allclose(tools.to_plane(stored, b)[0], point)
+        clicked.append(list(stored))
+    assert kpaths.tick_names(b, 3, clicked, special) == \
+        [tools.NAMES.get(name, name) for name in drawn]  # and the bands name it so
+    zone = tools.brillouin_zone(b, 3)
+    assert len(zone) == 6                                # a hexagon, not a square
+    reciprocal = [np.array(n) @ b for n in itertools.product(range(-2, 3), repeat=3) if any(n)]
+    for corner in zone @ tools.plane_basis(b):           # in 3D: a corner of the cell's cut
+        margins = [g.dot(g) / 2 - corner.dot(g) for g in reciprocal]
+        assert min(margins) > -1e-9 and sum(abs(m) < 1e-9 for m in margins) >= 2
+    assert np.allclose(tools.to_plane(tools.to_reduced(zone[0], b), b)[0], zone[0])
 
 
 def test_the_path_on_the_zone(window, qtbot, shot):

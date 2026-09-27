@@ -15,12 +15,13 @@ colour bar is drawn only for values that vary. The window computes what to draw;
 the pure functions below turn build arrays into artists.
 
 Site selection (PLAN.md 13.2): the pick tool selects the atom under a
-click (shift adds, ctrl toggles, a click on nothing clears), the box and
-lasso tools select what they enclose; the mouse wheel zooms, and the
-toolbar pans and zooms (while it does, the tools are off). The selection
-is kept as positions, so it survives a rebuild of the same geometry. The
-window turns it into a region or a removal op; the pure functions below do
-the geometry, so tests and drivers use them without a mouse.
+click (a click on nothing clears), the box and lasso tools select what
+they enclose; with all three, shift adds and ctrl toggles. The mouse wheel
+zooms, and the toolbar pans and zooms (while it does, the tools are off).
+The selection is kept as positions, so it survives a rebuild of the same
+geometry. The window turns it into a region or a removal op; the pure
+functions below do the geometry, so tests and drivers use them without a
+mouse.
 
 A geometry that is not flat (a three-dimensional lattice, buckled or
 stacked layers) is drawn in 3D (matplotlib's mplot3d: drag to turn it) with
@@ -51,6 +52,7 @@ from guiqula.ui import theme
 IMAGE_LIMIT = 3000       # above this many sites the neighbouring cells are not drawn
 RADIUS = 0.22            # of an atom, in pyqula's length unit (first neighbours at 1)
 PICK_RADIUS = 0.5        # a click selects the nearest site within this distance
+MIN_SPAN = 2.0           # the flat view spans at least this (the first neighbours of one site)
 SAME_SITE = 1e-3         # positions closer than this are the same site
 OUTLINE_PIXELS = 6       # circles narrower than this on the screen are drawn without outline
 TOOLS = ("pick", "box", "lasso")
@@ -206,23 +208,49 @@ def hopping_segments(build, view):
 
 
 def varies(values, tol=1e-9):
+    """Whether the finite values differ (a colour bar is drawn only then)."""
     values = np.asarray(values, dtype=float)
+    values = values[np.isfinite(values)]
     return len(values) > 0 and float(values.max() - values.min()) > tol
 
 
 def value_colors(values, symmetric=True, cmap=VALUE_MAP):
     """Colours of site values and the mappable for a colour bar; symmetric:
-    a colour scale centred at zero."""
+    a colour scale centred at zero. The finite values set the scale; a
+    value that is not finite (a Field's 1/x at x = 0) is grey (theme.MUTED)
+    instead of turning every site black."""
     values = np.asarray(values, dtype=float)
-    limit = float(np.max(np.abs(values))) if len(values) else 0.0
+    finite = np.isfinite(values)
+    good = values[finite]
+    limit = float(np.max(np.abs(good))) if len(good) else 0.0
     if symmetric:
         limit = limit if limit > 1e-12 else 1.0
         norm = mcolors.Normalize(-limit, limit)
     else:
-        low, high = (float(values.min()), float(values.max())) if len(values) else (0.0, 1.0)
+        low, high = (float(good.min()), float(good.max())) if len(good) else (0.0, 1.0)
         norm = mcolors.Normalize(low, high if high > low else low + 1.0)
     mappable = cm.ScalarMappable(norm=norm, cmap=cmap)
-    return [mcolors.to_hex(c) for c in mappable.to_rgba(values)], mappable
+    colors = [mcolors.to_hex(c) for c in mappable.to_rgba(np.where(finite, values, 0.0))]
+    return [c if ok else theme.MUTED for c, ok in zip(colors, finite)], mappable
+
+
+def value_range(values):
+    """'from a to b' of the finite values, and how many are not finite (the
+    captions of the Field preview)."""
+    values = np.asarray(values, dtype=float)
+    good = values[np.isfinite(values)]
+    text = f"from {good.min():.4g} to {good.max():.4g}" if len(good) else "no finite value"
+    bad = len(values) - len(good)
+    if bad and len(good):
+        text += f"; {bad} site{'s' if bad > 1 else ''} not finite (grey)"
+    return text
+
+
+def finite_vectors(vectors):
+    """Which vectors (N, 3) are finite: those get an arrow, and the longest
+    of them sets the scale of all."""
+    vectors = np.asarray(vectors, dtype=float).reshape(-1, 3)
+    return np.all(np.isfinite(vectors), axis=1)
 
 
 def cell_outline(build):
@@ -231,7 +259,8 @@ def cell_outline(build):
     if build["dimensionality"] != 2:
         return None
     a1, a2 = np.asarray(build["lattice"])[:2, :2]
-    centre = np.asarray(build["positions"])[:, :2].mean(axis=0)
+    r = np.asarray(build["positions"])[:, :2]
+    centre = r.mean(axis=0) if len(r) else np.zeros(2)      # every site removed
     corner = centre - (a1 + a2) / 2
     return np.array([corner, corner + a1, corner + a1 + a2, corner + a2])
 
@@ -245,9 +274,9 @@ def draw_structure(ax, build, highlight=None, selected=None, removed=None, image
     sequential one from the smallest to the largest value); arrows:
     {"vectors": (N, 3), "label"} draws the in-plane part at the sites,
     coloured by the z part; hoppings: a Hamiltonian view, whose hoppings
-    replace the first-neighbour bonds. Only the central cell sets the view;
-    the neighbouring cells show at its border. Returns the collection of
-    the selection rings."""
+    replace the first-neighbour bonds. Only the central cell sets the view
+    (at least MIN_SPAN wide); the neighbouring cells show at its border.
+    Returns the collection of the selection rings."""
     r = np.asarray(build["positions"])
     xy = r[:, :2]
     n = len(r)
@@ -309,11 +338,13 @@ def draw_structure(ax, build, highlight=None, selected=None, removed=None, image
             circles(ax, xy, 0.5 * RADIUS, 5, facecolors=dots, edgecolors=theme.ARROW,
                     linewidths=0.4)
             colorbar(mappable, f"{arrows.get('label', '')}, z (dots)")
-        longest = float(np.max(np.linalg.norm(vectors[:, :2], axis=1))) if n else 0.0
+        shown = finite_vectors(vectors)
+        lengths = np.linalg.norm(vectors[shown, :2], axis=1)
+        longest = float(lengths.max()) if len(lengths) else 0.0
         if longest > 1e-12:
-            ax.quiver(xy[:, 0], xy[:, 1], vectors[:, 0], vectors[:, 1], angles="xy",
-                      scale_units="xy", scale=longest / 0.8, pivot="middle", width=0.006,
-                      color=theme.ARROW, zorder=8)
+            ax.quiver(xy[shown, 0], xy[shown, 1], vectors[shown, 0], vectors[shown, 1],
+                      angles="xy", scale_units="xy", scale=longest / 0.8, pivot="middle",
+                      width=0.006, color=theme.ARROW, zorder=8)
     outline = cell_outline(build)
     if outline is not None:
         ax.add_patch(Polygon(outline, closed=True, fill=False, edgecolor=theme.CELL,
@@ -330,6 +361,10 @@ def draw_structure(ax, build, highlight=None, selected=None, removed=None, image
                 linewidths=1.2, linestyles="--")
         ax.scatter(p[:, 0], p[:, 1], marker="x", c=theme.REMOVED, s=20, linewidths=1.5,
                    zorder=7)
+    if n:                # one site (a chain's cell) is a point: show its neighbours too
+        low, high = xy.min(axis=0), xy.max(axis=0)
+        half = np.maximum(high - low, MIN_SPAN) / 2
+        ax.update_datalim([(low + high) / 2 - half, (low + high) / 2 + half])
     ax.set_aspect("equal", adjustable="datalim")
     ax.margins(0.15 if cells else 0.08)
     ax.autoscale_view()
@@ -422,10 +457,12 @@ def draw_structure_3d(ax, build, highlight=None, selected=None, removed=None, im
                                              linewidths=0.8))
     if arrows is not None:
         vectors = np.asarray(arrows["vectors"], dtype=float).reshape(-1, 3)
-        longest = float(np.max(np.linalg.norm(vectors, axis=1))) if n else 0.0
+        shown = finite_vectors(vectors)
+        lengths = np.linalg.norm(vectors[shown], axis=1)
+        longest = float(lengths.max()) if len(lengths) else 0.0
         if longest > 1e-12:
-            v = vectors * (0.8 / longest)
-            ax.quiver(r[:, 0] - v[:, 0] / 2, r[:, 1] - v[:, 1] / 2, r[:, 2] - v[:, 2] / 2,
+            v, at = vectors[shown] * (0.8 / longest), r[shown]
+            ax.quiver(at[:, 0] - v[:, 0] / 2, at[:, 1] - v[:, 1] / 2, at[:, 2] - v[:, 2] / 2,
                       v[:, 0], v[:, 1], v[:, 2], color=theme.ARROW, linewidth=1.2,
                       arrow_length_ratio=0.3)
     if highlight is not None and np.any(highlight):
@@ -547,6 +584,7 @@ class StructureView(QWidget):
         self.selected_positions = np.zeros((0, 3))
         self._selection_artist = None
         self._selector = None
+        self._press_key = None
         self._caption = ""
         self._drawn = self._overlays = None     # what the figure shows (show_structure)
         self._was_navigating = False
@@ -620,8 +658,11 @@ class StructureView(QWidget):
                 angles = (self.ax.elev, self.ax.azim)
             elif not was_3d and not three_d:
                 limits = (self.ax.get_xlim(), self.ax.get_ylim())
+        # the same geometry: the same positions (a Shift or a strain moves every site of a
+        # flake without changing their number, and the kept view showed none of them)
         same_sites = self.build is not None and build is not None and \
-            np.shape(self.build["positions"]) == np.shape(build["positions"])
+            np.shape(self.build["positions"]) == np.shape(build["positions"]) and \
+            np.allclose(self.build["positions"], build["positions"], rtol=0.0, atol=SAME_SITE)
         if system_id != self.system_id:
             self.selected_positions = np.zeros((0, 3))
         self.system_id, self.build = system_id, build
@@ -728,9 +769,12 @@ class StructureView(QWidget):
             return
         props = {"color": theme.SELECTED, "linewidth": 1.5}
         if self.tool == "box":
+            # shift and ctrl add and toggle (_mode), so they must not make matplotlib's box
+            # square or centred on the press
             self._selector = RectangleSelector(
                 self.ax, self._on_box, useblit=False, button=[1], interactive=False,
-                props={"edgecolor": theme.SELECTED, "fill": False, "linewidth": 1.5})
+                props={"edgecolor": theme.SELECTED, "fill": False, "linewidth": 1.5},
+                state_modifier_keys={"square": "not-applicable", "center": "not-applicable"})
         elif self.tool == "lasso":
             self._selector = LassoSelector(self.ax, self._on_lasso, useblit=False, button=[1],
                                            props=props)
@@ -752,13 +796,14 @@ class StructureView(QWidget):
 
     # ---- the brush (the Field preview)
     def brush(self):
-        """(value, radius, component) of the brush."""
-        def number(edit, default):
+        """(value, radius, component) of the brush; ValueError when the value
+        or the radius typed is not a number (it used to paint 1.0 then)."""
+        def number(edit, what):
             try:
                 return float(edit.text())
             except ValueError:
-                return default
-        return (number(self.brush_value, 1.0), number(self.brush_radius, 0.6),
+                raise ValueError(f"the brush {what} {edit.text()!r} is not a number") from None
+        return (number(self.brush_value, "value"), number(self.brush_radius, "radius"),
                 self.brush_component.currentData())
 
     def under_brush(self, x, y):
@@ -779,9 +824,15 @@ class StructureView(QWidget):
             self.paint_stroke.emit([], True)
 
     def _on_press(self, event):
+        self._press_key = event.key          # the lasso's modifier (_on_lasso gets no event)
         if self.paint.isChecked() and self.paint.isVisible() and self.build is not None \
                 and event.inaxes is self.ax and event.button == 1 and not self._navigating() \
                 and not self._is_3d():
+            try:
+                self.brush()
+            except ValueError:        # a stroke that paints nothing; the window says why
+                self.paint_stroke.emit([], True)
+                return
             self._painting = True
             self.paint_stroke.emit(self.under_brush(event.xdata, event.ydata), False)
             return
@@ -806,7 +857,8 @@ class StructureView(QWidget):
     def _on_lasso(self, vertices):
         if self.build is None or self._navigating():
             return
-        self.select(indices_in_polygon(self.build["positions"], vertices))
+        self.select(indices_in_polygon(self.build["positions"], vertices),
+                    self._mode(self._press_key))
 
     def _on_scroll(self, event):
         if self.ax is None or event.inaxes is not self.ax or event.xdata is None \

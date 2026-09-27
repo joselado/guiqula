@@ -5,7 +5,8 @@ for a report, a course or a paper.
 - ``figure.png`` and ``figure.pdf``: the plot as the result view draws it,
   in the light theme (a white background whatever the window shows); the
   window draws it, through the ``figure`` callable, since figures belong
-  to the UI process;
+  to the UI process; none for a result its view cannot draw either (the
+  README says why);
 - ``data.npz`` and ``data.json``: the arrays and everything else
   (io/results.py), ``data.csv`` too for curves (one column per curve);
 - ``script.py``: the pyqula script that computes the arrays, exported
@@ -35,10 +36,13 @@ def curves_table(result):
     plot = result.plot
     if plot.get("kind") not in CURVES:
         return None
-    y = np.asarray(result.arrays[plot["y"]], dtype=float)
-    x = np.asarray(result.arrays[plot["x"]], dtype=float) if plot.get("x") \
-        else np.arange(len(y), dtype=float)
-    y = y.reshape(len(x), -1)
+    try:
+        y = np.asarray(result.arrays[plot["y"]], dtype=float)
+        x = np.asarray(result.arrays[plot["x"]], dtype=float) if plot.get("x") \
+            else np.arange(len(y), dtype=float)
+        y = y.reshape(len(x), -1)
+    except (TypeError, ValueError):     # arrays that do not make curves (a Python calculation's)
+        return None
     xname = plot.get("x") or "index"
     names = [plot["y"]] if y.shape[1] == 1 else [f"{plot['y']}_{i}" for i in range(y.shape[1])]
     return [xname] + names, np.column_stack([x, y])
@@ -59,17 +63,26 @@ def scalar_rows(result):
 def write(folder, result, figure=None, trusted=True, results=None, stale=False):
     """Write the bundle of a result into folder (made if needed); returns
     the paths written. figure(png_path, pdf_path) draws the plot (the
-    window's); results: the ResultRefs a from_result Field reads now,
-    for a result that does not keep those it read (result.reads, which
-    win: a stale result read another result of that calculation, or one
-    the Document no longer reads)."""
+    window's); a result it cannot draw (arrays shaped otherwise than its
+    plot kind, which its view says too) is written without a figure, and
+    the README says why. results: the ResultRefs a from_result Field reads
+    now, for a result that does not keep those it read (result.reads,
+    which win: a stale result read another result of that calculation, or
+    one the Document no longer reads)."""
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
-    written = []
+    written, not_drawn = [], None
     if figure is not None:
         png, pdf = folder / "figure.png", folder / "figure.pdf"
-        figure(png, pdf)
-        written += [png, pdf]
+        try:
+            figure(png, pdf)
+            written += [png, pdf]
+        except OSError:                 # a folder that cannot be written: nothing can be
+            raise
+        except Exception as error:      # the drawing
+            for path in (png, pdf):
+                path.unlink(missing_ok=True)
+            not_drawn = f"{type(error).__name__}: {error}"
     written += list(result_files.save(result, folder / "data"))
     table = curves_table(result)
     if table is not None:
@@ -99,12 +112,13 @@ def write(folder, result, figure=None, trusted=True, results=None, stale=False):
         path.write_text(document.to_json(), encoding="utf-8")
         written += [script, path]
     readme = folder / "README.txt"
-    readme.write_text(_readme(result, [p.name for p in written], stale), encoding="utf-8")
+    readme.write_text(_readme(result, [p.name for p in written], stale, not_drawn),
+                      encoding="utf-8")
     written.append(readme)
     return written
 
 
-def _readme(result, names, stale):
+def _readme(result, names, stale, not_drawn=None):
     what = {"figure.png": "the plot (also figure.pdf)",
             "data.npz": "the arrays (numpy.load); data.json has the parameters, the plot "
                         "spec, the build reports and the Document snapshot",
@@ -117,5 +131,8 @@ def _readme(result, names, stale):
     if stale:
         lines += ["The document was changed after this result was computed; these files "
                   "reproduce the result, not the document as it is now.", ""]
+    if not_drawn:
+        lines += [f"The figure could not be drawn ({not_drawn}): its arrays do not have the "
+                  f"shapes its plot kind draws; the data files hold them all.", ""]
     lines += [f"{name}: {text}" for name, text in what.items() if name in names]
     return "\n".join(lines) + "\n"

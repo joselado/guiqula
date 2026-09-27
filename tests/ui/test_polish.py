@@ -163,6 +163,33 @@ def test_dark_theme_and_back(window, qtbot, shot):
         theme.resolve("purple")
 
 
+def formula_ink(window, entry="addTerm_zeeman"):
+    """The colour of most opaque pixels of the formula in a palette entry's
+    tooltip."""
+    import base64
+    import re
+    from collections import Counter
+    from PySide6.QtGui import QImage
+    tooltip = next(a for a in window.term_button.menu().actions()
+                   if a.objectName() == entry).toolTip()
+    image = QImage.fromData(base64.b64decode(re.search(r'base64,([^"]+)"', tooltip).group(1)),
+                            "PNG")
+    pixels = (image.pixelColor(x, y) for x in range(image.width()) for y in range(image.height()))
+    return Counter(p.name() for p in pixels if p.alpha() > 250).most_common(1)[0][0]
+
+
+def test_formulas_in_the_palettes_follow_the_theme(window):
+    """The formula images of the palettes' tooltips were drawn once, in the
+    theme of the moment: near-black on the dark theme's tooltips."""
+    assert formula_ink(window) == theme.COLORS["light"]["TEXT"]
+    window.set_theme("dark")
+    try:
+        assert formula_ink(window) == theme.COLORS["dark"]["TEXT"]
+    finally:
+        window.set_theme("light")
+    assert formula_ink(window) == theme.COLORS["light"]["TEXT"]
+
+
 def test_the_settings_of_the_interactive_window(qapp, qtbot, tmp_path, no_jobs):
     """The program's window (use_settings) keeps the theme, always trust
     and the recent files; a driven window leaves the file alone."""
@@ -173,6 +200,7 @@ def test_the_settings_of_the_interactive_window(qapp, qtbot, tmp_path, no_jobs):
     try:
         assert theme.name == "dark" and window.theme_actions["dark"].isChecked()
         window.attach(Session("honeycomb_zeeman_rashba", jobs=no_jobs))
+        assert formula_ink(window) == theme.COLORS["dark"]["TEXT"]    # built light, then dark
         window.set_theme("light")
         assert settings.get("theme") == "light"
         window.session.act("save", path=str(tmp_path / "a.guiqula"))

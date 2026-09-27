@@ -166,7 +166,10 @@ calculation. Add points appends vertices (they snap onto the high-symmetry point
 it on, a click on a vertex of the path adds that point again, so a path can pass twice
 through a point (Γ K M Γ). A vertex can be dragged, Remove last removes one, and Default
 path goes back to pyqula's. The k-path of a calculation's form takes the same path as text
-(`G K M G`). The latest Fermi surface of the system is drawn underneath.
+(`G K M G`). The latest Fermi surface of the system is drawn underneath. A
+three-dimensional lattice is drawn by the k3 = 0 cut of its zone (the plane of b1 and b2)
+with the high-symmetry points in that plane; a path that leaves the plane (pyqula's
+default one, or `Z` typed in the form) is drawn projected onto it.
 
 ## Python nodes, trust and the console
 

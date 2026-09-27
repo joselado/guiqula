@@ -110,6 +110,51 @@ def test_buckled_layers_are_not_flat():
     assert is_flat(flat) and not is_flat(buckled) and not is_flat(bulk)
 
 
+def test_a_map_with_a_value_that_is_not_a_number(qapp):
+    """One NaN in a 2D sweep's map (a point that gave no number) turned the
+    map into a sparse scatter of squares, and a symmetric one got a colour
+    bar of -0.1 to 0.1: the cell is left blank now, the rest is a map."""
+    from matplotlib.figure import Figure
+    from guiqula.core.results import Result
+    from guiqula.ui import plots
+    x, y = np.linspace(0, 1, 11), np.linspace(0, 2, 21)
+    c = np.add.outer(np.sin(3 * x), np.cos(2 * y))              # c[i, j] at (x[i], y[j])
+    c[5, 10] = np.nan
+    for symmetric in (False, True):
+        result = Result(calculation="c3", kind="sweep", key="k", params={},
+                        arrays={"value": x, "value2": y, "gap": c},
+                        plot={"kind": "heatmap", "x": "value", "y": "value2", "c": "gap",
+                              "symmetric": symmetric})
+        figure = Figure()
+        ax, _ = plots.draw(figure, result)
+        assert [type(a).__name__ for a in ax.collections] == ["QuadMesh"]
+        assert ax.collections[0].get_array().mask.sum() == 1          # the one blank cell
+        low, high = figure.axes[1].get_ylim()
+        assert np.isclose(high, np.nanmax(np.abs(c)) if symmetric else np.nanmax(c))
+    assert plots.grid_of(np.r_[x, 0.0], np.r_[x, 0.0], np.r_[x, 1.0]) is None   # not a grid
+
+
+def test_the_difference_of_two_coloured_band_structures(qapp):
+    """A difference replaces the coloured bands with curves: the colour bar
+    of the bands ('sz') stayed beside them, in the view and in exports."""
+    from matplotlib.figure import Figure
+    from guiqula.core.results import Result
+    from guiqula.ui import plots
+    k = np.linspace(0, 1, 20)
+
+    def bands(shift):
+        energies = np.column_stack([np.cos(np.pi * k) + shift, -np.cos(np.pi * k)])
+        return Result(calculation="c1", kind="bands", key=str(shift), params={},
+                      arrays={"k": k, "energies": energies, "sz": np.sign(energies)},
+                      plot={"kind": "colored_scatter", "x": "k", "y": "energies", "c": "sz"})
+    figure = Figure()
+    ax, points = plots.draw(figure, bands(0.0), overlays=[("c3", bands(0.1), "difference")])
+    assert figure.axes == [ax] and not ax.collections
+    assert np.allclose(ax.lines[0].get_ydata(), -0.1)
+    assert ax.get_legend().get_texts()[0].get_text() == "c1 − c3"
+    assert len(points[0]) == 40 and points[2] is None
+
+
 def test_overlays(window, qtbot, shot):
     """Two densities of states on one axes, then their difference (13.11)."""
     session = window.session

@@ -9,6 +9,7 @@ import json
 
 import numpy as np
 import pytest
+from matplotlib.backend_bases import MouseEvent
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QPushButton
@@ -80,6 +81,28 @@ def test_a_result_that_cannot_be_drawn_says_why(window, qtbot):
     assert window.session.build_is_current("s1") and not errors_since(window, start)
 
 
+def test_a_result_that_cannot_be_drawn_is_exported_without_a_figure(window, qtbot, tmp_path):
+    """Export is enabled on such a view, and it failed as a whole ('len()
+    of unsized object'), leaving an empty folder: the data, the script and
+    the document are written now, and the README says why no figure is."""
+    import os
+    start = fresh(qtbot, window)
+    window.session._keep_result("c1", Result(
+        calculation="c1", kind="python", key="old", params={},
+        arrays={"mu": np.array(0.0), "n": np.arange(3.0)},
+        plot={"kind": "lines", "x": "mu", "y": "n"},
+        document=window.session.document.to_json()))
+    window.show_result("c1")
+    assert window.plots["c1"].export.isEnabled()
+    files = window._act("export_bundle", calculation="c1", path=str(tmp_path / "c1"))
+    names = ["README.txt", "data.json", "data.npz", "document.json", "script.py"]
+    assert sorted(os.path.basename(p) for p in files) == names
+    assert sorted(os.listdir(tmp_path / "c1")) == names
+    readme = (tmp_path / "c1" / "README.txt").read_text()
+    assert "The figure could not be drawn (TypeError: len() of unsized object)" in readme
+    assert not errors_since(window, start)
+
+
 def test_a_geometry_without_sites(window, qtbot):
     start = fresh(qtbot, window)
     s2 = window._act("add_system", lattice="diamond_lattice")
@@ -100,6 +123,29 @@ def test_a_geometry_without_sites(window, qtbot):
     assert window.builds[s2]["sites"] > 0 and window.redo_action.isEnabled()
     assert not errors_since(window, start)
     window.set_canvas_view("structure")
+
+
+def test_a_removal_op_grows_with_one_lookup(window, qtbot, monkeypatch):
+    """Extending the trailing Remove atoms op looked every selected site up
+    in its positions one at a time, each time hashing all of them (7 s for
+    1830 sites of 7200, the window frozen): one lookup does them all now."""
+    from guiqula.ui import structure as structure_tools
+    fresh(qtbot, window)
+    window._do("set_param", entry="op1", name="n", value=[10, 10, 1])      # 200 sites
+    settle(qtbot, window)
+    window.select_sites(sublattice=1)
+    op = window.remove_selected()
+    settle(qtbot, window)
+    assert window.select_sites(all=True) == 100
+    lookups = []
+    lookup = structure_tools.nearest_indices
+    monkeypatch.setattr(structure_tools, "nearest_indices",
+                        lambda *args: lookups.append(args) or lookup(*args))
+    assert window.remove_selected() == op
+    assert len(window.session.document.find(op)[-1].params["positions"]) == 200
+    assert len(lookups) < 20        # not one per site: the selection's updates make a few
+    settle(qtbot, window)
+    assert window.builds["s1"]["sites"] == 0
 
 
 def test_the_brush_paints_only_the_system_it_is_drawn_on(window, qtbot):
@@ -385,3 +431,67 @@ def test_a_slider_needs_a_finite_range(still):
         assert window._act("slider", entry="t2", param="c", minimum=low, maximum=high) is None
     assert window.sliders == [] and panel.rows == [] and "sliders" not in window.view_state()
     assert window._act("slider", entry="t2", param="c", minimum=0.0, maximum=0.5) == 0
+
+
+def dab(view, point):
+    """One click of the brush at a point of the canvas."""
+    x, y = view.ax.transData.transform(point)
+    for kind in ("button_press_event", "button_release_event"):
+        MouseEvent(kind, view.canvas, x, y, 1)._process()
+
+
+def test_a_brush_that_is_not_a_number_paints_nothing(window, qtbot):
+    """'0,5' or 'abc' in the brush's boxes painted 1.0 (a radius 0.6)
+    without a word; now the stroke paints nothing and the log says why,
+    once."""
+    start = fresh(qtbot, window)
+    window.preview_field("t2", "c")
+    settle(qtbot, window)
+    view = window.structure
+    view.paint.setChecked(True)
+    view.canvas.draw()
+    before = window.session.document.to_json()
+    for value, radius in (("0,5", "0.3"), ("0.5", "x")):
+        view.brush_value.setText(value)
+        view.brush_radius.setText(radius)
+        dab(view, window.builds["s1"]["positions"][0, :2])
+    assert window.session.document.to_json() == before
+    assert errors_since(window, start) == [
+        "ERROR: paint: the brush value '0,5' is not a number",
+        "ERROR: paint: the brush radius 'x' is not a number"]
+    view.brush_radius.setText("0.3")
+    dab(view, window.builds["s1"]["positions"][0, :2])          # a number paints again
+    assert window.session.document.find("t2")[4].params["c"]["sites"][0][3] == 0.5
+    view.brush_value.setText("1")
+    view.brush_radius.setText("0.6")
+    window.set_canvas_view("structure")
+
+
+def test_a_field_that_is_not_finite_somewhere(window, qtbot):
+    """sqrt(x) is NaN where x < 0 and 1/(x+0.5) infinite at x = -0.5: the
+    preview painted every atom black ('from nan to nan', or a colour bar of
+    -0.1 to 0.1). The finite sites keep their colours on the scale of the
+    finite values; the others are grey, and the caption counts them."""
+    from matplotlib.colors import to_hex
+    from guiqula.ui import structure as structure_tools, theme
+    fresh(qtbot, window)
+    window.preview_field("t2", "c")
+    view = window.structure
+    x = window.builds["s1"]["positions"][:, 0]
+    for expression, finite in (("sqrt(x)", np.sqrt(np.clip(x, 0, None))),
+                               ("1/(x+0.5)", 1 / (x + 0.5 + 1e-300))):
+        bad = x < 0 if expression == "sqrt(x)" else np.isclose(x, -0.5)
+        count = f"{int(bad.sum())} site{'s' if bad.sum() > 1 else ''} not finite (grey)"
+        window._do("set_param", entry="t2", name="c", value=expression)
+        settle(qtbot, window)
+        qtbot.waitUntil(lambda: count in view.caption.text())
+        good = finite[~bad]
+        assert f"from {good.min():.4g} to {good.max():.4g}" in view.caption.text()
+        atoms = next(c for c in view.ax.collections
+                     if isinstance(c, structure_tools.DataCircles) and c.get_zorder() == 4)
+        colours = [to_hex(c) for c in atoms.get_facecolors()]
+        assert [c == theme.MUTED for c in colours] == bad.tolist()
+        assert len(set(colours)) > 2                           # the finite ones differ
+        bar = view.figure.axes[1]                               # on the finite scale
+        assert np.allclose(sorted(np.abs(bar.get_ylim())), [np.abs(good).max()] * 2)
+    window.set_canvas_view("structure")

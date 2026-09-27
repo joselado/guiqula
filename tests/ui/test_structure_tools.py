@@ -2,7 +2,7 @@
 geometry, then real mouse events on an offscreen canvas."""
 import numpy as np
 import pytest
-from matplotlib.backend_bases import MouseEvent
+from matplotlib.backend_bases import KeyEvent, MouseEvent
 
 from guiqula.ui import structure as st
 
@@ -130,3 +130,74 @@ def test_selection_survives_a_rebuild_and_wheel_zooms(view):
     assert np.diff(view.ax.get_xlim())[0] < width
     view.show_structure("s2", smaller, "another system")
     assert view.selected().tolist() == []
+
+
+def key(view, kind, name):
+    px, py = view.ax.transData.transform((1.5, 1.5))
+    KeyEvent(kind, view.canvas, name, px, py)._process()
+
+
+def drag(view, points, modifier=None):
+    """Press, move, release, holding a modifier key the whole time."""
+    if modifier:
+        key(view, "key_press_event", modifier)
+    mouse(view, "button_press_event", *points[0], key=modifier)
+    for point in points[1:]:
+        mouse(view, "motion_notify_event", *point, key=modifier)
+    mouse(view, "button_release_event", *points[-1], key=modifier)
+    if modifier:
+        key(view, "key_release_event", modifier)
+
+
+def test_box_and_lasso_with_modifiers(view):
+    """Shift adds and ctrl toggles with the box and the lasso too (the user
+    guide): matplotlib's box took shift for a square and ctrl for a box
+    around its centre, and the lasso always replaced the selection."""
+    flat_row_2 = [(-0.2, 1.8), (1.5, 2.0), (3.2, 2.2)]            # a wide, flat box: row y = 2
+    ring = [(2.7, 2.7), (3.3, 2.7), (3.3, 3.3), (2.7, 3.3), (2.7, 2.8)]   # around (3, 3)
+    mouse(view, "button_press_event", 0.0, 0.0)
+    view.set_tool("box")
+    drag(view, flat_row_2, "shift")
+    assert view.selected().tolist() == [0, 2, 6, 10, 14]          # no square: row y = 3 is out
+    drag(view, flat_row_2, "control")
+    assert view.selected().tolist() == [0]
+    view.set_tool("lasso")
+    drag(view, ring, "shift")
+    assert view.selected().tolist() == [0, 15]
+    drag(view, ring, "control")
+    assert view.selected().tolist() == [0]
+    drag(view, ring)
+    assert view.selected().tolist() == [15]
+
+
+def test_one_site_is_drawn_at_the_scale_of_its_neighbours(qtbot):
+    """A chain with one site per cell: the view was the inside of the one
+    atom (only the central sites set it), and Home gave the same."""
+    view = st.StructureView()
+    qtbot.addWidget(view)
+    view.resize(600, 600)
+    chain = {"positions": np.zeros((1, 3)), "lattice": np.eye(3), "dimensionality": 1,
+             "sublattice": None, "bonds": np.zeros((0, 2), int),
+             "image_bonds": np.array([[0, 0, 1, 0, 0]])}
+    view.show_structure("s1", chain, "a chain")
+    view.canvas.draw()
+    for _ in range(2):
+        (x0, x1), (y0, y1) = view.ax.get_xlim(), view.ax.get_ylim()
+        assert x0 < -1.0 and x1 > 1.0 and y1 - y0 > 4 * st.RADIUS    # the neighbours at x = +-1
+        view.fit()                                                     # Home
+        view.canvas.draw()
+
+
+def test_the_zoom_is_kept_only_for_the_same_geometry(view):
+    """A rebuild of the same sites keeps the zoom; sites that moved (a
+    Shift op: as many sites, somewhere else) are shown again."""
+    view.ax.set_xlim(0.5, 2.5)
+    view.ax.set_ylim(0.5, 2.5)
+    view.show_structure("s1", grid_build(), "the same sites again")
+    assert np.allclose(view.ax.get_xlim(), (0.5, 2.5))
+    moved = grid_build()
+    moved["positions"] = moved["positions"] + [30.0, 0.0, 0.0]
+    view.show_structure("s1", moved, "shifted")
+    view.canvas.draw()
+    (x0, x1), (y0, y1) = view.ax.get_xlim(), view.ax.get_ylim()
+    assert x0 < 30.0 and x1 > 33.0 and y0 < 0.0 and y1 > 3.0
