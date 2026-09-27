@@ -11,6 +11,7 @@
 # Hamiltonians where the diagonalization in the exact-diagonalization path
 # becomes the bottleneck; only the "plain" (fixed-point mixing) solver is
 # supported.
+from .. import filewrite
 import numpy as np
 import os
 from .. import filesystem as fs
@@ -45,11 +46,13 @@ def generic_densitydensity_kpm(h0, mf=None, mix=0.1, v=None, nk=DEFAULT_NK,
         compute_cross=True, compute_dd=True, verbose=1,
         compute_anomalous=True, compute_normal=True, maxite=1000,
         T=1e-7, callback_h=None,
-        scale=None, npol=DEFAULT_NPOL, ne=None, cores=None, **kwargs):
+        scale=None, npol=DEFAULT_NPOL, ne=None, cores=None, write=None,**kwargs):
     """KPM analogue of scftk.densitydensity.generic_densitydensity.
     Only the "plain" mixing solver is implemented (the alternate
     root-finding solvers there are not KPM-specific and are not needed for
-    this backend)."""
+    this backend). write=False keeps the converged mean field out of MF.pkl
+    in the working directory."""
+    write = filewrite.resolve(write,True) # the call, else the global switch
     from .densitydensity import (get_mf, mix_mf, diff_mf, update_hamiltonian,
             hamiltonian2dict, set_hoppings, SCF, random_hermitian_guess,
             mf_matches_hamiltonian, reject_leftover_kwargs)
@@ -121,7 +124,7 @@ def generic_densitydensity_kpm(h0, mf=None, mix=0.1, v=None, nk=DEFAULT_NK,
         if diff<maxerror:
             scf = f(mfnew)
             scf.converged = True
-            inout.save(scf.mf, mf_file)
+            if write: inout.save(scf.mf, mf_file) # MF.pkl, unless write=False
             return scf
         if maxite is not None and ite>=maxite:
             scf.converged = False
@@ -140,7 +143,9 @@ def densitydensity_kpm(h, filling=0.5, mu=None, verbose=0, nk=DEFAULT_NK,
                 "with integration=\"ed\") for a spinful Hamiltonian; "
                 "the KPM density-density engine (Vinteraction_kpm) "
                 "takes a single scalar filling, got %r" % (filling,))
-    from .densitydensity import get_dc_energy, electron_dimension
+    from .densitydensity import (get_dc_energy, electron_dimension,
+            require_hermitian)
+    require_hermitian(h,"the KPM mean field (Vinteraction_kpm)")
     from ..kpmtk.densitymatrix_kpm import get_fermi4filling_kpm
     h = h.get_multicell()
     h = h.get_dense()
@@ -249,8 +254,9 @@ def Vinteraction_kpm(h, V1=0.0, V2=0.0, V3=0.0, U=0.0, constrains=[],
     hv = h.geometry.get_hamiltonian(has_spin=False,is_multicell=True,
             mgenerator=mgenerator)
     v = hv.get_hopping_dict()
-    if Vr is not None: # every pair within rcut, as in Vinteraction
-        specialhopping.add_distance_cut_interaction(v,h.geometry,Vr,rcut=rcut)
+    if Vr is not None: # every pair within rcut, halved as in Vinteraction
+        from .densitydensity import add_pair_interaction
+        add_pair_interaction(v,h.geometry,Vr,rcut=rcut)
     U = obj2geometryarray(U, h.geometry)
     reject_spinless_U(h, U)
     if h.has_spin:

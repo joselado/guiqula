@@ -5,15 +5,14 @@ during development. Never edit anything under `vendor/pyqula/`; refresh
 the whole copy instead.
 
 - Source: a local checkout of https://github.com/joselado/pyqula (working tree, not git HEAD)
-- Upstream HEAD at copy time: `f8087b43e9011228dddf17e62a6809dde77e14dc` (2026-09-26 17:57:58 +0300)
-- Copied on: 2026-09-26
+- Upstream HEAD at copy time: `08a817936aa28c70dc65e388119c5d1fbb1b0ba6` (2026-09-27 16:21:22 +0300)
+- Copied on: 2026-09-27
 - Uncommitted upstream changes that were included in this copy:
     (none)
 
 Contents:
 - `pyqula/` — the package (`src/pyqula` upstream), without `__pycache__`
-- `pyqula_user_guide.md` — upstream `documentation/user_guide.md`
-- `pyqula_examples/` — upstream `examples/` (scripts only, outputs stripped)
+- `pyqula_user_guide.md` — upstream `documentation/user_guide.md` (the in-app help)
 
 Upstream runtime dependencies at copy time (mirror them in guiqula's
 `pyproject.toml`; optional extras are not listed):
