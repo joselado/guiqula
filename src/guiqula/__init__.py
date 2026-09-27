@@ -5,7 +5,7 @@ and points numba's cache at the user cache directory (guiqula.env). It
 imports neither pyqula nor Qt: the UI process stays free of pyqula, jax and
 numba (PLAN.md 13.15), and the headless parts stay free of Qt (PLAN.md 3).
 """
-__version__ = "0.0.1.dev0"
+__version__ = "0.0.1"
 
 from guiqula import env as _env
 from guiqula import vendoring as _vendoring
