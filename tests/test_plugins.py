@@ -62,16 +62,29 @@ def test_a_plugin_entry_is_registered_and_runs_in_the_workers(with_plugins):
             s = session.do("add_system", lattice="honeycomb_lattice")
             session.do("set_construction", system=s, has_spin=False)
             session.do("add_geometry_op", system=s, kind="supercell", params={"n": [3, 3, 1]})
-            session.do("add_term", system=s, kind="chiral_kekule", params={"t1": 0.2})
+            t = session.do("add_term", system=s, kind="chiral_kekule", params={"t1": 0.2})
             c = session.do("add_calculation", system=s, kind="bands", params={"nk": 10})
             job = session.run_calculation(c, wait=True, timeout=300)
+            data = session.document.model_dump(mode="json")
+            system = data["systems"][0]
             print(json.dumps({"plugin": spec.plugin, "described": spec.describe()["plugin"],
+                              "recorded": session.document.find(t)[-1].plugin,
+                              "saved": system["hamiltonian"]["terms"][0].get("plugin"),
+                              "own": ["plugin" in system["geometry"]["base"],
+                                      "plugin" in system["geometry"]["ops"][0],
+                                      "plugin" in data["calculations"][0]],
+                              "used": session.document.plugins(),
+                              "page": entries.plugins_page(session.document),
                               "loaded": plugins.describe()["loaded"], "status": job.status,
                               "error": job.error, "pyqula": "pyqula" in sys.modules,
                               "help": help,
                               "shape": list(session.result(c).arrays["energies"].shape)}))
     """)
     assert out["plugin"] == out["described"] == "guiqula-example-plugin"
+    # the document records the plugin and its version (phase-6 answer 37), and only there
+    assert out["recorded"] == out["saved"] == "guiqula-example-plugin==0.1"
+    assert out["own"] == [False, False, False] and out["used"] == ["guiqula-example-plugin==0.1"]
+    assert "## Used by the open document\n\n- guiqula-example-plugin==0.1: installed" in out["page"]
     assert out["loaded"][0]["entries"] == [["term", "chiral_kekule"]]
     assert out["loaded"][0]["version"] == "0.1"
     assert out["status"] == "done", out["error"]
@@ -129,17 +142,24 @@ def test_a_document_with_a_missing_plugin_entry_opens(site, with_plugins):
         d = Dispatcher()
         s = d.do("add_system", lattice="honeycomb_lattice")
         data = d.document.model_dump(mode="json")
-        data["systems"][0]["hamiltonian"]["terms"].append(
-            {"id": "t1", "kind": "chiral_kekule", "params": {"t1": 0.2}})
+        data["systems"][0]["hamiltonian"]["terms"] += [
+            {"id": "t1", "kind": "chiral_kekule", "params": {"t1": 0.2}},
+            {"id": "t2", "kind": "chiral_kekule", "params": {"t1": 0.2},
+             "plugin": "guiqula-example-plugin==0.1"}]
         document = Document.from_data(data)
         plan = pipeline.plan_system(document, s)
-        stage = [st for st in plan.stages if st.id == "t1"][0]
-        print(json.dumps({"problem": stage.problem, "applied": stage.applied,
-                          "stages": len(plan.stages)}))
+        stages = {st.id: st for st in plan.stages}
+        print(json.dumps({"problem": stages["t1"].problem, "applied": stages["t1"].applied,
+                          "named": stages["t2"].problem, "stages": len(plan.stages),
+                          "saved": json.loads(document.to_json())["systems"][0]["hamiltonian"]
+                                             ["terms"][1]["plugin"]}))
     """)
     assert out["problem"].startswith("unknown term 'chiral_kekule': neither guiqula nor an "
                                      "installed plugin provides it")
     assert "plugins are off" in out["problem"] and out["applied"] is False
+    assert out["named"] == ("unknown term 'chiral_kekule': it needs the plugin "
+                            "guiqula-example-plugin==0.1 (plugins are off: $GUIQULA_NO_PLUGINS)")
+    assert out["saved"] == "guiqula-example-plugin==0.1"      # kept on a round trip
 
 
 def test_files_in_the_plugins_folder(tmp_path, with_plugins):
@@ -199,3 +219,18 @@ def test_the_plugins_page_and_the_missing_entry_text(monkeypatch):
     assert "**guiqula-y**: failed to load, left out: ImportError: no" in page
     assert plugins.missing("term", "z").endswith("(plugin guiqula-y failed to load: "
                                                  "ImportError: no)")
+    # the plugin a document records for the entry (phase-6 answer 37)
+    assert plugins.missing("term", "z", "guiqula-q==3.1") == \
+        "unknown term 'z': it needs the plugin guiqula-q==3.1, which is not installed"
+    assert plugins.missing("term", "z", "guiqula-y==0.5") == \
+        "unknown term 'z': it needs the plugin guiqula-y==0.5, which failed to load: ImportError: no"
+    assert plugins.missing("term", "z", "guiqula-x==0.9") == \
+        ("unknown term 'z': the plugin guiqula-x 1.0 is installed but does not provide it "
+         "(the document was made with guiqula-x==0.9)")
+    from guiqula.core.document import Document
+    document = Document.from_data({"systems": [{"id": "s1", "geometry": {
+        "base": {"kind": "honeycomb_lattice", "plugin": "guiqula-q==3.1"},
+        "ops": [{"id": "o1", "kind": "z", "plugin": "guiqula-x==1.0"}]}}]})
+    page = entries.plugins_page(document)
+    assert ("## Used by the open document\n\n- guiqula-q==3.1: **not installed**\n"
+            "- guiqula-x==1.0: installed") in page

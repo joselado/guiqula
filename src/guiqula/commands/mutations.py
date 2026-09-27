@@ -15,6 +15,7 @@ from guiqula.core.document import (CLASSICAL_KINDS, SYSTEM_KINDS, Base, Calculat
                                    Construction, Entry, Geometry, Hamiltonian, MeanField, Model,
                                    Region, System, region_users, terms_of)
 from guiqula.registry import base as registry
+from guiqula.registry import plugins
 from guiqula.registry.params import ParamError
 
 FAMILY_OF = {"op": "geometry_op", "term": "term", "calculation": "calculation"}
@@ -25,6 +26,15 @@ def _normalize(family, kind, params):
         return registry.get(family, kind).normalize_params(params)
     except (registry.RegistryError, ParamError) as error:
         raise CommandError(str(error).strip("\"'")) from None
+
+
+def _plugin(family, kind):
+    """What the Document records of the plugin that provides an entry ("" for
+    guiqula's own; registry/plugins.py, origin)."""
+    try:
+        return plugins.origin(registry.get(family, kind))
+    except registry.RegistryError:
+        return ""
 
 
 def _rename_regions(params, mapping):
@@ -51,9 +61,11 @@ def add_system(document, lattice="honeycomb_lattice", name="", lattice_params=No
         raise CommandError(f"unknown system kind {kind!r}; kinds: {list(SYSTEM_KINDS)}")
     params = _normalize("lattice", lattice, lattice_params)
     system_id = document.new_id("system")
-    geometry = Geometry(base=Base(kind=lattice, params=params))
+    geometry = Geometry(base=Base(kind=lattice, params=params,
+                                  plugin=_plugin("lattice", lattice)))
     if kind in CLASSICAL_KINDS:
-        model = Model(kind=kind, params=_normalize("model", kind, model_params))
+        model = Model(kind=kind, params=_normalize("model", kind, model_params),
+                      plugin=_plugin("model", kind))
         system = System(id=system_id, name=name or system_id, kind=kind, geometry=geometry,
                         hamiltonian=None, model=model)
     else:
@@ -67,7 +79,8 @@ def add_system(document, lattice="honeycomb_lattice", name="", lattice_params=No
 def set_lattice(document, system, lattice, params=None):
     """Replace the base lattice of a system (ops and terms are kept)."""
     document.system(system).geometry.base = Base(kind=lattice,
-                                                 params=_normalize("lattice", lattice, params))
+                                                 params=_normalize("lattice", lattice, params),
+                                                 plugin=_plugin("lattice", lattice))
 
 
 @mutation
@@ -96,7 +109,7 @@ def set_meanfield(document, system, enabled=None, params=None, kind=None):
     merged = dict(block.params if kind == block.kind else {}, **(params or {}))
     target.hamiltonian.meanfield = MeanField(
         enabled=block.enabled if enabled is None else bool(enabled), kind=kind,
-        params=_normalize("meanfield", kind, merged))
+        params=_normalize("meanfield", kind, merged), plugin=_plugin("meanfield", kind))
 
 
 @mutation
@@ -130,7 +143,8 @@ def add_geometry_op(document, system, kind, params=None, index=None, enabled=Tru
     """Add a geometry op (at the end, or at index); returns its id."""
     target = document.system(system)
     op = Entry(id=document.new_id("op"), kind=kind, enabled=enabled,
-               params=_normalize("geometry_op", kind, params))
+               params=_normalize("geometry_op", kind, params),
+               plugin=_plugin("geometry_op", kind))
     _insert(target.geometry.ops, op, index)
     return op.id
 
@@ -146,7 +160,7 @@ def add_term(document, system, kind, params=None, region=None, index=None, enabl
         raise CommandError(f"{spec.label} does not apply to a {target.kind} system; it is a "
                            f"term of {', '.join(spec.systems)} systems")
     term = Entry(id=document.new_id("term"), kind=kind, enabled=enabled, params=params,
-                 region=region)
+                 region=region, plugin=plugins.origin(spec))
     _insert(terms_of(target), term, index)
     return term.id
 
@@ -195,7 +209,7 @@ def add_calculation(document, system, kind, params=None):
         raise CommandError(f"{spec.label} does not apply to a {target.kind} system; it is a "
                            f"calculation of {', '.join(spec.systems)} systems")
     calc = Calculation(id=document.new_id("calculation"), system=system, kind=kind,
-                       params=params)
+                       params=params, plugin=_plugin("calculation", kind))
     document.calculations.append(calc)
     return calc.id
 

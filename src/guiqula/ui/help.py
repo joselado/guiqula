@@ -124,8 +124,10 @@ class HelpPanel(QWidget):
         return self._show(("contents", which), title, entries.contents(which), remember)
 
     def show_plugins(self, remember=True):
-        """The plugins loaded, their entries, and the ones that failed."""
-        return self._show(("plugins",), "Plugins", entries.plugins_page(), remember)
+        """The plugins loaded, their entries, the ones that failed, and the
+        ones the open document uses."""
+        document = self.session.document if self.session is not None else None
+        return self._show(("plugins",), "Plugins", entries.plugins_page(document), remember)
 
     def go_back(self):
         if not self.history:

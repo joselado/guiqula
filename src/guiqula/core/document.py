@@ -16,13 +16,15 @@ name any entry by id alone; terms_of(system) is a system's term stack,
 whatever its kind.
 
 Parameters are stored as plain JSON (``params``); their meaning and
-validation belong to the registry entry named by ``kind``.
+validation belong to the registry entry named by ``kind``. An entry whose
+kind a plugin provides records that plugin (``plugin``), so a document
+opened without it says which one is missing.
 """
 import json
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 
 from guiqula.core import fields as field_tools
 
@@ -45,12 +47,28 @@ class _Model(BaseModel):
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
 
-class Base(_Model):
+class _Kind(_Model):
+    """Something whose kind names a registry entry. plugin: the plugin
+    that provided the kind when it was added (phase-6 answer 37),
+    "distribution==version", or "plugins/<file>.py" for the user's plugins
+    folder; "" for guiqula's own, and then left out of the JSON, so that a
+    document without plugins is written as before."""
+    plugin: str = ""
+
+    @model_serializer(mode="wrap")
+    def _without_empty_plugin(self, handler):
+        data = handler(self)
+        if isinstance(data, dict) and not data.get("plugin"):
+            data.pop("plugin", None)
+        return data
+
+
+class Base(_Kind):
     kind: str
     params: dict[str, Any] = Field(default_factory=dict)
 
 
-class Entry(_Model):
+class Entry(_Kind):
     """A geometry op or a Hamiltonian term."""
     id: str
     kind: str
@@ -77,7 +95,7 @@ class Construction(_Model):
     is_sparse: bool = False
 
 
-class MeanField(_Model):
+class MeanField(_Kind):
     """Interactions solved at the mean-field level after the term stack
     (PLAN.md section 5); kind names a registry entry of the "meanfield"
     family, whose declaration checks params."""
@@ -92,7 +110,7 @@ class Hamiltonian(_Model):
     meanfield: MeanField = Field(default_factory=MeanField)
 
 
-class Model(_Model):
+class Model(_Kind):
     """A classical system's model (decision 13.5): kind names a registry
     entry of the "model" family (the same name as the system's kind),
     whose params set the model up; terms is its stack."""
@@ -121,7 +139,7 @@ class System(_Model):
         return data
 
 
-class Calculation(_Model):
+class Calculation(_Kind):
     id: str
     system: str
     kind: str
@@ -197,6 +215,20 @@ class Document(_Model):
             if calc.id == entry_id:
                 return "calculation", None, self.calculations, i, calc
         raise DocumentError(f"no entry {entry_id!r}")
+
+    def plugins(self):
+        """The plugins its entries record (sorted, without repeats)."""
+        found = set()
+        for system in self.systems:
+            found.add(system.geometry.base.plugin)
+            found.update(op.plugin for op in system.geometry.ops)
+            found.update(term.plugin for term in terms_of(system))
+            if system.hamiltonian is not None:
+                found.add(system.hamiltonian.meanfield.plugin)
+            if system.model is not None:
+                found.add(system.model.plugin)
+        found.update(calc.plugin for calc in self.calculations)
+        return sorted(found - {""})
 
     def all_ids(self):
         ids = []

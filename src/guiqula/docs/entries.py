@@ -192,14 +192,23 @@ def entry_help(spec, stage=None):
     return "\n\n".join(parts) + "\n"
 
 
-def plugins_page():
-    """The plugins loaded, their entries, and what went wrong, as Markdown."""
+PLUGIN_STATUS = {"installed": "installed", "missing": "**not installed**",
+                 "failed": "**failed to load**", "off": "plugins are off in this run"}
+
+
+def plugins_page(document=None):
+    """The plugins loaded, their entries, what went wrong, and the plugins
+    the document's entries record (with whether they are here), as Markdown."""
     from guiqula.registry import plugins
     state = plugins.describe()
     lines = ["# Plugins", "",
              "Plugins are installed packages, or Python files in the folder "
              f"`{plugins.directory()}`, that add entries to guiqula "
              + link("guiqula", "Plugins", "(how)") + "."]
+    used = document.plugins() if document is not None else []
+    if used:
+        lines += ["", "## Used by the open document", ""]
+        lines += [f"- {plugin}: {PLUGIN_STATUS[plugins.status(plugin)]}" for plugin in used]
     if state["disabled"]:
         lines += ["", "Plugins are off in this run ($GUIQULA_NO_PLUGINS)."]
     elif not state["loaded"] and not state["problems"]:

@@ -246,8 +246,11 @@ classical models or calculations; once installed in guiqula's environment (`pip 
 guiqula-something`), its entries appear in the palettes, forms, help and exported scripts
 like guiqula's own, and run in the workers. Help > Plugins lists the plugins found, what
 each added, and any that failed to load: such a plugin is left out and guiqula starts
-without it (`GUIQULA_NO_PLUGINS=1 guiqula` starts without any). A document that uses an
-entry of a plugin that is not installed still opens; that entry is skipped and flagged.
+without it (`GUIQULA_NO_PLUGINS=1 guiqula` starts without any). A document records which
+plugin, and which version of it, each of its entries came from, and Help > Plugins lists
+the plugins the open document uses. A document that uses an entry of a plugin that is not
+installed still opens; that entry is skipped and flagged with the plugin's name, which is
+what to `pip install`.
 
 The quickest plugin is one Python file in the `plugins` folder of the user configuration
 directory (Help > Plugins shows where): each `*.py` there that declares entries with

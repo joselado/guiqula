@@ -443,7 +443,8 @@ class RemoteAPI:
                     s.family for s in specs) + ": give the family")
             return {"title": specs[0].label, "markdown": helptexts.entry_help(specs[0])}
         if guide == "plugins":
-            return {"title": "Plugins", "markdown": helptexts.plugins_page()}
+            return {"title": "Plugins",
+                    "markdown": helptexts.plugins_page(self.session.document)}
         if guide is not None:
             if guide not in ("pyqula", "guiqula"):
                 raise RemoteError(INVALID_PARAMS, "guide is pyqula, guiqula or plugins")

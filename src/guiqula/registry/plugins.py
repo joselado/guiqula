@@ -24,9 +24,11 @@ warning.
 A plugin that fails to load (an exception on import, a kind that is taken)
 is left out whole, what it registered before failing removed, and recorded
 in PROBLEMS; nothing else changes. The entries of a plugin carry its
-distribution's name (``EntrySpec.plugin``). A document that uses an entry
-no installed plugin provides still opens: the entry is skipped and flagged
-(14.3), like any invalid entry.
+distribution's name (``EntrySpec.plugin``), and a document records it,
+with the version, on every entry of a plugin's kind (``origin``; phase-6
+answer 37). A document that uses an entry no installed plugin provides
+still opens: the entry is skipped and flagged (14.3), like any invalid
+entry, with the plugin the document names.
 
 $GUIQULA_NO_PLUGINS (any value but "" and "0") loads none: the test suite
 sets it, so that a plugin installed on the machine cannot change its
@@ -139,8 +141,53 @@ def describe():
             "problems": [{k: v for k, v in p.items() if k != "traceback"} for p in PROBLEMS]}
 
 
-def missing(family, kind):
-    """Why a document's entry has no registry entry: the problem text."""
+def _loaded(name):
+    return next((p for p in LOADED if name in (p["distribution"], p["name"])), None)
+
+
+def origin(spec):
+    """What a document records of the plugin that provides spec:
+    "distribution==version" (or the plugins folder's file), "" for guiqula's
+    own entries."""
+    if not spec.plugin:
+        return ""
+    loaded = _loaded(spec.plugin)
+    version = loaded["version"] if loaded else ""
+    return f"{spec.plugin}=={version}" if version else spec.plugin
+
+
+def status(plugin):
+    """Whether the plugin a document records is here: "installed" (another
+    version, maybe), "failed", "off" or "missing"."""
+    name = plugin.split("==")[0]
+    if disabled():
+        return "off"
+    if _loaded(name):
+        return "installed"
+    if any("error" in p and name in (p["distribution"], p["name"]) for p in PROBLEMS):
+        return "failed"
+    return "missing"
+
+
+def missing(family, kind, plugin=""):
+    """Why a document's entry has no registry entry (plugin: the plugin the
+    document records for it): the problem text."""
+    if plugin:
+        name = plugin.split("==")[0]
+        state = status(plugin)
+        if state == "off":
+            return (f"unknown {family} {kind!r}: it needs the plugin {plugin} "
+                    f"(plugins are off: $GUIQULA_NO_PLUGINS)")
+        if state == "failed":
+            error = next(p["error"] for p in PROBLEMS
+                         if "error" in p and name in (p["distribution"], p["name"]))
+            return (f"unknown {family} {kind!r}: it needs the plugin {plugin}, which failed "
+                    f"to load: {error}")
+        if state == "installed":
+            loaded = _loaded(name)
+            return (f"unknown {family} {kind!r}: the plugin {name} {loaded['version']} is "
+                    f"installed but does not provide it (the document was made with {plugin})")
+        return f"unknown {family} {kind!r}: it needs the plugin {plugin}, which is not installed"
     text = f"unknown {family} {kind!r}: neither guiqula nor an installed plugin provides it"
     failed = [p for p in PROBLEMS if "error" in p]
     if failed:

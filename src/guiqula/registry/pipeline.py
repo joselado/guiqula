@@ -98,12 +98,13 @@ class SystemPlan:
         raise KeyError(entry_id)
 
 
-def _check_entry(family, entry_kind, params, system_kind, trusted=True):
-    """Return (spec, normalized params, problem)."""
+def _check_entry(family, entry_kind, params, system_kind, trusted=True, plugin=""):
+    """Return (spec, normalized params, problem); plugin: the one the
+    document records for the entry."""
     try:
         spec = registry.get(family, entry_kind)
     except registry.RegistryError:
-        return None, None, plugins.missing(family, entry_kind)
+        return None, None, plugins.missing(family, entry_kind, plugin)
     if system_kind not in spec.systems:
         return spec, None, f"{spec.label} does not apply to a {system_kind} system"
     try:
@@ -250,7 +251,8 @@ def plan_system(document, system_id, trusted=True, results=None):
     system = document.system(system_id)
     plan = SystemPlan(system_id=system.id, kind=system.kind)
     base = system.geometry.base
-    spec, params, problem = _check_entry("lattice", base.kind, base.params, system.kind)
+    spec, params, problem = _check_entry("lattice", base.kind, base.params, system.kind,
+                                         plugin=base.plugin)
     stage = StagePlan("base", None, base.kind, True, spec, params, None, problem)
     stage.key = content_hash({"stage": "base", "kind": base.kind,
                               "params": params if params is not None else base.params})
@@ -262,7 +264,7 @@ def plan_system(document, system_id, trusted=True, results=None):
 
     for op in system.geometry.ops:
         spec, params, problem = _check_entry("geometry_op", op.kind, op.params, system.kind,
-                                             trusted)
+                                             trusted, op.plugin)
         stage = StagePlan("op", op.id, op.kind, op.enabled, spec, params, None, problem)
         stage.applied = op.enabled and problem is None
         if stage.applied:
@@ -274,7 +276,7 @@ def plan_system(document, system_id, trusted=True, results=None):
     term_stages = []
     for term in terms_of(system):
         spec, params, problem = _check_entry("term", term.kind, term.params, system.kind,
-                                             trusted)
+                                             trusted, term.plugin)
         select = None
         if problem is None and term.region is not None:
             if term.region not in regions:
@@ -305,7 +307,8 @@ def plan_system(document, system_id, trusted=True, results=None):
     if system.model is not None:
         return _plan_classical(plan, system, key, term_stages)
     block = system.hamiltonian.meanfield
-    spec, params, problem = _check_entry("meanfield", block.kind, block.params, system.kind)
+    spec, params, problem = _check_entry("meanfield", block.kind, block.params, system.kind,
+                                         plugin=block.plugin)
     selections, refs, warnings = {}, {}, []
     if problem is None:
         selections, problem = _field_regions(spec, params, regions)
@@ -353,7 +356,8 @@ def plan_system(document, system_id, trusted=True, results=None):
 def _plan_classical(plan, system, key, term_stages):
     """The model stage and the terms of a classical system."""
     model = system.model
-    spec, params, problem = _check_entry("model", model.kind, model.params, system.kind)
+    spec, params, problem = _check_entry("model", model.kind, model.params, system.kind,
+                                         plugin=model.plugin)
     stage = StagePlan("model", f"{system.id}/model", model.kind, True, spec, params, None,
                       problem)
     if problem:
@@ -396,7 +400,7 @@ def plan_calculation(document, calc_id, trusted=True, results=None):
         return plan
     system_kind = plan.system.kind
     plan.spec, plan.params, plan.problem = _check_entry("calculation", calc.kind, calc.params,
-                                                        system_kind, trusted)
+                                                        system_kind, trusted, calc.plugin)
     if plan.problem is None and plan.system.problem:
         plan.problem = plan.system.problem
     inner = None
