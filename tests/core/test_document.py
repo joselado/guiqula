@@ -55,3 +55,14 @@ def test_presets_load_by_name():
     assert [t.kind for t in document.systems[0].hamiltonian.terms] == ["zeeman", "rashba"]
     with pytest.raises(DocumentError, match="no such preset"):
         project.load("no_such_preset")
+
+
+def test_a_preset_name_is_the_preset_beside_a_folder_of_that_name(tmp_path):
+    """The gallery hands over bare names: a folder called like a preset in
+    the working directory (a second `guiqula run P --out P`) must not hide
+    the preset; a folder named with a path is refused plainly."""
+    (tmp_path / "ssh_chain").mkdir()
+    assert project.resolve("ssh_chain") == project.preset_path("ssh_chain")
+    assert project.load("ssh_chain").systems
+    with pytest.raises(DocumentError, match="a folder"):
+        project.load(str(tmp_path / "ssh_chain"))

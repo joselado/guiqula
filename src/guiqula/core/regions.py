@@ -43,12 +43,17 @@ def normalize(select):
         extra = set(select) - {"kind", "positions", "tol"}
         if extra:
             raise RegionError(f"unknown keys {sorted(extra)} in a positions selection")
-        positions = np.asarray(select.get("positions", []), dtype=float)
+        try:
+            positions = np.asarray(select.get("positions", []), dtype=float)
+            tol = float(select.get("tol", 0.05))
+        except (TypeError, ValueError):
+            raise RegionError("positions must be a list of [x, y, z] and tol a number") from None
         if positions.ndim != 2 or positions.shape[1] != 3:
             raise RegionError("positions must be a list of [x, y, z]")
-        tol = float(select.get("tol", 0.05))
-        if not tol > 0:
-            raise RegionError("tol must be positive")
+        if not np.isfinite(positions).all():
+            raise RegionError("positions must be finite numbers")
+        if not (np.isfinite(tol) and tol > 0):   # inf would not survive a save (JSON null)
+            raise RegionError("tol must be a finite positive number")
         return {"kind": "positions", "positions": positions.tolist(), "tol": tol}
     raise RegionError(f"unknown selection kind {kind!r}; phase 1 has 'expression' and 'positions'")
 

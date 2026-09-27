@@ -470,7 +470,11 @@ class RegionForm(Form):
         if build is None:
             self.error.setText("the geometry is not built yet")
             return
-        mask = region_tools.evaluate_positions(region.select, build["positions"])
+        try:
+            mask = region_tools.evaluate_positions(region.select, build["positions"])
+        except ValueError as error:          # RegionError, ExpressionError
+            self.error.setText(str(error))
+            return
         self.commit("select_sites", indices=[int(i) for i in mask.nonzero()[0]])
 
     def signature(self):

@@ -18,9 +18,12 @@ Names available in an expression:
 Integer literals are read as floats, so ``9**9**9`` overflows to an error
 instead of building a huge integer. Comparisons give booleans that combine
 with ``&``, ``|`` and ``~`` and multiply as 0 and 1; ``and``/``or``/``if``
-are not available because they do not act elementwise on arrays.
+are not available because they do not act elementwise on arrays. A chained
+comparison ``-2 < x < 2``, which Python evaluates with ``and``, is read as
+``(-2 < x) & (x < 2)``.
 """
 import ast
+import copy
 import math
 
 import numpy as np
@@ -62,8 +65,10 @@ def _check(node, source, depth=0):
     if isinstance(node, ast.Constant):
         if isinstance(node.value, bool) or not isinstance(node.value, (int, float)):
             raise ExpressionError(f"only numbers are allowed as constants, not {node.value!r}")
-    elif isinstance(node, ast.Name):
-        if node.id not in VARIABLES and node.id not in CONSTANTS and node.id not in FUNCTIONS:
+    elif isinstance(node, ast.Name):      # a called function's name is not visited
+        if node.id in FUNCTIONS:
+            raise ExpressionError(f"{node.id} is a function: call it, as in {node.id}(x)")
+        if node.id not in VARIABLES and node.id not in CONSTANTS:
             raise ExpressionError(
                 f"unknown name {node.id!r}; available: {', '.join(VARIABLES + tuple(CONSTANTS))} "
                 f"and the functions {', '.join(sorted(FUNCTIONS))}")
@@ -71,7 +76,7 @@ def _check(node, source, depth=0):
         if not (isinstance(node.value, ast.Name) and node.value.id == "np" and node.attr in FUNCTIONS):
             raise ExpressionError("attribute access is only allowed as np.<function> for the "
                                   "whitelisted functions")
-        return
+        raise ExpressionError(f"np.{node.attr} is a function: call it, as in np.{node.attr}(x)")
     elif isinstance(node, ast.Call):
         if node.keywords:
             raise ExpressionError("keyword arguments are not allowed in an expression")
@@ -90,6 +95,22 @@ def _check(node, source, depth=0):
         return
     for child in ast.iter_child_nodes(node):
         _check(child, source, depth + 1)
+
+
+class _ChainedComparisons(ast.NodeTransformer):
+    """``a < b < c`` as ``(a < b) & (b < c)``: Python's own reading, with
+    ``and``, fails on arrays."""
+    def visit_Compare(self, node):
+        self.generic_visit(node)
+        if len(node.ops) == 1:
+            return node
+        operands = [node.left] + node.comparators
+        out = None
+        for i, op in enumerate(node.ops):
+            left = operands[i] if i == 0 else copy.deepcopy(operands[i])
+            part = ast.Compare(left, [op], [operands[i + 1]])
+            out = part if out is None else ast.BinOp(out, ast.BitAnd(), part)
+        return ast.copy_location(out, node)
 
 
 class _FloatConstants(ast.NodeTransformer):
@@ -137,6 +158,7 @@ class Expression:
             raise ExpressionError("expression nested too deeply") from None
         _check(tree, source)
         self.source = source.strip()
+        tree = _ChainedComparisons().visit(tree)
         self.tree = ast.fix_missing_locations(_FloatConstants().visit(tree))
         self._code = compile(self.tree, "<expression>", "eval")
         self.names = frozenset(n.id for n in ast.walk(tree) if isinstance(n, ast.Name))
@@ -174,7 +196,8 @@ class Expression:
 
     def to_python(self, var="r"):
         """Python source of the body of ``lambda <var>: ...`` with ``np`` imported."""
-        tree = _ToPython(var).visit(ast.parse(self.source, mode="eval"))
+        tree = _ChainedComparisons().visit(ast.parse(self.source, mode="eval"))
+        tree = _ToPython(var).visit(tree)
         return ast.unparse(ast.fix_missing_locations(tree))
 
 

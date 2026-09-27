@@ -18,7 +18,11 @@ of the Document covers (core/locks.py) is refused, whichever it is.
 Every operation is appended to the journal as JSON-serializable data and
 announced to the listeners, which is what the UI, autosave and the future
 remote API bind to. Arguments must be JSON-serializable, so anything the UI
-can do can be written down, replayed and sent over a socket.
+can do can be written down, replayed and sent over a socket. The journal
+keeps the last JOURNAL_LIMIT operations, and a merged mutation (a slider
+drag, a brush stroke) replaces the one it joins, so a stroke that sets a
+painted Field of every site at each mouse move keeps one copy, not one per
+move.
 """
 import inspect
 import json
@@ -29,6 +33,7 @@ from guiqula.core import locks
 from guiqula.core.document import Document, DocumentError, check
 
 UNDO_LIMIT = 200
+JOURNAL_LIMIT = 1000      # operations the journal keeps
 
 
 class CommandError(ValueError):
@@ -59,6 +64,7 @@ class Dispatcher:
         self._undo = []
         self._redo = []
         self._merge = None       # the merge key of the last mutation (do_merged)
+        self._merges = 0         # merged steps started: tags their journal records
         self._actions = {}
         self._listeners = []
         self.journal = []
@@ -77,8 +83,14 @@ class Dispatcher:
         self._listeners.append(listener)
         return lambda: self._listeners.remove(listener)
 
-    def _emit(self, event):
-        self.journal.append(dict(event, time=time.time()))
+    def _emit(self, event, merge=None):
+        record = dict(event, time=time.time())
+        if merge is not None:
+            record["merge"] = merge
+            if self.journal and self.journal[-1].get("merge") == merge:
+                self.journal.pop()           # the mutation this one joins
+        self.journal.append(record)
+        del self.journal[:-JOURNAL_LIMIT]
         for listener in list(self._listeners):
             listener(event)
 
@@ -116,7 +128,8 @@ class Dispatcher:
                                f" locked (unlock with the unlock command, or Edit > Unlock "
                                f"everything)")
         self.document = after
-        if merge is not None and merge == self._merge and self._undo:
+        merged = merge is not None and merge == self._merge and bool(self._undo)
+        if merged:
             self._undo[-1] = dict(self._undo[-1], after=after)
         else:
             try:
@@ -126,10 +139,12 @@ class Dispatcher:
             entry, system = step_texts.touched(name, args, result)
             self._undo.append({"name": name, "args": args, "before": before, "after": after,
                                "text": text, "entry": entry, "system": system})
+            self._merges += merge is not None
         self._merge = merge
         del self._undo[:-UNDO_LIMIT]
         self._redo.clear()
-        self._emit({"type": "mutation", "name": name, "args": args, "result": result})
+        self._emit({"type": "mutation", "name": name, "args": args, "result": result},
+                   merge=None if merge is None else (merge, self._merges))
         return result
 
     def can_undo(self):

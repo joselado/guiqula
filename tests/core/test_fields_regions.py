@@ -41,7 +41,9 @@ def test_region_selections():
     code = eval(f"lambda r: {regions.code_indicator(by_pos)}", {"np": np})
     assert [code(p) for p in positions] == [0.0, 1.0, 0.0]
     for bad in ({"kind": "lasso"}, {"kind": "positions", "positions": [[1, 2]]},
-                {"kind": "expression", "expr": "import os"}, {"kind": "positions", "tol": -1}):
+                {"kind": "expression", "expr": "import os"}, {"kind": "positions", "tol": -1},
+                {**by_pos, "tol": float("inf")}, {**by_pos, "tol": "wide"},
+                {**by_pos, "positions": [[float("nan"), 0, 0]]}):
         with pytest.raises(regions.RegionError):
             regions.normalize(bad)
 

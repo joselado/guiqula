@@ -145,6 +145,25 @@ def test_merged_mutations_are_one_undo_step():
     assert d.document.find(t)[-1].params["mu"] == 0.4
 
 
+def test_the_journal_keeps_one_record_per_merged_step_and_is_bounded(monkeypatch):
+    """A brush stroke sets the whole painted Field at every mouse move: the
+    journal keeps the stroke's last value only, not a copy per move."""
+    from guiqula.commands import dispatcher
+    d = Dispatcher()
+    s = d.do("add_system")
+    t = d.do("add_term", system=s, kind="onsite", params={"mu": 0.1})
+    for stroke in range(2):
+        for value in (0.2, 0.3, 0.4):
+            d.do_merged("paint", "set_param", entry=t, name="mu", value=value + stroke)
+        d.end_merge()
+    values = [e["args"].get("value") for e in d.journal]
+    assert values == [None, None, 0.4, 1.4]
+    monkeypatch.setattr(dispatcher, "JOURNAL_LIMIT", 5)
+    for value in range(10):
+        d.do("set_param", entry=t, name="mu", value=float(value))
+    assert [e["args"]["value"] for e in d.journal] == [5.0, 6.0, 7.0, 8.0, 9.0]
+
+
 def test_undo_steps_are_named_and_taken_several_at_once():
     """Phase 5, design item 10: Undo and Redo name their step, the history
     lists them, several steps go back as one event carrying the entry the

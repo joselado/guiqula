@@ -27,7 +27,7 @@ def test_vectorised_matches_pointwise():
     "__import__('os')", "x.__class__", "(1).real", "lambda: 1", "x if y else z", "x and y",
     "np.linalg.norm(x)", "q + 1", "foo(x)", "tanh(x, out=y)", "'a'", "x[0]", "[x]", "{x: 1}",
     "tanh(*x)", "True", "(x := 1)", "np", "exec('1')", "open('f')", "x" * 1001,
-    "-" * 60 + "x",
+    "-" * 60 + "x", "x + sin", "np.tanh", "where(x < 0, cos, 1)",
 ])
 def test_rejected(source):
     with pytest.raises(ExpressionError):
@@ -45,3 +45,14 @@ def test_to_python_is_equivalent(source):
     f = eval(f"lambda r: {e.to_python('r')}", {"np": np})
     for p in np.random.default_rng(1).normal(size=(10, 3)):
         assert f(p) == pytest.approx(e.at(p), abs=1e-15)
+
+
+def test_chained_comparisons_act_elementwise():
+    """-2 < x < 2 is (-2 < x) & (x < 2): per site as pyqula calls it, on
+    arrays as the canvas and the regions evaluate it, and in the script."""
+    e = Expression("-2 < x <= 2 < 3")
+    positions = np.array([[-3.0, 0, 0], [0.0, 0, 0], [2.0, 0, 0], [2.5, 0, 0]])
+    assert list(e.evaluate_positions(positions)) == [0.0, 1.0, 1.0, 0.0]
+    assert [bool(e.at(p)) for p in positions] == [False, True, True, False]
+    f = eval(f"lambda r: {e.to_python('r')}", {"np": np})
+    assert [bool(f(p)) for p in positions] == [False, True, True, False]

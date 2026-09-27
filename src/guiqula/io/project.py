@@ -32,12 +32,20 @@ def preset_path(name):
 
 
 def resolve(path_or_name):
-    """A path, or the name of a shipped preset."""
-    path = Path(path_or_name)
-    if path.exists():
-        return path
-    if path.suffix == "" and path.name in presets():
+    """A path, or the name of a shipped preset. A bare name (no folder, no
+    suffix) that names a preset is the preset, even when the working
+    directory has a file or folder of that name (the gallery and the
+    Presets menu hand over bare names; project files have a suffix); write
+    ./name for such a file."""
+    text = str(path_or_name)
+    path = Path(text)
+    bare = path.suffix == "" and "/" not in text and "\\" not in text
+    if bare and path.name in presets():
         return preset_path(path.name)
+    if path.is_file():
+        return path
+    if path.is_dir():
+        raise DocumentError(f"{path_or_name}: a folder, not a document")
     raise DocumentError(f"{path_or_name}: no such file and no such preset; presets: {presets()}")
 
 
