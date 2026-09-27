@@ -183,8 +183,10 @@ a `Session`.
   (upstream URL and commit, uncommitted upstream files that were included, upstream's
   runtime dependencies to mirror in `pyproject.toml`) and then runs the help tests. Commit a
   refresh on its own; the one exception is the fix of registry `guide=` anchors that a
-  renamed upstream guide section forces (decision 13.13), which may join it. `vendor/pyqula_user_guide.md` is upstream's user guide and
-  `vendor/pyqula_examples/` its example scripts: check those first for how to call something,
+  renamed upstream guide section forces (decision 13.13), which may join it. `vendor/` holds
+  the package and `vendor/pyqula_user_guide.md`, upstream's user guide (the in-app help), and
+  nothing else of upstream (the maintainer's answer, 2026-09-27). For how to call something,
+  check the guide first, then upstream's `examples/` (in the pyqula checkout, or on GitHub),
   before grepping the vendored source.
 - Every pyqula calculation runs in a scratch directory (the worker's job dir, or the session
   scratchpad when experimenting by hand). Verified: `h.get_bands(write=False)` still writes

@@ -1702,6 +1702,12 @@ window); bands coloured by sz look noisy wherever the bands are degenerate (a zi
 ribbon's), since the spin of a degenerate pair is arbitrary, so the README colours the
 Kane-Mele ribbon by position instead.
 
+Also asked: "update pyqula", then "do not include the whole pyqula, just src/pyqula". The
+vendored copy was refreshed from upstream (19 commits, to 08a8179), and `vendor/` now holds
+the package and upstream's user guide only (the guide stays, for the in-app help, the
+maintainer's choice); upstream's examples were removed from `vendor/` and from the whole
+history before the first push, and `tools/update_vendor.sh` no longer copies them.
+
 ### Where the section 13 items land
 
 | Phase | Items |

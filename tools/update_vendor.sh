@@ -18,9 +18,7 @@ fi
 mkdir -p "$DST"
 rsync -a --delete --exclude='__pycache__' --exclude='*.pyc' "$SRC/src/pyqula/" "$DST/pyqula/"
 cp "$GUIDE" "$DST/pyqula_user_guide.md"
-rsync -a --delete --exclude='__pycache__' --exclude='*.pyc' --exclude='*.OUT' \
-      --exclude='*.pkl' --exclude='*.png' --exclude='*.pdf' --exclude='*.npy' \
-      "$SRC/examples/" "$DST/pyqula_examples/"
+# only the package and the guide (the in-app help): upstream's examples stay upstream
 HEAD=$(git -C "$SRC" rev-parse HEAD)
 # the upstream repository's public URL, never the local path (the repository is public)
 ORIGIN=$(git -C "$SRC" remote get-url origin 2>/dev/null \
@@ -48,8 +46,7 @@ ${MOD:-    (none)}
 
 Contents:
 - \`pyqula/\` — the package (\`src/pyqula\` upstream), without \`__pycache__\`
-- \`pyqula_user_guide.md\` — upstream \`documentation/user_guide.md\`
-- \`pyqula_examples/\` — upstream \`examples/\` (scripts only, outputs stripped)
+- \`pyqula_user_guide.md\` — upstream \`documentation/user_guide.md\` (the in-app help)
 
 Upstream runtime dependencies at copy time (mirror them in guiqula's
 \`pyproject.toml\`; optional extras are not listed):
