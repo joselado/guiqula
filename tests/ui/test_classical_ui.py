@@ -119,3 +119,14 @@ def test_a_texture_feeds_an_exchange_field(window, qtbot, shot):
     session.do("set_param", entry=texture, name="tries", value=3)   # the texture goes stale
     window.outliner.refresh(session)
     assert "stale result" in window.outliner.item(term).text(1)
+
+
+def test_a_from_result_field_opens_before_its_result_exists(window, qtbot):
+    """The form of a term whose Field reads a result not computed yet lists
+    that calculation anyway (it raised a TypeError before)."""
+    window.open_document("texture_exchange")
+    settle(qtbot, window)
+    window.select("t3")                              # m reads c1, which has not run
+    editor = window.properties.form.editors["m"].components[0]
+    assert editor.result_calc.itemData(editor.result_calc.currentIndex()) == "c1"
+    assert window.properties.form.item_id == "t3"

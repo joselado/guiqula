@@ -109,10 +109,10 @@ class Editor(QWidget):
         self.outer.addLayout(self.layout_)
         self.setToolTip(param.doc)
 
-    def _quiet(self, widget, setter, value):
+    def _quiet(self, widget, setter, *values):
         widget.blockSignals(True)
         try:
-            setter(value)
+            setter(*values)
         finally:
             widget.blockSignals(False)
 

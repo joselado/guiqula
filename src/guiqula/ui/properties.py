@@ -59,13 +59,15 @@ class Form(QWidget):
         layout = QVBoxLayout(self)
         self.title = QLabel(title)
         self.title.setObjectName("formTitle")
-        self.help_button = QToolButton()
+        # parented from the start: a parentless widget made visible is a window of its own,
+        # which flashes on the desktop and takes the activation from the main window
+        self.help_button = QToolButton(self)
         self.help_button.setText("?")
         self.help_button.setObjectName("formHelp")
         self.help_button.setToolTip("the help of this entry: pyqula's documentation of it (F1)")
         self.help_button.setVisible(bool(item_id))
         self.help_button.clicked.connect(lambda: panel.help_requested.emit(self.item_id))
-        self.doc = QLabel(doc)
+        self.doc = QLabel(doc, self)
         self.doc.setObjectName("formDoc")
         self.doc.setWordWrap(True)
         self.doc.setVisible(bool(doc))

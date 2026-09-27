@@ -297,7 +297,7 @@ functions only: the window loads the plugin too, and must start without pyqula.
 | canvas | Ctrl+A | select every site |
 | canvas | Ctrl+Shift+A | select nothing |
 | canvas | Ctrl+I | invert the selection |
-| canvas | Del | remove the selected atoms (a Remove atoms op) |
+| canvas | Del, Backspace | remove the selected atoms (a Remove atoms op) |
 | canvas | Home | show the whole geometry |
 | console | Return | run the input |
 | console | Shift+Return | a new line in the input |

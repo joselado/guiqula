@@ -279,6 +279,32 @@ def test_pan_or_zoom_unchecks_the_selection_tools(window, qtbot):
     window.set_tool("pick")
 
 
+def test_forms_open_no_window_of_their_own(window, qtbot, qapp):
+    """A widget made visible before it has a parent is a window of its own:
+    it flashes on the desktop and takes the activation, and with it the
+    keyboard focus, from the main window (the canvas lost its Del key)."""
+    from PySide6.QtCore import QEvent, QObject
+
+    class Spy(QObject):
+        shown = []
+
+        def eventFilter(self, obj, event):
+            if event.type() == QEvent.Type.Show and obj.isWidgetType() and obj.isWindow() \
+                    and obj is not window and not obj.inherits("QMenu"):
+                self.shown.append(f"{type(obj).__name__} {obj.objectName()}")
+            return False
+
+    spy = Spy()
+    qapp.installEventFilter(spy)
+    try:
+        for entry in window.session.document.all_ids() + ["s1/meanfield", ""]:
+            window.select(entry)
+            qtbot.wait(20)
+    finally:
+        qapp.removeEventFilter(spy)
+    assert spy.shown == []
+
+
 def test_report_exception_writes_a_crash_report(window, tmp_path, monkeypatch):
     monkeypatch.setenv("GUIQULA_DATA_DIR", str(tmp_path))
     try:
