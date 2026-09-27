@@ -629,6 +629,8 @@ class MainWindow(QMainWindow):
                      lambda: self._act("help", guide="guiqula"), name="guiqulaGuideAction")
         self._action(help_menu, "&Keyboard shortcuts", self.show_shortcuts, "shortcuts",
                      "shortcutsAction")
+        self._action(help_menu, "P&lugins", lambda: self._act("help", guide="plugins"),
+                     name="pluginsAction")
         self._action(help_menu, "&About", lambda: self.message(
             f"guiqula {guiqula.__version__}, {vendoring.describe()}"))
         self._action(help_menu, "Open &crash reports folder", lambda: self._open_folder(
@@ -2059,11 +2061,14 @@ class MainWindow(QMainWindow):
     def help(self, entry=None, guide=None, anchor=None):
         """Show help in the Help dock: an outliner item's (entry, by default
         the selected one; "" for guiqula's guide), a section
-        of a guide (guide "pyqula" or "guiqula" and anchor), or a guide's
-        contents (guide alone); returns the title shown."""
+        of a guide (guide "pyqula" or "guiqula" and anchor), a guide's
+        contents (guide alone), or the plugins (guide "plugins"); returns
+        the title shown."""
         dock = self.docks["helpDock"]
         dock.show()
         dock.raise_()
+        if guide == "plugins":
+            return self.help_panel.show_plugins()
         if guide is not None and anchor is not None:
             return self.help_panel.show_section(guide, anchor)
         if guide is not None:
@@ -2100,7 +2105,8 @@ class MainWindow(QMainWindow):
         if page is not None:
             {"item": lambda: self.help_panel.show_item(page[1], remember=False),
              "section": lambda: self.help_panel.show_section(*page[1:], remember=False),
-             "contents": lambda: self.help_panel.show_contents(page[1], remember=False)
+             "contents": lambda: self.help_panel.show_contents(page[1], remember=False),
+             "plugins": lambda: self.help_panel.show_plugins(remember=False)
              }[page[0]]()
         return applied
 

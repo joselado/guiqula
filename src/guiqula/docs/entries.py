@@ -185,8 +185,34 @@ def entry_help(spec, stage=None):
     if own:
         parts.append("In guiqula's user guide: " + ", ".join(link("guiqula", a) for a in own)
                      + ".")
+    if spec.plugin:
+        parts.append(f"*From the plugin {spec.plugin} "
+                     + link("guiqula", "Plugins", "(plugins)") + ".*")
     parts.append(source_note())
     return "\n\n".join(parts) + "\n"
+
+
+def plugins_page():
+    """The plugins loaded, their entries, and what went wrong, as Markdown."""
+    from guiqula.registry import plugins
+    state = plugins.describe()
+    lines = ["# Plugins", "",
+             "Plugins are installed packages, or Python files in the folder "
+             f"`{plugins.directory()}`, that add entries to guiqula "
+             + link("guiqula", "Plugins", "(how)") + "."]
+    if state["disabled"]:
+        lines += ["", "Plugins are off in this run ($GUIQULA_NO_PLUGINS)."]
+    elif not state["loaded"] and not state["problems"]:
+        lines += ["", "No plugin is installed."]
+    for item in state["loaded"]:
+        lines += ["", f"## {item['distribution'] or item['name']} {item['version']}", ""]
+        lines += [f"- {family.replace('_', ' ')} `{kind}`: {registry.get(family, kind).label}"
+                  for family, kind in item["entries"]] or ["(it adds no entry)"]
+    for problem in state["problems"]:
+        what = problem.get("error") or problem.get("warning")
+        lines += ["", f"**{problem['distribution'] or problem['name']}**: "
+                  + ("failed to load, left out: " if "error" in problem else "") + what]
+    return "\n".join(lines) + "\n"
 
 
 def source_note():

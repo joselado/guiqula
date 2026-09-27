@@ -41,6 +41,7 @@ from guiqula.core import regions as region_tools
 from guiqula.core.document import DocumentError, terms_of
 from guiqula.core.hashing import content_hash
 from guiqula.registry import base as registry
+from guiqula.registry import plugins
 from guiqula.registry.params import FieldParam, ParamError
 
 MODES = ("spinless", "spinful", "nambu")
@@ -101,8 +102,8 @@ def _check_entry(family, entry_kind, params, system_kind, trusted=True):
     """Return (spec, normalized params, problem)."""
     try:
         spec = registry.get(family, entry_kind)
-    except registry.RegistryError as error:
-        return None, None, str(error).strip("\"'")
+    except registry.RegistryError:
+        return None, None, plugins.missing(family, entry_kind)
     if system_kind not in spec.systems:
         return spec, None, f"{spec.label} does not apply to a {system_kind} system"
     try:

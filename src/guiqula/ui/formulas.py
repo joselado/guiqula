@@ -72,4 +72,6 @@ def entry_tooltip(spec, color=None):
                      .replace("spin", "spinful").replace("nambu", "Nambu"))
     if spec.runs_code:
         parts.append("<i>Python code: runs only in a trusted document</i>")
+    if spec.plugin:
+        parts.append(f"<i>from the plugin {html_tools.escape(spec.plugin)}</i>")
     return "<br>".join(parts)

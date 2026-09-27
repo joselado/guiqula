@@ -30,7 +30,9 @@ print(json.dumps({"seconds": seconds,
 
 
 def test_startup(run_python):
-    result = run_python(PROBE)
+    # with the plugins on (the suite turns them off): listing them is part of the start,
+    # 15 ms among 431 installed distributions on the development machine (2026-09-27)
+    result = run_python(PROBE, env_update={"GUIQULA_NO_PLUGINS": ""})
     assert result.returncode == 0, result.stderr
     out = json.loads(result.stdout.strip().splitlines()[-1])
     assert HEAVY.isdisjoint(out["loaded"]), sorted(HEAVY & set(out["loaded"]))

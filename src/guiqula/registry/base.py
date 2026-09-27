@@ -81,6 +81,8 @@ class EntrySpec:
                                      # "guiqula: <heading>" names one of guiqula's own guide
     pyqula: tuple = ()               # the pyqula calls behind a custom entry, whose docstrings
                                      # the help shows (a Call's target is known already)
+    plugin: str = ""                 # the distribution of the plugin that registered it
+                                     # (registry/plugins.py); "" for guiqula's own
     extra: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
@@ -126,13 +128,23 @@ class EntrySpec:
                 "guide": list(self.guide), "pyqula": list(self.pyqula),
                 "requires": "per parameters" if callable(self.requires) else list(self.requires),
                 "systems": list(self.systems), "runs_code": self.runs_code,
-                "params": [p.describe() for p in self.params]}
+                "plugin": self.plugin, "params": [p.describe() for p in self.params]}
+
+
+_plugin = None     # the plugin being loaded, whose name register() gives its entries
+
+
+def _tagging(name):
+    global _plugin
+    _plugin = name
 
 
 def register(spec):
     table = CATALOGUE[spec.family]
     if spec.kind in table:
         raise RegistryError(f"{spec.family} {spec.kind!r} registered twice")
+    if _plugin is not None and not spec.plugin:
+        spec.plugin = _plugin
     table[spec.kind] = spec
     return spec
 
@@ -161,11 +173,14 @@ _loaded = False
 
 
 def _load_builtins():
+    """guiqula's own entries, then the plugins' (registry/plugins.py)."""
     global _loaded
     if not _loaded:
         _loaded = True
         from guiqula.registry import (calculations, classical, geometry_ops,  # noqa: F401
                                       lattices, meanfield, python_nodes, sweeps, terms)
+        from guiqula.registry import plugins
+        plugins.load(CATALOGUE, _tagging)
 
 
 ALL_SYSTEMS = ("quantum", "classical_spin", "lattice_gas", "ising")

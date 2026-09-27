@@ -42,6 +42,7 @@ import numpy as np
 
 import guiqula
 from guiqula import registry, vendoring
+from guiqula.registry import plugins
 from guiqula.core.document import terms_of
 from guiqula.remote.server import INVALID_PARAMS, NO_METHOD, Pending, RemoteError
 
@@ -74,7 +75,8 @@ WINDOW_ACTIONS = {
     "remove_slider": "index",
     "theme": "name: system, light or dark",
     "export_bundle": "calculation, path: figure, data and script in one folder",
-    "help": "entry, or guide and anchor: show help in the Help dock",
+    "help": "entry, or guide (pyqula, guiqula, plugins) and anchor: show help in the Help "
+            "dock",
     "remote": "enabled: remote control on or off",
 }
 
@@ -181,10 +183,11 @@ class RemoteAPI:
     # ---- what is open
     def hello(self):
         session = self.session
+        registry.entries()                  # loads the plugins
         return {"guiqula": guiqula.__version__, "pyqula": vendoring.describe(),
                 "window": self.window is not None,
                 "document": str(session.path) if session.path else None,
-                "methods": list(METHODS)}
+                "methods": list(METHODS), "plugins": plugins.describe()}
 
     def status(self):
         session = self.session
@@ -422,7 +425,8 @@ class RemoteAPI:
     def help(self, item=None, kind=None, family=None, guide=None, anchor=None):
         """An outliner item's help (item: an entry id, s1/base...), a registry
         entry's (kind, and family when the kind is ambiguous), a section of
-        a guide (guide "pyqula" or "guiqula", anchor), or a guide's contents."""
+        a guide (guide "pyqula" or "guiqula", anchor), a guide's contents,
+        or the plugins (guide "plugins")."""
         from guiqula.docs import entries as helptexts
         if item is not None:
             try:
@@ -438,9 +442,11 @@ class RemoteAPI:
                 raise RemoteError(INVALID_PARAMS, f"{kind!r} is a " + " and a ".join(
                     s.family for s in specs) + ": give the family")
             return {"title": specs[0].label, "markdown": helptexts.entry_help(specs[0])}
+        if guide == "plugins":
+            return {"title": "Plugins", "markdown": helptexts.plugins_page()}
         if guide is not None:
             if guide not in ("pyqula", "guiqula"):
-                raise RemoteError(INVALID_PARAMS, "guide is pyqula or guiqula")
+                raise RemoteError(INVALID_PARAMS, "guide is pyqula, guiqula or plugins")
             if anchor:
                 anchor = _anchor(helptexts.guide_of(guide), anchor)
                 return {"title": anchor, "markdown": helptexts.section_page(guide, anchor)}

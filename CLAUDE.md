@@ -34,7 +34,8 @@ parts: settings, themes, shortcuts, undo; teaching exports and locks; performanc
 help); its report, numbered design items 1 to 14 and decisions 15 to 24 (PLAN.md section 7,
 end of phase 5; items 1 to 7 are the in-app help's open points of section 11), awaits the
 maintainer's answers. Phase 6 (distribution and the add-on) is under way: part 1, remote
-control and the MCP add-on, is done (2026-09-27; PLAN.md section 7, decisions from 25 on).
+control and the MCP add-on, and part 2, plugins, are done (2026-09-27; PLAN.md section 7,
+decisions from 25 on).
 
 ## Code map
 
@@ -65,7 +66,11 @@ a `Session`.
   the stage and calculation keys (staleness); the mean field is the last stage; an entry
   that `runs_code` (the Python nodes, `python_nodes.py`) is invalid unless planned with
   `trusted=True` (the Session's flag, never the Document's; the UI plans only through
-  `Session.plan_system`/`plan_calculation`/`calculation_key`). `cost.py`
+  `Session.plan_system`/`plan_calculation`/`calculation_key`). `plugins.py` loads the
+  plugins right after the built-in entries, in the window and the workers alike: entry points
+  of the group `guiqula.plugins` and the `*.py` of the user's plugins folder; a failing one is
+  left out whole and listed (Help > Plugins); `EntrySpec.plugin` names it; the test suite
+  sets `$GUIQULA_NO_PLUGINS`; `plugin_template/` is a plugin package with its test. `cost.py`
   estimates durations (the cost guard). Adding a term = one `entry(...)` call plus its case
   in `tests/engine/test_entries.py` (a completeness test fails otherwise; the case is also
   exported and run by `tests/engine/test_script_export.py`). A custom script names the

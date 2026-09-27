@@ -236,6 +236,24 @@ with connect() as client:
     print(client.call("run", calculation="c1")["result"]["arrays"])
 ```
 
+## Plugins
+
+A plugin is a Python package that adds lattices, geometry operations, terms, mean fields,
+classical models or calculations; once installed in guiqula's environment (`pip install
+guiqula-something`), its entries appear in the palettes, forms, help and exported scripts
+like guiqula's own, and run in the workers. Help > Plugins lists the plugins found, what
+each added, and any that failed to load: such a plugin is left out and guiqula starts
+without it (`GUIQULA_NO_PLUGINS=1 guiqula` starts without any). A document that uses an
+entry of a plugin that is not installed still opens; that entry is skipped and flagged.
+
+The quickest plugin is one Python file in the `plugins` folder of the user configuration
+directory (Help > Plugins shows where): each `*.py` there that declares entries with
+`guiqula.registry.entry(...)` is loaded at start. To share one, make it a package: copy
+`plugin_template/` from guiqula's source, whose module is named in the entry point group
+`guiqula.plugins` of its `pyproject.toml`, with a test that compares each entry with a
+direct pyqula call; its README says what to change. Either way, import pyqula inside
+functions only: the window loads the plugin too, and must start without pyqula.
+
 ## Keyboard shortcuts
 
 | where | keys | what |

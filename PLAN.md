@@ -15,8 +15,8 @@ built. Phase 5 (polish) was done on 2026-09-27; its report (design items 1
 to 14, the first seven being the recommendations for the open points of the
 in-app help in section 11, and decisions 15 to 24) awaits the maintainer's
 answers. Phase 6 (distribution and the add-on) is under way: part 1, remote
-control and the MCP add-on, was done on 2026-09-27 (decisions 25 to 33 in
-section 7).
+control and the MCP add-on, and part 2, plugins, were done on 2026-09-27
+(decisions 25 to 37 in section 7).
 
 ## 1. Requirements (as stated by the maintainer)
 
@@ -253,7 +253,8 @@ Semantics, borrowed from Blender's modifier stack:
 
 One Python module per entry, discovered at import (built-ins) or from a
 plugins directory (the per-user config directory from `platformdirs`, plus a `guiqula.plugins`
-entry-point group for pip-installed extensions). An entry declares:
+entry-point group for pip-installed extensions; built in phase 6, part 2:
+`registry/plugins.py`, `plugin_template/`). An entry declares:
 
 ```python
 @term("zeeman", label="Zeeman / exchange field", group="Magnetism",
@@ -1527,6 +1528,51 @@ Decisions for the maintainer, numbered after the phase-5 ones:
 33. a `.mcp.json` in this repository would register the add-on for every
     Claude Code session opened here (the maintainer's own configuration):
     offered, not added.
+**Part 2 done 2026-09-27** (plugins, 3.2). Built: `registry/plugins.py`.
+A plugin is an installed distribution with an entry point in the group
+`guiqula.plugins` (its value a module that registers entries with
+`registry.entry(...)` when imported, or a function that does), or a `*.py`
+file in the user's plugins folder (`plugins` in the user configuration
+directory), both as 3.2 planned. The registry loads them right after its
+own entries, in every process that asks for an entry, so the window's
+palettes, forms, tooltips ("from the plugin X") and help, the planner, the
+workers and the exported scripts treat them as guiqula's own. A plugin that
+raises, or registers a kind that is taken, is left out whole (what it
+registered before failing is removed) and listed; one that imports pyqula,
+jax or numba when loaded is loaded, with a warning (the window would then
+load them, 13.15). Every entry names its plugin (`EntrySpec.plugin`, in
+`describe()` and so in the remote catalogue). A document using an entry
+that no plugin provides opens, the entry skipped and flagged ("unknown
+term 'x': neither guiqula nor an installed plugin provides it", with the
+plugins that failed to load). Help > Plugins (and the remote `help`,
+guide "plugins") lists the plugins, their entries and their problems.
+`$GUIQULA_NO_PLUGINS` turns them off; the test suite sets it, so a plugin
+installed on the machine cannot change its results. `plugin_template/`:
+a plugin package (pyproject with the entry point, one term: pyqula's chiral
+Kekule hopping, which guiqula does not offer; a README; a test comparing
+the entry with a direct pyqula call and running its exported script). The
+user guide has a section on plugins. Tests: `tests/test_plugins.py` (fake
+installed distributions on a temporary path, in fresh interpreters: the
+template's entry registered, tagged, helped and run in a worker, the
+window process free of pyqula; broken, colliding and heavy plugins; a file
+of the plugins folder, run in a worker; a document with a missing entry;
+the template's own tests; the Plugins page), the Help dock's Plugins page
+in `tests/ui/test_help.py`, and the startup test now measures with the
+plugins on. Measured: listing the entry points costs 15 ms among the 431
+distributions of the development environment; the window's start is 1.1
+to 1.2 s either way (budget 2 s).
+Decisions for the maintainer:
+34. plugins are trusted code, like any installed package: they are not
+    behind the trust prompt of 13.7 (which is about code inside
+    documents);
+35. a plugin whose kind collides with one of guiqula's, or with an
+    earlier plugin's, is refused whole rather than overriding it: the
+    meaning of a saved document must not depend on which plugins are
+    installed;
+36. plugins add registry entries only; presets and guide sections shipped
+    by a plugin (the gallery, the help) are left for later, if wanted;
+37. the documents do not record which plugin an entry came from (no
+    schema change): a missing one is reported as an unknown kind.
 
 ### Where the section 13 items land
 

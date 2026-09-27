@@ -110,3 +110,17 @@ def test_the_help_follows_a_change_of_theme(window, qtbot):
     finally:
         window.set_theme("light")
     assert theme.name == "light"
+
+
+def test_the_plugins_page(window, qtbot):
+    panel = window.help_panel
+    window.help("t1")
+    action = window.findChild(type(window.undo_action), "pluginsAction")
+    action.trigger()
+    assert panel.title.text() == "Plugins" and panel.page == ("plugins",)
+    assert "Plugins are off in this run" in panel.browser.toPlainText()    # the test suite's
+    window.set_theme("dark")                                    # drawn again in the new colours
+    assert panel.page == ("plugins",)
+    window.set_theme("light")
+    panel.go_back()
+    assert panel.page == ("item", "t1")

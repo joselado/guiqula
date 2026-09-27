@@ -167,10 +167,10 @@ def tools():
         ("help", "Help as Markdown: of a document item (item: t1, c1, s1/base...), of a "
                  "registry entry (kind, with family if ambiguous), or of a section of a "
                  'guide (guide: "pyqula" or "guiqula", anchor: a heading); a guide alone '
-                 "gives its contents.",
+                 'gives its contents; guide "plugins" lists the installed plugins.',
          _schema({"item": {"type": "string"}, "kind": {"type": "string"},
-                  "family": {"type": "string"}, "guide": {"type": "string",
-                                                          "enum": ["pyqula", "guiqula"]},
+                  "family": {"type": "string"}, "guide": {"type": "string", "enum": [
+                      "pyqula", "guiqula", "plugins"]},
                   "anchor": {"type": "string"}}), True),
         ("script", "The standalone pyqula script that computes a calculation.",
          _schema(CALC, ("calculation",)), True),

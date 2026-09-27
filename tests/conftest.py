@@ -9,7 +9,9 @@
   ($GUIQULA_DATA_DIR), never to the user's data directory; so does the
   settings file ($GUIQULA_CONFIG_DIR).
 - ``run_python(code)`` runs code in a fresh interpreter that sees src/, for
-  checks that need a clean process (startup cost, import side effects).
+  checks that need a clean process (startup cost, import side effects);
+  ``run_python.src`` is that directory.
+- Installed guiqula plugins are not loaded ($GUIQULA_NO_PLUGINS).
 """
 import atexit
 import os
@@ -36,6 +38,9 @@ atexit.register(shutil.rmtree, os.environ["GUIQULA_DATA_DIR"], True)
 # and the settings file (theme, recent files) never is the user's either
 os.environ["GUIQULA_CONFIG_DIR"] = tempfile.mkdtemp(prefix="guiqula-test-config-")
 atexit.register(shutil.rmtree, os.environ["GUIQULA_CONFIG_DIR"], True)
+# plugins installed on the machine must not change the results (tests/test_plugins.py
+# turns them on for its own interpreters)
+os.environ["GUIQULA_NO_PLUGINS"] = "1"
 
 
 @pytest.fixture(autouse=True)
@@ -72,6 +77,7 @@ def run_python(tmp_path):
         return subprocess.run([sys.executable, "-c", code], cwd=tmp_path, env=child_env,
                               capture_output=True, text=True, timeout=timeout)
 
+    run.src = str(SRC)
     return run
 
 

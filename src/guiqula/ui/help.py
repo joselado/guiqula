@@ -89,6 +89,7 @@ class HelpPanel(QWidget):
         self.session = None     # the window's, for the help of outliner items
         self.history = []       # pages shown before
         self.page = None        # ("item", id) | ("section", which, anchor) | ("contents", which)
+                                # | ("plugins",)
         self._update_back()
 
     def _show(self, page, title, text, remember=True):
@@ -122,6 +123,10 @@ class HelpPanel(QWidget):
         title = f"{which} user guide"
         return self._show(("contents", which), title, entries.contents(which), remember)
 
+    def show_plugins(self, remember=True):
+        """The plugins loaded, their entries, and the ones that failed."""
+        return self._show(("plugins",), "Plugins", entries.plugins_page(), remember)
+
     def go_back(self):
         if not self.history:
             return None
@@ -130,6 +135,8 @@ class HelpPanel(QWidget):
             self.show_section(page[1], page[2], remember=False)
         elif page[0] == "contents":
             self.show_contents(page[1], remember=False)
+        elif page[0] == "plugins":
+            self.show_plugins(remember=False)
         else:
             self.show_item(page[1], remember=False)
         self._update_back()
