@@ -131,7 +131,9 @@ def test_recoverable_lists_dead_sessions_only(data_dir, tmp_path):
     (directory / "broken.json").write_text("{not json")
     found = autosave.recoverable()
     assert [e["path"] for e in found if "error" not in e] == [str(orphan)]
-    assert found[0]["systems"] == ["graphene with exchange and Rashba"]
+    # by path: the unreadable file, written last, may sort first (newest first, by its mtime)
+    (entry,) = [e for e in found if e["path"] == str(orphan)]
+    assert entry["systems"] == ["graphene with exchange and Rashba"]
     assert any("error" in e and e["path"].endswith("broken.json") for e in found)
     assert {e["path"] for e in autosave.recoverable(include_unmodified=True)} >= {
         str(orphan), str(directory / "saved.json")}
