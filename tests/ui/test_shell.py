@@ -63,6 +63,27 @@ def test_outliner_checkbox_toggles_and_undo(window, qtbot):
     assert window.outliner.item("t2").checkState(0).name == "Checked"
 
 
+def test_a_refused_toggle_puts_the_checkbox_back(window, qtbot):
+    """Qt flips an outliner checkbox before its command runs: when the
+    command is refused (a lock), the box shows the Document again."""
+    fresh(qtbot, window)
+    session = window.session
+    session.do("lock", target="t2")
+    start = len(window.log.toPlainText())
+    window.outliner.item("t2").setCheckState(0, Qt.CheckState.Unchecked)
+    qtbot.waitUntil(lambda: "set_enabled: t2 is locked" in window.log.toPlainText()[start:],
+                    timeout=5000)
+    assert session.document.find("t2")[-1].enabled
+    assert window.outliner.item("t2").checkState(0) == Qt.CheckState.Checked
+    session.do("lock", target="s1")                  # the mean field's box too
+    window.outliner.item("s1/meanfield").setCheckState(0, Qt.CheckState.Checked)
+    qtbot.waitUntil(lambda: "set_meanfield: s1 is locked" in window.log.toPlainText()[start:],
+                    timeout=5000)
+    assert not session.document.system("s1").hamiltonian.meanfield.enabled
+    assert window.outliner.item("s1/meanfield").checkState(0) == Qt.CheckState.Unchecked
+    session.do("unlock")
+
+
 def test_drop_index():
     from guiqula.ui.outliner import drop_index
     # entries a b c d at 0..3; move b (1)

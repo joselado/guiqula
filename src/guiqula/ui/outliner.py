@@ -13,9 +13,10 @@ rebuilt from the Document after the move command.
 
 Items carry the id of what they show: an entry id (s1, op2, t3, r1, c2),
 or ``<system>/base``, ``<system>/geometry``, ``<system>/regions``,
-``<system>/hamiltonian``, ``<system>/meanfield`` for the rows of a system
-that are not entries, and ``calculations``. The mean-field row closes the
-Hamiltonian's list, with its own checkbox (set_meanfield).
+``<system>/hamiltonian``, ``<system>/meanfield`` (``<system>/model_stack``,
+``<system>/model`` for a classical system) for the rows of a system that
+are not entries (pseudo_ids), and ``calculations``. The mean-field row
+closes the Hamiltonian's list, with its own checkbox (set_meanfield).
 """
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QBrush, QColor
@@ -49,6 +50,17 @@ def list_heads(family, system):
 def system_of(item_id):
     """The system part of a pseudo id (s1/base -> s1), else None."""
     return item_id.split("/", 1)[0] if "/" in item_id else None
+
+
+def pseudo_ids(system):
+    """The rows of a system that are not entries: a quantum system has a
+    Hamiltonian and its mean field, a classical one a model."""
+    rows = ["geometry", "base", "regions", "problem"]
+    if system.hamiltonian is not None:
+        rows += ["hamiltonian", "meanfield"]
+    if system.model is not None:
+        rows += ["model_stack", "model"]
+    return {f"{system.id}/{row}" for row in rows}
 
 
 def _label(family, kind):

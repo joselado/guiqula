@@ -88,9 +88,13 @@ def describe(name, args, document):
 
 
 def touched(name, args, result):
-    """The entry a step changed (a new entry's id, the entry it names, its
-    system), for the selection to follow an undo or a redo; and the system,
-    for when the entry no longer exists."""
+    """The entry a step changed (a new entry's id, the entry it names, the
+    mean field's or the model's row, its system), for the selection to
+    follow an undo or a redo; and the system, for when the entry no longer
+    exists."""
+    row = {"set_meanfield": "meanfield", "set_model": "model"}.get(name)
+    if row and args.get("system"):
+        return f"{args['system']}/{row}", args["system"]
     entry = result if isinstance(result, str) and name.startswith(("add_", "duplicate")) \
         else args.get("entry") or args.get("system")
     return entry, args.get("system")

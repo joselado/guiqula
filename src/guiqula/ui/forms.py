@@ -219,7 +219,7 @@ class _PieceRow:
         self.remove.setText("×")
         self.remove.setToolTip("remove this region's value")
         self.remove.setObjectName(f"pieceRemove_{name}_{index}")
-        self.region.activated.connect(lambda _: editor._edited())
+        self.region.activated.connect(lambda _: editor._piece_finished())
         self.value.editingFinished.connect(editor._piece_finished)
         self.value.textEdited.connect(lambda _: editor._look())
         self.remove.clicked.connect(lambda: editor.remove_piece(index))
@@ -409,6 +409,7 @@ class FieldEditor(Editor):
         if set(self.profile_edits) != set(value["params"]):
             for label, edit in self.profile_edits.values():
                 for widget in (label, edit):
+                    widget.blockSignals(True)     # hiding the box with the focus finishes it
                     self.profile_grid.removeWidget(widget)
                     widget.hide()
                     widget.deleteLater()          # may run inside one of their own signals
@@ -426,13 +427,16 @@ class FieldEditor(Editor):
     def _profile_edited(self, new_name=False):
         if self._mode() != 3:
             return
-        if new_name:
+        if new_name:            # another profile starts from its defaults; the same one stays
+            if self.profile_name.currentText() == self._value["name"]:
+                return
             value = {"kind": "profile", "name": self.profile_name.currentText(), "params": {}}
         else:
             try:
-                params = {name: parse_float(edit.text())
+                params = {name: self._number(edit.text(), name)
                           for name, (_, edit) in self.profile_edits.items()}
-            except ValueError:
+            except ValueError as error:
+                self._commit_draft(error)
                 return
             value = dict(self._value, params=params)
         if value != self._value:
@@ -442,10 +446,11 @@ class FieldEditor(Editor):
         if self._mode() != 4:
             return
         try:
-            points = [[parse_float(c) for c in line.replace(";", ",").split(",")]
+            points = [[self._number(c, "points") for c in line.replace(";", ",").split(",")]
                       for line in self.points.toPlainText().splitlines() if line.strip()]
-            length = parse_float(self.length.text())
-        except ValueError:
+            length = self._number(self.length.text(), "length")
+        except ValueError as error:
+            self._commit_draft(error)
             return
         value = {"kind": "interpolated", "points": points, "length": length}
         if value != self._value:
@@ -455,8 +460,9 @@ class FieldEditor(Editor):
         if self._mode() != 5:
             return
         try:
-            default = parse_float(self.paint_default.text())
-        except ValueError:
+            default = self._number(self.paint_default.text(), "elsewhere")
+        except ValueError as error:
+            self._commit_draft(error)
             return
         value = dict(self._value, default=default, **({"sites": []} if clear else {}))
         if value != self._value:
@@ -514,6 +520,9 @@ class FieldEditor(Editor):
         if len(pieces) != len(self.rows):
             for row in self.rows:
                 for widget in row.widgets():
+                    # hiding the box with the focus finishes its edit, which would send
+                    # the pieces of these old rows again (and take back an undo)
+                    widget.blockSignals(True)
                     self.grid.removeWidget(widget)
                     widget.hide()
                     widget.deleteLater()        # may run inside one of their own signals
@@ -565,19 +574,20 @@ class FieldEditor(Editor):
     def _result_edited(self, new_calc=False, new_array=False):
         if self._mode() != 2:
             return
-        if new_calc:
-            value = self._result_value(self.result_calc.currentData())
+        if new_calc and self.result_calc.currentData() != self._value["calculation"]:
+            value = self._result_value(self.result_calc.currentData())   # from its first array
         else:
             value = dict(self._value, array=self.result_array.currentData(),
                          component=self.result_component.currentData())
-            if new_array:
+            if new_array and value["array"] != self._value["array"]:
                 source = self._source(value["calculation"])
                 components = source[2].get(value["array"]) if source else None
                 value["component"] = None if components is None else 0
             try:
-                value["scale"] = parse_float(self.result_scale.text())
-            except ValueError:
-                pass
+                value["scale"] = self._number(self.result_scale.text(), "times")
+            except ValueError as error:
+                self._commit_draft(error)
+                return
         if value is not None and value != self._value:
             self._commit_draft(value)
 
@@ -602,9 +612,21 @@ class FieldEditor(Editor):
                             "value": parse_field(row.value.text())} for row in self.rows]}
 
     def _commit_draft(self, value):
+        """Send value as the Field; a ValueError instead is refused the
+        way a main editor refuses text (value() raises it): the form says
+        what is wrong and shows the stored value again."""
         self._draft = value
-        self.committed.emit()
-        self._draft = None
+        try:
+            self.committed.emit()
+        finally:
+            self._draft = None
+
+    @staticmethod
+    def _number(text, box):
+        try:
+            return parse_float(text)
+        except ValueError as error:
+            raise ValueError(f"{box}: {error}") from None
 
     def _kind_chosen(self, index):
         mode = self._mode()
@@ -650,6 +672,8 @@ class FieldEditor(Editor):
 
     # ---- the value
     def value(self):
+        if isinstance(self._draft, ValueError):
+            raise self._draft
         if self._draft is not None:
             return self._draft
         if self._mode() == 1:

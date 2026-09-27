@@ -288,6 +288,24 @@ def test_undo_steps_are_named_and_taken_several_at_once():
         d.redo()
 
 
+def test_a_step_of_the_mean_field_or_the_model_touches_its_row():
+    """The selection follows an undo of a mean-field or a model change to
+    that row (s1/meanfield, s2/model), not to the system's form."""
+    d = Dispatcher()
+    events = []
+    d.subscribe(events.append)
+    s = d.do("add_system")
+    d.do("set_meanfield", system=s, params={"U": 2.0})
+    g = d.do("add_system", kind="lattice_gas")
+    d.do("set_model", system=g, params={"filling": 0.5})
+    d.undo()
+    assert (events[-1]["entry"], events[-1]["system"]) == (f"{g}/model", g)
+    d.undo(2)
+    assert (events[-1]["entry"], events[-1]["system"]) == (f"{s}/meanfield", s)
+    d.redo()
+    assert events[-1]["entry"] == f"{s}/meanfield"
+
+
 def test_every_mutation_has_a_step_text():
     """No mutation falls back to its bare name (a new one needs a text in
     commands/steps.py)."""

@@ -661,12 +661,19 @@ class PropertiesPanel(QScrollArea):
     def _set_form(self, form):
         """Replace the form; the old one is deleted later, since this may
         run inside a signal of one of its own editors."""
+        shown = self.form
         old = self.takeWidget()
-        self.form = form
-        self.setWidget(form)
         if old is not None:
             old.hide()
             old.deleteLater()
+        if self.form is not shown:
+            # taking the old form out took the focus from its editor, which sent what
+            # was typed there: that edit already set a form built after it, and this
+            # one, built before, would show the value it replaced
+            form.deleteLater()
+            return
+        self.form = form
+        self.setWidget(form)
 
     def _make(self, item_id):
         document = self.session.document

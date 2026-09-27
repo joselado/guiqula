@@ -57,7 +57,7 @@ from guiqula.ui.help import HelpPanel
 from guiqula.ui.kspace import KSpaceView
 from guiqula.ui.sliders import SlidersPanel
 from guiqula.ui.jobpanel import JobPanel
-from guiqula.ui.outliner import Outliner, system_of
+from guiqula.ui.outliner import Outliner, pseudo_ids, system_of
 from guiqula.ui.plots import PlotView
 from guiqula.ui.properties import PropertiesPanel
 from guiqula.ui import structure as structure_tools
@@ -810,10 +810,9 @@ class MainWindow(QMainWindow):
             return True
         system = system_of(item_id)
         try:
-            if system is not None:
-                self.session.document.system(system)
-            else:
-                self.session.document.find(item_id)
+            if system is not None:      # a row the outliner shows for a system of its kind
+                return item_id in pseudo_ids(self.session.document.system(system))
+            self.session.document.find(item_id)
             return True
         except Exception:
             return False
@@ -1067,6 +1066,8 @@ class MainWindow(QMainWindow):
         document = self.session.document
         if entry.endswith("/meanfield"):
             system = document.system(system_of(entry))
+            if system.hamiltonian is None:
+                raise ValueError(f"{system.id} is a classical system: it has no mean field")
             block = system.hamiltonian.meanfield
             spec, params, region = registry.get("meanfield", block.kind), block.params, None
         else:
@@ -1203,7 +1204,10 @@ class MainWindow(QMainWindow):
         if isinstance(ui.get("calculation"), str) and self.calc_box.findData(ui["calculation"]) >= 0:
             self.select_calculation(ui["calculation"])
         selected = ui.get("selected", "")
-        self.select(selected if isinstance(selected, str) and self._exists(selected) else "")
+        try:
+            self.select(selected if isinstance(selected, str) and self._exists(selected) else "")
+        except Exception:
+            self.select("")
         self.sliders = []
         for spec in ui.get("sliders", []) if isinstance(ui.get("sliders"), list) else []:
             try:
@@ -1554,6 +1558,10 @@ class MainWindow(QMainWindow):
         ok, out = self._do(name, **args)
         if ok and name == "duplicate":
             self.select(out)
+        elif not ok and name in ("set_enabled", "set_meanfield"):
+            # Qt ticked or unticked the box before the refusal (a lock): show the Document
+            self.outliner.refresh(self.session)
+            self.outliner.set_current(self.selected)
 
     # ---- calculations and results
     def _refresh_calculations(self):
@@ -1764,6 +1772,9 @@ class MainWindow(QMainWindow):
         problem = sweeps.check_target(document, entry, param, component)
         if problem:
             raise ValueError(problem)
+        minimum, maximum = float(minimum), float(maximum)
+        if not np.isfinite([minimum, maximum, maximum - minimum]).all():
+            raise ValueError("the range needs finite numbers")
         if not maximum > minimum:
             raise ValueError("the range needs a maximum above its minimum")
         probe = sweeps.with_value(document, entry, param, component,

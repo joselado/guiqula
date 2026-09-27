@@ -1,12 +1,20 @@
-"""What the bug hunt of 2026-09-27 found in the window: a result that
-cannot be drawn, a geometry without sites, the brush over another system,
-sliders of removed or locked parameters, text typed while a build
-finishes. None of them may raise out of a Qt callback (pytest-qt fails the
-test then) or stop the window from rebuilding."""
+"""What the bug hunts of 2026-09-27 and 2026-09-28 found in the window: a
+result that cannot be drawn, a geometry without sites, the brush over
+another system, sliders of removed or locked parameters or of an infinite
+range, text typed while a build finishes or while a form is rebuilt, the
+f(r) panel's own boxes and combos, a row a system does not have, the
+selection after an undo. None of them may raise out of a Qt callback
+(pytest-qt fails the test then) or stop the window from rebuilding."""
+import json
+
 import numpy as np
 import pytest
+from PySide6.QtCore import Qt
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication, QPushButton
 
 from guiqula.core.results import Result
+from guiqula.session import Session
 from guiqula.ui.app import build_main_window
 
 
@@ -18,6 +26,26 @@ def window(qapp):
     window.start_session("honeycomb_zeeman_rashba", warm=False)
     yield window
     window.close()
+
+
+@pytest.fixture
+def still(qapp, no_jobs):
+    """A window over a session that runs nothing: for what the forms, the
+    outliner and the undo do by themselves."""
+    window = build_main_window()
+    window.resize(1200, 800)
+    window.show()
+    session = Session("honeycomb_zeeman_rashba", jobs=no_jobs)
+    window.attach(session)
+    yield window, session
+    window.close()
+    session.close()
+
+
+def focus(qtbot, widget):
+    widget.window().activateWindow()
+    widget.setFocus()
+    qtbot.waitUntil(lambda: QApplication.focusWidget() is widget, timeout=5000)
 
 
 def settle(qtbot, window, timeout=120_000):
@@ -150,3 +178,210 @@ def test_the_jobs_panel_keeps_the_newest_finished_rows(qapp, monkeypatch):
     assert [panel.table.item(r, 0).text() for r in range(3)] == ["j1", "j5", "j6"]
     panel.update_job(SimpleNamespace(**dict(vars(running), status="done", done=True)))
     assert panel.table.item(panel.rows["j1"], 2).text() == "done"
+
+
+def test_a_form_rebuilt_while_a_value_is_typed(still, qtbot):
+    """A change of the form's signature (a region added by the console)
+    while a value is typed: taking the old form out sends the value, and
+    the form shows it, not the value before."""
+    window, session = still
+    window.select("t2")
+    edit = window.properties.form.editors["c"].edit
+    focus(qtbot, edit)
+    edit.selectAll()
+    QTest.keyClicks(edit, "0.37")                   # typed, not confirmed yet
+    session.do("add_region", system="s1", name="right",
+               select={"kind": "expression", "expr": "x > 0"})
+    assert session.document.find("t2")[-1].params["c"] == 0.37
+    assert window.properties.form.editors["c"].edit.text() == "0.37"
+    assert window.properties.form.region.count() == 2        # everywhere, right
+
+
+def test_undo_of_a_piece_whose_box_has_the_focus(still, qtbot):
+    """Hiding the value box of a piece that has the focus finished its edit,
+    which sent the old pieces again: the undo of Add a region was taken
+    back at once, and removing a piece was three undo steps."""
+    window, session = still
+    session.do("add_region", system="s1", name="right",
+               select={"kind": "expression", "expr": "x > 0"})
+    session.do("set_param", entry="t2", name="c",
+               value={"kind": "piecewise", "default": 0.1, "pieces": []})
+    window.select("t2")
+
+    def stored():
+        return session.document.find("t2")[-1].params["c"]
+
+    window.properties.form.editors["c"].add.click()            # Add a region
+    box = window.properties.form.editors["c"].rows[0].value
+    focus(qtbot, box)
+    box.selectAll()
+    QTest.keyClicks(box, "0.5")
+    QTest.keyClick(box, Qt.Key.Key_Return)
+    assert stored()["pieces"] == [{"region": "r1", "value": 0.5}]
+    assert QApplication.focusWidget() is box
+    window.undo_action.trigger()
+    window.undo_action.trigger()                                # and Add a region
+    assert stored()["pieces"] == [] and session.dispatcher.can_redo()
+    window.redo_action.trigger()
+    assert stored()["pieces"] == [{"region": "r1", "value": 0.1}]
+    session.do("set_param", entry="t2", name="c", value={
+        "kind": "piecewise", "default": 0.1,
+        "pieces": [{"region": "r1", "value": 0.2}, {"region": "r1", "value": 0.3}]})
+    focus(qtbot, window.properties.form.editors["c"].rows[0].value)
+    steps = len(session.dispatcher.history()["undo"])
+    window.properties.form.editors["c"].rows[1].remove.click()
+    assert stored()["pieces"] == [{"region": "r1", "value": 0.2}]
+    assert len(session.dispatcher.history()["undo"]) == steps + 1
+
+
+def test_picking_the_item_shown_again_changes_nothing(still):
+    """The f(r) panel's combos (QComboBox.activated fires for the item
+    shown too): the same profile kept its numbers, the same result or array
+    its component and scale, the same region was no undo step. Another
+    one still starts afresh."""
+    window, session = still
+
+    def stored():
+        return session.document.find("t2")[-1].params["c"]
+
+    def editor():
+        return window.properties.form.editors["c"]
+
+    def pick(box, data=None):
+        if data is not None:
+            box.setCurrentIndex(box.findData(data))
+        box.activated.emit(box.currentIndex())
+
+    profile = {"kind": "profile", "name": "gaussian",
+               "params": {"amplitude": 5.0, "x0": 1.0, "y0": 0.0, "width": 3.0}}
+    session.do("set_param", entry="t2", name="c", value=profile)
+    window.select("t2")
+    pick(editor().profile_name)
+    assert stored() == profile
+    s2 = session.do("add_system", lattice="square_lattice")
+    c3 = session.do("add_calculation", system=s2, kind="ldos")
+    session._keep_result(c3, Result(
+        calculation=c3, kind="ldos", key="k", params={},
+        arrays={"m": np.ones((4, 3)), "rho": np.ones(4)},
+        plot={"kind": "structure_scalar", "values": "rho"},
+        structure={"positions": np.zeros((4, 3))}))
+    read = {"kind": "from_result", "calculation": c3, "array": "m", "component": 2,
+            "scale": 0.8, "tol": 0.1}
+    session.do("set_param", entry="t2", name="c", value=read)
+    pick(editor().result_array)
+    pick(editor().result_calc)
+    assert stored() == read
+    pick(editor().result_array, "rho")
+    assert stored()["array"] == "rho" and stored()["component"] is None
+    session.do("add_region", system="s1", name="right",
+               select={"kind": "expression", "expr": "x > 0"})
+    session.do("set_param", entry="t2", name="c", value={
+        "kind": "piecewise", "default": 0.1, "pieces": [{"region": "r1", "value": 0.2}]})
+    steps = len(session.dispatcher.history()["undo"])
+    pick(editor().rows[0].region)
+    assert len(session.dispatcher.history()["undo"]) == steps
+
+
+def test_a_number_the_field_panel_cannot_read_is_refused(still):
+    """The f(r) panel's own boxes (a profile's numbers, the control points,
+    painted's elsewhere, a result's scale) said nothing about text that is
+    not a number, and kept showing it: the form says what is wrong, and the
+    box shows the stored value again, as the main editors do."""
+    window, session = still
+    window.select("t2")
+
+    def editor():
+        return window.properties.form.editors["c"]
+
+    def error():
+        return window.properties.form.error.text()
+
+    def stored():
+        return session.document.find("t2")[-1].params["c"]
+
+    session.do("set_param", entry="t2", name="c",
+               value={"kind": "profile", "name": "gaussian", "params": {}})
+    box = editor().profile_edits["amplitude"][1]
+    box.setText("wide")
+    box.editingFinished.emit()
+    assert error() == "c: amplitude: 'wide' is not a number"
+    assert box.text() == "1" and stored()["params"]["amplitude"] == 1.0
+    session.do("set_param", entry="t2", name="c",
+               value={"kind": "interpolated", "points": [[0.0, 0.0, 0.0]], "length": 2.0})
+    editor().points.setPlainText("0, 0, 1\n3, oops, 2")
+    editor().findChild(type(editor().add), "fieldPointsApply_c").click()
+    assert error() == "c: points: 'oops' is not a number"
+    assert editor().points.toPlainText() == "0, 0, 0"
+    assert stored()["points"] == [[0.0, 0.0, 0.0]]
+    session.do("set_param", entry="t2", name="c",
+               value={"kind": "painted", "sites": [], "tol": 0.1, "default": 0.0})
+    editor().paint_default.setText("zero")
+    editor().paint_default.editingFinished.emit()
+    assert error() == "c: elsewhere: 'zero' is not a number"
+    assert editor().paint_default.text() == "0" and stored()["default"] == 0.0
+    editor().paint_default.setText("0.25")               # a number still goes through
+    editor().paint_default.editingFinished.emit()
+    assert error() == "" and stored()["default"] == 0.25
+
+
+def test_a_row_the_system_does_not_have(still, tmp_path):
+    """s1/model on a quantum system (s2/meanfield on a classical one) is
+    refused, not an AttributeError that left it selected and saved; a file
+    whose ui block names such a row opens, with its trust bar."""
+    window, session = still
+    window.select("t1")
+    with pytest.raises(ValueError, match="nothing called 's1/model'"):
+        window.select("s1/model")
+    assert window.selected == "t1"
+    s2 = session.do("add_system", lattice="square_lattice", kind="ising")
+    with pytest.raises(ValueError, match="nothing called"):
+        window.select(f"{s2}/meanfield")
+    with pytest.raises(ValueError, match="classical system: it has no mean field"):
+        window.preview_field(f"{s2}/meanfield", "U")
+    window.select(f"{s2}/model")                        # the rows it has
+    window.select("s1/meanfield")
+    session.do("add_term", system="s1", kind="python")  # a file with it opens untrusted
+    path = tmp_path / "pseudo.json"
+    session.act("save", path=str(path))
+    data = json.loads(path.read_text())
+    data.setdefault("ui", {})["selected"] = "s1/model"
+    path.write_text(json.dumps(data))
+    start = len(window.log.toPlainText())
+    window.open_document(path)
+    assert not [line for line in errors_since(window, start) if line.startswith("ERROR: load")]
+    assert session.path == path and window.selected == ""
+    assert not session.trusted and session.code_entries() and window.trust_bar.isVisible()
+
+
+def test_undo_keeps_the_form_of_the_mean_field_or_the_model(still):
+    window, session = still
+    window.select("s1/meanfield")
+    session.do("set_meanfield", system="s1", params={"U": 2.5})
+    window.undo_action.trigger()
+    assert window.selected == "s1/meanfield"
+    assert type(window.properties.form).__name__ == "MeanFieldForm"
+    window.open_document("ising_ferromagnet")
+    window.select("s1/model")
+    session.do("set_model", system="s1", params={"m": 0.7})
+    window.undo_action.trigger()
+    window.redo_action.trigger()
+    assert window.selected == "s1/model"
+    assert type(window.properties.form).__name__ == "ModelForm"
+
+
+def test_a_slider_needs_a_finite_range(still):
+    """The Sliders dock took -inf..inf: the add was reported as failed (a
+    NaN), yet the slider stayed, without a row, and was saved."""
+    window, session = still
+    panel = window.sliders_panel
+    panel.entry.setText("t2")
+    panel.param.setText("c")
+    panel.minimum.setText("-inf")
+    panel.maximum.setText("inf")
+    panel.findChild(QPushButton, "addSliderButton").click()
+    assert window.log.toPlainText().splitlines()[-1] == \
+        "ERROR: slider: the range needs finite numbers"
+    for low, high in ((0.0, np.inf), (-1e308, 1e308)):
+        assert window._act("slider", entry="t2", param="c", minimum=low, maximum=high) is None
+    assert window.sliders == [] and panel.rows == [] and "sliders" not in window.view_state()
+    assert window._act("slider", entry="t2", param="c", minimum=0.0, maximum=0.5) == 0
