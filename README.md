@@ -15,7 +15,9 @@ term can depend on position, and results that no longer match the model are mark
 
 ## Install
 
-guiqula needs Python 3.12 or 3.13 and runs on Linux, macOS and Windows:
+guiqula needs Python 3.12 or 3.13. It is developed and tested on Linux; all its
+dependencies have wheels for macOS and Windows too, where it is expected to work but has not
+been tried yet (reports are welcome):
 
 ```
 pip install guiqula
@@ -122,10 +124,11 @@ phase diagram sweeps the Chern number over both parameters.
 ### Quantum spin Hall effect: the Kane-Mele model
 
 `guiqula kane_mele_ribbon`. A zigzag graphene ribbon with intrinsic spin-orbit coupling: the
-bulk is gapped, and a helical pair of edge states crosses the gap on each edge. Here the
-bands are coloured by the position across the ribbon (the `yposition` operator), so the
-states of the two edges come out red and blue; the second calculation shows the local
-density of states inside the gap sitting on the edges.
+bulk is gapped, and a helical pair of edge states crosses the gap on each edge. The bands
+are coloured by the position across the ribbon (the `yposition` operator; any other, such
+as `sz`, is chosen in the calculation's form), so the states of the two edges come out red
+and blue; the second calculation shows the local density of states inside the gap sitting
+on the edges.
 
 ![bands of a Kane-Mele ribbon coloured by the position across it](https://raw.githubusercontent.com/joselado/guiqula/master/docs/images/kane_mele_bands.png)
 
