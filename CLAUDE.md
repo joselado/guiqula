@@ -134,13 +134,11 @@ a `Session`.
 - `desktop.py`: `guiqula desktop` (the menu entry, icon and `.guiqula` file type for the
   current user: freedesktop files on Linux, a Start menu shortcut and registry keys on
   Windows, `~/Applications/guiqula.app` on macOS; from a checkout it carries `src/`);
-  `env.launcher()` is the command that starts guiqula again (the executable itself when
-  frozen). `resources/`: the icon (SVG; PNG, ICO, ICNS made by `tools/make_icons.py`).
-- `packaging/`: `pyinstaller/guiqula.spec` (the application folder: `guiqula` and
-  `guiqula-cli`; pyqula collected as sources, which the vendoring shim finds as "bundled";
-  `launcher.py` calls `freeze_support()` for the workers), `windows/guiqula.iss` (Inno
-  Setup), `README.md` (what each build is, what was verified, the release checklist);
-  `.github/workflows/` (tests on three systems, release artifacts, PyPI).
+  `env.launcher()` is the command that starts guiqula again. `resources/`: the icon (SVG;
+  PNG, ICO, ICNS made by `tools/make_icons.py`).
+- `packaging/README.md`: what each distribution is (pip only: sdist and wheel, the conda
+  file, `guiqula desktop`), what was verified, the release checklist (built and uploaded by
+  hand; there is no CI).
 - `ui/`: `mainwindow.py` (workspaces, palettes with search boxes from the registry, docks,
   bars, one result view per calculation, the cost guard, auto re-run; the window's own
   dispatcher actions `select`, `workspace`, `tool`, `select_sites`, `region_from_selection`,
@@ -296,8 +294,6 @@ claude mcp add guiqula -e PYTHONPATH=$PWD/src -- python -m guiqula mcp  # regist
 PYTHONPATH=src python -m guiqula desktop [--remove]   # menu entry, icon, file type (this user)
 python -m build && twine check --strict dist/*   # sdist and wheel (packaging/README.md)
 python tools/make_icons.py             # the PNG, ICO and ICNS from resources/guiqula.svg
-<venv>/bin/pyinstaller packaging/pyinstaller/guiqula.spec --noconfirm   # dist/guiqula/
-GUIQULA_FROZEN_PYTHON=<venv>/bin/python python -m pytest tests/test_frozen.py  # build + drive
 tools/update_vendor.sh /path/to/pyqula  # refresh vendor/ from upstream pyqula ($PYQULA_SRC)
 ```
 

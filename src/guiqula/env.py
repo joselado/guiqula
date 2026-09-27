@@ -15,10 +15,7 @@ APP_NAME = "guiqula"
 
 def launcher():
     """The command that starts guiqula again (the window, or a subcommand
-    after it): the interpreter with -m guiqula, or the executable itself in
-    a frozen application (packaging/pyinstaller)."""
-    if getattr(sys, "frozen", False):
-        return [sys.executable]
+    after it): the interpreter with -m guiqula."""
     return [sys.executable, "-m", "guiqula"]
 
 

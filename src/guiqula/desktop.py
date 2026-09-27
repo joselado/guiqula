@@ -113,7 +113,7 @@ def start_menu():
         "Microsoft" / "Windows" / "Start Menu" / "Programs"
 
 
-def windows_shortcut_script(python, shortcut, icon, directory=None, arguments="-m guiqula"):
+def windows_shortcut_script(python, shortcut, icon, directory=None):
     """The PowerShell that writes the Start menu shortcut (directory: its
     working directory, the user's home by default; src/ from a checkout,
     where python -m guiqula then finds the package)."""
@@ -121,16 +121,16 @@ def windows_shortcut_script(python, shortcut, icon, directory=None, arguments="-
         return "'" + str(value).replace("'", "''") + "'"
     return "; ".join([
         f"$s = (New-Object -ComObject WScript.Shell).CreateShortcut({quoted(shortcut)})",
-        f"$s.TargetPath = {quoted(python)}", f"$s.Arguments = {quoted(arguments)}",
+        f"$s.TargetPath = {quoted(python)}", "$s.Arguments = '-m guiqula'",
         f"$s.IconLocation = {quoted(icon)}", f"$s.Description = {quoted(COMMENT)}",
         f"$s.WorkingDirectory = {quoted(directory or Path.home())}", "$s.Save()"])
 
 
-def windows_registry(python, icon, arguments="-m guiqula"):
+def windows_registry(python, icon):
     """{key under HKEY_CURRENT_USER: {value name: data}} of the .guiqula
     file association ("" is a key's default value)."""
     base = r"Software\Classes"
-    command = f'"{python}" ' + (f"{arguments} " if arguments else "") + '"%1"'
+    command = f'"{python}" -m guiqula "%1"'
     return {rf"{base}\.guiqula": {"": PROG_ID},
             rf"{base}\{PROG_ID}": {"": "guiqula project"},
             rf"{base}\{PROG_ID}\DefaultIcon": {"": str(icon)},
@@ -139,22 +139,19 @@ def windows_registry(python, icon, arguments="-m guiqula"):
 
 def _install_windows(python):
     import winreg
-    frozen = getattr(sys, "frozen", False) and python is None
-    python = sys.executable if frozen else windows_python(python)
-    arguments = "" if frozen else "-m guiqula"
+    python = windows_python(python)
     icon = RESOURCES / "guiqula.ico"
     shortcut = start_menu() / f"{NAME}.lnk"
     shortcut.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
-                    windows_shortcut_script(python, shortcut, icon, checkout_src(), arguments)],
+                    windows_shortcut_script(python, shortcut, icon, checkout_src())],
                    check=True,
                    capture_output=True, timeout=120)
-    for key, values in windows_registry(python, icon, arguments).items():
+    for key, values in windows_registry(python, icon).items():
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, key) as handle:
             for name, data in values.items():
                 winreg.SetValueEx(handle, name, 0, winreg.REG_SZ, data)
-    return [str(shortcut)] + [f"HKEY_CURRENT_USER\\{key}" for key in windows_registry(python,
-                                                                                         icon, arguments)]
+    return [str(shortcut)] + [f"HKEY_CURRENT_USER\\{key}" for key in windows_registry(python, icon)]
 
 
 def _remove_windows():

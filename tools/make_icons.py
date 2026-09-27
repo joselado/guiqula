@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 """Render guiqula's icon (src/guiqula/resources/guiqula.svg) to the files
-the program and the installers use:
+the program uses:
 
 - guiqula.png (256 px): the window icon and the Linux desktop entry's;
-- guiqula.ico (16 to 256 px): Windows (the Start menu shortcut, the
-  PyInstaller bundle, the installer);
-- guiqula.icns (128 to 1024 px): the macOS app bundles;
+- guiqula.ico (16 to 256 px): Windows (the Start menu shortcut and the
+  file type of ``guiqula desktop``);
+- guiqula.icns (128 to 1024 px): the macOS app bundle of ``guiqula desktop``;
 
 all in src/guiqula/resources, next to the SVG (``guiqula desktop`` uses
 them from the installed package).

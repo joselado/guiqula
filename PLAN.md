@@ -634,7 +634,9 @@ One window, one document, three workspaces switched by tabs in the header
   Briefcase) are a phase-6 item; numba and jax make bundles large but they do
   work. (Built in phase 6, part 3: `guiqula desktop`; a PyInstaller folder of
   900 MB on Linux, an Inno Setup installer for Windows and a disk image for
-  macOS through the release workflow; `packaging/README.md`.)
+  macOS through a release workflow. The maintainer's answers to the phase-6
+  report dropped the frozen builds and the workflows: pip is the only
+  installer, with `guiqula desktop`; `packaging/README.md`.)
 - Optional extras: `[3d]` (pyqtgraph.opengl / pyvista), `[fast]` (pyqtgraph).
   (A `[claude]` extra for the MCP server was planned; the server needs no
   dependency, decision 27.)
