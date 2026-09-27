@@ -18,8 +18,9 @@ structure, with live_value(parameter) while it is being typed.
 """
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPalette
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QGroupBox, QLabel, QLineEdit,
-                               QMenu, QPushButton, QScrollArea, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QGroupBox, QHBoxLayout,
+                               QLabel, QLineEdit, QMenu, QPushButton, QScrollArea, QToolButton,
+                               QVBoxLayout, QWidget)
 
 from guiqula.core import regions as region_tools
 from guiqula.core.document import DocumentError
@@ -58,6 +59,12 @@ class Form(QWidget):
         layout = QVBoxLayout(self)
         self.title = QLabel(title)
         self.title.setObjectName("formTitle")
+        self.help_button = QToolButton()
+        self.help_button.setText("?")
+        self.help_button.setObjectName("formHelp")
+        self.help_button.setToolTip("the help of this entry: pyqula's documentation of it (F1)")
+        self.help_button.setVisible(bool(item_id))
+        self.help_button.clicked.connect(lambda: panel.help_requested.emit(self.item_id))
         self.doc = QLabel(doc)
         self.doc.setObjectName("formDoc")
         self.doc.setWordWrap(True)
@@ -68,7 +75,10 @@ class Form(QWidget):
         self.error.setObjectName("formError")
         self.error.setWordWrap(True)
         self.error.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        layout.addWidget(self.title)
+        heading = QHBoxLayout()
+        heading.addWidget(self.title, 1)
+        heading.addWidget(self.help_button)
+        layout.addLayout(heading)
         layout.addWidget(self.doc)
         layout.addLayout(self.rows)
         layout.addWidget(self.error)
@@ -610,6 +620,7 @@ class ModelForm(Form):
 
 class PropertiesPanel(QScrollArea):
     preview = Signal(str, str)        # entry (or <system>/meanfield), parameter name
+    help_requested = Signal(str)      # the ? of a form: the item whose help to show
 
     def __init__(self, run, parent=None):
         super().__init__(parent)

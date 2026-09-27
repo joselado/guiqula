@@ -5,9 +5,14 @@ set -euo pipefail
 SRC="${1:-/path/to/pyqula}"
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 DST="$HERE/vendor"
+GUIDE="$SRC/documentation/user_guide.md"
+if [ ! -f "$GUIDE" ]; then     # before writing anything: never a mixed copy
+    echo "update_vendor.sh: $GUIDE is missing; the in-app help needs pyqula's guide" >&2
+    exit 1
+fi
 mkdir -p "$DST"
 rsync -a --delete --exclude='__pycache__' --exclude='*.pyc' "$SRC/src/pyqula/" "$DST/pyqula/"
-cp "$SRC/documentation/user_guide.md" "$DST/pyqula_user_guide.md"
+cp "$GUIDE" "$DST/pyqula_user_guide.md"
 rsync -a --delete --exclude='__pycache__' --exclude='*.pyc' --exclude='*.OUT' \
       --exclude='*.pkl' --exclude='*.png' --exclude='*.pdf' --exclude='*.npy' \
       "$SRC/examples/" "$DST/pyqula_examples/"
@@ -48,3 +53,11 @@ modified from a guiqula session: no edits, no \`pip install -e\`, no running
 scripts with the cwd inside it (pyqula writes \`.OUT\` files to the cwd).
 EOT
 echo "vendor refreshed from $SRC @ $HEAD"
+# the in-app help (decision 13.13): every section a registry entry names must still exist,
+# and every docstring must still be read from the source; fixes to the entries' guide=
+# anchors that a renamed upstream section forces may join the refresh commit (CLAUDE.md)
+cd "$HERE"
+if ! python -m pytest -q tests/test_help.py tests/engine/test_help_docstrings.py; then
+    echo "update_vendor.sh: the in-app help no longer matches the new pyqula (see above)" >&2
+    exit 2
+fi

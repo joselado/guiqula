@@ -78,7 +78,8 @@ entry("geometry_op", "python", "Python op",
       CodeParam("code", OP_CODE, "code", "Python with g (the geometry), np and pyqula"),
       group="Python", doc="Python code that changes the geometry: anything pyqula can do "
                           "that has no op of its own. It runs only in a trusted document.",
-      runs_code=True, apply=_op, script=_code_lines)
+      runs_code=True, apply=_op, script=_code_lines,
+      guide=("guiqula: Python nodes, trust and the console",))
 
 TERM_CODE = """\
 # h: the Hamiltonian built so far (g its geometry); change it in place or
@@ -108,7 +109,8 @@ entry("term", "python", "Python term",
       group="Python", doc="Python code that changes the Hamiltonian: any pyqula term that "
                           "has no entry of its own. It runs only in a trusted document.",
       requires=lambda params: NEEDS[params["needs"]], runs_code=True, apply=_term,
-      script=_code_lines, systems=ALL_SYSTEMS)
+      script=_code_lines, systems=ALL_SYSTEMS,
+      guide=("guiqula: Python nodes, trust and the console",))
 
 CALCULATION_CODE = """\
 # h: the Hamiltonian of the system; set arrays (a dict of arrays or numbers)
@@ -162,4 +164,5 @@ entry("calculation", "python", "Python calculation",
                           "Hamiltonian; the arrays it sets are the result. It runs only in a "
                           "trusted document.",
       runs_code=True, apply=_calculation, script=_code_lines, systems=ALL_SYSTEMS,
-      plot=lambda params: {"kind": "lines", "x": "x", "y": "y"})
+      plot=lambda params: {"kind": "lines", "x": "x", "y": "y"},
+      guide=("guiqula: Python nodes, trust and the console",))

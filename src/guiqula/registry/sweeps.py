@@ -163,4 +163,5 @@ entry("calculation", "sweep", "Sweep",
       group="Sweeps", systems=ALL_SYSTEMS, document_level=True,
       doc="Run a calculation at every value of a parameter (or on a grid of two) and draw the "
           "numbers it gives: the gap against a field, the Chern number against two couplings.",
-      apply=_sweep, script=lambda ctx: [], plot=_plot)
+      apply=_sweep, script=lambda ctx: [], plot=_plot,
+      guide=("guiqula: Sweeps and sliders",))

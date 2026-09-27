@@ -90,7 +90,8 @@ entry("calculation", "bands", "Band structure",
                            "high-symmetry path pyqula chooses for the geometry).",
       apply=_bands, script=_bands_script, plot=_bands_plot,
       cost=lambda p, size: p["nk"] * cost.diagonalization(size["dimension"])
-      * (2 if p["operator"] else 1))
+      * (2 if p["operator"] else 1),
+      guide=("Electronic band structures", "guiqula: The k-space tab"), pyqula=("h.get_bands",))
 
 
 def _dos(h, ctx):
@@ -137,7 +138,8 @@ entry("calculation", "dos", "Density of states",
       group="Spectral", doc="Density of states on an energy window.",
       apply=_dos, script=_dos_script, cost=_dos_cost,
       plot=lambda params: {"kind": "lines", "x": "energies", "y": "dos",
-                           "xlabel": "energy", "ylabel": "DOS"})
+                           "xlabel": "energy", "ylabel": "DOS"},
+      guide=("Density of states", "Chebyshev kernel polynomial (KPM) methods"), pyqula=("h.get_dos",))
 
 
 # ---- helpers shared by the first-wave calculations (phase 4)
@@ -178,10 +180,11 @@ def _mesh_cost(factor=1.0):
 
 
 def scalar(kind, label, value, code, rows, params=(), cost_=None, group="Topology", doc="",
-           modules=()):
+           modules=(), guide=(), pyqula=()):
     """A calculation returning numbers: value(h, ctx) -> {name: number},
     code(ctx) -> the source of the same dict; rows: [[name, label]]."""
     entry("calculation", kind, label, *params, group=group, doc=doc, modules=modules,
+          guide=guide, pyqula=pyqula,
           apply=lambda h, ctx: {k: float(v) for k, v in value(h, ctx).items()},
           script=lambda ctx: [f"arrays = {{k: float(v) for k, v in ({code(ctx)}).items()}}"],
           plot={"kind": "scalar", "rows": [list(r) for r in rows]}, cost=cost_)
@@ -207,7 +210,8 @@ entry("calculation", "ldos", "Local density of states",
           f"nk={ctx.code('nk')}, nrep=1, write=False, return_rd=True{_operator_code(ctx)})",
           "arrays = dict(ldos=ldos)"],
       plot={"kind": "structure_scalar", "values": "ldos", "clabel": "LDOS"},
-      cost=_mesh_cost())
+      cost=_mesh_cost(),
+      guide=("Local density of states",), pyqula=("h.get_ldos",))
 
 entry("calculation", "density", "Electron density",
       IntParam("nk", 10, "k-points", "k-points per direction of the mesh (periodic systems)",
@@ -217,7 +221,8 @@ entry("calculation", "density", "Electron density",
       apply=lambda h, ctx: {"density": h.get_vev(nk=ctx.value("nk"))},
       script=lambda ctx: [f"arrays = dict(density=h.get_vev(nk={ctx.code('nk')}))"],
       plot={"kind": "structure_scalar", "values": "density", "clabel": "electrons per site"},
-      cost=_mesh_cost())
+      cost=_mesh_cost(),
+      pyqula=("h.get_vev",))
 
 entry("calculation", "magnetization", "Magnetization",
       IntParam("nk", 10, "k-points", "k-points per direction of the mesh (periodic systems)",
@@ -229,7 +234,8 @@ entry("calculation", "magnetization", "Magnetization",
       script=lambda ctx: [
           f"arrays = dict(magnetization=h.get_magnetization(nk={ctx.code('nk')}))"],
       plot={"kind": "structure_vector", "vectors": "magnetization", "clabel": "magnetization"},
-      cost=_mesh_cost(3.0))
+      cost=_mesh_cost(3.0),
+      pyqula=("h.get_magnetization",))
 
 
 def _real_space_chern(h, ctx):
@@ -249,7 +255,8 @@ entry("calculation", "real_space_chern", "Local Chern marker",
                           "arrays = dict(marker=marker)"],
       plot={"kind": "structure_scalar", "values": "marker", "clabel": "Chern marker",
             "symmetric": True},
-      cost=lambda p, size: 4 * cost.diagonalization(size["dimension"]))
+      cost=lambda p, size: 4 * cost.diagonalization(size["dimension"]),
+      guide=("Chern number in real-space", "Topological markers"), pyqula=("topology.real_space_chern",))
 
 
 # ---- k space
@@ -273,7 +280,8 @@ entry("calculation", "fermi_surface", "Fermi surface",
           "arrays = dict(kx=kx, ky=ky, weight=weight)"],
       plot={"kind": "heatmap", "x": "kx", "y": "ky", "c": "weight", "xlabel": "kx",
             "ylabel": "ky", "clabel": "spectral weight", "equal": True},
-      cost=lambda p, size: p["nk"] ** 2 * cost.diagonalization(size["dimension"]))
+      cost=lambda p, size: p["nk"] ** 2 * cost.diagonalization(size["dimension"]),
+      guide=("Fermi surfaces",), pyqula=("h.get_fermi_surface",))
 
 
 def _spectral_function(h, ctx):
@@ -311,7 +319,8 @@ entry("calculation", "spectral_function", "Spectral function",
           {"kind": "heatmap", "x": "k", "y": "energies", "c": "weight",
            "xlabel": "k-path point", "ylabel": "energy", "clabel": "A(k, E)"}, params, arrays),
       cost=lambda p, size: p["nk"] * cost.diagonalization(size["dimension"])
-      * (1 if p["mode"] == "ED" else p["ne"] / 3))
+      * (1 if p["mode"] == "ED" else p["ne"] / 3),
+      guide=("Momentum resolved spectral functions",), pyqula=("kdos.kdos_bands",))
 
 
 def _surface(h, ctx):
@@ -345,7 +354,8 @@ entry("calculation", "surface_spectral_function", "Surface spectral function",
           f"delta={ctx.code('delta')}, nk={ctx.code('nk')}, write=False{_operator_code(ctx)})",
           "arrays = dict(k=k, energies=energies, surface=surface, bulk=bulk)"],
       plot=_surface_plot,
-      cost=lambda p, size: 20 * p["nk"] * p["ne"] * cost.diagonalization(size["dimension"]) / 3)
+      cost=lambda p, size: 20 * p["nk"] * p["ne"] * cost.diagonalization(size["dimension"]) / 3,
+      guide=("Surface spectral functions",), pyqula=("h.get_surface_kdos",))
 
 
 # ---- topology
@@ -365,7 +375,8 @@ entry("calculation", "berry_curvature", "Berry curvature map",
           "arrays = dict(kx=np.asarray(kx), ky=np.asarray(ky), berry=np.asarray(b))"],
       plot={"kind": "heatmap", "x": "kx", "y": "ky", "c": "berry", "xlabel": "kx",
             "ylabel": "ky", "clabel": "Berry curvature", "symmetric": True, "equal": True},
-      cost=lambda p, size: 3 * p["nk"] ** 2 * cost.diagonalization(size["dimension"]))
+      cost=lambda p, size: 3 * p["nk"] ** 2 * cost.diagonalization(size["dimension"]),
+      guide=("Chern number",), pyqula=("h.get_berry_curvature",))
 
 
 def _berry_path(h, ctx):
@@ -383,7 +394,8 @@ entry("calculation", "berry_curvature_path", "Berry curvature along the path",
           "arrays = dict(k=k, berry=b)"],
       plot={"kind": "lines", "x": "k", "y": "berry", "xlabel": "k-path point",
             "ylabel": "Berry curvature"},
-      cost=lambda p, size: 3 * p["nk"] * cost.diagonalization(size["dimension"]))
+      cost=lambda p, size: 3 * p["nk"] * cost.diagonalization(size["dimension"]),
+      guide=("Chern number",), pyqula=("topology.get_berry_curvature_path",))
 
 scalar("chern", "Chern number",
        lambda h, ctx: {"chern": h.get_chern(nk=ctx.value("nk"))},
@@ -392,7 +404,8 @@ scalar("chern", "Chern number",
        (IntParam("nk", 40, "k-points", "k-points per direction", minimum=2),),
        cost_=lambda p, size: 3 * p["nk"] ** 2 * cost.diagonalization(size["dimension"]),
        doc="Chern number of the states below zero energy of a two-dimensional system "
-           "(pyqula's get_chern, Berry curvature summed on a mesh).")
+           "(pyqula's get_chern, Berry curvature summed on a mesh).",
+       guide=("Chern number",), pyqula=("h.get_chern",))
 
 scalar("spin_chern", "Spin Chern number",
        lambda h, ctx: {"spin_chern": h.get_spin_chern(nk=ctx.value("nk"))},
@@ -401,7 +414,8 @@ scalar("spin_chern", "Spin Chern number",
        (IntParam("nk", 30, "k-points", "k-points per direction", minimum=2),),
        cost_=lambda p, size: 6 * p["nk"] ** 2 * cost.diagonalization(size["dimension"]),
        doc="Spin Chern number (C+ - C-)/2 of the states below zero energy, split by the sign "
-           "of the projected sz (pyqula's get_spin_chern); quantum spin Hall insulators.")
+           "of the projected sz (pyqula's get_spin_chern); quantum spin Hall insulators.",
+       guide=("Spin Chern number and mirror Chern number",), pyqula=("h.get_spin_chern",))
 
 
 def _z2(h, ctx):
@@ -419,7 +433,8 @@ scalar("z2", "Z2 invariant", _z2,
        modules=("topology",),
        doc="Z2 invariant of a two-dimensional time-reversal-symmetric system as a parity, "
            "-1 for a quantum spin Hall insulator and +1 for a trivial one, from the pumping "
-           "of the hybrid Wannier centres (pyqula's topology.z2_invariant).")
+           "of the hybrid Wannier centres (pyqula's topology.z2_invariant).",
+       guide=("Z2 invariant",), pyqula=("topology.z2_invariant",))
 
 scalar("gap", "Gap",
        lambda h, ctx: {"gap": h.get_gap()},
@@ -427,7 +442,8 @@ scalar("gap", "Gap",
        [["gap", "gap"]], group="Spectral",
        cost_=lambda p, size: 400 * cost.diagonalization(size["dimension"]),
        doc="Smallest distance between the states below and above zero energy over the "
-           "Brillouin zone (pyqula's get_gap, an indirect gap from a minimization).")
+           "Brillouin zone (pyqula's get_gap, an indirect gap from a minimization).",
+       pyqula=("h.get_gap",))
 
 scalar("total_energy", "Total energy",
        lambda h, ctx: {"energy": h.get_total_energy(nk=ctx.value("nk"))},
@@ -436,7 +452,8 @@ scalar("total_energy", "Total energy",
        (IntParam("nk", 20, "k-points", "k-points per direction of the mesh", minimum=1),),
        group="Energetics", cost_=_mesh_cost(),
        doc="Energy of the states below zero energy, per unit cell (pyqula's "
-           "get_total_energy).")
+           "get_total_energy).",
+       pyqula=("h.get_total_energy",))
 
 
 # ---- response
@@ -471,4 +488,5 @@ entry("calculation", "optical_conductivity", "Optical conductivity",
       plot=lambda params: {"kind": "lines", "x": "omega", "y": "real", "xlabel": "frequency",
                            "ylabel": f"Re sigma_{params['component']}"},
       cost=lambda p, size: 3 * cost.kmesh(p["nk"], size["dimensionality"])
-      * cost.diagonalization(size["dimension"]))
+      * cost.diagonalization(size["dimension"]),
+      guide=("Optical conductivity",), pyqula=("h.get_optical_conductivity",))

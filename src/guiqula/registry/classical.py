@@ -33,7 +33,8 @@ entry("model", "classical_spin", "Classical spins",
       group="Classical", systems=SPINS,
       doc="Classical unit vectors on the sites (pyqula's classicalspin.SpinModel), coupled "
           "by an exchange tensor and a field.",
-      preamble=DOUBLE_PRECISION, call=Call("classicalspin.SpinModel", G))
+      preamble=DOUBLE_PRECISION, call=Call("classicalspin.SpinModel", G),
+      guide=("Classical spin models", "guiqula: Classical systems"))
 
 entry("model", "lattice_gas", "Lattice gas",
       FloatParam("filling", 0.5, "filling", "fraction of the sites occupied (kept fixed by "
@@ -42,7 +43,8 @@ entry("model", "lattice_gas", "Lattice gas",
       group="Classical", systems=GAS,
       doc="Classical particles that occupy a site or not (pyqula's latticegas.LatticeGas): "
           "J n_i n_j (positive J: repulsion) and a chemical potential.",
-      call=Call("latticegas.LatticeGas", G, filling="filling"))
+      call=Call("latticegas.LatticeGas", G, filling="filling"),
+      guide=("Lattice gas models", "guiqula: Classical systems"))
 
 entry("model", "ising", "Ising model",
       FloatParam("m", 0.0, "initial magnetization", "average spin of the random initial "
@@ -51,7 +53,8 @@ entry("model", "ising", "Ising model",
       group="Classical", systems=ISING,
       doc="Ising spins +-1 on the sites (pyqula's latticeising.LatticeIsing): -J s_i s_j "
           "(positive J: ferromagnetic) and a field.",
-      call=Call("latticeising.LatticeIsing", G, m="m"))
+      call=Call("latticeising.LatticeIsing", G, m="m"),
+      guide=("Ising models", "guiqula: Classical systems"))
 
 
 # ---- shared helpers
@@ -97,7 +100,8 @@ entry("term", "heisenberg", "Heisenberg exchange",
       formula=r"\sum_{ij} J_{ij}\, \vec S_i\cdot \mathrm{diag}(a_x,a_y,a_z)\, \vec S_j",
       doc="Exchange between neighbour shells (pyqula's SpinModel.add_heisenberg).",
       apply=_heisenberg, script=lambda ctx: [
-          f"model.add_heisenberg(Jij={shells(ctx)!r}, Jm={list(ctx.value('anisotropy'))!r})"])
+          f"model.add_heisenberg(Jij={shells(ctx)!r}, Jm={list(ctx.value('anisotropy'))!r})"],
+      guide=("Classical spin models",), pyqula=("classicalspin.SpinModel.add_heisenberg",))
 
 
 def _spin_field(model, ctx):
@@ -113,7 +117,8 @@ entry("term", "spin_field", "Magnetic field",
           "SpinModel.b, one vector per site).",
       apply=_spin_field, script=lambda ctx: [
           f"b = {ctx.code('b')}",
-          "model.b = model.b + np.stack([" + site_values_code("c") + " for c in b], axis=1)"])
+          "model.b = model.b + np.stack([" + site_values_code("c") + " for c in b], axis=1)"],
+      guide=("Classical spin models",), pyqula=("classicalspin.SpinModel",))
 
 TENSORS = ("Heisenberg", "Linear", "RKKYTI", "ZZ", "XYZ", "DM")
 
@@ -154,7 +159,8 @@ entry("term", "spin_tensor", "Exchange tensor",
       doc="A coupling tensor from pyqula's classicalspin.generating_functions: "
           "Dzyaloshinskii-Moriya, dipolar, RKKY, Ising ZZ, anisotropic XYZ. Every pair of "
           "sites is visited, so large systems take long.",
-      modules=("classicalspin",), apply=_tensor, script=_tensor_script)
+      modules=("classicalspin",), apply=_tensor, script=_tensor_script,
+      guide=("Classical spin models",), pyqula=("classicalspin.generating_functions", "classicalspin.SpinModel.add_tensor", "classicalspin.SpinModel.add_tensor_2d"))
 
 
 # ---- lattice gas and Ising terms
@@ -183,7 +189,8 @@ entry("term", "chemical_potential", "Chemical potential",
       doc="A site-dependent energy of the occupied sites (LatticeGas.mu): it matters for the "
           "arrangement at fixed filling when it varies in space.",
       apply=_chemical_potential,
-      script=lambda ctx: [f"model.mu = model.mu + {site_values_code(ctx.code('mu'))}"])
+      script=lambda ctx: [f"model.mu = model.mu + {site_values_code(ctx.code('mu'))}"],
+      guide=("Lattice gas models",), pyqula=("latticegas.LatticeGas",))
 
 
 def _ising_field(model, ctx):
@@ -196,7 +203,8 @@ entry("term", "ising_field", "Field",
       doc="A field on the Ising spins, uniform or a function of the position "
           "(LatticeIsing.add_field).",
       apply=_ising_field,
-      script=lambda ctx: [f"model.add_field({site_values_code(ctx.code('b'))})"])
+      script=lambda ctx: [f"model.add_field({site_values_code(ctx.code('b'))})"],
+      guide=("Ising models",), pyqula=("latticeising.LatticeIsing.add_field",))
 
 
 # ---- calculations
@@ -230,7 +238,8 @@ entry("calculation", "minimize_spins", "Minimize the energy",
           "local_energy=np.asarray(model.get_local_energy(), dtype=float), "
           "energy=float(model.energy()))"],
       plot=_minimize_plot,
-      cost=lambda p, size: p["tries"] * (0.05 + 2e-5 * size["sites"] ** 2))
+      cost=lambda p, size: p["tries"] * (0.05 + 2e-5 * size["sites"] ** 2),
+      guide=("Classical spin models",), pyqula=("classicalspin.SpinModel.minimize_energy",))
 
 
 def _anneal_params(show):
@@ -289,7 +298,8 @@ entry("calculation", "anneal_gas", "Anneal",
           "arrays = dict(occupation=np.asarray(model.den, dtype=float), "
           "local_energy=np.asarray(model.get_local_energy(), dtype=float), "
           "step=np.arange(len(es)), energy=np.asarray(es, dtype=float))"],
-      plot=_gas_plot, cost=_anneal_cost)
+      plot=_gas_plot, cost=_anneal_cost,
+      guide=("Lattice gas models",), pyqula=("latticegas.LatticeGas.anneal",))
 
 
 def _ising(model, ctx):
@@ -330,4 +340,5 @@ entry("calculation", "anneal_ising", "Anneal",
           "local_field=np.asarray(model.get_local_field(), dtype=float), "
           "step=np.arange(len(es)), energy=np.asarray(es, dtype=float), "
           "magnetization=np.asarray(ms, dtype=float))"],
-      plot=_ising_plot, cost=_anneal_cost)
+      plot=_ising_plot, cost=_anneal_cost,
+      guide=("Ising models",), pyqula=("latticeising.LatticeIsing.anneal",))

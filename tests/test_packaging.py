@@ -35,7 +35,8 @@ def test_wheel_ships_vendored_pyqula(repo, tmp_path, run_python):
         shutil.copy2(repo / name, tree / name)
     shutil.copytree(repo / "src", tree / "src", ignore=ignore)
     shutil.copytree(repo / "vendor" / "pyqula", tree / "vendor" / "pyqula", ignore=ignore)
-    shutil.copy2(repo / "vendor" / "VENDOR.md", tree / "vendor" / "VENDOR.md")
+    for name in ("VENDOR.md", "pyqula_user_guide.md"):
+        shutil.copy2(repo / "vendor" / name, tree / "vendor" / name)
     build = subprocess.run(
         [sys.executable, "-m", "pip", "wheel", "--no-deps", "--no-build-isolation",
          "-w", str(tmp_path / "dist"), str(tree)],
@@ -51,6 +52,8 @@ def test_wheel_ships_vendored_pyqula(repo, tmp_path, run_python):
     assert "guiqula/_vendor/pyqula/htk/__init__.py" in names
     assert "guiqula/_vendor/pyqula/datasets/bands_TaS2.txt" in names
     assert "guiqula/_vendor/__init__.py" not in names   # a plain directory, not a package
+    assert "guiqula/_vendor/pyqula_user_guide.md" in names   # the in-app help (13.13)
+    assert "guiqula/docs/user_guide.md" in names
     assert not [n for n in names if n.endswith((".pyc", ".nbi", ".nbc"))]
     assert not [n for n in names if n.startswith(("vendor/", "pyqula/", "tests/"))]
     upstream = {p.relative_to(repo / "vendor").as_posix()
@@ -70,11 +73,13 @@ def test_wheel_ships_vendored_pyqula(repo, tmp_path, run_python):
     zipfile.ZipFile(wheel).extractall(site)
     code = ("import sys; sys.path.insert(0, %r)\n"
             "import json, guiqula, pyqula; from guiqula import vendoring\n"
-            "print(json.dumps([vendoring.location[0], guiqula.__file__, pyqula.__file__]))"
+            "guide = [str(p) for p in vendoring.find_guide()]\n"
+            "print(json.dumps([vendoring.location[0], guiqula.__file__, pyqula.__file__, guide]))"
             % str(site))
     result = run_python(code, env_update={"GUIQULA_PYQULA_PATH": "", "PYTHONPATH": ""})
     assert result.returncode == 0, result.stderr
-    origin, guiqula_file, pyqula_file = json.loads(result.stdout.strip().splitlines()[-1])
+    origin, guiqula_file, pyqula_file, guide = json.loads(result.stdout.strip().splitlines()[-1])
+    assert guide == ["vendored", str(site / "guiqula" / "_vendor" / "pyqula_user_guide.md")]
     assert origin == "vendored"
     assert guiqula_file == str(site / "guiqula" / "__init__.py")
     assert pyqula_file == str(site / "guiqula" / "_vendor" / "pyqula" / "__init__.py")

@@ -11,8 +11,10 @@ points in section 11); the plan review of the same day is in section 14
 (decided items) and at the end of section 11 (items still open).** Phases 0 to 3 were
 done on 2026-09-26 and phase 4 on 2026-09-27 (section 7); the maintainer asked
 for phase 5 without commenting on the phase-4 report, so its items stand as
-built. Phase 5 (polish) is in progress; its design, with recommendations for
-the open points of the in-app help (section 11), awaits confirmation.
+built. Phase 5 (polish) was done on 2026-09-27; its report (design items 1
+to 14, the first seven being the recommendations for the open points of the
+in-app help in section 11, and decisions 15 to 24) awaits the maintainer's
+answers; phase 6 (distribution and the add-on) is next.
 
 ## 1. Requirements (as stated by the maintainer)
 
@@ -1163,7 +1165,7 @@ phase 5 (2026-09-27) without commenting on items 1 to 17, so they stand as
 built, as the uncommented items of phase 2 did; an answer later still changes
 them.
 
-**Phase 5 — polish.** Undo everywhere, keyboard shortcuts, theming (light and
+**Phase 5 — polish. Done 2026-09-27** (four parts below). Undo everywhere, keyboard shortcuts, theming (light and
 dark), tooltips (the registry's one-line docs and formula images), in-app
 help from pyqula's own documentation (13.13), guiqula's user guide, example
 projects, teaching presets and exports (13.16), performance passes
@@ -1338,6 +1340,84 @@ draws a Hamiltonian it built sparse. Worth fixing upstream. matplotlib's
 EllipseCollection and CircleCollection draw thousands of filled circles
 equally fast: the outlines cost the time. `islands.get_geometry` is most
 of the time of a large island (10 s for 21,600 sites).
+**Part 4 done 2026-09-27** (the in-app help of 13.13, built as the
+recommendations 1 to 7 of section 11 say, and guiqula's user guide). The
+`docs` package, which never imports pyqula: `guide.py` splits a Markdown
+guide into sections (headings outside fenced code; a heading's text is its
+anchor, "Parent > Heading" when repeated; pyqula's guide has 250 sections
+and no repeated heading) and turns the equations into mathtext images
+after a few rewrites (`\tfrac`, an unbraced `\mathbf k`, `\frac12`,
+`\sqrt3`, `\left(`): 998 of the guide's 1000 equations are drawn, the two
+matrices are shown as their source. `docstrings.py` reads pyqula's
+docstrings from the source of the copy in use with `ast`, following
+relative and star imports, aliases and `@get_docstring`; for the 95 pyqula
+calls behind the registry entries the text equals `inspect.getdoc`
+(`tests/engine/test_help_docstrings.py`). `entries.py` puts an item's help
+together: label, group, doc, formula, the Hilbert space it needs, the
+parameters table, the pyqula code with the current values, the docstrings,
+the sections the entry names (`EntrySpec.guide`; lattices default to
+"Setting up a Hamiltonian") and the reference section of each of its calls
+(the guide's "Main functions and methods" chapter: "h.add_zeeman()",
+"sm.add_heisenberg()"...), in full, and up to eight links to other
+sections whose code calls them; a custom entry declares its calls
+(`EntrySpec.pyqula`). guiqula's own items (a system, a region, the
+calculations) show a section of guiqula's user guide
+(`src/guiqula/docs/user_guide.md`: the window, systems, selections and
+regions, terms, Fields, the mean field, classical systems, calculations,
+sweeps and sliders, overlays and exports, the k-space tab, Python nodes
+and trust, projects and locks, undo and themes, headless use, the
+shortcuts, help; its shortcut table is checked against
+`ui/shortcuts.py`). The Help dock (`ui/help.py`, tabbed with Properties):
+F1, a form's ? button, Help > pyqula user guide and guiqula user guide, the
+`help` window action; Markdown in a QTextBrowser whose `loadResource`
+serves the equations (`formula:N`), `help:` links between sections, Back;
+while it shows an item's help it follows the selection. Packaging:
+`setup.py` copies `vendor/pyqula_user_guide.md` into the wheel as
+`guiqula/_vendor/pyqula_user_guide.md`, and guiqula's guide is package
+data; `vendoring.find_guide()` takes the guide of an override's tree when
+it has one. `tools/update_vendor.sh` stops before copying when upstream
+has no guide, and runs the help tests after copying; CLAUDE.md lets anchor
+fixes join a refresh commit. Tests: `tests/test_help.py` (sections,
+equations, every anchor of the registry, every entry's help, the guides'
+contents, an override's guide), `tests/engine/test_help_docstrings.py`,
+`tests/ui/test_help.py` (F1, following the selection, links and Back, the
+?, the shortcut table, mathtext over the whole guide), the wheel test.
+Facts learned: Qt's Markdown drops an image without alt text (`![](x)`)
+and does not load `data:` images in Markdown (it does in HTML), while a
+QTextBrowser subclass's `loadResource` serves any scheme; link targets need
+percent-encoding; pyqula gives no docstring to 20 of the 95 calls guiqula
+uses (among them `h.get_dos`, `h.get_chern`, `h.get_berry_curvature`,
+`h.get_fermi_surface`, `g.get_supercell`, `islands.get_geometry`,
+`ribbon.bulk2ribbon`) and a one-line one to 48, and its guide's reference
+chapter has no section for 55 of them (the lattice constructors, most
+geometry methods, `disorder.anderson`): worth completing upstream, since
+the help shows whatever pyqula writes.
+**Phase 5 done 2026-09-27.** Decisions for the maintainer to confirm,
+numbered after the design items 1 to 14 above (which were built as
+designed, item 14 deciding against a pyqtgraph canvas with the numbers of
+part 3):
+15. an undo brings back up to 4 earlier results per calculation, by key;
+16. locks are checked by comparing the Document before and after any
+    mutation; a locked system freezes everything in it; a copy of a locked
+    entry is free; `Document.locks` is a new field (the schema version
+    stays 1: an older guiqula refuses a file that has it);
+17. an export writes the script and the document of the result's own
+    snapshot (a stale result is reproduced as it was);
+18. a result on the atoms of a chain is drawn as a curve against x;
+19. the interactive builds use sparse matrices above pyqula's dense limit
+    and then draw no Hamiltonian view; the calculations still follow the
+    construction (13.12's automatic switch for them stays unbuilt);
+20. a worker's build cache takes at most an eighth of the machine's memory
+    (1 to 8 GB);
+21. the planner warns when sparse storage meets a position-dependent
+    Haldane, Rashba or (anti) Kane-Mele or modified Haldane coupling;
+22. "always trust" is the window's setting only: `guiqula run` and
+    `tools/drive.py` still need `--trust`;
+23. the Help dock follows the selection while it shows an item's help;
+    the sections an entry names and the reference sections of its calls
+    are shown in full, other sections as links;
+24. the Haldane preset gained the phase diagram (c4) instead of a new
+    preset; teaching presets are those with locks.
 
 **Phase 6 — distribution and add-on.** PyPI release, conda file, installers for
 Mac/Windows, plugin entry points and a plugin template, JSON-RPC server + MCP
@@ -1463,7 +1543,8 @@ supersede quantum-lattice; both can coexist.
      for a help panel.
 
   Recommendations (2026-09-27, phase-5 design; numbered as the points, and
-  items 1 to 7 of the phase-5 design in section 7):
+  items 1 to 7 of the phase-5 design in section 7), built as written in
+  phase 5, part 4, pending the maintainer's confirmation:
   1. Read the docstrings statically in the UI process, from the source of
      the pyqula copy in use (an AST parse, lazily at the first help
      request): `helptk.get_docstring(f)` is a decorator that copies `f`'s

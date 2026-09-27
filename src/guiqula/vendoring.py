@@ -66,6 +66,28 @@ def find_pyqula_dir():
         f"{ENV_VAR} is not set")
 
 
+def find_guide():
+    """(origin, path) of pyqula's user guide that goes with the pyqula copy
+    in use, or None. An override's own guide is used when its tree has one
+    (``documentation/user_guide.md`` above the package), so the help matches
+    the running code; else the shipped or checkout copy (origin says which)."""
+    try:
+        origin, directory = find_pyqula_dir()
+    except VendoringError:
+        return None
+    if origin == "override":
+        for base in (directory, directory.parent, directory.parent.parent):
+            candidate = base / "documentation" / "user_guide.md"
+            if candidate.is_file():
+                return "override", candidate
+    for origin, candidate in (("vendored", _HERE / "_vendor" / "pyqula_user_guide.md"),
+                              ("checkout", _HERE.parents[1] / "vendor" /
+                               "pyqula_user_guide.md")):
+        if candidate.is_file():
+            return origin, candidate
+    return None
+
+
 def _check_already_imported(directory):
     module = sys.modules.get("pyqula")
     if module is None:

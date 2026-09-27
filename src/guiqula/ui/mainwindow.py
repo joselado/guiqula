@@ -53,6 +53,7 @@ from guiqula.registry import cost, pipeline
 from guiqula.registry.params import VectorFieldParam
 from guiqula.ui.bars import MessageBar
 from guiqula.ui.console import ConsoleWidget
+from guiqula.ui.help import HelpPanel
 from guiqula.ui.kspace import KSpaceView
 from guiqula.ui.sliders import SlidersPanel
 from guiqula.ui.jobpanel import JobPanel
@@ -70,7 +71,7 @@ WORKSPACES = ("geometry", "hamiltonian", "calculate")
 # actions of the window itself: they change what is shown, not the Document
 WINDOW_ACTIONS = ("select", "workspace", "tool", "select_sites", "canvas_view", "preview",
                   "auto_rerun", "projection", "overlay", "slider", "set_slider",
-                  "remove_slider", "paint", "theme", "export_bundle")
+                  "remove_slider", "paint", "theme", "export_bundle", "help")
 STRUCTURE_TAB = 0
 KSPACE_TAB = 1
 # a new classical system: its lattice, and a supercell the usual orders fit in
@@ -149,6 +150,8 @@ class MainWindow(QMainWindow):
         self.outliner.command.connect(self._outliner_command)
         self.properties = PropertiesPanel(self._do)
         self.properties.preview.connect(self._preview_requested)
+        self.properties.help_requested.connect(lambda item: self.show_help(item))
+        self.help_panel = HelpPanel()
         self.structure = StructureView()
         self.structure.selection_changed.connect(self._selection_changed)
         self.structure.view_chosen.connect(self.set_canvas_view)
@@ -215,6 +218,10 @@ class MainWindow(QMainWindow):
                                   Qt.DockWidgetArea.RightDockWidgetArea)
         self.tabifyDockWidget(jobs_dock, sliders_dock)
         jobs_dock.raise_()
+        help_dock = self._dock("Help", self.help_panel, "helpDock",
+                               Qt.DockWidgetArea.RightDockWidgetArea)
+        self.tabifyDockWidget(properties_dock, help_dock)
+        properties_dock.raise_()
         log_dock = self._dock("Log", self.log, "logDock", Qt.DockWidgetArea.BottomDockWidgetArea)
         console_dock = self._dock("Console", self.console, "consoleDock",
                                   Qt.DockWidgetArea.BottomDockWidgetArea)
@@ -223,8 +230,9 @@ class MainWindow(QMainWindow):
         self.resizeDocks([outliner_dock, properties_dock], [320, 340], Qt.Orientation.Horizontal)
         self.resizeDocks([properties_dock, jobs_dock], [480, 180], Qt.Orientation.Vertical)
         self.resizeDocks([log_dock], [130], Qt.Orientation.Vertical)
-        self.docks = {d.objectName(): d for d in (outliner_dock, properties_dock, jobs_dock,
-                                                  log_dock, console_dock, sliders_dock)}
+        self.docks = {d.objectName(): d for d in (outliner_dock, properties_dock, help_dock,
+                                                  jobs_dock, log_dock, console_dock,
+                                                  sliders_dock)}
 
         self._build_toolbars()
         self._build_menus()
@@ -600,6 +608,12 @@ class MainWindow(QMainWindow):
                                           f"{AUTO_RERUN_SECONDS:g} s")
         run.setToolTipsVisible(True)
         help_menu = self.menuBar().addMenu("&Help")
+        self._action(help_menu, "&Help on the selected entry", lambda: self.show_help(),
+                     "help", "helpAction")
+        self._action(help_menu, "&pyqula user guide", lambda: self._act("help", guide="pyqula"),
+                     name="pyqulaGuideAction")
+        self._action(help_menu, "&guiqula user guide",
+                     lambda: self._act("help", guide="guiqula"), name="guiqulaGuideAction")
         self._action(help_menu, "&Keyboard shortcuts", self.show_shortcuts, "shortcuts",
                      "shortcutsAction")
         self._action(help_menu, "&About", lambda: self.message(
@@ -656,6 +670,8 @@ class MainWindow(QMainWindow):
         dispatcher.register_action("remove_slider", self.remove_slider)
         dispatcher.register_action("theme", lambda name="system": self.set_theme(name))
         dispatcher.register_action("export_bundle", self.export_bundle)
+        dispatcher.register_action("help", self.help)
+        self.help_panel.session = session
         session.view_state = self.view_state
         self.timer.start(POLL_MS)
         self._document_changed()
@@ -885,6 +901,7 @@ class MainWindow(QMainWindow):
         self._refresh_structure()
         self._update_status()
         self._update_palettes()
+        self._help_follows(entry)
         return entry
 
     def set_workspace(self, name):
@@ -2004,6 +2021,35 @@ class MainWindow(QMainWindow):
             action.triggered.connect(lambda checked=False, n=i: self.undo(n))
         if menu.isEmpty():
             menu.addAction("nothing to undo").setEnabled(False)
+
+    # ---- help (decision 13.13)
+    def show_help(self, item=None):
+        """F1, a form's ?: the help of an item (the selected one) in the Help dock."""
+        return self._act("help", entry=self.selected if item is None else item)
+
+    def help(self, entry=None, guide=None, anchor=None):
+        """Show help in the Help dock: an outliner item's (entry, by default
+        the selected one; "" for guiqula's guide), a section
+        of a guide (guide "pyqula" or "guiqula" and anchor), or a guide's
+        contents (guide alone); returns the title shown."""
+        dock = self.docks["helpDock"]
+        dock.show()
+        dock.raise_()
+        if guide is not None and anchor is not None:
+            return self.help_panel.show_section(guide, anchor)
+        if guide is not None:
+            if guide not in ("pyqula", "guiqula"):
+                raise ValueError(f"guide is pyqula or guiqula, not {guide!r}")
+            return self.help_panel.show_contents(guide)
+        return self.help_panel.show_item(self.selected if entry is None else entry)
+
+    def _help_follows(self, entry):
+        """While the Help dock shows an item's help, it follows the selection."""
+        dock = self.docks["helpDock"]
+        page = self.help_panel.page
+        if dock.isVisible() and not dock.visibleRegion().isEmpty() and page and \
+                page[0] == "item" and page[1] != entry:
+            self.help_panel.show_item(entry, remember=False)
 
     # ---- theme, settings, shortcuts
     def set_theme(self, name="system"):

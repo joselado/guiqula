@@ -29,9 +29,11 @@ answers). Phase 4 is done (2026-09-27, in parts 1 to 4b: the breadth of the regi
 plot kinds, Python nodes, trust and the console, classical systems and `from_result` Fields,
 results in projects, presets gallery, overlays, sweeps, sliders, the Brillouin-zone canvas,
 the remaining Fields and the brush); the maintainer asked for phase 5 without commenting
-on its report, so its items stand as built. Phase 5 (polish) is in progress, in four parts
-(PLAN.md section 7: its numbered design, items 1 to 7 being the recommendations for the
-open points of the in-app help at the end of section 11, awaits confirmation).
+on its report, so its items stand as built. Phase 5 (polish) is done (2026-09-27, in four
+parts: settings, themes, shortcuts, undo; teaching exports and locks; performance; the in-app
+help); its report, numbered design items 1 to 14 and decisions 15 to 24 (PLAN.md section 7,
+end of phase 5; items 1 to 7 are the in-app help's open points of section 11), awaits the
+maintainer's answers. Phase 6 (distribution and the add-on) is next.
 
 ## Code map
 
@@ -68,6 +70,16 @@ a `Session`.
   exported and run by `tests/engine/test_script_export.py`). A custom script names the
   pyqula modules it uses (`modules=`); a calculation's `plot` is a dict or a callable of the
   parameters (and the arrays); plot kinds are listed in `ui/plots.py`.
+- `docs/`: the in-app help (13.13), without pyqula imports: `guide.py` (a Markdown guide in
+  sections; an anchor is a heading's text, "Parent > Heading" when repeated; equations to
+  mathtext images), `docstrings.py` (pyqula's docstrings read from its source with `ast`,
+  following imports and `@get_docstring`), `entries.py` (an item's help: formula,
+  parameters, the pyqula code with its values, docstrings, the guide sections it names
+  with `guide=`, the reference section of each call), `user_guide.md` (guiqula's own
+  guide: the program, never pyqula's physics; its shortcut table is checked against
+  `ui/shortcuts.py`). A registry entry names its guide sections (`guide=`, "guiqula: X" for
+  guiqula's guide) and, if custom, its pyqula calls (`pyqula=`); `tests/test_help.py`
+  checks every anchor and `tests/engine/test_help_docstrings.py` every docstring.
 - `commands/`: `Dispatcher` (mutations with snapshot undo, actions journaled only; each undo
   step named by `steps.py`, which a new mutation needs a text in, and `undo(steps)`);
   `mutations.py` lists every mutation. Command arguments are JSON.
@@ -101,7 +113,9 @@ a `Session`.
   bars, one result view per calculation, the cost guard, auto re-run; the window's own
   dispatcher actions `select`, `workspace`, `tool`, `select_sites`, `region_from_selection`,
   `remove_selected`, `canvas_view`, `preview`, `auto_rerun`, `projection`, `overlay`,
-  `slider`, `set_slider`, `remove_slider`, `paint`, `theme`, `export_bundle`), `shortcuts.py` (the one
+  `slider`, `set_slider`, `remove_slider`, `paint`, `theme`, `export_bundle`, `help`),
+  `help.py` (the Help dock: F1, a form's ?, the guides; Markdown in a QTextBrowser, whose
+  `loadResource` serves the equations), `shortcuts.py` (the one
   table of keyboard shortcuts: menus, the canvas and outliner keys, the dialog; a test
   refuses ambiguous keys), `outliner.py`, `gallery.py`
   (presets), `sliders.py` (the Sliders dock), `kspace.py` (the Brillouin-zone canvas),
@@ -130,7 +144,9 @@ a `Session`.
   `sys.path` shim because pyqula imports itself absolutely. Never hand-edit it;
   refresh the whole copy with `tools/update_vendor.sh`, which also rewrites `vendor/VENDOR.md`
   (source path, upstream commit, uncommitted upstream files that were included, upstream's
-  runtime dependencies to mirror in `pyproject.toml`). Commit a refresh on its own. `vendor/pyqula_user_guide.md` is upstream's user guide and
+  runtime dependencies to mirror in `pyproject.toml`) and then runs the help tests. Commit a
+  refresh on its own; the one exception is the fix of registry `guide=` anchors that a
+  renamed upstream guide section forces (decision 13.13), which may join it. `vendor/pyqula_user_guide.md` is upstream's user guide and
   `vendor/pyqula_examples/` its example scripts: check those first for how to call something,
   before grepping the vendored source.
 - Every pyqula calculation runs in a scratch directory (the worker's job dir, or the session
@@ -227,6 +243,8 @@ python tools/drive.py project.guiqula --trust ...   # run the Python nodes of a 
 python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "theme", "name": "dark"}' --shot dark.png
 python tools/drive.py preset --do '{"do": "set_param", ...}' --do '{"do": "undo"}'
                                                    # undo, redo (steps), history
+python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "select", "entry": "t1"}' \
+    --do '{"do": "help"}' --widget helpDock --shot help.png   # an entry's help (13.13)
 python tools/drive.py honeycomb_zeeman_rashba --run c1 \
     --python "session.act('export_bundle', calculation='c1', path='out/c1_bands')"
                                                    # figure, data, script in one folder

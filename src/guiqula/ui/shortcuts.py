@@ -41,6 +41,7 @@ SHORTCUTS = (
     ("run", ("F5",), "window", "run the selected calculation"),
     ("cancel", ("Esc",), "window", "cancel the selected calculation's job"),
     ("shortcuts", ("Ctrl+/",), "window", "this list of shortcuts"),
+    ("help", ("F1",), "window", "help on the selected entry"),
     ("delete", ("Del",), "outliner", "delete the selected entry"),
     ("rename", ("F2",), "outliner", "rename the selected entry"),
     ("duplicate", ("Ctrl+D",), "outliner", "duplicate the selected entry"),
@@ -89,3 +90,10 @@ def bind(action, shortcut_id):
 def rows():
     """(context, keys as text, what) for the dialog and the user guide."""
     return [(context, text(sid), what) for sid, _, context, what in SHORTCUTS]
+
+
+def markdown_table():
+    """The table as guiqula's user guide shows it (a test keeps them equal)."""
+    lines = ["| where | keys | what |", "|---|---|---|"]
+    lines += [f"| {context} | {keys} | {what} |" for context, keys, what in rows()]
+    return "\n".join(lines)

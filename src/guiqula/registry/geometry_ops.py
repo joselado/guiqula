@@ -16,7 +16,7 @@ def in_place(method, *names):
 
     def script(ctx):
         return [f"g.{method}({', '.join(ctx.code(name) for name in names)})"]
-    return {"apply": apply, "script": script}
+    return {"apply": apply, "script": script, "pyqula": (f"g.{method}",)}
 
 
 entry("geometry_op", "supercell", "Supercell",
@@ -68,7 +68,8 @@ entry("geometry_op", "remove_atoms", "Remove atoms",
                  minimum=1e-9),
       group="Sculpt", doc="Remove the sites at the stored positions (they survive a change "
                           "of the supercell upstream, indices would not).",
-      apply=_remove_atoms, script=_remove_atoms_script)
+      apply=_remove_atoms, script=_remove_atoms_script,
+      guide=("guiqula: Selections and regions",), pyqula=("g.remove",))
 
 
 entry("geometry_op", "keep_where", "Keep sites where",
@@ -76,13 +77,15 @@ entry("geometry_op", "keep_where", "Keep sites where",
                      "an expression of x, y, z, r; the sites where it is true are kept"),
       group="Sculpt", doc="Keep only the sites where a condition on the position holds: cut "
                           "a shape (a disk: x**2 + y**2 < 25; a stripe: abs(y) < 3).",
-      call=Call("sculpt.intersec", G, "condition"))
+      call=Call("sculpt.intersec", G, "condition"),
+      guide=("guiqula: Selections and regions",))
 
 entry("geometry_op", "remove_where", "Remove sites where",
       ConditionParam("condition", "x > 0", "condition",
                      "an expression of x, y, z, r; the sites where it is true are removed"),
       group="Sculpt", doc="Remove the sites where a condition on the position holds.",
-      call=Call("g.remove", "condition"))
+      call=Call("g.remove", "condition"),
+      guide=("guiqula: Selections and regions",))
 
 entry("geometry_op", "clean", "Remove dangling sites",
       BoolParam("iterative", True, "repeat", "repeat until no site with a single neighbour is "
@@ -126,7 +129,8 @@ entry("geometry_op", "shift", "Shift",
                                                               "periodic geometry the sites are "
                                                               "then wrapped into the cell"),
       group="Transform", doc="Move every site by a displacement.",
-      apply=_shift, script=lambda ctx: [f"g.shift(-np.array({ctx.code('d')}, dtype=float))"])
+      apply=_shift, script=lambda ctx: [f"g.shift(-np.array({ctx.code('d')}, dtype=float))"],
+      pyqula=("g.shift",))
 
 entry("geometry_op", "center", "Center",
       group="Transform", doc="Move the geometry so that the average position is the origin.",

@@ -77,6 +77,10 @@ class EntrySpec:
     regions: bool = True             # terms: whether a region may restrict it (a factor may not)
     runs_code: bool = False          # a Python node: runs only in a trusted document (13.7)
     document_level: bool = False     # a sweep: apply(document, ctx, run) runs other calculations
+    guide: tuple = ()                # sections of pyqula's user guide on it (in-app help, 13.13);
+                                     # "guiqula: <heading>" names one of guiqula's own guide
+    pyqula: tuple = ()               # the pyqula calls behind a custom entry, whose docstrings
+                                     # the help shows (a Call's target is known already)
     extra: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
@@ -119,6 +123,7 @@ class EntrySpec:
     def describe(self):
         return {"family": self.family, "kind": self.kind, "label": self.label,
                 "group": self.group, "doc": self.doc, "formula": self.formula,
+                "guide": list(self.guide), "pyqula": list(self.pyqula),
                 "requires": "per parameters" if callable(self.requires) else list(self.requires),
                 "systems": list(self.systems), "runs_code": self.runs_code,
                 "params": [p.describe() for p in self.params]}
@@ -168,9 +173,13 @@ ALL_SYSTEMS = ("quantum", "classical_spin", "lattice_gas", "ising")
 
 def entry(family, kind, label, *params, **meta):
     """Declare and register an entry; returns the spec. Lattices and
-    geometry ops apply to every kind of system unless they say otherwise."""
+    geometry ops apply to every kind of system unless they say otherwise; a
+    lattice's help is the guide's section on making a geometry and a
+    Hamiltonian unless it names another."""
     if family in ("lattice", "geometry_op"):
         meta.setdefault("systems", ALL_SYSTEMS)
+    if family == "lattice":
+        meta.setdefault("guide", ("Setting up a Hamiltonian",))
     return register(EntrySpec(family=family, kind=kind, label=label, params=tuple(params), **meta))
 
 

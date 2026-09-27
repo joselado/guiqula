@@ -29,7 +29,8 @@ entry("term", "onsite", "Onsite energy",
       FieldParam("mu", 0.2, "onsite energy", "energy added on every site"),
       group="Onsite", formula=r"\sum_i \mu(\vec r_i)\, c^\dagger_i c_i",
       doc="Onsite energy; a constant shifts the bands rigidly (chemical potential).",
-      call=Call("h.add_onsite", "mu"))
+      call=Call("h.add_onsite", "mu"),
+      guide=("Including an onsite energy",))
 
 entry("term", "sublattice_imbalance", "Sublattice imbalance",
       FieldParam("mass", 0.1, "mass", "staggered onsite energy, +mass on A and -mass on B"),
@@ -41,7 +42,8 @@ entry("term", "zeeman", "Zeeman / exchange field",
       VectorFieldParam("m", (0.0, 0.0, 0.1), "field (mx, my, mz)", "exchange field"),
       group="Magnetism", formula=r"\sum_i \vec m(\vec r_i)\cdot\vec\sigma_i",
       doc="Local exchange field acting on the spin; breaks time-reversal symmetry.",
-      requires=("spin",), call=Call("h.add_zeeman", "m"))
+      requires=("spin",), call=Call("h.add_zeeman", "m"),
+      guide=("Including an external Zeeman field",))
 
 entry("term", "rashba", "Rashba spin-orbit coupling",
       FieldParam("c", 0.1, "strength", "Rashba coupling, evaluated at the bond midpoint"),
@@ -54,7 +56,8 @@ entry("term", "haldane", "Haldane coupling",
       FieldParam("t", 0.05, "strength", "second-neighbour imaginary hopping, at the bond midpoint"),
       group="Topology", formula=r"i t_H \sum_{\langle\langle ij\rangle\rangle} \nu_{ij} c^\dagger_i c_j",
       doc="Second-neighbour imaginary hopping of the Haldane model; breaks time reversal.",
-      call=Call("h.add_haldane", "t"))
+      call=Call("h.add_haldane", "t"),
+      guide=("Chern number",))
 
 entry("term", "anderson_disorder", "Anderson disorder",
       FieldParam("w", 0.5, "strength", "onsite energies drawn uniformly in [-w, w]", native=False),
@@ -71,7 +74,8 @@ entry("term", "kane_mele", "Kane-Mele spin-orbit coupling",
                                   r"c^\dagger_i \sigma_z c_j",
       doc="Intrinsic spin-orbit coupling of the Kane-Mele model: a Haldane coupling of opposite "
           "sign for each spin; preserves time reversal.",
-      requires=("spin",), call=Call("h.add_kane_mele", "t"))
+      requires=("spin",), call=Call("h.add_kane_mele", "t"),
+      guide=("Spin Chern number and mirror Chern number", "Z2 invariant"))
 
 def _antiferromagnetism(h, ctx):
     components = ctx.value("m")
@@ -91,14 +95,16 @@ entry("term", "antiferromagnetism", "Antiferromagnetic exchange",
       group="Magnetism", formula=r"\sum_i \tau_i\, \vec m(\vec r_i)\cdot\vec\sigma_i",
       doc="Exchange field whose sign alternates between the two sublattices (Neel "
           "order); needs a bipartite geometry.",
-      requires=("spin",), apply=_antiferromagnetism, script=_antiferromagnetism_script)
+      requires=("spin",), apply=_antiferromagnetism, script=_antiferromagnetism_script,
+      pyqula=("h.add_antiferromagnetism",))
 
 entry("term", "swave", "s-wave pairing",
       FieldParam("delta", 0.1, "pairing", "singlet pairing amplitude on every site"),
       group="Superconductivity", formula=r"\sum_i \Delta(\vec r_i)\, c^\dagger_{i\uparrow} "
                                          r"c^\dagger_{i\downarrow} + h.c.",
       doc="Onsite spin-singlet superconducting pairing; turns the Hamiltonian into Nambu form.",
-      requires=("nambu",), call=Call("h.add_swave", "delta"))
+      requires=("nambu",), call=Call("h.add_swave", "delta"),
+      guide=("s-wave superconductivity",))
 
 entry("term", "anti_kane_mele", "Anti Kane-Mele coupling",
       FieldParam("t", 0.05, "strength", "second-neighbour spin-orbit coupling of opposite sign "
@@ -145,7 +151,8 @@ entry("term", "strain", "Hopping modulation",
       doc="Scale the matrix elements already in the Hamiltonian by a factor that depends on "
           "the position (pyqula's add_strain, scalar mode): a strain or a smooth "
           "hopping modulation. It acts on the terms above it.",
-      apply=_strain, script=_strain_script, regions=False)
+      apply=_strain, script=_strain_script, regions=False,
+      pyqula=("h.add_strain",))
 
 entry("term", "valley_exchange", "Valley exchange",
       VectorFieldParam("v", (0.0, 0.0, 0.1), "field (vx, vy, vz)", "valley-pseudospin field",
@@ -180,7 +187,8 @@ entry("term", "electric_field", "Electric field",
       doc="A uniform potential gradient: the onsite energy grows as E.r (a gate bias across "
           "layers, with E along z).",
       apply=_electric_field,
-      script=lambda ctx: [f"h.add_onsite(lambda r: float(np.dot(np.array({ctx.code('E')}), r)))"])
+      script=lambda ctx: [f"h.add_onsite(lambda r: float(np.dot(np.array({ctx.code('E')}), r)))"],
+      guide=("Including an onsite energy",), pyqula=("h.add_onsite",))
 
 entry("term", "orbital_field", "Orbital magnetic field",
       FieldParam("B", 0.01, "field", "flux through a unit area in units of the flux quantum",
@@ -191,7 +199,8 @@ entry("term", "orbital_field", "Orbital magnetic field",
       doc="Out-of-plane magnetic field as Peierls phases on the hoppings (pyqula's "
           "add_peierls); a periodic system needs a supercell that holds a whole flux quantum, "
           "or it is not periodic.",
-      call=Call("h.add_peierls", "B", gauge="gauge"))
+      call=Call("h.add_peierls", "B", gauge="gauge"),
+      guide=("Including an external orbital field",))
 
 entry("term", "inplane_field", "In-plane magnetic field",
       FieldParam("b", 0.1, "field", "in units of the flux quantum", native=False),
@@ -232,7 +241,8 @@ entry("term", "pairing", "Superconducting pairing",
           "with a d-vector); turns the Hamiltonian into Nambu form.",
       requires=("nambu",), apply=_pairing,
       script=lambda ctx: [f"h.add_pairing(delta={ctx.code('delta')}, mode={ctx.code('mode')}, "
-                          f"d={vector_function_code(ctx.code('d'))})"])
+                          f"d={vector_function_code(ctx.code('d'))})"],
+      guide=("Spin-triplet d-vector and non-unitary superconductivity",), pyqula=("h.add_pairing",))
 
 
 def _phase_disorder(h, ctx):
@@ -248,4 +258,5 @@ entry("term", "phase_disorder", "Phase disorder",
       doc="Random phases on the hoppings inside the cell (pyqula.disorder.phase); spinless "
           "normal-state Hamiltonians only; reproducible through the seed.",
       modules=("disorder",), apply=_phase_disorder, script=lambda ctx: [
-          f"h.intra = disorder.phase(h, w={ctx.code('w')}).intra"])
+          f"h.intra = disorder.phase(h, w={ctx.code('w')}).intra"],
+      pyqula=("disorder.phase",))
