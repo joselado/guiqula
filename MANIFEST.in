@@ -1,0 +1,8 @@
+# The source distribution: what a wheel is built from (setup.py copies pyqula's user guide
+# into the wheel, so it must be here), and the files a reader of the sources wants.
+# vendor/pyqula itself comes in as the package guiqula._vendor.pyqula (pyproject.toml).
+include README.md LICENSE environment.yml setup.py MANIFEST.in
+include vendor/VENDOR.md vendor/pyqula_user_guide.md
+recursive-include plugin_template *.py *.toml *.md
+prune tests
+global-exclude __pycache__ *.py[cod] *.nbi *.nbc

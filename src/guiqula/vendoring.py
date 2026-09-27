@@ -9,8 +9,10 @@ this order and inserted at the front of sys.path:
    directory that contains ``pyqula/`` (for example an upstream ``src``) or
    at the ``pyqula`` package directory itself. If it is set it must be valid;
    there is no silent fallback.
-2. ``guiqula/_vendor``: the copy shipped inside an installed guiqula.
-3. ``<checkout>/vendor``: the copy in a source checkout.
+2. the application folder of a frozen guiqula (PyInstaller,
+   packaging/pyinstaller), which holds pyqula's sources as files;
+3. ``guiqula/_vendor``: the copy shipped inside an installed guiqula.
+4. ``<checkout>/vendor``: the copy in a source checkout.
 
 When the override is used the interpreter stops writing bytecode, so an
 upstream checkout (read-only from guiqula) gets no ``__pycache__``; numba's
@@ -48,11 +50,14 @@ def _override_dir(value):
 def find_pyqula_dir():
     """Return (origin, directory containing the pyqula package).
 
-    origin is "override", "vendored" or "checkout".
+    origin is "override", "bundled", "vendored" or "checkout".
     """
     value = os.environ.get(ENV_VAR)
     if value:
         return "override", _override_dir(value)
+    frozen = getattr(sys, "_MEIPASS", None)
+    if frozen and (Path(frozen) / "pyqula" / "__init__.py").is_file():
+        return "bundled", Path(frozen)
     shipped = _HERE / "_vendor"
     if (shipped / "pyqula" / "__init__.py").is_file():
         return "vendored", shipped

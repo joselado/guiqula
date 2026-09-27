@@ -5,6 +5,7 @@ check runs in a fresh interpreter (the registry loads once per process),
 with fake installed distributions on a temporary path; the test suite
 itself runs with $GUIQULA_NO_PLUGINS set."""
 import json
+import os
 import shutil
 import textwrap
 
@@ -40,7 +41,8 @@ def site(tmp_path, repo):
 def with_plugins(run_python, site):
     def run(code, timeout=300, env=None):
         result = run_python(textwrap.dedent(code), env_update=dict({
-            "GUIQULA_NO_PLUGINS": "", "PYTHONPATH": f"{site}:{run_python.src}"}, **(env or {})),
+            "GUIQULA_NO_PLUGINS": "", "PYTHONPATH": f"{site}{os.pathsep}{run_python.src}"},
+            **(env or {})),
             timeout=timeout)
         assert result.returncode == 0, result.stderr[-3000:]
         return json.loads(result.stdout.strip().splitlines()[-1])
@@ -176,7 +178,8 @@ def test_the_template_tests_pass(site, run_python, repo, tmp_path):
     result = run_python(
         f"import sys, pytest; sys.exit(pytest.main(['-q', '-p', 'no:cacheprovider', "
         f"'--rootdir', {str(repo / TEMPLATE)!r}, {str(repo / TEMPLATE / 'tests')!r}]))",
-        env_update={"GUIQULA_NO_PLUGINS": "", "PYTHONPATH": f"{site}:{run_python.src}"},
+        env_update={"GUIQULA_NO_PLUGINS": "",
+                    "PYTHONPATH": f"{site}{os.pathsep}{run_python.src}"},
         timeout=600)
     assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-3000:]
     assert "3 passed" in result.stdout

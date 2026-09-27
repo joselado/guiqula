@@ -1,22 +1,31 @@
 [build-system]
-requires = ["setuptools>=68"]
+# 77: the license as an SPDX expression (PEP 639)
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "guiqula"
 dynamic = ["version"]
 description = "Graphical workbench for the pyqula tight-binding library"
-license = {file = "LICENSE"}
+readme = "README.md"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+keywords = ["tight-binding", "condensed matter", "topology", "pyqula", "physics", "GUI"]
 authors = [
     {name = "Jose Lado", email = "joselado@aalto.fi"},
 ]
 # jax>=0.8.1 (a pyqula dependency) needs Python 3.11; developed on 3.12.
 requires-python = ">=3.11"
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 3 - Alpha",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: Education",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Physics",
 ]
 dependencies = [
@@ -59,7 +68,7 @@ version = {attr = "guiqula.__version__"}
 "guiqula._vendor.pyqula" = "vendor/pyqula"
 
 [tool.setuptools.package-data]
-guiqula = ["presets/*.json", "docs/*.md"]
+guiqula = ["presets/*.json", "docs/*.md", "resources/*"]
 "guiqula._vendor.pyqula" = ["datasets/*.txt"]
 
 [tool.setuptools.exclude-package-data]

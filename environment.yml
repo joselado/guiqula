@@ -1,0 +1,24 @@
+# conda environment for guiqula (PLAN.md section 6):
+#   conda env create -f environment.yml && conda activate guiqula && guiqula
+# The scientific stack comes from conda-forge; guiqula itself (with its copy of pyqula)
+# and Qt (PySide6-Essentials) from PyPI: conda's pyside6 would not satisfy pip's
+# PySide6-Essentials requirement, and two Qt copies in one environment break the window.
+# The list mirrors pyproject.toml (tests/test_packaging.py checks it).
+name: guiqula
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.11
+  - pip
+  - pydantic>=2.8
+  - platformdirs>=3.10
+  - numpy>=2.1
+  - scipy>=1.13.1
+  - matplotlib-base>=3.10.0
+  - numba>=0.60.0
+  - multiprocess>=0.70.19
+  - dill>=0.4.1
+  - threadpoolctl>=3.5.0
+  - jax>=0.8.1
+  - pip:
+      - guiqula

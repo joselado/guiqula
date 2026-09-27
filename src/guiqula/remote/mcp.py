@@ -248,7 +248,8 @@ class Bridge:
         return {"connected": self.backend.describe(), "running": running}
 
     def _launch(self, document):
-        command = [sys.executable, "-m", "guiqula", "--remote"] + ([document] if document else [])
+        from guiqula import env
+        command = env.launcher() + ["--remote"] + ([document] if document else [])
         options = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL,
                    "stderr": subprocess.DEVNULL}
         if os.name == "nt":

@@ -34,8 +34,11 @@ parts: settings, themes, shortcuts, undo; teaching exports and locks; performanc
 help); its report, numbered design items 1 to 14 and decisions 15 to 24 (PLAN.md section 7,
 end of phase 5; items 1 to 7 are the in-app help's open points of section 11), awaits the
 maintainer's answers. Phase 6 (distribution and the add-on) is under way: part 1, remote
-control and the MCP add-on, and part 2, plugins, are done (2026-09-27; PLAN.md section 7,
-decisions from 25 on).
+control and the MCP add-on, part 2, plugins, and part 3, distribution (README, PyPI
+metadata, sdist, conda file, `guiqula desktop`, icons, the PyInstaller folder, the Windows
+installer script and the CI workflows, which have never run: there is no remote), are done
+(2026-09-27; PLAN.md section 7); its report, decisions 25 to 45, awaits the maintainer's
+answers. Nothing is uploaded or pushed without the maintainer.
 
 ## Code map
 
@@ -127,6 +130,16 @@ a `Session`.
   per result, the figure drawn by the window in the light theme), `settings.py` (the user's theme, recent files, always
   trust, remote control; `$GUIQULA_CONFIG_DIR`; only the interactive program's window, `use_settings=True`,
   reads or writes it).
+- `desktop.py`: `guiqula desktop` (the menu entry, icon and `.guiqula` file type for the
+  current user: freedesktop files on Linux, a Start menu shortcut and registry keys on
+  Windows, `~/Applications/guiqula.app` on macOS; from a checkout it carries `src/`);
+  `env.launcher()` is the command that starts guiqula again (the executable itself when
+  frozen). `resources/`: the icon (SVG; PNG, ICO, ICNS made by `tools/make_icons.py`).
+- `packaging/`: `pyinstaller/guiqula.spec` (the application folder: `guiqula` and
+  `guiqula-cli`; pyqula collected as sources, which the vendoring shim finds as "bundled";
+  `launcher.py` calls `freeze_support()` for the workers), `windows/guiqula.iss` (Inno
+  Setup), `README.md` (what each build is, what was verified, the release checklist);
+  `.github/workflows/` (tests on three systems, release artifacts, PyPI).
 - `ui/`: `mainwindow.py` (workspaces, palettes with search boxes from the registry, docks,
   bars, one result view per calculation, the cost guard, auto re-run; the window's own
   dispatcher actions `select`, `workspace`, `tool`, `select_sites`, `region_from_selection`,
@@ -274,6 +287,11 @@ PYTHONPATH=src python -m guiqula serve preset         # a session without a wind
 PYTHONPATH=src python -m guiqula mcp [--attach|--headless] [--document D]   # the MCP add-on
 claude mcp add guiqula -e PYTHONPATH=$PWD/src -- python -m guiqula mcp  # register it (checkout)
 <python with the mcp SDK> tools/mcp_check.py --python $(which python)  # the SDK's client vs mcp
+PYTHONPATH=src python -m guiqula desktop [--remove]   # menu entry, icon, file type (this user)
+python -m build && twine check --strict dist/*   # sdist and wheel (packaging/README.md)
+python tools/make_icons.py             # the PNG, ICO and ICNS from resources/guiqula.svg
+<venv>/bin/pyinstaller packaging/pyinstaller/guiqula.spec --noconfirm   # dist/guiqula/
+GUIQULA_FROZEN_PYTHON=<venv>/bin/python python -m pytest tests/test_frozen.py  # build + drive
 tools/update_vendor.sh                 # refresh vendor/ from upstream pyqula
 ```
 

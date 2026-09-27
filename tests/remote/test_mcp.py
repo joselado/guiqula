@@ -161,9 +161,11 @@ def test_serve_and_attach():
         finally:
             mcp.close()
     finally:
-        serve.send_signal(signal.SIGTERM)
-        assert serve.wait(timeout=60) == 0, serve.stderr.read()[-3000:]
-    assert not os.path.exists(info["connection_file"])     # removed on a clean stop
+        serve.send_signal(signal.SIGTERM)       # on Windows: TerminateProcess, no clean stop
+        code = serve.wait(timeout=60)
+    if os.name == "posix":
+        assert code == 0, serve.stderr.read()[-3000:]
+        assert not os.path.exists(info["connection_file"])     # removed on a clean stop
 
 
 def test_attach_without_a_server_says_so():

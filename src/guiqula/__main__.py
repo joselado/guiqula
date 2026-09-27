@@ -6,6 +6,7 @@
     guiqula serve [DOCUMENT]              a session without a window, driven through
                                           the remote API (PLAN.md 3.7)
     guiqula mcp                           the MCP server of the Claude add-on (PLAN.md 3.7)
+    guiqula desktop [--remove]            a menu entry and an icon on the desktop
 
 A file holding Python nodes is not trusted (PLAN.md 13.7): its nodes are
 skipped unless --trust is given, as in the window until it is trusted.
@@ -130,6 +131,22 @@ def _serve(argv):
     return 0
 
 
+def _desktop(argv):
+    parser = argparse.ArgumentParser(
+        prog="guiqula desktop", description="Put guiqula in the desktop's application menu, "
+                                            "with its icon and the .guiqula file type, for "
+                                            "this interpreter (the current user only).")
+    parser.add_argument("--remove", action="store_true", help="take it out again")
+    args = parser.parse_args(argv)
+    from guiqula import desktop
+    done = desktop.remove() if args.remove else desktop.install()
+    for path in done:
+        print(("removed " if args.remove else "wrote ") + path)
+    if not done:
+        print("nothing to remove" if args.remove else "nothing written")
+    return 0
+
+
 def _mcp(argv):
     from guiqula.remote.mcp import main as mcp_main
     return mcp_main(argv)
@@ -137,7 +154,8 @@ def _mcp(argv):
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    commands = {"run": _run, "script": _script, "serve": _serve, "mcp": _mcp}
+    commands = {"run": _run, "script": _script, "serve": _serve, "mcp": _mcp,
+                "desktop": _desktop}
     if argv and argv[0] in commands:
         return commands[argv[0]](argv[1:])
     return _window(argv)

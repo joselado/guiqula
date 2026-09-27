@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- guiqula: a honeycomb ring in the canvas's sublattice colours -->
+  <rect x="8" y="8" width="240" height="240" rx="44" fill="#fbfbf9" stroke="#c9c9c4" stroke-width="4"/>
+  <g stroke="#b9b9b4" stroke-width="10" stroke-linecap="round">
+    <line x1="128.0" y1="196.0" x2="128.0" y2="228.0"/> <line x1="69.1" y1="162.0" x2="41.4" y2="178.0"/> <line x1="69.1" y1="94.0" x2="41.4" y2="78.0"/> <line x1="128.0" y1="60.0" x2="128.0" y2="28.0"/> <line x1="186.9" y1="94.0" x2="214.6" y2="78.0"/> <line x1="186.9" y1="162.0" x2="214.6" y2="178.0"/>
+  </g>
+  <polygon points="128.0,196.0 69.1,162.0 69.1,94.0 128.0,60.0 186.9,94.0 186.9,162.0" fill="none" stroke="#7a7a76" stroke-width="11" stroke-linejoin="round"/>
+  <g stroke="#ffffff" stroke-width="5">
+    <circle cx="128.0" cy="196.0" r="21" fill="#2f6db3"/> <circle cx="69.1" cy="162.0" r="21" fill="#d9822b"/> <circle cx="69.1" cy="94.0" r="21" fill="#2f6db3"/> <circle cx="128.0" cy="60.0" r="21" fill="#d9822b"/> <circle cx="186.9" cy="94.0" r="21" fill="#2f6db3"/> <circle cx="186.9" cy="162.0" r="21" fill="#d9822b"/>
+  </g>
+</svg>

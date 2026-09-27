@@ -120,6 +120,9 @@ def test_console_in_the_window(window, qtbot, shot):
     qtbot.waitUntil(lambda: session.document.system("s1").name == "from the console",
                     timeout=60_000)
     assert window.outliner.item("s1").text(0).endswith("from the console")
+    # the rename lands while its console job is still ending, and Run stays disabled until
+    # it has ended (a click before would do nothing, as it does for a user)
+    qtbot.waitUntil(console.run_button.isEnabled, timeout=60_000)
     console.input.setPlainText("1/0")
     console.run_button.click()
     qtbot.waitUntil(lambda: "ZeroDivisionError" in console.output.toPlainText(), timeout=60_000)

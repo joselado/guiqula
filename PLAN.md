@@ -14,9 +14,12 @@ for phase 5 without commenting on the phase-4 report, so its items stand as
 built. Phase 5 (polish) was done on 2026-09-27; its report (design items 1
 to 14, the first seven being the recommendations for the open points of the
 in-app help in section 11, and decisions 15 to 24) awaits the maintainer's
-answers. Phase 6 (distribution and the add-on) is under way: part 1, remote
-control and the MCP add-on, and part 2, plugins, were done on 2026-09-27
-(decisions 25 to 37 in section 7).
+answers. Phase 6 (distribution and the add-on) was done on 2026-09-27 in
+three parts (remote control and the MCP add-on; plugins; distribution,
+verified on Linux); its report, decisions 25 to 45 in section 7, awaits
+the maintainer's answers, as do the PyPI upload, a GitHub remote for the
+CI workflows, and the installers for Windows and macOS, which only those
+workflows can build.
 
 ## 1. Requirements (as stated by the maintainer)
 
@@ -628,7 +631,9 @@ One window, one document, three workspaces switched by tabs in the header
 - Desktop integration: `.desktop` file on Linux, a `.bat`/Start-menu entry on
   Windows, an app bundle on macOS. Single-file installers (PyInstaller or
   Briefcase) are a phase-6 item; numba and jax make bundles large but they do
-  work.
+  work. (Built in phase 6, part 3: `guiqula desktop`; a PyInstaller folder of
+  900 MB on Linux, an Inno Setup installer for Windows and a disk image for
+  macOS through the release workflow; `packaging/README.md`.)
 - Optional extras: `[3d]` (pyqtgraph.opengl / pyvista), `[fast]` (pyqtgraph).
   (A `[claude]` extra for the MCP server was planned; the server needs no
   dependency, decision 27.)
@@ -1573,6 +1578,88 @@ Decisions for the maintainer:
     by a plugin (the gallery, the help) are left for later, if wanted;
 37. the documents do not record which plugin an entry came from (no
     schema change): a missing one is reported as an unknown kind.
+**Part 3 done 2026-09-27** (distribution, section 6), verified on Linux
+only; nothing was uploaded or pushed (there is no remote). Built:
+`README.md` (the PyPI description), the metadata of `pyproject.toml` (the
+license as an SPDX expression, classifiers, keywords; setuptools 77 or
+newer), `MANIFEST.in` (the sdist carries pyqula's user guide, which the
+wheel build copies, and `plugin_template/`, not the tests), `environment.yml`
+(the scientific stack from conda-forge, Qt and guiqula from PyPI),
+`guiqula desktop [--remove]` (`desktop.py`: on Linux a desktop entry, the
+icon in the hicolor theme and the MIME type of `.guiqula` files; on Windows
+a Start menu shortcut written by PowerShell and the file association in the
+user's registry hive; on macOS `~/Applications/guiqula.app`; from a source
+checkout the entry carries `src/`), the icon (`resources/guiqula.svg`, a
+honeycomb ring in the canvas's sublattice colours; PNG, ICO and ICNS made by
+`tools/make_icons.py`, which writes the ICO and ICNS containers itself; the
+window uses it), `env.launcher()` (the command that starts guiqula again,
+the executable itself when frozen), a "bundled" origin in the vendoring
+shim, `packaging/pyinstaller/guiqula.spec` and `launcher.py` (one folder
+with two executables, `guiqula` windowed on Windows and macOS and
+`guiqula-cli` a console program, sharing `_internal/`; pyqula collected as
+source files, for numba's cache and the help's docstrings;
+`freeze_support()` so that the frozen executable can start its workers; a
+`guiqula.app` on macOS that declares the `.guiqula` document type),
+`packaging/windows/guiqula.iss` (Inno Setup: a per-user install with a
+Start menu entry and the file association), `.github/workflows/tests.yml`
+(the suite on Linux, macOS and Windows with Python 3.11 to 3.13) and
+`release.yml` (sdist and wheel, the PyInstaller folders with a smoke test,
+a Linux archive, a macOS disk image, the Windows installer, and on a tag
+the upload to PyPI by trusted publishing), `packaging/README.md` (what each
+build is, what was verified, the release checklist). Tests:
+`tests/test_packaging.py` (the conda file mirrors the dependencies; the
+wheel built from the sdist, as pip does, with `twine check --strict`),
+`tests/test_desktop.py` (the Linux files written and removed, valid for
+`desktop-file-validate`; the Windows and macOS files as text),
+`tests/test_frozen.py` (builds the PyInstaller folder and drives it when
+`$GUIQULA_FROZEN_PYTHON` names a Python with PyInstaller: passed here in
+57 s). Measured and verified here: a fresh venv installs the wheel from
+PyPI's current dependencies in 61 s (1.2 GB: numpy 2.5.3, scipy 1.18.1,
+jax 0.11.2, numba 0.67, matplotlib 3.11.2, PySide6-Essentials 6.11.2);
+its `guiqula run` gives arrays equal bit for bit to the development
+environment's (17 s with the first numba compilation); its window,
+started offscreen with `--remote`, answers in 1.7 s and was driven and
+photographed through the remote API. Python 3.13.15 installs the wheel and
+runs `guiqula run` (the test suite ran on 3.12 only). PyInstaller 6.22.3
+builds the folder in 36 s: 906 MB on Linux, of which jaxlib is 339 MB,
+llvmlite 171 MB and Qt 99 MB (pyqula's dependencies dominate); the frozen
+`guiqula-cli run` reproduces the arrays exactly, starting its workers; a
+frozen `guiqula serve` answers in 0.3 s, with pyqula's docstrings in its
+help and the console working; the frozen window was driven and
+photographed. The name guiqula is free on PyPI (2026-09-27). Facts
+learned: conda's pyside6 does not satisfy pip's PySide6-Essentials, so a
+conda environment that also pip-installs guiqula would hold two Qt copies;
+setuptools puts a project's top-level `tests/test*.py` into the sdist
+unless told otherwise; the wheel builds from the sdist only when the sdist
+carries `vendor/pyqula_user_guide.md`; Qt's ICO and ICNS writers are image
+format plugins that are not found when only the platform plugin path is
+set; after the window is killed its workers end by their watchdog within
+seconds (checked with the installed program). A race in
+`test_console_in_the_window` showed under load (it clicked the console's
+Run while the previous console job was still ending, when the button is
+disabled); the test now waits for the button.
+Decisions for the maintainer:
+38. the first release on PyPI as 0.1.0 (the version stays 0.0.1.dev0
+    until you say; the upload is yours, or the release workflow's once the
+    repository has a GitHub remote and PyPI knows it as a trusted
+    publisher);
+39. PyInstaller rather than Briefcase: verified here with the frozen
+    workers, one spec for the three systems, maintained hooks for numba,
+    jax and Qt; one folder rather than one file (a one-file executable
+    would unpack 900 MB at every start);
+40. two executables in the folder: `guiqula` (no console on Windows and
+    macOS) and `guiqula-cli` (for `run`, `serve`, `script`, `mcp`);
+41. the Windows installer and the macOS disk image are not signed (that
+    needs a code-signing certificate and an Apple developer account): a
+    first start warns once;
+42. Linux gets pip (with `guiqula desktop`) and the folder as a .tar.gz;
+    no AppImage or Flatpak;
+43. the conda file takes Qt and guiqula from PyPI; a conda-forge recipe
+    could come later;
+44. the classifiers name Python 3.11 to 3.13 (3.12 fully tested, 3.13 a
+    headless run); the CI matrix covers all three once it runs;
+45. the icon: a honeycomb ring in the sublattice colours (easy to replace:
+    the SVG and `tools/make_icons.py`).
 
 ### Where the section 13 items land
 

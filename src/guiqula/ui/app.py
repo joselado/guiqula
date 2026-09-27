@@ -1,12 +1,16 @@
 """QApplication setup and the entry point of the graphical program."""
 import sys
+from pathlib import Path
 
 from PySide6.QtCore import QTimer
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 from guiqula import env
 from guiqula.ui import errors, theme
 from guiqula.ui.mainwindow import MainWindow
+
+ICON = Path(__file__).resolve().parents[1] / "resources" / "guiqula.png"
 
 
 def create_application(argv=None):
@@ -20,6 +24,8 @@ def create_application(argv=None):
         env.configure_qt()
         app = QApplication(list(argv) if argv is not None else sys.argv[:1])
         app.setApplicationName("guiqula")
+        app.setDesktopFileName("guiqula")       # the desktop entry of guiqula desktop
+        app.setWindowIcon(QIcon(str(ICON)))
     if not app.property("guiqula_theme"):    # also an application someone else made (pytest-qt)
         theme.apply(app)                     # plain Qt look (decision 13.6)
         app.setProperty("guiqula_theme", True)

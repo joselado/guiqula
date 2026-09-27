@@ -26,23 +26,50 @@ def test_vendored_dependencies_are_mirrored(repo):
         assert ours[requirement_name(req)] == req, f"pyproject has {ours[requirement_name(req)]}, upstream {req}"
 
 
+def test_the_conda_environment_mirrors_the_dependencies(repo):
+    """environment.yml has every dependency of pyproject.toml with the same bound
+    (matplotlib as conda-forge's matplotlib-base), except Qt, which pip brings."""
+    lines = (repo / "environment.yml").read_text().split("dependencies:")[1].splitlines()
+    conda = {requirement_name(line.strip()[2:]): line.strip()[2:] for line in lines
+             if line.startswith("  - ") and not line.strip().endswith(":")}
+    conda["matplotlib"] = conda.pop("matplotlib-base").replace("-base", "")
+    ours = tomllib.loads((repo / "pyproject.toml").read_text())["project"]["dependencies"]
+    for req in ours:
+        name = requirement_name(req)
+        if name == "pyside6-essentials":
+            assert not [n for n in conda if n.startswith("pyside")]    # two Qt copies break it
+            continue
+        assert conda.get(name) == req, f"environment.yml: {conda.get(name)}, pyproject: {req}"
+    assert "guiqula" in (repo / "environment.yml").read_text().split("pip:")[1]
+
+
 @pytest.mark.slow
 def test_wheel_ships_vendored_pyqula(repo, tmp_path, run_python):
+    """What pip does with a source distribution: the sdist from the files git
+    knows, then the wheel from the sdist (setup.py needs vendor/'s guide in it)."""
+    listed = subprocess.run(["git", "ls-files", "--cached", "--others", "--exclude-standard"],
+                            cwd=repo, capture_output=True, text=True, check=True).stdout.split()
     tree = tmp_path / "tree"
-    ignore = shutil.ignore_patterns("__pycache__", "*.pyc", "*.egg-info")
-    for name in ("pyproject.toml", "setup.py", "LICENSE"):
-        (tree / name).parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(repo / name, tree / name)
-    shutil.copytree(repo / "src", tree / "src", ignore=ignore)
-    shutil.copytree(repo / "vendor" / "pyqula", tree / "vendor" / "pyqula", ignore=ignore)
-    for name in ("VENDOR.md", "pyqula_user_guide.md"):
-        shutil.copy2(repo / "vendor" / name, tree / "vendor" / name)
+    for name in listed:
+        if (repo / name).is_file() and not name.startswith("ui_dump/"):
+            (tree / name).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(repo / name, tree / name)
     build = subprocess.run(
-        [sys.executable, "-m", "pip", "wheel", "--no-deps", "--no-build-isolation",
-         "-w", str(tmp_path / "dist"), str(tree)],
-        capture_output=True, text=True, timeout=600)
-    assert build.returncode == 0, build.stdout + build.stderr
+        [sys.executable, "-m", "build", "--sdist", "--wheel", "--no-isolation",
+         "--outdir", str(tmp_path / "dist"), str(tree)],
+        capture_output=True, text=True, timeout=900)
+    assert build.returncode == 0, build.stdout[-3000:] + build.stderr[-3000:]
+    (sdist,) = (tmp_path / "dist").glob("guiqula-*.tar.gz")
     (wheel,) = (tmp_path / "dist").glob("guiqula-*.whl")
+    import tarfile
+    in_sdist = {n.split("/", 1)[1] for n in tarfile.open(sdist).getnames() if "/" in n}
+    assert {"README.md", "LICENSE", "environment.yml", "vendor/pyqula_user_guide.md",
+            "vendor/VENDOR.md", "plugin_template/pyproject.toml"} <= in_sdist
+    assert not [n for n in in_sdist if n.startswith(("tests/", "ui_dump/", "tools/"))]
+    if shutil.which("twine"):
+        check = subprocess.run(["twine", "check", "--strict", str(sdist), str(wheel)],
+                               capture_output=True, text=True, timeout=300)
+        assert check.returncode == 0, check.stdout + check.stderr
     names = set(zipfile.ZipFile(wheel).namelist())
 
     assert "guiqula/__init__.py" in names
@@ -54,6 +81,11 @@ def test_wheel_ships_vendored_pyqula(repo, tmp_path, run_python):
     assert "guiqula/_vendor/__init__.py" not in names   # a plain directory, not a package
     assert "guiqula/_vendor/pyqula_user_guide.md" in names   # the in-app help (13.13)
     assert "guiqula/docs/user_guide.md" in names
+    assert {"guiqula/resources/guiqula.png", "guiqula/resources/guiqula.svg",
+            "guiqula/resources/guiqula.ico", "guiqula/resources/guiqula.icns"} <= names
+    metadata = zipfile.ZipFile(wheel).read(next(n for n in names if n.endswith("METADATA")))
+    assert b"License-Expression: GPL-3.0-or-later" in metadata
+    assert b"Description-Content-Type: text/markdown" in metadata and b"# guiqula" in metadata
     assert not [n for n in names if n.endswith((".pyc", ".nbi", ".nbc"))]
     assert not [n for n in names if n.startswith(("vendor/", "pyqula/", "tests/"))]
     upstream = {p.relative_to(repo / "vendor").as_posix()
