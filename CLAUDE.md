@@ -33,7 +33,8 @@ on its report, so its items stand as built. Phase 5 (polish) is done (2026-09-27
 parts: settings, themes, shortcuts, undo; teaching exports and locks; performance; the in-app
 help); its report, numbered design items 1 to 14 and decisions 15 to 24 (PLAN.md section 7,
 end of phase 5; items 1 to 7 are the in-app help's open points of section 11), awaits the
-maintainer's answers. Phase 6 (distribution and the add-on) is next.
+maintainer's answers. Phase 6 (distribution and the add-on) is under way: part 1, remote
+control and the MCP add-on, is done (2026-09-27; PLAN.md section 7, decisions from 25 on).
 
 ## Code map
 
@@ -100,20 +101,34 @@ a `Session`.
   keys of the current Document object, reused until it, the results or trust change;
   actions `undo`,
   `redo`, `history` for drivers; with `autosave=True` (the window's) it
-  autosaves from `poll()`. The object tests, `guiqula run`, `tools/drive.py` and the window
-  drive.
+  autosaves from `poll()`. The object tests, `guiqula run`, `tools/drive.py`, the window
+  and the remote API drive. `ACTIONS` names its dispatcher actions.
+- `remote/` (the Claude add-on, PLAN.md 3.7): `api.py` (`RemoteAPI`: the methods a client
+  calls over a Session, JSON in and out: status, document, commands, catalogue, do, run,
+  wait, result, plot, screenshot, help, script, console, journal; a method that waits
+  returns a `Pending`; without a window it asks for the builds itself;
+  `WINDOW_ACTIONS` lists the window's actions, checked by a test), `server.py` (JSON-RPC
+  2.0, one message per line, on 127.0.0.1, `hello` with the token first; polled from the
+  host's loop, never a thread of its own, so the Session stays single-threaded),
+  `connection.py` (connection files, mode 0600, in `$GUIQULA_DATA_DIR/remote`),
+  `client.py` (`connect()`), `mcp.py` (`guiqula mcp`: the MCP protocol written by hand,
+  the handshake of 2024-11-05 to 2025-11-25; attaches to the newest running server or runs
+  a Session of its own; fd 1 points at stderr so nothing but protocol reaches stdout),
+  `window.py` (the window's hooks: screenshots, widget names, its state).
 - `io/`: project files (a `.guiqula` zip keeps the results too), presets
   (`src/guiqula/presets/*.json`, loadable by name, described by the Document's `notes`),
   script export (a sweep exports a loop), result files, `autosave.py` (autosave and
   recovery), `crashreport.py`, `bundle.py` (Export figure, data and script: one folder
   per result, the figure drawn by the window in the light theme), `settings.py` (the user's theme, recent files, always
-  trust; `$GUIQULA_CONFIG_DIR`; only the interactive program's window, `use_settings=True`,
+  trust, remote control; `$GUIQULA_CONFIG_DIR`; only the interactive program's window, `use_settings=True`,
   reads or writes it).
 - `ui/`: `mainwindow.py` (workspaces, palettes with search boxes from the registry, docks,
   bars, one result view per calculation, the cost guard, auto re-run; the window's own
   dispatcher actions `select`, `workspace`, `tool`, `select_sites`, `region_from_selection`,
   `remove_selected`, `canvas_view`, `preview`, `auto_rerun`, `projection`, `overlay`,
-  `slider`, `set_slider`, `remove_slider`, `paint`, `theme`, `export_bundle`, `help`),
+  `slider`, `set_slider`, `remove_slider`, `paint`, `theme`, `export_bundle`, `help`,
+  `remote`; a new one joins `remote/api.py`'s `WINDOW_ACTIONS`; File > Allow remote
+  control starts the server, polled from the window's timer),
   `help.py` (the Help dock: F1, a form's ?, the guides; Markdown in a QTextBrowser, whose
   `loadResource` serves the equations), `shortcuts.py` (the one
   table of keyboard shortcuts: menus, the canvas and outliner keys, the dialog; a test
@@ -249,6 +264,11 @@ python tools/drive.py honeycomb_zeeman_rashba --run c1 \
     --python "session.act('export_bundle', calculation='c1', path='out/c1_bands')"
                                                    # figure, data, script in one folder
                                                    # (--do runs before --run, --python after)
+PYTHONPATH=src python -m guiqula --remote preset      # the window, remote control on (3.7)
+PYTHONPATH=src python -m guiqula serve preset         # a session without a window, remotely driven
+PYTHONPATH=src python -m guiqula mcp [--attach|--headless] [--document D]   # the MCP add-on
+claude mcp add guiqula -e PYTHONPATH=$PWD/src -- python -m guiqula mcp  # register it (checkout)
+<python with the mcp SDK> tools/mcp_check.py --python $(which python)  # the SDK's client vs mcp
 tools/update_vendor.sh                 # refresh vendor/ from upstream pyqula
 ```
 

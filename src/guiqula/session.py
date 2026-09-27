@@ -1,7 +1,7 @@
 """A Session: the Document with its command dispatcher, the workers, the
 latest result of every calculation and the latest build of every system.
 It is the one object the tests, the headless runner (``guiqula run``,
-PLAN.md 13.3), tools/drive.py, the UI and the future remote API all drive;
+PLAN.md 13.3), tools/drive.py, the UI and the remote API (remote/) all drive;
 none of them reaches the Document or the workers any other way.
 
 With ``autosave=True`` (the window's session) it also autosaves the
@@ -47,6 +47,10 @@ from guiqula.worker.client import JobManager
 
 BUILD_PATIENCE = 10.0    # seconds: a build still running when a newer one is asked is killed
 RESULT_HISTORY = 4       # earlier results kept per calculation, so that an undo finds them
+# the Session's dispatcher actions (the window registers its own, ui/mainwindow.py)
+ACTIONS = ("run_calculation", "cancel", "save", "load", "new", "export_script", "save_result",
+           "recover", "list_recoverable", "discard_recovery", "trust", "console",
+           "interrupt_console", "undo", "redo", "history")
 
 
 def _content(document):
@@ -112,9 +116,7 @@ class Session:
         self.jobs.subscribe(self._on_job_event)
         self.jobs.request_handler = self._on_request
         self.dispatcher.subscribe(self._on_document_event)
-        for name in ("run_calculation", "cancel", "save", "load", "new", "export_script",
-                     "save_result", "recover", "list_recoverable", "discard_recovery",
-                     "trust", "console", "interrupt_console", "undo", "redo", "history"):
+        for name in ACTIONS:
             self.dispatcher.register_action(name, getattr(self, "_action_" + name))
 
     # ---- the command API

@@ -17,7 +17,7 @@ The window is a client of a Session: every change goes through the
 dispatcher. The selected item, the workspace, the canvas tool and the site
 selection are window state, not Document mutations; they are registered on
 the dispatcher as actions (select, workspace, tool, select_sites), so
-tools/drive.py and the future remote API reach them without putting clicks
+tools/drive.py and the remote API (remote/) reach them without putting clicks
 on the undo stack. region_from_selection and remove_selected are actions
 that apply one mutation each (add_region; add_geometry_op, or set_param on
 a trailing removal op, PLAN.md 3.1). The same state is saved with the
@@ -131,6 +131,8 @@ class MainWindow(QMainWindow):
         self.selected = ""
         self.workspace = "geometry"
         self.last_crash_report = None
+        self.remote = None             # the remote control server (PLAN.md 3.7), when on
+        self.remote_wanted = False     # started with the session when it is wanted
         self._owns_session = False
         self._unsubscribe = None
         self._last_crash_text = None
@@ -243,6 +245,9 @@ class MainWindow(QMainWindow):
         self.autosave_label = QLabel("")
         self.autosave_label.setObjectName("autosaveLabel")
         self.statusBar().addWidget(self.status_label, 1)
+        self.remote_label = QLabel("")
+        self.remote_label.setObjectName("remoteLabel")
+        self.statusBar().addPermanentWidget(self.remote_label)
         self.statusBar().addPermanentWidget(self.autosave_label)
 
         self.timer = QTimer(self)
@@ -261,6 +266,7 @@ class MainWindow(QMainWindow):
             stored = settings.load()
             self.set_theme(stored["theme"])
             self.always_trust_action.setChecked(stored["always_trust"])
+            self.set_remote(stored["remote"], remember=False)
 
     # ---- construction helpers
     def _dock(self, title, widget, name, area):
@@ -557,6 +563,13 @@ class MainWindow(QMainWindow):
         self.always_trust_action.setCheckable(True)
         self.always_trust_action.setToolTip("open every file with its Python nodes allowed to "
                                             "run (PLAN.md 13.7); off by default")
+        self.remote_action = self._action(
+            file_menu, "Allow re&mote control", lambda: self.set_remote(
+                self.remote_action.isChecked()), name="remoteAction")
+        self.remote_action.setCheckable(True)
+        self.remote_action.setToolTip("let other programs on this computer drive this window "
+                                      "through a localhost socket protected by a token (the "
+                                      "Claude add-on: guiqula mcp); off by default")
         file_menu.addSeparator()
         self._action(file_menu, "&Quit", self.close, "quit")
         file_menu.setToolTipsVisible(True)
@@ -671,12 +684,16 @@ class MainWindow(QMainWindow):
         dispatcher.register_action("theme", lambda name="system": self.set_theme(name))
         dispatcher.register_action("export_bundle", self.export_bundle)
         dispatcher.register_action("help", self.help)
+        dispatcher.register_action("remote", lambda enabled=True: self.set_remote(
+            enabled, remember=False))
         self.help_panel.session = session
         session.view_state = self.view_state
         self.timer.start(POLL_MS)
         self._document_changed()
         self.apply_view_state(session.document.ui)
         self._update_trust()
+        if self.remote_wanted and self.remote is None:
+            self.set_remote(True, remember=False)
         self.offer_recovery(quiet=True)
 
     def closeEvent(self, event):
@@ -686,6 +703,7 @@ class MainWindow(QMainWindow):
                 return
         self.timer.stop()
         self.build_timer.stop()
+        self._stop_remote()
         if self._unsubscribe:
             self._unsubscribe()
             self._unsubscribe = None
@@ -711,6 +729,14 @@ class MainWindow(QMainWindow):
             self.session.poll(0)
         except Exception:
             self.message("error while polling the workers:\n" + traceback.format_exc(), error=True)
+        if self.remote is not None:
+            try:
+                self.remote.poll(0)
+            except Exception:
+                self.message("remote control failed and was turned off:\n"
+                             + traceback.format_exc(), error=True)
+                self._stop_remote()
+                self._update_remote_label()
         self._update_autosave_label()
 
     def _on_session_event(self, kind, payload):
@@ -730,6 +756,9 @@ class MainWindow(QMainWindow):
         if event is not None and event["type"] == "action" and self.use_settings \
                 and event.get("name") in ("load", "save") and event.get("result"):
             self._remember_file(event["result"])
+        if event is not None and self.remote is not None and event["type"] in ("action", "reset") \
+                and event.get("name") in ("load", "save", "new", "recover", "reset"):
+            self.remote.update(document=str(self.session.path) if self.session.path else None)
         if event is not None and event["type"] in ("undo", "redo"):
             self._follow_step(event)
         if event is not None and event["type"] == "action":
@@ -2083,6 +2112,47 @@ class MainWindow(QMainWindow):
             self.session.always_trust = bool(enabled)
         if self.use_settings:
             settings.put("always_trust", bool(enabled))
+
+    def set_remote(self, enabled, remember=True):
+        """Let other programs drive this window (PLAN.md 3.7): a JSON-RPC
+        server on a localhost port, whose port and token are in a connection
+        file only the user can read (remote/connection.py); guiqula mcp, the
+        Claude add-on, finds it there. Off by default; the menu's choice is
+        kept in the settings file (remember), guiqula --remote turns it on
+        for one run. Returns the port, or None when off."""
+        enabled = bool(enabled)
+        self.remote_wanted = enabled
+        self.remote_action.setChecked(enabled)
+        if remember and self.use_settings:
+            settings.put("remote", enabled)
+        if enabled and self.remote is None and self.session is not None:
+            from guiqula.remote import window as remote_window
+            try:
+                self.remote = remote_window.start(self)
+            except OSError as error:
+                self.message(f"could not start remote control: {error}", error=True)
+            else:
+                self.message(f"remote control on: port {self.remote.port}, connection file "
+                             f"{self.remote.file}")
+        elif not enabled and self.remote is not None:
+            self._stop_remote()
+            self.message("remote control off")
+        self._update_remote_label()
+        return self.remote.port if self.remote is not None else None
+
+    def _stop_remote(self):
+        if self.remote is not None:
+            server, self.remote = self.remote, None
+            server.close()
+
+    def _update_remote_label(self):
+        if self.remote is None:
+            self.remote_label.setText("")
+            self.remote_label.setToolTip("")
+        else:
+            self.remote_label.setText(f"remote :{self.remote.port}")
+            self.remote_label.setToolTip(f"remote control is on (File > Allow remote control); "
+                                         f"connection file {self.remote.file}")
 
     def _remember_file(self, path):
         path = Path(path)

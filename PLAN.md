@@ -14,7 +14,9 @@ for phase 5 without commenting on the phase-4 report, so its items stand as
 built. Phase 5 (polish) was done on 2026-09-27; its report (design items 1
 to 14, the first seven being the recommendations for the open points of the
 in-app help in section 11, and decisions 15 to 24) awaits the maintainer's
-answers; phase 6 (distribution and the add-on) is next.
+answers. Phase 6 (distribution and the add-on) is under way: part 1, remote
+control and the MCP add-on, was done on 2026-09-27 (decisions 25 to 33 in
+section 7).
 
 ## 1. Requirements (as stated by the maintainer)
 
@@ -388,6 +390,11 @@ calculations, fetch result arrays and screenshots, and explain what it sees.
 Inside the program, an "Ask Claude" panel can send the same context to the
 Claude API. Nothing in phases 1 to 5 needs to change for this; it is the
 payoff of the headless core.
+Built in phase 6, part 1 (section 7): the server is `remote/server.py`
+(off unless File > Allow remote control, `guiqula --remote` or `guiqula
+serve`), the MCP server is `guiqula mcp` (written without the MCP SDK),
+and the "Ask Claude" panel is left for the maintainer to decide
+(decision 32).
 
 ### 3.8 Spatial modulation of any parameter (requirement 12)
 
@@ -621,8 +628,9 @@ One window, one document, three workspaces switched by tabs in the header
   Windows, an app bundle on macOS. Single-file installers (PyInstaller or
   Briefcase) are a phase-6 item; numba and jax make bundles large but they do
   work.
-- Optional extras: `[3d]` (pyqtgraph.opengl / pyvista), `[fast]` (pyqtgraph),
-  `[claude]` (MCP server).
+- Optional extras: `[3d]` (pyqtgraph.opengl / pyvista), `[fast]` (pyqtgraph).
+  (A `[claude]` extra for the MCP server was planned; the server needs no
+  dependency, decision 27.)
 - Look and feel: plain Qt Widgets with the Fusion style and a light/dark
   palette (QSS), no `qfluentwidgets` dependency (section 13, item 6).
 
@@ -1426,6 +1434,99 @@ part 3):
 **Phase 6 — distribution and add-on.** PyPI release, conda file, installers for
 Mac/Windows, plugin entry points and a plugin template, JSON-RPC server + MCP
 wrapper (the Claude add-on).
+Asked for on 2026-09-27 ("continue with the plan") without comments on the
+phase-5 report, so its items stand as built. Planned in parts, ordered by
+what can be verified on this machine: 1, remote control and the MCP add-on;
+2, plugins; 3, distribution (only Linux can be tried here; nothing is
+uploaded or pushed without the maintainer).
+**Part 1 done 2026-09-27** (remote control and the Claude add-on, 3.7).
+Built: the `remote` package. `api.py`: `RemoteAPI`, the methods a client
+calls over a Session, JSON in and out (`status`: the outline with each
+system's entries, Hilbert space, latest build and invalid entries, the
+calculations with status and estimate, the undo steps, the window's state;
+`document`; `commands`; `catalogue`: registry entries with their
+parameters, filtered by family, system kind or words; `do`: any mutation or
+action, replying once the geometry is rebuilt, as tools/drive.py waits;
+`run`, `wait`, `cancel`; `result`: summary, shapes and ranges, and the
+values asked for, thinned along the first axis beyond `max_values`
+numbers; `plot`: the result's figure drawn with Agg in the light theme;
+`screenshot` and `widgets`; `help`: an item's, an entry's or a guide
+section's Markdown, a heading found by its start; `script`; `console`;
+`journal`). A method that waits returns a `Pending`, which the server
+checks at every poll, so a calculation never holds up the window.
+`server.py`: JSON-RPC 2.0, one message per line, on 127.0.0.1 (a free
+port), `hello` with the token first or the connection is closed; the host
+polls it from its own loop (the window's 30 ms timer, `guiqula serve`), so
+the Session is only touched from one thread; a refused command (a
+CommandError, a window action's ValueError) is -32000 with its message.
+`connection.py`: a connection file per server (port, token, pid, whether a
+window) in `$GUIQULA_DATA_DIR/remote`, mode 0600, deleted on close; files
+of dead processes are deleted when listed. `client.py`: `connect()`.
+`mcp.py`: `guiqula mcp`, the MCP server Claude Code starts (`claude mcp
+add guiqula -- guiqula mcp`), 15 tools (status, document, commands,
+catalogue, command, run_calculation, wait, result, plot, screenshot,
+widgets, help, script, console, connect) and instructions for the model;
+it drives the newest running window or `guiqula serve`, else a Session of
+its own without a window; `connect` lists, attaches, starts a headless
+session or opens a window (`launch`). File descriptor 1 points at stderr
+while it runs, so pyqula's prints in the workers never reach the protocol
+stream. `window.py`: the window's hooks. The window: File > Allow remote
+control (kept in the settings file, off by default), `guiqula --remote`
+for one run, a `remote` window action, "remote :port" in the status bar;
+the connection file follows the document opened or saved. `guiqula serve
+[document]`: a session without a window, which asks for the builds after
+every change as the window does. `tools/mcp_check.py` runs the official
+MCP SDK's client against the bridge. The user guide has a section on it.
+Tests: `tests/remote/test_server.py` (round trip, the token, malformed
+requests, a pending reply that does not block another client, connection
+files), `tests/remote/test_api.py` (every method over a Session with
+workers), `tests/remote/test_mcp.py` (the protocol replies; `guiqula mcp`
+as a process with its own session and attached to `guiqula serve`, line by
+line, stdout holding only protocol; the SDK's client when
+`$GUIQULA_MCP_PYTHON` names a Python that has it), and
+`tests/ui/test_remote_window.py` (the offscreen window driven from a
+client in another thread: status, screenshots, commands reaching the
+outliner, a run drawn in its view, the switch and its setting; the list of
+window actions). Verified with the MCP SDK 2.2.0 (in a scratch venv only):
+its client negotiates 2025-11-25, lists the tools, reads text and image
+results and `isError`. Facts learned: the MCP revision 2026-07-28 replaced
+the handshake by a stateless per-request envelope; a 2026 client first
+sends `server/discover` and falls back to `initialize` on any error except
+an unsupported-version error naming only 2026 revisions, so a server that
+answers "method not found" keeps working.
+Decisions for the maintainer, numbered after the phase-5 ones:
+25. remote control is off by default: File > Allow remote control (kept
+    in the settings) or `guiqula --remote` for one run; a client with the
+    token can do what the user can, the console and `trust` included
+    (Jupyter's model: localhost only, a token in a file only the user can
+    read);
+26. the transport is TCP on 127.0.0.1 with newline-delimited JSON-RPC 2.0
+    (a Unix socket would leave Windows out); no server thread: the host's
+    loop polls it and a long request answers later;
+27. the MCP protocol is written in guiqula (about 450 lines) instead of
+    depending on the MCP SDK, which brings anyio, httpx, starlette, uvicorn
+    and more; it speaks the handshake revisions 2024-11-05 to 2025-11-25,
+    not the stateless 2026-07-28 one (clients fall back); so the `[claude]`
+    extra of section 6 needs no dependency and is dropped;
+28. the add-on is `guiqula mcp`, a subcommand, rather than 3.7's separate
+    `guiqula-mcp` script;
+29. the bridge attaches, at its first tool call, to the newest running
+    window or server, else runs a session of its own without a window; it
+    never loads a document into a window it attaches to (that would drop
+    unsaved work); `connect` switches;
+30. `command` replies once the geometry is rebuilt (as tools/drive.py
+    waits); `result` sends at most 2000 numbers per array unless asked
+    (thinned rows, and says so); `plot` draws in the light theme;
+31. a window action's ValueError counts as a refused command (-32000),
+    like a CommandError;
+32. the "Ask Claude" panel inside the window (3.7) is not built: it needs
+    the `anthropic` package, an API key and pays per use, and the MCP
+    add-on already lets Claude Code drive the window. If wanted: a dock
+    that calls the same `RemoteAPI` in-process through the Claude API's
+    tool use, the key from `ANTHROPIC_API_KEY`;
+33. a `.mcp.json` in this repository would register the add-on for every
+    Claude Code session opened here (the maintainer's own configuration):
+    offered, not added.
 
 ### Where the section 13 items land
 

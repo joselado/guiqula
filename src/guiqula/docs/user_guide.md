@@ -186,8 +186,8 @@ protection.
 Edit > Undo and Redo say which step they take back; Edit > Undo history goes back several
 steps at once, and the selection follows. What is shown (the selection, the workspace,
 the sliders, the overlays, the theme) is not undone. View > Theme chooses light, dark or
-the desktop's scheme. The settings (theme, recent files, always trust) are a file in the
-user configuration directory.
+the desktop's scheme. The settings (theme, recent files, always trust, remote control)
+are a file in the user configuration directory.
 
 ## Headless use
 
@@ -201,6 +201,40 @@ guiqula script honeycomb_zeeman_rashba --calc c1
 `run` computes a calculation of a project or preset and writes its arrays (and, with
 `--script`, the pyqula script); `script` prints the script. A file with Python nodes needs
 `--trust`.
+
+## Remote control and the Claude add-on
+
+Other programs on the same computer can drive guiqula, and Claude (Claude Code, or any
+MCP client) can drive it through them. File > Allow remote control (or `guiqula --remote`
+for one run) makes the window listen on a local port; `guiqula serve project.guiqula`
+does the same without a window. The port and a secret token are written to a connection
+file in the user data directory that only the user can read, and a client must present
+the token first. What a client does goes through the same commands as the window: it is
+undoable, it shows in the window at once, and locks refuse it. A client with the token
+can do anything the user can, including running Python in the console, so remote control
+is off by default.
+
+`guiqula mcp` is the add-on: an MCP server on standard input and output whose tools
+(status, catalogue, command, run_calculation, result, plot, screenshot, help, script,
+console...) drive the newest running window, or, when none runs, a session of its own
+without a window. Register it with Claude Code once:
+
+```
+claude mcp add guiqula -- guiqula mcp
+```
+
+From a source checkout, give the interpreter and the path instead:
+`claude mcp add guiqula -e PYTHONPATH=/path/to/guiqula/src -- python -m guiqula mcp`.
+Its `connect` tool lists the running windows, attaches to one, or opens one.
+
+Scripts can use the same port with `guiqula.remote.client`:
+
+```python
+from guiqula.remote.client import connect
+with connect() as client:
+    client.call("do", command="add_term", args={"system": "s1", "kind": "haldane"})
+    print(client.call("run", calculation="c1")["result"]["arrays"])
+```
 
 ## Keyboard shortcuts
 

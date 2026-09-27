@@ -33,11 +33,14 @@ def build_main_window(**options):
     return MainWindow(**options)
 
 
-def run(argv=None, document=None):
+def run(argv=None, document=None, remote=False):
     """Show the main window, start the workers once it is visible, and run
-    the event loop; return the exit code."""
+    the event loop; return the exit code. remote: turn remote control on
+    for this run (PLAN.md 3.7), whatever the settings say."""
     app = create_application(argv)
     window = build_main_window(ask_before_close=True, use_settings=True)
+    if remote:
+        window.set_remote(True, remember=False)
     errors.install(window)
     window.show()
     QTimer.singleShot(0, lambda: window.start_session(document))

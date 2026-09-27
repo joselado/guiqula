@@ -1,0 +1,190 @@
+"""guiqula serve and guiqula mcp (the Claude add-on, PLAN.md 3.7), as
+processes: the MCP bridge spoken to line by line, with its own session and
+attached to a running server; and the bridge's protocol replies."""
+import base64
+import json
+import os
+import signal
+import subprocess
+import sys
+import time
+
+import pytest
+
+from guiqula.remote import connection
+from guiqula.remote.client import connect
+from guiqula.remote.mcp import VERSIONS, Bridge, tools
+
+SRC = os.path.join(os.path.dirname(__file__), "..", "..", "src")
+
+
+def child_env():
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join([os.path.abspath(SRC)] + [
+        p for p in env.get("PYTHONPATH", "").split(os.pathsep) if p])
+    return env
+
+
+class McpProcess:
+    def __init__(self, *args):
+        self.process = subprocess.Popen([sys.executable, "-m", "guiqula", "mcp", *args],
+                                        stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                        stderr=subprocess.PIPE, env=child_env())
+        self.ids = 0
+
+    def send(self, method, params=None, notify=False):
+        message = {"jsonrpc": "2.0", "method": method, "params": params or {}}
+        if not notify:
+            self.ids += 1
+            message["id"] = self.ids
+        self.process.stdin.write(json.dumps(message).encode() + b"\n")
+        self.process.stdin.flush()
+        if notify:
+            return None
+        line = self.process.stdout.readline()
+        assert line, self.process.stderr.read().decode()[-3000:]
+        reply = json.loads(line)          # nothing but protocol messages on stdout
+        assert reply["id"] == self.ids
+        return reply
+
+    def tool(self, tool, /, **arguments):
+        reply = self.send("tools/call", {"name": tool, "arguments": arguments})
+        return reply["result"]
+
+    def close(self):
+        self.process.stdin.close()
+        assert self.process.wait(timeout=60) == 0
+        return self.process.stderr.read().decode()
+
+
+def text_of(result):
+    return "\n".join(c["text"] for c in result["content"] if c["type"] == "text")
+
+
+def test_protocol_replies():
+    bridge = Bridge("headless")
+    reply = bridge.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                           "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                                      "clientInfo": {"name": "t", "version": "0"}}})
+    result = reply["result"]
+    assert result["protocolVersion"] == "2025-06-18"
+    assert result["capabilities"] == {"tools": {"listChanged": False}}
+    assert result["serverInfo"]["name"] == "guiqula" and "status" in result["instructions"]
+    # an unknown version gets the newest; the 2026 probe falls back to the handshake
+    reply = bridge.handle({"id": 2, "method": "initialize", "params": {"protocolVersion": "1999"}})
+    assert reply["result"]["protocolVersion"] == VERSIONS[-1]
+    assert bridge.handle({"id": 3, "method": "server/discover"})["error"]["code"] == -32601
+    assert bridge.handle({"method": "notifications/initialized"}) is None
+    assert bridge.handle({"id": 4, "method": "ping"})["result"] == {}
+    listed = bridge.handle({"id": 5, "method": "tools/list"})["result"]["tools"]
+    assert [t["name"] for t in listed] == [t[0] for t in tools()]
+    for tool in listed:
+        assert tool["inputSchema"]["type"] == "object" and tool["description"]
+        assert "readOnlyHint" in tool["annotations"]
+    assert "add_term(system, kind" in next(t for t in listed if t["name"] == "command")[
+        "description"]
+    reply = bridge.handle({"id": 6, "method": "tools/call", "params": {"name": "nonsense"}})
+    assert reply["error"]["code"] == -32602
+    reply = bridge.handle({"id": 7, "method": "tools/call",
+                           "params": {"name": "status", "arguments": {"bogus": 1}}})
+    assert reply["result"]["isError"] is True           # the model sees what was wrong
+    assert bridge.backend is None                       # nothing was started for it
+
+
+@pytest.mark.parametrize("version", ["2024-11-05"])
+def test_old_revisions_get_no_annotations(version):
+    bridge = Bridge("headless")
+    bridge.handle({"id": 1, "method": "initialize", "params": {"protocolVersion": version}})
+    listed = bridge.handle({"id": 2, "method": "tools/list"})["result"]["tools"]
+    assert all("annotations" not in t for t in listed)
+
+
+def test_mcp_with_its_own_session():
+    mcp = McpProcess("--headless", "--document", "honeycomb_zeeman_rashba")
+    try:
+        reply = mcp.send("initialize", {"protocolVersion": "2025-11-25", "capabilities": {},
+                                        "clientInfo": {"name": "test", "version": "0"}})
+        assert reply["result"]["protocolVersion"] == "2025-11-25"
+        mcp.send("notifications/initialized", notify=True)
+        assert len(mcp.send("tools/list")["result"]["tools"]) == len(tools())
+        status = mcp.tool("status")
+        assert not status["isError"]
+        assert text_of(status).startswith("connected to a session of the bridge's own")
+        assert json.loads(text_of(status).split("\n", 1)[1])["systems"][0]["id"] == "s1"
+        added = mcp.tool("command", name="add_term", args={"system": "s1", "kind": "haldane",
+                                                            "params": {"t": 0.05}})
+        assert json.loads(text_of(added))["result"] == "t3"
+        refused = mcp.tool("command", name="add_term", args={"system": "s9", "kind": "haldane"})
+        assert refused["isError"] and "s9" in text_of(refused)
+        run = json.loads(text_of(mcp.tool("run_calculation", calculation="c1")))
+        assert run["status"] == "done", run
+        plot = mcp.tool("plot", calculation="c1")
+        image = plot["content"][0]
+        assert image["type"] == "image" and image["mimeType"] == "image/png"
+        assert base64.b64decode(image["data"])[:4] == b"\x89PNG"
+        shot = mcp.tool("screenshot")
+        assert shot["isError"] and "window" in text_of(shot)
+        assert "add_haldane" in text_of(mcp.tool("help", kind="haldane"))
+        assert "get_bands" in text_of(mcp.tool("script", calculation="c1"))
+        out = mcp.tool("console", code="print('from the console', h.intra.shape)")
+        assert "from the console (16, 16)" in text_of(out)
+        undo = json.loads(text_of(mcp.tool("command", name="undo")))
+        assert undo["result"]["redo"][0].startswith("add")      # the history after it
+    finally:
+        stderr = mcp.close()
+    assert "Traceback" not in stderr, stderr[-3000:]
+
+
+def test_serve_and_attach():
+    serve = subprocess.Popen([sys.executable, "-m", "guiqula", "serve", "honeycomb_zeeman_rashba",
+                              "--no-warm"], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             env=child_env(), text=True)
+    try:
+        info = json.loads(serve.stdout.readline())
+        assert os.path.exists(info["connection_file"])
+        with connect(info["pid"]) as client:
+            assert client.info["window"] is False
+            reply = client.call("do", command="set_param",
+                                args={"entry": "t2", "name": "c", "value": 0.2})
+            assert reply["systems"]["s1"]["build"]["current"]
+        mcp = McpProcess("--attach")
+        try:
+            mcp.send("initialize", {"protocolVersion": "2025-06-18"})
+            status = mcp.tool("status")
+            assert text_of(status).startswith(f"connected to guiqula serve of process "
+                                              f"{info['pid']}")
+            document = json.loads(text_of(mcp.tool("document")))
+            assert document["systems"][0]["hamiltonian"]["terms"][1]["params"]["c"] == 0.2
+            listed = json.loads(text_of(mcp.tool("connect")))
+            assert info["pid"] in [r["pid"] for r in listed["running"]]
+            assert all("token" not in r for r in listed["running"])
+        finally:
+            mcp.close()
+    finally:
+        serve.send_signal(signal.SIGTERM)
+        assert serve.wait(timeout=60) == 0, serve.stderr.read()[-3000:]
+    assert not os.path.exists(info["connection_file"])     # removed on a clean stop
+
+
+def test_attach_without_a_server_says_so():
+    before = {i["pid"] for i in connection.instances()}
+    mcp = McpProcess("--attach")
+    try:
+        mcp.send("initialize", {"protocolVersion": "2025-06-18"})
+        if before:
+            pytest.skip("another guiqula serves remotely in this run")
+        status = mcp.tool("status")
+        assert status["isError"] and "guiqula --remote" in text_of(status)
+    finally:
+        mcp.close()
+
+
+@pytest.mark.skipif(not os.environ.get("GUIQULA_MCP_PYTHON"),
+                    reason="set GUIQULA_MCP_PYTHON to a Python with the MCP SDK (pip install mcp)")
+def test_the_sdk_client_understands_the_bridge(repo):
+    """The official MCP SDK's client against guiqula's own protocol code."""
+    done = subprocess.run([os.environ["GUIQULA_MCP_PYTHON"], str(repo / "tools" / "mcp_check.py"),
+                           "--python", sys.executable], capture_output=True, text=True,
+                          timeout=600, env=child_env())
+    assert done.returncode == 0, done.stdout + done.stderr[-3000:]
+    assert json.loads(done.stdout)["server"] == "guiqula"
