@@ -57,7 +57,11 @@ a `Session`.
   nearest to a position within a tolerance, by a cell hash: regions by positions, painted
   and from_result Fields and the canvas selection must use it, never an N x M scan), `results.py` (the `Result` dataclass
   that crosses the process boundary; a result drawn on the atoms carries its geometry in
-  `structure`; `ResultRef`, what a from_result Field reads), `hashing.py`.
+  `structure`, and the ResultRefs its from_result Fields read in `reads`; `ResultRef`,
+  what a from_result Field reads), `bonds.py` (a Field known on the sites only, painted,
+  from_result or a region by positions, at the bond midpoints where pyqula evaluates the
+  parameters declared `FieldParam(bond=True)`: the mean of the two ends, a region holding
+  a bond when it holds both), `hashing.py`.
 - `registry/`: one declaration per lattice, op, term, mean field and calculation
   (`lattices.py`, `geometry_ops.py`, `terms.py`, `meanfield.py`, `calculations.py`,
   `classical.py` for the classical models, terms and calculations, `python_nodes.py`,

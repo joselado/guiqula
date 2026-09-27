@@ -463,8 +463,8 @@ the origin, not the position vector: subscripts are not allowed, so the
 coordinates are `x, y, z` (phase 1 choice, 2026-09-26). Script export
 writes `x` as `r[0]` and `r` as `np.linalg.norm(r)` inside `lambda r:`.
 One arithmetic holds in the engine, the canvas previews and the exported
-script alike (the maintainer's decision of 2026-09-28): a comparison is
-1.0 where it holds and 0.0 elsewhere wherever it appears, so
+script alike (a review decision of 2026-09-28, open to the maintainer): a
+comparison is 1.0 where it holds and 0.0 elsewhere wherever it appears, so
 `(x > 0) + (y > 0)` is 2 where both hold and `-(x > 0)` works; `&`, `|`,
 `^` and `~` are logical on such truth values; a value that is not a real
 number (`(-8)**(1/3)`) is refused when typed and when evaluated; a function
