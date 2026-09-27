@@ -4,7 +4,8 @@ vectors satisfy a_i . b_j = delta_ij), the high-symmetry points pyqula
 names for its geometry, pyqula's default path (dashed), and the k-path of
 the chosen calculation (bands, spectral function) with vertices that can
 be dragged (they snap to the high-symmetry points, and are then stored by
-label) or added with the Add points tool; the Fermi surface of the system,
+label) or added with the Add points tool (a click on a vertex adds it
+again, so that a path can pass twice through a point, Γ-K-M-Γ); the Fermi surface of the system,
 when it has one, is drawn under the zone. The worker hands the geometry of
 k-space in the build summary (engine/structure.kspace), since this process
 cannot call pyqula; the window turns an edit into set_param on the
@@ -14,7 +15,7 @@ import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
 from matplotlib.patches import Polygon
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QPushButton, QToolButton,
                                QVBoxLayout, QWidget)
 
@@ -23,6 +24,7 @@ from guiqula.ui import theme
 
 SNAP = 0.08          # a vertex this close (in |b1|) to a high-symmetry point takes its label
 GRAB_PIXELS = 10     # a press this close to a vertex drags it
+CLICK_PIXELS = 3     # a press released this close to where it started is a click, not a drag
 NAMES = {"G": "Γ"}
 
 
@@ -136,7 +138,9 @@ class KSpaceView(QWidget):
         self.add.setObjectName("kpathAdd")
         self.add.setCheckable(True)
         self.add.setToolTip("click in the zone to add a vertex at the end of the path (it snaps "
-                            "to a high-symmetry point nearby)")
+                            "to a high-symmetry point nearby); click a vertex to pass through "
+                            "it again; drag a vertex to move it")
+        self.add.toggled.connect(lambda on: self.stop_navigating() if on else None)
         self.remove_last = QPushButton("Remove last")
         self.remove_last.setObjectName("kpathRemoveLast")
         self.remove_last.clicked.connect(self._remove_last)
@@ -163,6 +167,11 @@ class KSpaceView(QWidget):
         self.calc = None
         self.vertices = np.zeros((0, 2))
         self._drag = None
+        self._press = None         # where a press on a vertex started, until it moves
+        # pan or zoom takes the clicks: Add points shows off meanwhile (checking it again
+        # turns them off), once the toolbar's own slot has switched the mode
+        self.toolbar.actionTriggered.connect(lambda action: QTimer.singleShot(
+            0, lambda: self.add.setChecked(False) if self.toolbar.mode else None))
         self.canvas.mpl_connect("button_press_event", self._on_press)
         self.canvas.mpl_connect("motion_notify_event", self._on_motion)
         self.canvas.mpl_connect("button_release_event", self._on_release)
@@ -255,6 +264,14 @@ class KSpaceView(QWidget):
         if self.calc is not None:
             self.path_edited.emit(self.calc, vertices)
 
+    def stop_navigating(self):
+        """Turn off the toolbar's pan or zoom mode, which takes the clicks."""
+        mode = str(getattr(self.toolbar, "mode", ""))
+        if mode == "pan/zoom":
+            self.toolbar.pan()
+        elif mode == "zoom rect":
+            self.toolbar.zoom()
+
     def _pixel_near(self, event):
         if not len(self.vertices):
             return None
@@ -269,13 +286,17 @@ class KSpaceView(QWidget):
             return
         index = self._pixel_near(event)
         if index is not None:
-            self._drag = index
+            self._drag, self._press = index, (event.x, event.y)
         elif self.add.isChecked():
             self.add_point((event.xdata, event.ydata))
 
     def _on_motion(self, event):
         if self._drag is None or event.inaxes is not self.ax or event.xdata is None:
             return
+        if self._press is not None:
+            if np.hypot(event.x - self._press[0], event.y - self._press[1]) <= CLICK_PIXELS:
+                return                             # not a drag yet
+            self._press = None
         self.vertices[self._drag] = (event.xdata, event.ydata)
         self._line.set_data(self.vertices[:, 0], self.vertices[:, 1])
         self.canvas.draw_idle()
@@ -284,4 +305,9 @@ class KSpaceView(QWidget):
         if self._drag is None:
             return
         index, self._drag = self._drag, None
-        self.move_vertex(index, self.vertices[index])
+        if self._press is None:                    # it was dragged: move it
+            self.move_vertex(index, self.vertices[index])
+            return
+        self._press = None
+        if self.add.isChecked():                   # a click on it: pass through it again
+            self.add_point(self.vertices[index])

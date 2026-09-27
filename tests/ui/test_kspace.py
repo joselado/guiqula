@@ -78,3 +78,41 @@ def test_the_path_on_the_zone(window, qtbot, shot):
     assert session.document.calculation("c1").params["kpath"] is None
     window.viewport.setCurrentIndex(1)          # running c1 brought its result forward
     assert window.view_state()["tab"] == "kspace"
+
+
+def test_a_click_on_a_vertex_passes_through_it_again(window, qtbot):
+    """A press released where it started, on a vertex, adds that point again
+    with Add points on (a path can go back to Γ); a drag still moves it."""
+    session = window.session
+    settle(qtbot, window)
+    window.viewport.setCurrentIndex(1)
+    view = window.kspace_view
+    special = tools.special_images(view.kspace)
+    b = view.kspace["reciprocal"]
+
+    def path():
+        return session.document.calculation("c1").params["kpath"]
+
+    def click(point, jitter=0.0):
+        x, y = view.ax.transData.transform(point)
+        MouseEvent("button_press_event", view.canvas, x, y, button=1)._process()
+        MouseEvent("motion_notify_event", view.canvas, x + jitter, y, button=1)._process()
+        MouseEvent("button_release_event", view.canvas, x + jitter, y, button=1)._process()
+
+    view.add.setChecked(True)
+    next(a for a in view.toolbar.actions() if a.text() == "Pan").trigger()
+    qtbot.waitUntil(lambda: not view.add.isChecked())    # pan takes the clicks: Add shows off
+    view.add.setChecked(True)                            # and turns pan off again
+    assert str(view.toolbar.mode) == ""
+    click(special["K"])                                  # a new path starts at Γ
+    click(special["M"])
+    click((0.0, 0.0), jitter=2)                          # on the Γ vertex, a click: again
+    assert np.allclose(tools.to_plane(path(), b), [[0, 0], special["K"], special["M"], [0, 0]],
+                       atol=1e-6)
+    click(special["K"])                                  # and through K a second time
+    assert len(path()) == 5 and np.allclose(tools.to_plane(path(), b)[4], special["K"],
+                                            atol=1e-6)
+    view.add.setChecked(False)                           # without Add points: nothing
+    click(special["M"])
+    assert len(path()) == 5
+    view.default.click()

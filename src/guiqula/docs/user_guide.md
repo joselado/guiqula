@@ -154,9 +154,11 @@ the script alone. The scripts use pyqula only, not guiqula.
 
 The k-space tab draws the Brillouin zone of the selected system with the high-symmetry
 points pyqula knows for it, pyqula's default path (dashed) and the k-path of the chosen
-calculation. Add points appends vertices (they snap onto the high-symmetry points), a
-vertex can be dragged, Remove last removes one, and Default path goes back to pyqula's. The latest Fermi
-surface of the system is drawn underneath.
+calculation. Add points appends vertices (they snap onto the high-symmetry points); with
+it on, a click on a vertex of the path adds that point again, so a path can pass twice
+through a point (Γ K M Γ). A vertex can be dragged, Remove last removes one, and Default
+path goes back to pyqula's. The k-path of a calculation's form takes the same path as text
+(`G K M G`). The latest Fermi surface of the system is drawn underneath.
 
 ## Python nodes, trust and the console
 
