@@ -49,7 +49,8 @@ def parse_args(argv):
                         help='command, e.g. \'{"do": "add_term", "system": "s1", "kind": "haldane"}\'')
     parser.add_argument("--commands", metavar="FILE", help="JSON list of --do objects")
     parser.add_argument("--run", action="append", default=[], metavar="CALC",
-                        help="calculation id to run with the Run button (repeatable)")
+                        help="calculation id to run with the Run button (repeatable); a slow one "
+                             "is confirmed in the cost bar (the report's cost_guard)")
     parser.add_argument("--cores", type=int, default=1)
     parser.add_argument("--timeout", type=float, default=600, help="seconds to wait for jobs")
     parser.add_argument("--no-warm", action="store_true", help="skip the numba warm-up")
@@ -156,7 +157,17 @@ def main(argv=None):
         for calc in args.run:
             window.select_calculation(calc)
             window.run_button.click()
-            job = session.calc_jobs[calc]
+            if calc not in session.calc_jobs and window.cost_bar.isVisible():
+                # the cost guard asks before a slow run: --run means run, so answer it
+                from PySide6.QtWidgets import QPushButton
+                window.cost_bar.findChild(QPushButton, "runAnywayButton").click()
+                report.setdefault("cost_guard", []).append(calc)
+            job = session.calc_jobs.get(calc)
+            if job is None:
+                print(f"drive.py: {calc} did not start (see the log in the report)",
+                      file=sys.stderr)
+                status = 1
+                continue
             deadline = time.monotonic() + args.timeout
             while not job.done and time.monotonic() < deadline:
                 app.processEvents()

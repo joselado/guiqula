@@ -294,6 +294,7 @@ claude mcp add guiqula -e PYTHONPATH=$PWD/src -- python -m guiqula mcp  # regist
 PYTHONPATH=src python -m guiqula desktop [--remove]   # menu entry, icon, file type (this user)
 python -m build && twine check --strict dist/*   # sdist and wheel (packaging/README.md)
 python tools/make_icons.py             # the PNG, ICO and ICNS from resources/guiqula.svg
+python tools/readme_images.py [name ...]   # the README's screenshots (docs/images), by drive.py
 tools/update_vendor.sh /path/to/pyqula  # refresh vendor/ from upstream pyqula ($PYQULA_SRC)
 ```
 

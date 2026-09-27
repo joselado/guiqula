@@ -53,7 +53,7 @@
             "kind": "spin_field",
             "enabled": true,
             "params": {
-              "b": ["0.6*tanh(x - 10)", 0.0, 0.3]
+              "b": ["0.6*tanh(x)", 0.0, 0.3]
             },
             "region": null
           }

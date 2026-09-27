@@ -1685,6 +1685,23 @@ desktop` keeps its icons (ICO, ICNS) for pip installs on Windows and
 macOS; 44, Python 3.12 and 3.13 only (what has run: the full suite on
 both); 26, 28 to 32, 36, 40, 43 and 45 were not asked and stand as built.
 
+Asked for at the same time: a README for users, condensed matter physicists: how to
+install, then what guiqula does, then examples by physical regime with screenshots (flat
+bands, Chern insulator, quantum spin Hall, quantum Hall, interaction-driven edge
+magnetism, Majorana wire, Aubry-Andre localization, a graphene flake with a gate,
+frustrated classical spins, a classical texture seen by electrons). The images are in
+`docs/images/` (about 1 MB, not in the sdist), linked by absolute URLs so that PyPI shows
+them too, and `tools/readme_images.py` makes them again through `tools/drive.py`. Found
+while making them: the `texture_exchange` preset's field `0.6*tanh(x - 10)` assumed a
+ladder from x = 0 to 20, but the finite ladder is centred, so the minimized texture was
+uniform and there was no domain wall: it is `0.6*tanh(x)` now; `tools/drive.py --run`
+failed with a KeyError when the cost guard asked before a slow run (the Haldane phase
+diagram), and now answers "Run anyway" (the report's `cost_guard`). Not fixed: a heatmap in
+a narrow result view clips its y tick labels (the Berry curvature map in a 1400-pixel
+window); bands coloured by sz look noisy wherever the bands are degenerate (a zigzag
+ribbon's), since the spin of a degenerate pair is arbitrary, so the README colours the
+Kane-Mele ribbon by position instead.
+
 ### Where the section 13 items land
 
 | Phase | Items |
