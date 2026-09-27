@@ -28,7 +28,7 @@ the version guiqula was tested with.
 
 ## Install
 
-Python 3.11 or newer, on Linux, macOS or Windows:
+Python 3.12 or 3.13, on Linux, macOS or Windows:
 
 ```
 pip install guiqula            # or: pipx install guiqula, uv tool install guiqula
@@ -38,9 +38,6 @@ guiqula desktop                # a menu entry and an icon (optional)
 
 With conda, `conda env create -f environment.yml` makes an environment `guiqula` with
 the dependencies from conda-forge and guiqula from PyPI.
-
-Stand-alone builds (a Windows installer, a macOS disk image, a Linux folder) that need no
-Python are made with PyInstaller; `packaging/README.md` says how.
 
 The first calculation of a session takes some seconds more: numba compiles pyqula's
 kernels once, and keeps them in the user cache directory.

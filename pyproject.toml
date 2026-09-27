@@ -12,10 +12,10 @@ license = "GPL-3.0-or-later"
 license-files = ["LICENSE"]
 keywords = ["tight-binding", "condensed matter", "topology", "pyqula", "physics", "GUI"]
 authors = [
-    {name = "Jose Lado", email = "joselado@aalto.fi"},
+    {name = "Jose Lado", email = "jose.lado@aalto.fi"},
 ]
-# jax>=0.8.1 (a pyqula dependency) needs Python 3.11; developed on 3.12.
-requires-python = ">=3.11"
+# 3.12 and 3.13: the versions the whole test suite has run on (phase-6 answer 44).
+requires-python = ">=3.12"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: X11 Applications :: Qt",
@@ -23,7 +23,6 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Physics",
@@ -53,6 +52,9 @@ fast = ["pyqtgraph>=0.13"]
 test = ["pytest>=7.4", "pytest-qt>=4.4", "setuptools>=77", "build"]
 
 [project.urls]
+Homepage = "https://github.com/joselado/guiqula"
+Source = "https://github.com/joselado/guiqula"
+Issues = "https://github.com/joselado/guiqula/issues"
 pyqula = "https://github.com/joselado/pyqula"
 
 [project.scripts]
