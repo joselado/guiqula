@@ -2097,9 +2097,13 @@ maintainer to confirm or change):
   never in a key; `rename` takes them, `add_term` and `add_calculation`
   take `name`, the outliner shows it after the kind;
 - run at once is off in a window that does not read the settings (the
-  tests, `tools/drive.py`, `guiqula --offscreen`), as the theme is left
-  alone there, so that nothing a driver adds starts a run it did not ask
-  for; the interactive program starts with it on;
+  tests and `tools/drive.py`), as the theme is left alone there, so that
+  nothing a driver adds starts a run it did not ask for; the program
+  (`guiqula`, `--offscreen` too) reads it and starts with it on; a
+  calculation that is not set up yet (a sweep that names no calculation,
+  a Python calculation in an untrusted document) is not run at once, and
+  a vertex dragged in the k-space tab re-runs the bands at once when the
+  drag ends (a plain `set_param`, as a form edit is);
 - the Fermi level adds to the shift the picked result saw: an energy is
   picked on a spectrum the previous Fermi-level term (if the result's
   snapshot had one) had moved already, so the new mu is that term's mu
@@ -2189,9 +2193,11 @@ your answer:
     calculations (left out of the JSON when empty, never in a key), which
     the naming of what a pick adds and the "Fermi level" term need;
 56. Run at once is off in a window that does not read the settings (the
-    tests, `tools/drive.py`, `--offscreen`), on in the interactive program;
+    tests, `tools/drive.py`), on in the program; a k-path vertex dragged in
+    the k-space tab re-runs the bands at once when the drag ends;
 57. the Fermi-level target adds to the shift the picked result saw (the
-    energy is read on a spectrum the previous Fermi-level term had moved);
+    energy is read on a spectrum the previous Fermi-level term had moved),
+    and turns the term on again if it was off;
 58. an optional quantity (the LDOS's k-point) gives two targets, without
     and with it; an LDOS over the mesh stays so when moved;
 59. the eigenstate's k-point is a plain vector (Γ by default), and the
@@ -2211,6 +2217,7 @@ your answer:
 | 3 | 13.12 cost guard; 13.8 Hamiltonian view (first version: bonds and onsite); Fields: constant, expression, piecewise (section 3.8) |
 | 4 | 13.5 classical systems; 13.7 trust prompt (arrives with Python nodes); 14.1 remote console; 13.9 Brillouin-zone canvas; 13.10 sliders and sweeps; 13.11 overlays; Fields: profile, interpolated, painted, from_result (section 3.8) |
 | 5 | 13.16 teaching presets and exports; 13.13 in-app help from pyqula's documentation |
+| 7 | 13.17 calculations from picks |
 | 7 (proposed) | 13.17 calculations from picks |
 
 ## 8. Risks and mitigations

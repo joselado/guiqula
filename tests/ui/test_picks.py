@@ -200,7 +200,15 @@ def test_the_fermi_level_target(window, qtbot):
     again = session.act("pick", calculation="c1", x=x, y=y)     # updates the same term
     target = again["targets"][of(again["targets"], "fermi_level")]
     assert target["term"] == term.id
-    session.undo()
+    session.do("set_enabled", entry=term.id, enabled=False)      # off: the next pick turns
+    steps = len(session.dispatcher.history()["undo"])            # it on, in one step
+    target = session.act("pick", calculation="c1", x=x, y=y)["targets"]
+    target = target[of(target, "fermi_level")]
+    assert "update and enable" in target["label"]
+    session.act("pick_to", calculation="c1", target=target)
+    assert session.document.find(term.id)[4].enabled
+    assert len(session.dispatcher.history()["undo"]) == steps + 1
+    session.undo(3)
     assert not any(t.name == pick_targets.FERMI_LEVEL
                    for t in session.document.system("s1").hamiltonian.terms)
 
@@ -247,6 +255,9 @@ def test_run_at_once(window, qtbot):
         assert session.status(calc) == "stale" and session.calc_jobs[calc].done
         session.undo()
         assert session.status(calc) == "done"
+        sweep = session.do("add_calculation", system="s1", kind="sweep")   # not set up yet
+        assert sweep not in session.calc_jobs
+        session.do("remove", entry=sweep)
     finally:
         session.act("run_at_once", enabled=False)
         session.do("remove", entry=calc)

@@ -88,6 +88,10 @@ def _where(values):
     return " ".join(part for part in (f"at {at}" if at else "", on) if part)
 
 
+def _verb(term):
+    return "add" if term is None else "update" if term.enabled else "update and enable"
+
+
 def fermi_term(system):
     """The Fermi-level term of a system (an onsite term of that name), or None."""
     for term in terms_of(system):
@@ -198,6 +202,6 @@ def targets(document, system_id, values, source=None, mode=None, dimensionality=
         out.append({"target": "fermi_level", "system": system_id,
                     "term": term.id if term is not None else None, "mu": mu,
                     "label": f"Fermi level to E = {pick_tools.number(energy)} "
-                             f"({'update' if term is not None else 'add'} the onsite term "
-                             f"{FERMI_LEVEL!r}, mu = {pick_tools.number(mu)})"})
+                             f"({_verb(term)} the onsite term {FERMI_LEVEL!r}, "
+                             f"mu = {pick_tools.number(mu)})"})
     return out

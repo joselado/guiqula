@@ -2246,6 +2246,12 @@ class MainWindow(QMainWindow):
         if not self.run_at_once or self.session is None or \
                 (self.session.result(calc) is not None and not self.session.is_stale(calc)):
             return None
+        try:
+            unset = self.session.plan_calculation(calc).problem
+        except Exception:
+            unset = True
+        if unset:            # not set up yet (a sweep naming nothing, an untrusted Python
+            return None      # node): the outliner says why, and nothing runs
         self.session.jobs.supersede("run", calc)
         job = self.run_guarded(calc)
         return job["id"] if isinstance(job, dict) else None
@@ -2369,8 +2375,14 @@ class MainWindow(QMainWindow):
             return {"target": kind, "calculation": run}
         if kind == "fermi_level":
             if target.get("term"):
-                session.do("set_param", entry=target["term"], name="mu", value=target["mu"])
                 term = target["term"]
+                key = f"pick:{time.time()}"            # set, and on again if it was off: one step
+                try:
+                    session.do_merged(key, "set_param", entry=term, name="mu", value=target["mu"])
+                    if not session.document.find(term)[4].enabled:
+                        session.do_merged(key, "set_enabled", entry=term, enabled=True)
+                finally:
+                    session.dispatcher.end_merge()
             else:
                 term = session.do("add_term", system=target["system"], kind="onsite",
                                   params={"mu": target["mu"]}, name=pick_targets.FERMI_LEVEL)
