@@ -99,9 +99,16 @@ class _Worker:
                   "parent_pid": os.getpid()}
         self.process = self.context.Process(target=process.main, args=(child, config),
                                             name=f"guiqula-{self.role}", daemon=False)
-        self.process.start()
-        child.close()
         self.conn = parent
+        try:
+            self.process.start()
+        except BaseException:
+            # e.g. a spawn from a module that is still being imported: the error
+            # goes to the caller, and the worker is left not running, as before
+            self._cleanup()
+            raise
+        finally:
+            child.close()
         self.ready = False
         self.job = None
         self.starts += 1

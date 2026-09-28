@@ -257,3 +257,30 @@ def test_a_worker_that_cannot_start_is_not_restarted_without_end(monkeypatch, tm
         for _ in range(20):
             m.poll(0.05)
         assert worker.starts == client.START_ATTEMPTS and worker.process is None
+
+
+def test_a_process_that_cannot_be_started_leaves_the_worker_stopped(monkeypatch):
+    """Process.start() raising (a spawn while the main module is still being
+    imported, as in a launcher without its __main__ guard): the error reaches
+    the caller, and the worker is left not running, so stop and kill (the
+    shutdown at exit), poll and a later shutdown of the manager work."""
+    import multiprocessing
+    import multiprocessing.context
+    from guiqula.worker import client
+
+    def refuse(self):
+        raise RuntimeError("no process today")
+
+    worker = client._Worker("batch", False, multiprocessing.get_context("spawn"))
+    with JobManager(batch=1, interactive=False, warm=False) as m:
+        monkeypatch.setattr(multiprocessing.context.SpawnProcess, "start", refuse)
+        with pytest.raises(RuntimeError, match="no process today"):
+            worker.start()
+        assert worker.process is None and not os.path.exists(worker.scratch)
+        worker.stop()
+        worker.kill()
+        with pytest.raises(RuntimeError, match="no process today"):
+            m.restart("batch")
+        assert m.workers["batch"][0].process is None
+        m.poll(0.05)
+    assert m.closed
