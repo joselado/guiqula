@@ -38,8 +38,10 @@ and the add-on) is done (2026-09-27, in three parts: remote control and the MCP 
 plugins; distribution: README, PyPI metadata, sdist and wheel, conda file, `guiqula
 desktop`, icons), and the maintainer answered its report, decisions 25 to 45 (PLAN.md
 section 7): a public GitHub repository without CI, pip as the only installer (no frozen
-builds), Python 3.12 and 3.13, 0.0.1 as the first release. Nothing is uploaded or pushed
-without the maintainer.
+builds), Python 3.12 and 3.13, 0.0.1 as the first release. Phase 7 (calculations from
+picks on the plots: the vocabulary, the targets, the new calculations, the markers) is done
+(2026-09-28, in three parts); its report, decisions 55 to 62 (PLAN.md section 7, end of
+phase 7), is not answered yet. Nothing is uploaded or pushed without the maintainer.
 
 ## Code map
 
@@ -172,7 +174,8 @@ a `Session`.
   selection tools, and the mplot3d drawing of geometries that are not flat), `plots.py`
   (`PlotView` per calculation, `plot_<id>`; lines, colored_scatter, heatmap,
   structure_scalar, structure_vector, scalar; the right click, the Pick, Box and Lasso
-  toggles, `pick_requested`), `jobpanel.py`,
+  toggles, `pick_requested`; the markers, sliders with `on` drawn by `set_markers` and
+  dragged through `marker_moved`), `jobpanel.py`,
   `console.py` (the console dock), `bars.py` (recovery, error, cost and trust bars),
   `errors.py` (exception hook), `theme.py` (light and dark: the colour names are the active
   theme's, rebound by `apply`; every figure is drawn inside `theme.drawing(figure)`). The

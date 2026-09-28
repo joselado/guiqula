@@ -33,6 +33,16 @@ Lasso toggles pick every atom inside a drag, as the canvas's tools select
 them. The view only reports where (pick_requested); the window's pick and
 pick_to actions do the rest, so that drivers reach them too.
 
+Markers (PLAN.md phase 7, part 3): a picked value stays drawn on the plot
+it was picked on, bound to the parameter it set, which is what a slider
+holds; the window hands the view its markers (set_markers: a line at a
+number on the axis that carries it, a vertical line at a point of a k-path,
+circles at a k-point of a map and its images, rings around sites), and a
+drag of a line or a circle reports the position (marker_moved), which the
+window turns into the slider's value: the parameter follows, one undo step
+per drag, and the marker follows the parameter when a slider, a form or an
+undo changes it.
+
 Overlays (decision 13.11): the curves of other results drawn on the same
 axes, each in its colour with a legend, or the difference of this result
 and another one with the same x (two densities of states on one energy
@@ -55,6 +65,8 @@ from guiqula.ui import theme
 
 READOUT_PIXELS = 12      # the readout names a data point this close to the mouse
 CLICK_PIXELS = 3         # a press released this close to where it started is a click
+GRAB_PIXELS = 6          # a press this close to a marker drags it
+MARKER_KINDS = ("hline", "vline", "dots", "rings")
 CURVES = ("lines", "colored_scatter")       # plot kinds that overlay
 OVERLAY_MODES = ("overlay", "difference")
 
@@ -317,6 +329,7 @@ class PlotView(QWidget):
     # calculation id, where ({"x", "y"} in data coordinates, {"box"} or {"polygon"}), the
     # global position of the menu: the window shows what can be done there
     pick_requested = Signal(str, object, object)
+    marker_moved = Signal(int, float, float, bool)     # slider index, x, y, still dragging
 
     def __init__(self, calc_id="", parent=None):
         super().__init__(parent)
@@ -396,6 +409,9 @@ class PlotView(QWidget):
         self.overlays = []
         self._press = None                 # (x, y, button) of a press on the canvas, in pixels
         self._selector = None
+        self.markers = []                  # [{index, kind, value, label}] (set_markers)
+        self._marker_artists = []          # [(marker, [artists])]
+        self._dragging = None              # the marker being dragged
         self._update_buttons()
         self.canvas.mpl_connect("motion_notify_event", self._on_motion)
         self.canvas.mpl_connect("button_press_event", self._on_press)
@@ -426,6 +442,8 @@ class PlotView(QWidget):
         self.overlays = list(overlays)
         try:
             self.ax, self.points = draw(self.figure, result, title, overlays)
+            self._marker_artists = []
+            self._draw_markers()
             self.canvas.draw()    # now: the limits and the layout are final for the readout
         except Exception as error:
             self.figure.clear()
@@ -440,6 +458,8 @@ class PlotView(QWidget):
         self._install_selector()
 
     def clear(self, caption=""):
+        self._marker_artists = []
+        self._dragging = None
         self.result = self.ax = self.points = None
         self.stale = False
         self.figure.clear()
@@ -498,6 +518,9 @@ class PlotView(QWidget):
         return not any(mode == "difference" for _, _, mode in self.overlays)
 
     def _on_motion(self, event):
+        if self._dragging is not None and event.inaxes is self.ax and event.xdata is not None:
+            self._drag_to(event, True)
+            return
         if self.result is None or event.inaxes is not self.ax or event.xdata is None:
             if self.readout.text():
                 self.readout.setText("")
@@ -516,6 +539,92 @@ class PlotView(QWidget):
             if label:
                 text += f" · a pick takes {label}"
         self.readout.setText(text)
+
+    # ---- markers (part 3)
+    def set_markers(self, markers):
+        """Draw these markers instead of the ones drawn: [{"index": the
+        slider's, "kind": hline | vline | dots | rings, "value": a number or
+        [[x, y], ...], "label"}]; the plot itself is not drawn again, so its
+        zoom stays."""
+        markers = [dict(m) for m in markers]
+        if markers == self.markers and (self._marker_artists or not markers):
+            return
+        self.markers = markers
+        if self.ax is None:
+            return
+        with theme.drawing(self.figure):
+            for _, artists in self._marker_artists:
+                for artist in artists:
+                    artist.remove()
+            self._marker_artists = []
+            self._draw_markers()
+        self.canvas.draw_idle()
+
+    def _draw_markers(self):
+        if self.ax is None or getattr(self.ax, "name", "") == "3d":
+            return
+        style = {"color": theme.SELECTED, "linewidth": 1.4, "linestyle": "--", "zorder": 8}
+        for marker in self.markers:
+            kind, value, artists = marker["kind"], marker["value"], []
+            if kind == "hline":
+                artists.append(self.ax.axhline(value, **style))
+                artists.append(self.ax.annotate(
+                    marker.get("label", ""), (1.0, value), xycoords=("axes fraction", "data"),
+                    xytext=(-4, 3), textcoords="offset points", ha="right", fontsize=8,
+                    color=theme.SELECTED, zorder=8))
+            elif kind == "vline":
+                artists.append(self.ax.axvline(value, **style))
+                artists.append(self.ax.annotate(
+                    marker.get("label", ""), (value, 1.0), xycoords=("data", "axes fraction"),
+                    xytext=(3, -10), textcoords="offset points", fontsize=8,
+                    color=theme.SELECTED, zorder=8))
+            elif kind == "dots" and len(value):
+                xy = np.asarray(value, dtype=float).reshape(-1, 2)
+                artists += self.ax.plot(xy[:, 0], xy[:, 1], "o", markersize=9,
+                                        markerfacecolor="none", markeredgewidth=2,
+                                        color=theme.SELECTED, zorder=8, linestyle="none")
+            elif kind == "rings" and len(value):
+                xy = np.asarray(value, dtype=float).reshape(-1, 2)
+                artists.append(self.ax.scatter(xy[:, 0], xy[:, 1], s=260, facecolors="none",
+                                               edgecolors=theme.SELECTED, linewidths=2,
+                                               zorder=8))
+            self._marker_artists.append((marker, artists))
+
+    def marker_near(self, x_pixels, y_pixels, radius=GRAB_PIXELS):
+        """The marker a press at this position (display pixels) grabs, or
+        None: a line within radius of it, a circle within radius (rings are
+        not dragged)."""
+        if self.ax is None:
+            return None
+        best, best_d = None, radius
+        for marker in self.markers:
+            kind, value = marker["kind"], marker["value"]
+            if kind == "hline":
+                d = abs(self.ax.transData.transform((0, value))[1] - y_pixels)
+            elif kind == "vline":
+                d = abs(self.ax.transData.transform((value, 0))[0] - x_pixels)
+            elif kind == "dots" and len(value):
+                xy = self.ax.transData.transform(np.asarray(value, dtype=float).reshape(-1, 2))
+                d = float(np.min(np.hypot(xy[:, 0] - x_pixels, xy[:, 1] - y_pixels)))
+            else:
+                continue
+            if d <= best_d:
+                best, best_d = marker, d
+        return best
+
+    def _drag_to(self, event, dragging):
+        marker = self._dragging
+        for drawn, artists in self._marker_artists:        # the line follows at once
+            if drawn is marker and artists:
+                if marker["kind"] == "hline":
+                    artists[0].set_ydata([event.ydata, event.ydata])
+                elif marker["kind"] == "vline":
+                    artists[0].set_xdata([event.xdata, event.xdata])
+                elif marker["kind"] == "dots":           # its images come back after
+                    artists[0].set_data([event.xdata], [event.ydata])
+        self.canvas.draw_idle()
+        self.marker_moved.emit(int(marker["index"]), float(event.xdata), float(event.ydata),
+                               dragging)
 
     # ---- picks: the gestures (the window does the rest)
     def _tool_toggled(self, tool, on):
@@ -562,8 +671,24 @@ class PlotView(QWidget):
 
     def _on_press(self, event):
         self._press = (event.x, event.y, event.button) if event.inaxes is self.ax else None
+        if self._press is not None and event.button == 1 and not self._navigating():
+            self._dragging = self.marker_near(event.x, event.y)
+            if self._dragging is not None:
+                self._press = None                 # a drag of the marker, not a pick
+                if self._selector is not None:     # nor a box
+                    self._selector.set_active(False)
 
     def _on_release(self, event):
+        if self._dragging is not None:
+            if event.xdata is not None and event.inaxes is self.ax:
+                self._drag_to(event, False)
+            else:                                  # released outside: where it was last
+                marker = self._dragging
+                self.marker_moved.emit(int(marker["index"]), float("nan"), float("nan"), False)
+            self._dragging = None
+            if self._selector is not None:
+                self._selector.set_active(True)
+            return
         press, self._press = self._press, None
         if press is None or self.result is None or event.inaxes is not self.ax \
                 or event.xdata is None or press[2] != event.button \

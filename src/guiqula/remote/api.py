@@ -76,7 +76,8 @@ WINDOW_ACTIONS = {
     "overlay": "calc, other (None clears), mode=overlay|difference: two results on one axes",
     "paint": "value, indices or point=[x, y] and radius, entry, param, component: paint a "
              "Field on sites",
-    "slider": "entry, param, component, minimum, maximum",
+    "slider": "entry, param, component, minimum, maximum, on (a calculation: drawn on its "
+              "plot as a marker)",
     "set_slider": "index, value",
     "remove_slider": "index",
     "theme": "name: system, light or dark",

@@ -3,7 +3,11 @@ changes; with the automatic re-run of cheap results (Run menu) the plots
 follow the drag. A slider holds a number of an entry (the same parameters
 a sweep can change: a Field of a term, a number of an op, a calculation,
 the lattice, the mean field or a classical model), within a range; a drag
-is one undo step. The window keeps the sliders with the view state."""
+is one undo step. The window keeps the sliders with the view state.
+
+A marker (PLAN.md phase 7, part 3) is a slider drawn on a result view (its
+"on"): its row says so, and a marker of a k-point or of sites has no range
+and no slider, only its value; it is moved on the plot."""
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QComboBox, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
                                QPushButton, QSlider, QToolButton, QVBoxLayout, QWidget)
@@ -27,10 +31,12 @@ class SliderRow(QWidget):
         component = spec.get("component")
         text = f"{spec['entry']} {spec['param']}" + ("" if component is None else
                                                      f"[{'xyz'[component]}]")
+        if spec.get("on"):
+            text += f" on {spec['on']}"
         self.label = QLabel(text)
-        self.slider = QSlider(Qt.Orientation.Horizontal)
-        self.slider.setObjectName(f"slider_{index}")
-        self.slider.setRange(0, STEPS)
+        self.label.setObjectName(f"sliderLabel_{index}")
+        ranged = spec.get("min") is not None and spec.get("max") is not None
+        self.slider = QSlider(Qt.Orientation.Horizontal) if ranged else None
         self.value = QLabel("")
         self.value.setObjectName(f"sliderValue_{index}")
         self.value.setMinimumWidth(60)
@@ -39,14 +45,19 @@ class SliderRow(QWidget):
         self.remove.setObjectName(f"sliderRemove_{index}")
         self.remove.setToolTip("remove this slider (the parameter keeps its value)")
         self.remove.clicked.connect(lambda: self.removed.emit(self.index))
-        self.slider.valueChanged.connect(lambda _: self._moved(self.slider.isSliderDown()))
-        self.slider.sliderReleased.connect(lambda: self._moved(False))
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 0, 0, 0)
         row.addWidget(self.label)
-        row.addWidget(QLabel(f"{spec['min']:g}"))
-        row.addWidget(self.slider, 1)
-        row.addWidget(QLabel(f"{spec['max']:g}"))
+        if ranged:
+            self.slider.setObjectName(f"slider_{index}")
+            self.slider.setRange(0, STEPS)
+            self.slider.valueChanged.connect(lambda _: self._moved(self.slider.isSliderDown()))
+            self.slider.sliderReleased.connect(lambda: self._moved(False))
+            row.addWidget(QLabel(f"{spec['min']:g}"))
+            row.addWidget(self.slider, 1)
+            row.addWidget(QLabel(f"{spec['max']:g}"))
+        else:
+            row.addStretch(1)
         row.addWidget(self.value)
         row.addWidget(self.remove)
 
@@ -55,6 +66,12 @@ class SliderRow(QWidget):
         return low + (high - low) * self.slider.value() / STEPS
 
     def show_value(self, value):
+        if self.slider is None:                  # a marker of a k-point or of sites
+            if self.spec.get("quantity") == "sites":
+                self.value.setText(f"{len(value)} sites")
+            else:
+                self.value.setText("(" + ", ".join(f"{float(c):.3g}" for c in value) + ")")
+            return
         self.slider.blockSignals(True)
         self.slider.setValue(fraction_of(value, self.spec["min"], self.spec["max"]))
         self.slider.blockSignals(False)
@@ -141,5 +158,5 @@ class SlidersPanel(QWidget):
 
     def show_values(self, values):
         for row, value in zip(self.rows, values):
-            if value is not None and not row.slider.isSliderDown():
+            if value is not None and (row.slider is None or not row.slider.isSliderDown()):
                 row.show_value(value)

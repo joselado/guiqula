@@ -45,6 +45,15 @@ def run(window, qtbot, calc):
     return shown(window, qtbot, calc)
 
 
+def ready(window, qtbot, calc):
+    """A calculation's current result drawn, run first if it has none (a
+    test run alone)."""
+    session = window.session
+    if session.result(calc) is None or session.is_stale(calc):
+        return run(window, qtbot, calc)
+    return shown(window, qtbot, calc)
+
+
 def band_point(result, ik=10, band=7):
     energies = np.asarray(result.arrays["energies"])
     return float(result.arrays["k"][ik]), float(energies[ik, band])
@@ -92,7 +101,7 @@ def test_a_pick_on_the_bands_adds_an_ldos_at_that_energy(window, qtbot, shot):
 def test_the_menu_of_a_right_click(window, qtbot, shot):
     settle(qtbot, window)
     session = window.session
-    view = shown(window, qtbot, "c1")
+    view = ready(window, qtbot, "c1")
     x, y = band_point(view.result, ik=30, band=8)
     px, py = view.ax.transData.transform((x, y))
     for name in ("button_press_event", "button_release_event"):       # a right click
@@ -114,7 +123,7 @@ def test_the_menu_of_a_right_click(window, qtbot, shot):
 
 def test_the_readout_says_what_a_pick_takes(window, qtbot):
     settle(qtbot, window)
-    view = shown(window, qtbot, "c1")
+    view = ready(window, qtbot, "c1")
     x, y = band_point(view.result)
     px, py = view.ax.transData.transform((x, y))
     MouseEvent("motion_notify_event", view.canvas, px, py)._process()
@@ -127,7 +136,7 @@ def test_a_locked_calculation_refuses_the_pick(window, qtbot):
     calc = session.do("add_calculation", system="s1", kind="ldos", params={"nk": 2})
     session.do("lock", target=f"{calc}.energy")
     try:
-        view = shown(window, qtbot, "c1")
+        view = ready(window, qtbot, "c1")
         x, y = band_point(view.result)
         picked = session.act("pick", calculation="c1", x=x, y=y)
         index = of(picked["targets"], "set", calculation=calc)
@@ -180,7 +189,7 @@ def test_a_box_on_an_ldos_map_picks_the_atoms_inside_it(window, qtbot, shot):
 def test_the_fermi_level_target(window, qtbot):
     settle(qtbot, window)
     session = window.session
-    view = shown(window, qtbot, "c1")
+    view = ready(window, qtbot, "c1")
     x, y = band_point(view.result)
     picked = session.act("pick", calculation="c1", x=x, y=y)
     done = session.act("pick_to", calculation="c1", x=x, y=y,
@@ -301,3 +310,93 @@ def test_the_dos_on_the_selected_sites(window, qtbot, shot):
         shot(view, "site_dos")
     finally:
         session.do("remove", entry=calc.id)
+
+
+def drag(view, start, end, qtbot=None):
+    """A left-button drag on a result view, from and to data coordinates."""
+    (x0, y0), (x1, y1) = (view.ax.transData.transform(p) for p in (start, end))
+    MouseEvent("button_press_event", view.canvas, x0, y0, button=1)._process()
+    for t in np.linspace(0.25, 1.0, 4):
+        MouseEvent("motion_notify_event", view.canvas, x0 + t * (x1 - x0),
+                   y0 + t * (y1 - y0), button=1)._process()
+    MouseEvent("button_release_event", view.canvas, x1, y1, button=1)._process()
+
+
+def test_a_marker_stays_on_the_plot_and_drives_its_parameter(window, qtbot, shot):
+    """Part 3: the energy a pick set is a line on the bands, bound to the
+    LDOS's energy as a slider is; a drag moves it (one undo step), and a
+    command or an undo moves the line."""
+    settle(qtbot, window)
+    session = window.session
+    view = ready(window, qtbot, "c1")
+    x, y = band_point(view.result)
+    picked = session.act("pick", calculation="c1", x=x, y=y)
+    done = session.act("pick_to", calculation="c1", x=x, y=y,
+                       target=of(picked["targets"], "add", kind="ldos"))
+    calc = done["calculation"]
+    try:
+        marker = window.sliders[-1]
+        assert (marker["entry"], marker["param"], marker["on"], marker["axis"]) == \
+            (calc, "energy", "c1", "y")
+        view = window.plots["c1"]
+        assert [(m["kind"], m["value"]) for m in view.markers] == [("hline", pytest.approx(y))]
+        row = window.sliders_panel.rows[-1]
+        assert row.label.text() == f"{calc} energy on c1"
+        window.show_result("c1")
+        steps = len(session.dispatcher.history()["undo"])
+        target = y + 0.4 * (marker["max"] - y)
+        drag(view, (x, y), (x, target))
+        energy = session.document.calculation(calc).params["energy"]
+        assert energy == pytest.approx(target, abs=0.02 * (marker["max"] - marker["min"]))
+        assert len(session.dispatcher.history()["undo"]) == steps + 1      # one drag, one step
+        assert view.markers[0]["value"] == pytest.approx(energy)
+        shot(view, "dragged")
+        session.do("set_param", entry=calc, name="energy", value=0.1)      # a command moves it
+        assert view.markers[0]["value"] == pytest.approx(0.1)
+        session.undo()
+        assert view.markers[0]["value"] == pytest.approx(energy)
+        state = window.view_state()["sliders"]
+        assert state[-1]["on"] == "c1" and state[-1]["axis"] == "y"
+        run(window, qtbot, calc)                   # with the automatic re-run on, the LDOS
+        session.act("auto_rerun", enabled=True)    # follows the line
+        try:
+            window.show_result("c1")
+            drag(view, (x, energy), (x, y))
+            qtbot.waitUntil(lambda: session.result(calc).params["energy"] == pytest.approx(
+                session.document.calculation(calc).params["energy"]), timeout=120_000)
+        finally:
+            session.act("auto_rerun", enabled=False)
+    finally:
+        session.do("remove", entry=calc)
+    assert all(s.get("on") != "c1" or s["entry"] != calc for s in window.sliders)
+    assert view.markers == []                           # pruned with its calculation
+
+
+def test_a_kpoint_marker_on_a_fermi_surface(window, qtbot):
+    """A k-point picked on a map is a dot there; dragged, the k-point of
+    the eigenstate follows the cell under it."""
+    settle(qtbot, window)
+    session = window.session
+    surface = session.do("add_calculation", system="s1", kind="fermi_surface",
+                         params={"energy": 0.5, "nk": 16, "delta": 0.1})
+    try:
+        view = run(window, qtbot, surface)
+        kx, ky = view.result.arrays["kx"], view.result.arrays["ky"]
+        x, y = float(kx[40]), float(ky[40])
+        picked = session.act("pick", calculation=surface, x=x, y=y)
+        done = session.act("pick_to", calculation=surface, x=x, y=y,
+                           target=of(picked["targets"], "add", kind="eigenstate"))
+        marker = window.sliders[-1]
+        assert (marker["param"], marker["axis"], marker["quantity"]) == ("k", "xy", "kpoint")
+        dots = [m for m in view.markers if m["kind"] == "dots"]
+        assert dots and any(np.allclose(point, [x, y], atol=1e-9) for point in dots[0]["value"])
+        assert len(dots[0]["value"]) > 1                    # its images in the extended zone
+        x2, y2 = float(kx[100]), float(ky[100])
+        drag(view, (x, y), (x2, y2))
+        k = session.document.calculation(done["calculation"]).params["k"]
+        assert k == pytest.approx(session.act("pick", calculation=surface, x=x2, y=y2)[
+            "values"]["kpoint"])
+        assert window.sliders_panel.rows[-1].slider is None       # a k-point: no range
+        session.do("remove", entry=done["calculation"])
+    finally:
+        session.do("remove", entry=surface)

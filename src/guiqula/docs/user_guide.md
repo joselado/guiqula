@@ -183,6 +183,16 @@ offered without pairing only, since in Bogoliubov-de Gennes form an onsite energ
 the electron and hole blocks with opposite signs, which changes the pairing problem
 instead of shifting the spectrum, whose zero is the Fermi level already.
 
+What a pick set stays on the plot it was picked on as a marker: a dashed line at the
+energy across the bands or the density of states, at the swept value of a sweep, a line at
+the picked point of a k-path, a circle at the k-point of a map, rings around the picked
+atoms. A marker is bound to the parameter it set, as a slider is, so dragging it sets the
+parameter, one undo step per drag, and with Run > Re-run cheap results automatically the
+LDOS follows the line as it is dragged across the bands; a form, a slider or an undo
+moves the marker in turn, since it always shows the value the parameter holds. The Sliders
+dock lists the markers with the sliders (a marker of a k-point or of sites has no range
+there, only its value), and removing the row removes the marker.
+
 A pick is a set of ordinary commands, meaning that the document holds plain numbers, an
 undo takes a pick back as one step, and a locked parameter refuses it with a message in
 the log; whether what it added or moved runs at once is the choice of Run > Run
@@ -201,6 +211,7 @@ and a sweep fails at a value pyqula rejects: no point is computed without its en
 
 The Sliders dock attaches a slider to any number of the document: dragging it changes the
 parameter (one undo step per drag), and with the automatic re-run on, cheap results follow.
+A marker is a slider drawn on a plot (see Picking from a plot).
 
 ## Overlays and exports
 

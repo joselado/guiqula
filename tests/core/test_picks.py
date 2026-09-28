@@ -207,3 +207,26 @@ def test_names_are_cosmetic():
     t = d.do("add_term", system=s, kind="onsite", name="Fermi level")
     assert d.document.find(t)[4].name == "Fermi level"
     assert type(d.document).from_json(d.document.to_json()).find(t)[4].name == "Fermi level"
+
+
+def test_where_a_marker_of_a_kpoint_goes():
+    """The other way round (part 3): a picked k-point is drawn where it was
+    picked, on the path, and at every image of it on a map."""
+    b = bands()
+    k = picks.pick(b, 2, 0.1)["values"]["kpoint"]
+    assert picks.path_position(b, k) == 2.0
+    assert picks.path_position(b, [0.9, 0.9, 0.0]) is None           # off the path
+    kx, ky = (a.ravel() for a in np.meshgrid(np.linspace(-1, 1, 9), np.linspace(-1, 1, 9),
+                                             indexing="ij"))
+    k2K = np.array([[0.5, 0.5, 0], [-0.5, 0.5, 0], [0, 0, 1.0]])
+    r = result("fermi_surface", {"kx": kx, "ky": ky, "weight": np.ones(81)},
+               {"kind": "heatmap", "x": "kx", "y": "ky", "c": "weight",
+                "picks": {"x": "kmesh", "y": "kmesh"}}, kspace={"k2K": k2K})
+    k = picks.pick(r, 0.5, -0.25)["values"]["kpoint"]
+    points = picks.mesh_positions(r, k)
+    assert any(np.allclose(p, [0.5, -0.25]) for p in points)
+    for p in points:                        # each an image: the same k up to integers
+        shift = np.array(picks.reduced_k(r.kspace, *p)) - k
+        assert np.allclose(shift, np.round(shift), atol=1e-9)
+    r.kspace = None
+    assert picks.mesh_positions(r, k) == []

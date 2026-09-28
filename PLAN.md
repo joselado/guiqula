@@ -1769,7 +1769,7 @@ the package and upstream's user guide only (the guide stays, for the in-app help
 maintainer's choice); upstream's examples were removed from `vendor/` and from the whole
 history before the first push, and `tools/update_vendor.sh` no longer copies them.
 
-**Phase 7, calculations from picks (proposed 2026-09-28; parts 1 and 2 built the same day).** Asked
+**Phase 7, calculations from picks (proposed 2026-09-28; built the same day, in three parts).** Asked
 for on 2026-09-28: to do calculations by picking parameters from the plots,
 taking some bands and computing the LDOS at an energy selected on them, or
 the LDOS at an energy and a k-point picked there, or the Fermi surface at
@@ -2151,6 +2151,56 @@ Decided while building part 2:
 - a calculation's `helpers` now reach its exported script (they reached it
   from terms and ops only), which the DOS on sites needs.
 
+Part 3, built 2026-09-28: the markers. A value a pick set stays drawn on
+the plot it was picked on, as a slider with `on` (the calculation whose
+view draws it), `axis` (the axis of that plot that carries the parameter:
+x, y, "xy" for a k-point of a map, "sites") and `quantity`: a dashed line
+at an energy or a swept value, a vertical line at the point of a k-path
+where a picked k-point is, circles at a k-point of a map and at all its
+images inside the map (the Fermi surface's mesh spans more than one zone,
+and the image nearest the centre was not where the click was), rings
+around picked sites. `pick_to` adds the markers of what it set; the
+`slider` action takes `on` (its range, when not given, is the drawn range
+of that axis); `set_slider` takes a k-point for a marker of one; the
+view reports a drag (`marker_moved`) and the window turns the position
+into the value (`move_marker`: the number on the axis, or the k-point
+under it, read as a pick reads it), one undo step per drag, with Run at
+once after the release; every document change redraws the markers
+without redrawing the plots, so a form, a slider, a command or an undo
+moves them and the zoom stays. The Sliders dock lists the markers ("c3
+energy on c1"; a marker of a k-point or of sites has its value and no
+range), they are kept in the project's `ui` block and pruned with their
+entry or their calculation. Tests (`tests/ui/test_picks.py`): a line on
+the bands after a pick, dragged in one undo step, moved by a command and
+by an undo, kept in the view state, pruned with its calculation, and the
+LDOS following the drag with the automatic re-run on; a circle on a Fermi
+surface dragged to another cell, the eigenstate's k-point following it.
+
+Phase 7 report (2026-09-28). Built as planned in its three parts, with
+the answers to decisions 46 to 54; the whole suite passes (1057 tests, the
+wheel build included). `tests/ui/test_startup.py` failed in two of the
+runs along the way, at 2.04 and 2.05 s against its 2.0 s budget, and the
+start before phase 7 is as slow on this machine (2.0 to 2.4 s for both,
+measured side by side), so that is the load, not the phase. What each part
+decided that the plan did not say is listed with the part; the ones worth
+your answer:
+
+55. names: the one schema addition, an optional `name` on ops, terms and
+    calculations (left out of the JSON when empty, never in a key), which
+    the naming of what a pick adds and the "Fermi level" term need;
+56. Run at once is off in a window that does not read the settings (the
+    tests, `tools/drive.py`, `--offscreen`), on in the interactive program;
+57. the Fermi-level target adds to the shift the picked result saw (the
+    energy is read on a spectrum the previous Fermi-level term had moved);
+58. an optional quantity (the LDOS's k-point) gives two targets, without
+    and with it; an LDOS over the mesh stays so when moved;
+59. the eigenstate's k-point is a plain vector (Γ by default), and the
+    entry is called Eigenstate;
+60. the DOS on sites is by exact diagonalization only;
+61. a k-point marker on a map is drawn at every image of the k-point
+    inside the map;
+62. a marker of sites (rings) is drawn and listed, but not dragged.
+
 ### Where the section 13 items land
 
 | Phase | Items |
@@ -2449,7 +2499,7 @@ onward are features (placement per phase at the end of section 7).
    script, and presets with locked parameters, for use in courses.
 
 17. **Calculations from picks** (asked 2026-09-28, proposed in section 7,
-   phase 7, being built). A point of a plot is a set of physical values (an
+   phase 7, built the same day). A point of a plot is a set of physical values (an
    energy, a k-point, a site, a parameter value), and any calculation whose
    parameters take them can be started from it or moved to it: the LDOS at
    an energy picked on the bands, the LDOS at a picked k-point and energy,

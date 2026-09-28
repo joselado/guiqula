@@ -19,7 +19,10 @@ A result view answers a right click (or a click with its Pick toggle, or
 a box or a lasso on a result drawn on the atoms) with the menu of what the
 point stands for and what can be done with it (PLAN.md phase 7): the
 actions pick and pick_to, which emit ordinary commands, so an undo takes a
-pick back and the Document holds plain numbers.
+pick back and the Document holds plain numbers. The value a pick set stays
+drawn on the plot it was picked on as a marker, a slider with "on" (the
+calculation whose view draws it): dragging it sets the parameter, and it
+follows the parameter whatever changes it.
 
 The window is a client of a Session: every change goes through the
 dispatcher. The selected item, the workspace, the canvas tool and the site
@@ -826,6 +829,7 @@ class MainWindow(QMainWindow):
             self._prune_sliders()
             if self.sliders:
                 self.sliders_panel.show_values([self._slider_value(sl) for sl in self.sliders])
+            self._refresh_markers()
             self._update_status()
         finally:
             # a view that fails to draw must not stop the rebuild, Undo or the title
@@ -1254,6 +1258,13 @@ class MainWindow(QMainWindow):
         self.sliders = []
         for spec in ui.get("sliders", []) if isinstance(ui.get("sliders"), list) else []:
             try:
+                if spec.get("on") is not None:        # a marker: kept as it was saved
+                    if self._slider_kept(spec) and spec.get("axis") in ("x", "y", "xy",
+                                                                         "sites"):
+                        self.sliders.append({k: spec.get(k) for k in (
+                            "entry", "param", "component", "min", "max", "on", "axis",
+                            "quantity")})
+                    continue
                 self.add_slider(spec["entry"], spec["param"], spec.get("component"),
                                 spec["min"], spec["max"])
             except Exception:
@@ -1660,6 +1671,7 @@ class MainWindow(QMainWindow):
             view.detach_requested.connect(self.toggle_detached)
             view.overlay_menu_requested.connect(self._fill_overlay_menu)
             view.pick_requested.connect(self._pick_requested)
+            view.marker_moved.connect(self._marker_moved)
             self.plots[calc] = view
             self.viewport.addTab(view, calc)
             self._draw_result(calc)
@@ -1766,6 +1778,7 @@ class MainWindow(QMainWindow):
                                                  for r in result.skipped))
         if stale:
             notes.append("the document changed since this result was computed; run again")
+        view.markers = self._markers_of(calc, result)      # drawn with the plot
         view.show_result(result, title, " · ".join(notes), stale=stale, overlays=overlays)
 
     def overlay(self, calc, other=None, mode="overlay"):
@@ -1796,28 +1809,183 @@ class MainWindow(QMainWindow):
 
     # ---- sliders (13.10)
     def _slider_value(self, spec):
-        """The number a slider's parameter holds now, or None."""
+        """The number a slider's parameter holds now (a marker's: the
+        k-point or the positions too), or None."""
         from guiqula.registry import sweeps
         try:
             _, params = sweeps.locate(self.session.document, spec["entry"])
             value = params.get(spec["param"])
             if spec["component"] is not None:
                 value = value[spec["component"]]
+            if spec.get("quantity") in ("kpoint", "sites") and isinstance(value, list):
+                return value
             return float(value) if isinstance(value, (int, float)) else None
         except Exception:
             return None
 
+    # ---- markers (part 3): sliders drawn on result views
+    def _marker_axis(self, on, entry, param, component):
+        """(axis, quantity) of a parameter drawn on the view of calculation
+        on: the axis of its plot that carries what the parameter takes (x,
+        y, "xy" for a k-point of a map, "sites" for a result on the atoms);
+        ValueError when the plot carries none of it."""
+        from guiqula.registry import sweeps
+        calc = self.session.document.calculation(on)
+        result = self.session.result(on)
+        if result is None:
+            raise ValueError(f"{on} has no result to draw a marker on: run it first")
+        spec = pick_tools.spec_of(result)
+        declared = sweeps.locate(self.session.document, entry)[0].param_map.get(param)
+        if declared is None:
+            raise ValueError(f"{entry} has no parameter {param!r}")
+        quantity = declared.quantity
+        if spec.get("sites"):
+            if quantity == "sites":
+                return "sites", quantity
+        else:
+            for axis in ("x", "y"):
+                carrier = spec.get(axis)
+                if carrier == "parameter" and [entry, param, component] == \
+                        (result.plot.get("parameters") or {}).get(axis):
+                    return axis, "parameter"
+                if quantity is not None and carrier in pick_tools.AXES and \
+                        pick_tools.AXES[carrier] == quantity:
+                    return ("xy" if carrier == "kmesh" else axis), quantity
+        raise ValueError(f"the plot of {on} ({calc.kind}) has no axis for {entry} {param}")
+
+    def _range_of(self, on, axis):
+        """The range of the drawn data on an axis of a view (a marker's
+        slider range), or (0, 1)."""
+        view = self.plots.get(on)
+        if view is None or view.points is None or not len(view.points[0]):
+            return 0.0, 1.0
+        values = np.asarray(view.points[0 if axis == "x" else 1], dtype=float)
+        values = values[np.isfinite(values)]
+        if not len(values) or values.max() <= values.min():
+            return 0.0, 1.0
+        return float(values.min()), float(values.max())
+
+    def _markers_of(self, calc, result):
+        """What a view draws of the markers on it: [{index, kind, value,
+        label}], a marker whose value is not on the plot left out (a k-point
+        off the drawn path)."""
+        out = []
+        for index, spec in enumerate(self.sliders):
+            if spec.get("on") != calc or result is None:
+                continue
+            value = self._slider_value(spec)
+            if value is None:
+                continue
+            label = f"{spec['entry']} {spec['param']}" + (
+                "" if spec["component"] is None else f"[{'xyz'[spec['component']]}]")
+            drawn = self._marker_drawing(spec, value, result)
+            if drawn is not None:
+                out.append(dict(drawn, index=index, label=label))
+        return out
+
+    def _marker_drawing(self, spec, value, result):
+        axis = spec.get("axis")
+        try:
+            if axis in ("x", "y") and spec.get("quantity") != "kpoint":
+                return {"kind": "vline" if axis == "x" else "hline", "value": float(value)}
+            if axis == "x":                          # a k-point along a k-path
+                x = pick_tools.path_position(result, value)
+                return None if x is None else {"kind": "vline", "value": x}
+            if axis == "xy":                         # a k-point of a map: all its images
+                points = pick_tools.mesh_positions(result, value)
+                return {"kind": "dots", "value": points} if points else None
+            if axis == "sites" and result.structure is not None:
+                return {"kind": "rings", "value": [[float(p[0]), float(p[1])] for p in value]}
+        except (TypeError, ValueError, KeyError, IndexError):
+            return None
+        return None
+
+    def _refresh_markers(self):
+        for calc, view in list(self.plots.items()):
+            if view.result is not None:
+                view.set_markers(self._markers_of(calc, view.result))
+
+    def _marker_moved(self, index, x, y, dragging):
+        """A marker dragged on its view: the value under it, as a slider's;
+        a refusal (a lock) is reported and the marker goes back."""
+        try:
+            self.move_marker(index, x, y, dragging)
+        except (ValueError, KeyError, IndexError) as error:
+            self.message(f"marker: {error}", error=True)
+            self.session.dispatcher.end_merge()
+            self._refresh_markers()
+
+    def move_marker(self, index, x, y, dragging=False):
+        """Set a marker's parameter to the value at (x, y) of its view (its
+        axis, or the k-point there); x and y not finite: the drag ended
+        where it was. Returns the value set."""
+        spec = self.sliders[index]
+        if not (np.isfinite(x) and np.isfinite(y)):
+            self.session.dispatcher.end_merge()
+            if any(c.id == spec["entry"] for c in self.session.document.calculations):
+                self._ran_at_once(spec["entry"])
+            return None
+        if spec.get("quantity") == "kpoint":
+            view = self.plots[spec["on"]]
+            value = pick_tools.pick(view.result, x, y)["values"].get("kpoint")
+            if value is None:
+                return None
+        else:
+            value = x if spec.get("axis") == "x" else y
+        return self.set_slider(index, value, dragging)
+
+    def _mark(self, source, target, done):
+        """Keep the values a pick set drawn on the plot it was picked on:
+        a marker for each parameter that an axis of that plot carries."""
+        if source is None or source not in self.plots:
+            return []
+        entries = []
+        if target["target"] in ("set", "add") and done.get("calculation"):
+            entries = [(done["calculation"], name, None) for name in target["params"]]
+        elif target["target"] == "parameter":
+            entries = [(p["entry"], p["param"], p["component"]) for p in target["set"]]
+        added = []
+        for entry, param, component in entries:
+            if any(s.get("on") == source and (s["entry"], s["param"], s["component"]) ==
+                   (entry, param, component) for s in self.sliders):
+                continue
+            try:
+                added.append(self.add_slider(entry, param, component, on=source))
+            except (ValueError, KeyError):         # no axis of that plot carries it
+                continue
+        return added
+
     def _show_sliders(self):
         self.sliders_panel.set_sliders(self.sliders, [self._slider_value(s) for s in self.sliders])
 
-    def add_slider(self, entry, param, component=None, minimum=0.0, maximum=1.0):
-        """Attach a parameter to a slider; returns its index."""
+    def add_slider(self, entry, param, component=None, minimum=None, maximum=None, on=None):
+        """Attach a parameter to a slider; with on, a calculation whose
+        view draws it as a marker, on the axis of its plot that carries the
+        parameter (a k-point or sites: a marker without a slider's range).
+        The range is the axis's drawn range when on is given and it is
+        not; else 0 to 1. Returns its index."""
         from guiqula.core import locks
         from guiqula.registry import sweeps
         document = self.session.document
+        axis = quantity = None
+        if on is not None:
+            axis, quantity = self._marker_axis(on, entry, param, component)
+        if quantity in ("kpoint", "sites"):
+            if sweeps.locate(document, entry)[0].param_map.get(param) is None:
+                raise ValueError(f"{entry} has no parameter {param!r}")
+            self.sliders.append({"entry": entry, "param": param, "component": None,
+                                 "min": None, "max": None, "on": on, "axis": axis,
+                                 "quantity": quantity})
+            self._show_sliders()
+            self._refresh_markers()
+            return len(self.sliders) - 1
         problem = sweeps.check_target(document, entry, param, component)
         if problem:
             raise ValueError(problem)
+        if minimum is None or maximum is None:
+            low, high = self._range_of(on, axis) if on is not None else (0.0, 1.0)
+            minimum = low if minimum is None else minimum
+            maximum = high if maximum is None else maximum
         minimum, maximum = float(minimum), float(maximum)
         if not np.isfinite([minimum, maximum, maximum - minimum]).all():
             raise ValueError("the range needs finite numbers")
@@ -1831,22 +1999,42 @@ class MainWindow(QMainWindow):
         if broken:
             raise ValueError(f"{', '.join(broken)} {'is' if len(broken) == 1 else 'are'} "
                              f"locked: unlock it to move {entry}.{param} with a slider")
-        self.sliders.append({"entry": entry, "param": param, "component": component,
-                             "min": float(minimum), "max": float(maximum)})
+        spec = {"entry": entry, "param": param, "component": component,
+                "min": float(minimum), "max": float(maximum)}
+        if on is not None:
+            spec.update(on=on, axis=axis, quantity=quantity)
+        self.sliders.append(spec)
         self._show_sliders()
-        self.docks["slidersDock"].raise_()
+        if on is None:
+            self.docks["slidersDock"].raise_()
+        self._refresh_markers()
         return len(self.sliders) - 1
 
     def remove_slider(self, index):
         del self.sliders[index]
         self._show_sliders()
+        self._refresh_markers()
+
+    def _slider_kept(self, spec):
+        """Whether a slider still fits the Document: its entry and parameter,
+        and the calculation a marker is drawn on."""
+        from guiqula.registry import sweeps
+        document = self.session.document
+        if spec.get("on") is not None and not any(c.id == spec["on"]
+                                                  for c in document.calculations):
+            return False
+        if spec.get("quantity") in ("kpoint", "sites"):
+            try:
+                return spec["param"] in sweeps.locate(document, spec["entry"])[0].param_map
+            except Exception:
+                return False
+        return sweeps.check_target(document, spec["entry"], spec["param"],
+                                   spec["component"]) is None
 
     def _prune_sliders(self):
-        """Drop the sliders whose entry was removed."""
-        from guiqula.registry import sweeps
-        kept = [spec for spec in self.sliders
-                if sweeps.check_target(self.session.document, spec["entry"], spec["param"],
-                                       spec["component"]) is None]
+        """Drop the sliders whose entry was removed, and the markers whose
+        calculation was."""
+        kept = [spec for spec in self.sliders if self._slider_kept(spec)]
         if len(kept) != len(self.sliders):
             self.sliders = kept
             self._show_sliders()
@@ -1863,10 +2051,13 @@ class MainWindow(QMainWindow):
         """Set a slider's parameter; the steps of one drag are one undo step."""
         from guiqula.registry import sweeps
         spec = self.sliders[index]
-        value = min(max(float(value), spec["min"]), spec["max"])
         entry, param, component = spec["entry"], spec["param"], spec["component"]
         key = f"slider:{index}:{entry}:{param}:{component}"
-        command = sweeps.command(self.session.document, entry, param, component, value)
+        if spec.get("quantity") in ("kpoint", "sites"):          # a marker of a vector
+            command = ("set_param", {"entry": entry, "name": param, "value": value})
+        else:
+            value = min(max(float(value), spec["min"]), spec["max"])
+            command = sweeps.command(self.session.document, entry, param, component, value)
         try:
             self.session.do_merged(key, command[0], **command[1])
         finally:
@@ -2139,7 +2330,9 @@ class MainWindow(QMainWindow):
                     or not 0 <= target < len(targets):
                 raise ValueError(f"target is a dict or an index from 0 to {len(targets) - 1}")
             target = targets[target]
-        return self._do_target(target)
+        done = self._do_target(target)
+        self._mark(calculation, target, done)
+        return done
 
     def _do_target(self, target):
         from guiqula.registry import sweeps

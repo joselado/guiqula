@@ -26,9 +26,14 @@ and a result drawn on the atoms yields ``sites`` by its kind, stored by
 position (never by index, so that a pick survives a change upstream as
 far as it is meaningful).
 
+The other way round, path_position and mesh_positions say where a k-point
+is drawn on such a plot, which is where its marker goes (part 3).
+
 numpy only, like nearest.py: the window, the remote API and the tests
 share it.
 """
+import itertools
+
 import numpy as np
 
 QUANTITIES = ("energy", "kpoint", "sites", "parameter", "frequency")
@@ -134,6 +139,47 @@ def reduced_k(kspace, kx, ky):
         return None
     reduced = np.asarray(kspace["k2K"], dtype=float) @ np.array([kx, ky, 0.0])
     return [float(round(c, 12)) + 0.0 for c in reduced]
+
+
+def path_position(result, k, tol=1e-6):
+    """The x of the point of a k-path at reduced k, on the k axis drawn,
+    or None when no point of the path is there."""
+    kpoints = result.arrays.get("kpoints")
+    if kpoints is None:
+        return None
+    kpoints = np.asarray(kpoints, dtype=float).reshape(-1, 3)
+    if not len(kpoints):
+        return None
+    distance = np.linalg.norm(kpoints - np.asarray(k, dtype=float).reshape(3), axis=1)
+    i = int(np.argmin(distance))
+    if distance[i] > tol:
+        return None
+    x = np.unique(np.round(np.asarray(result.arrays[result.plot["x"]], dtype=float).ravel(), 12))
+    return float(x[min(i, len(x) - 1)])
+
+
+def mesh_positions(result, k):
+    """The points [[x, y], ...] of a map over the zone, in its mesh
+    coordinates, at reduced k: every image of k (k shifted by reciprocal
+    lattice vectors) inside the mesh drawn, which spans more than one zone;
+    [] when none is, or the result has no k2K."""
+    kspace = result.kspace
+    if not kspace or kspace.get("k2K") is None:
+        return []
+    inverse = np.linalg.inv(np.asarray(kspace["k2K"], dtype=float)[:2, :2])
+    kx = np.asarray(result.arrays[result.plot["x"]], dtype=float).ravel()
+    ky = np.asarray(result.arrays[result.plot["y"]], dtype=float).ravel()
+    if not len(kx) or not len(ky):
+        return []
+    low = np.array([kx.min(), ky.min()]) - 1e-9
+    high = np.array([kx.max(), ky.max()]) + 1e-9
+    k = np.asarray(k, dtype=float).reshape(3)[:2]
+    out = []
+    for shift in itertools.product(range(-3, 4), repeat=2):
+        point = inverse @ (k + np.array(shift))
+        if np.all(point >= low) and np.all(point <= high):
+            out.append([float(point[0]), float(point[1])])
+    return out
 
 
 def pick(result, x=None, y=None, index=None, sites=None):
