@@ -788,7 +788,9 @@ class IntVectorEditor(Editor):
 
 
 class FloatVectorEditor(Editor):
-    """One number per component, each a line of text."""
+    """One number per component, each a line of text; for an optional
+    parameter every box left empty is None (the entry's own default, the
+    k-mesh of an LDOS), and the boxes say so."""
 
     def __init__(self, param, parent=None):
         super().__init__(param, parent)
@@ -796,6 +798,8 @@ class FloatVectorEditor(Editor):
         for i in range(param.length):
             edit = QLineEdit()
             edit.setObjectName(f"edit_{param.name}_{i}")
+            if getattr(param, "optional", False):
+                edit.setPlaceholderText("empty")
             edit.editingFinished.connect(self._finished)
             self.layout_.addWidget(edit)
             self.edits.append(edit)
@@ -806,10 +810,14 @@ class FloatVectorEditor(Editor):
             self.committed.emit()
 
     def value(self):
-        return [parse_float(e.text()) for e in self.edits]
+        texts = [e.text().strip() for e in self.edits]
+        if getattr(self.param, "optional", False) and not any(texts):
+            return None
+        return [parse_float(text) for text in texts]
 
     def set_value(self, value):
-        self._shown = [format_number(float(v)) for v in value]
+        self._shown = [""] * len(self.edits) if value is None else \
+            [format_number(float(v)) for v in value]
         for edit, text in zip(self.edits, self._shown):
             self._quiet(edit, edit.setText, text)
 

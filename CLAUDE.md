@@ -159,7 +159,8 @@ a `Session`.
   `remote`, `pick`, `pick_to`, `run_at_once`; a new one joins `remote/api.py`'s
   `WINDOW_ACTIONS`; File > Allow remote control starts the server, polled from the window's
   timer; a pick emits ordinary commands, and the pick menu is built by `pick_menu` and
-  shown with `popup()`, never `exec()`),
+  shown with `popup()`, never `exec()`; `pick` and `pick_to` take a calculation and a
+  point, or `system` and `values`: the k-space tab's click, Calculate on selection),
   `help.py` (the Help dock: F1, a form's ?, the guides; Markdown in a QTextBrowser, whose
   `loadResource` serves the equations), `shortcuts.py` (the one
   table of keyboard shortcuts: menus, the canvas and outliner keys, the dialog; a test

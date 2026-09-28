@@ -169,17 +169,27 @@ class SeedParam(IntParam):
 
 
 class IntVectorParam(Param):
+    """A fixed-length list of integers; optional: None is allowed too
+    (and then length says how long a value is, the default being None)."""
     type_name = "int_vector"
 
-    def __init__(self, name, default, label=None, doc="", minimum=None, quantity=None):
-        super().__init__(name, list(default), label, doc, quantity)
-        self.length = len(default)
+    def __init__(self, name, default, label=None, doc="", minimum=None, quantity=None,
+                 optional=False, length=None):
+        super().__init__(name, None if default is None else list(default), label, doc,
+                         quantity)
+        self.length = len(default) if length is None else length
         self.minimum = minimum
+        self.optional = optional
 
     def normalize(self, value):
+        if value is None and self.optional:
+            return None
         if not isinstance(value, (list, tuple)) or len(value) != self.length:
             raise ParamError(f"{self.name}: expected a list of {self.length} integers")
         return [_number(self.name, v, int, self.minimum, None) for v in value]
+
+    def describe(self):
+        return dict(super().describe(), length=self.length, optional=self.optional)
 
 
 class BoolParam(Param):
@@ -241,6 +251,8 @@ class FloatVectorParam(IntVectorParam):
     type_name = "float_vector"
 
     def normalize(self, value):
+        if value is None and self.optional:
+            return None
         if not isinstance(value, (list, tuple)) or len(value) != self.length:
             raise ParamError(f"{self.name}: expected a list of {self.length} numbers")
         return [_number(self.name, v, float, self.minimum, None) for v in value]

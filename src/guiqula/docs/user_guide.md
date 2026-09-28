@@ -155,13 +155,24 @@ moves, so you know it before clicking.
 
 The menu then lists what takes those values. The calculations of the system with a
 parameter of that kind come first, moved to the picked value with their other parameters
-kept; then a new calculation of every kind that takes it (the LDOS or the Fermi surface at
-the picked energy), with its defaults otherwise and named after where it came from,
-`at E = 0.3 from c1`. On a sweep the menu sets the document at that point of the phase diagram
-and runs the swept calculation there; a picked k-point can become a new vertex of the
-k-path of the bands; picked sites can be selected on the Structure tab or made a region.
-On a result drawn flat on the atoms, the Box and Lasso toggles of its toolbar pick every
-atom inside a drag, as the canvas tools select them.
+kept; then a new calculation of every kind that takes it, with its defaults otherwise and
+named after where it came from, `at E = 0.3 from c1`: the LDOS at the picked energy over
+the whole k-mesh, and the LDOS at the picked energy and k-point alone (an LDOS left over
+the mesh stays so when it is moved), the eigenstate nearest that energy at that k-point,
+drawn as its weight on the atoms, the Fermi surface and the quasiparticle interference
+pattern at the energy, the density of states on picked sites. On a sweep the menu sets
+the document at that point of the phase diagram and runs the swept calculation there; a
+picked k-point can become a new vertex of the k-path of the bands; picked sites can be
+selected on the Structure tab or made a region. On a result drawn flat on the atoms, the
+Box and Lasso toggles of its toolbar pick every atom inside a drag, as the canvas tools
+select them.
+
+Two places that are not plots pick too. A click in the zone of the k-space tab, with Add
+points off, or a right click there in any mode, picks the k-point under it, snapped onto
+a high-symmetry point nearby as a vertex would be (a click on a vertex picks the vertex),
+and offers the LDOS and the eigenstate at that k. On the Structure tab, Calculate on
+selection offers what takes the selected sites, the density of states on them first, next
+to Region from selection.
 
 A picked energy can also become the Fermi level: an onsite term named `Fermi level` whose
 mu shifts the spectrum so that the picked energy sits at zero, updated by the next pick of
@@ -207,7 +218,8 @@ calculation. Add points appends vertices (they snap onto the high-symmetry point
 it on, a click on a vertex of the path adds that point again, so a path can pass twice
 through a point (Γ K M Γ). A vertex can be dragged, Remove last removes one, and Default
 path goes back to pyqula's. The k-path of a calculation's form takes the same path as text
-(`G K M G`). The latest Fermi surface of the system is drawn underneath. A
+(`G K M G`). The latest Fermi surface of the system is drawn underneath, and a click
+in the zone with Add points off picks its k-point (see Picking from a plot). A
 three-dimensional lattice is drawn by the k3 = 0 cut of its zone (the plane of b1 and b2)
 with the high-symmetry points in that plane; a path that leaves the plane (pyqula's
 default one, or `Z` typed in the form) is drawn projected onto it.

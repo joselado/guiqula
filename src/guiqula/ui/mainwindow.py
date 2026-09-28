@@ -183,6 +183,7 @@ class MainWindow(QMainWindow):
             lambda calc, vertices: self._do("set_param", entry=calc, name="kpath",
                                             value=vertices))
         self.kspace_view.calculation_chosen.connect(self._kpath_calculation_chosen)
+        self.kspace_view.kpoint_picked.connect(self._kpoint_picked)
         self.kpath_calc = None         # the calculation whose k-path the k-space tab edits
         self.viewport.addTab(self.kspace_view, "k-space")
         for tab in (STRUCTURE_TAB, KSPACE_TAB):
@@ -436,6 +437,12 @@ class MainWindow(QMainWindow):
         self._tip(self.region_button, "a named region of the selected sites, which any term "
                                       "can be restricted to")
         geometry.addWidget(self.region_button)
+        self.calculate_button = QPushButton("Calculate on selection")
+        self.calculate_button.setObjectName("calculateOnSelectionButton")
+        self.calculate_button.clicked.connect(self._selection_menu)
+        self._tip(self.calculate_button, "what takes the selected sites: the density of states "
+                                         "on them, and every calculation of sites")
+        geometry.addWidget(self.calculate_button)
         self.remove_button = QPushButton("Remove selected")
         self.remove_button.setObjectName("removeSelectedButton")
         self._tip(self.remove_button, "remove the selected atoms (a Remove atoms op, by "
@@ -1375,6 +1382,7 @@ class MainWindow(QMainWindow):
     def _selection_changed(self, count):
         self.region_button.setEnabled(count > 0)
         self.remove_button.setEnabled(count > 0)
+        self.calculate_button.setEnabled(count > 0)
 
     def current_system(self):
         """The system of the selected item, else the first one, else None."""
@@ -2052,14 +2060,20 @@ class MainWindow(QMainWindow):
         return job["id"] if isinstance(job, dict) else None
 
     # ---- picks (PLAN.md phase 7)
-    def pick(self, calculation, x=None, y=None, box=None, polygon=None):
+    def pick(self, calculation=None, x=None, y=None, box=None, polygon=None, system=None,
+             values=None):
         """What a point of a calculation's result stands for, and what can
         be done with it: {"calculation", "system", "values", "label",
         "notes", "targets", "point", "sites"}. x, y: a position in the
         plot's data coordinates (snapped to the drawn point the readout
         names there); box [x0, y0, x1, y1] or polygon [[x, y], ...]: the
-        atoms inside, on a result drawn on them."""
+        atoms inside, on a result drawn on them. Or values without a
+        calculation, {quantity: value} on a system (the current one by
+        default): a k-point of the k-space tab, the sites of the canvas
+        selection."""
         from guiqula.remote.api import jsonable
+        if calculation is None:
+            return jsonable(self._pick_values(system, values))
         view = self.plots.get(calculation)
         result = view.result if view is not None and view.result is not None else \
             self.session.result(calculation)
@@ -2093,12 +2107,34 @@ class MainWindow(QMainWindow):
         picked.update(calculation=calculation, system=system, sites=sites)
         return jsonable(picked)
 
-    def pick_to(self, calculation, target, x=None, y=None, box=None, polygon=None):
+    def _pick_values(self, system, values):
+        """pick() of values given as they are, on a system."""
+        system = system or self.current_system()
+        if system is None:
+            raise ValueError("there is no system to pick on")
+        self.session.document.system(system)
+        if not isinstance(values, dict) or not values or \
+                not set(values) <= set(pick_tools.QUANTITIES):
+            raise ValueError(f"values is a dict of quantities: {list(pick_tools.QUANTITIES)}")
+        build = self.builds.get(system)
+        try:
+            mode = self.session.plan_system(system).mode
+        except Exception:
+            mode = None
+        targets = pick_targets.targets(self.session.document, system, values, mode=mode,
+                                       dimensionality=build["dimensionality"] if build else None)
+        return {"calculation": None, "system": system, "values": values,
+                "label": pick_tools.describe(values), "notes": [], "targets": targets,
+                "point": None, "sites": None}
+
+    def pick_to(self, calculation=None, target=None, x=None, y=None, box=None, polygon=None,
+                system=None, values=None):
         """Do one target of a pick: its index in the list pick() gives for
-        the same position, or the target dict itself. Returns what was
-        done: {"target", and "calculation", "term", "region" or "sites"}."""
+        the same position (or values), or the target dict itself. Returns
+        what was done: {"target", and "calculation", "term", "region" or
+        "sites"}."""
         if not isinstance(target, dict):
-            targets = self.pick(calculation, x, y, box, polygon)["targets"]
+            targets = self.pick(calculation, x, y, box, polygon, system, values)["targets"]
             if isinstance(target, bool) or not isinstance(target, int) \
                     or not 0 <= target < len(targets):
                 raise ValueError(f"target is a dict or an index from 0 to {len(targets) - 1}")
@@ -2160,18 +2196,21 @@ class MainWindow(QMainWindow):
             return {"target": kind, "sites": count}
         raise ValueError(f"unknown target {kind!r}")
 
-    def pick_menu(self, calculation, x=None, y=None, box=None, polygon=None):
+    def pick_menu(self, calculation=None, x=None, y=None, box=None, polygon=None, system=None,
+                  values=None, leave=()):
         """The menu of a pick (built, not shown: the view pops it up, a test
         reads its actions): the picked values, why something could not be
-        picked, then the targets."""
+        picked, then the targets, but those of the kinds in leave (the
+        canvas has its own buttons for a region of the selection)."""
         menu = QMenu(self)
         menu.setObjectName("pickMenu")
         menu.setToolTipsVisible(True)
         try:
-            picked = self.pick(calculation, x, y, box, polygon)
+            picked = self.pick(calculation, x, y, box, polygon, system, values)
         except Exception as error:
             menu.addAction(str(error)).setEnabled(False)
             return menu
+        picked["targets"] = [t for t in picked["targets"] if t["target"] not in leave]
         title = menu.addAction(picked["label"] or "nothing to pick here")
         title.setObjectName("pickTitle")
         title.setEnabled(False)
@@ -2189,10 +2228,29 @@ class MainWindow(QMainWindow):
 
     def _pick_requested(self, calculation, where, position):
         """A result view asks for the pick menu at a point."""
+        self._popup_pick(position, calculation=calculation, **where)
+
+    def _popup_pick(self, position, **where):
         if self._pick_menu is not None:
             self._pick_menu.deleteLater()
-        self._pick_menu = self.pick_menu(calculation, **where)
+        self._pick_menu = self.pick_menu(**where)
         self._pick_menu.popup(position)
+        return self._pick_menu
+
+    def _kpoint_picked(self, k, position):
+        """A click in the k-space tab: what takes that k-point."""
+        self._popup_pick(position, system=self.current_system(), values={"kpoint": k})
+
+    def _selection_menu(self):
+        """Calculate on selection: what takes the selected sites."""
+        try:
+            system, positions = self._selection_positions()
+        except ValueError as error:
+            self.message(str(error), error=True)
+            return None
+        button = self.calculate_button
+        return self._popup_pick(button.mapToGlobal(button.rect().bottomLeft()), system=system,
+                                values={"sites": positions}, leave=("select_sites", "region"))
 
     def show_meanfield(self):
         system = self._target_system()

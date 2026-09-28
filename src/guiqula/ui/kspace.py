@@ -9,7 +9,11 @@ again, so that a path can pass twice through a point, Γ-K-M-Γ); the Fermi surf
 when it has one, is drawn under the zone. The worker hands the geometry of
 k-space in the build summary (engine/structure.kspace), since this process
 cannot call pyqula; the window turns an edit into set_param on the
-calculation's kpath. Drawn for one- and two-dimensional systems (a 3D
+calculation's kpath. A click in the zone with Add points off, or a right
+click in any mode, picks the k-point there (snapped onto a high-symmetry
+point nearby, a vertex when on one), and the window offers what takes it
+(PLAN.md phase 7: the LDOS or the eigenstate at that k). Drawn for one- and
+two-dimensional systems (a 3D
 zone is shown by its k3 = 0 cut: the plane of b1 and b2, clipped by every
 reciprocal lattice vector, with the high-symmetry points in that plane; a
 path that leaves it, pyqula's default one for instance, is drawn projected
@@ -21,6 +25,7 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolb
 from matplotlib.figure import Figure
 from matplotlib.patches import Polygon
 from PySide6.QtCore import QTimer, Signal
+from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QPushButton, QToolButton,
                                QVBoxLayout, QWidget)
 
@@ -164,6 +169,7 @@ class KSpaceView(QWidget):
 
     path_edited = Signal(str, object)      # calculation id, vertices (or None: the default)
     calculation_chosen = Signal(str)
+    kpoint_picked = Signal(object, object)  # reduced k [k1, k2, k3], the menu's global position
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -212,6 +218,7 @@ class KSpaceView(QWidget):
         self.vertices = np.zeros((0, 2))
         self._drag = None
         self._press = None         # where a press on a vertex started, until it moves
+        self._click = None         # (x, y, button) of any press, for a pick on its release
         # pan or zoom takes the clicks: Add points shows off meanwhile (checking it again
         # turns them off), once the toolbar's own slot has switched the mode
         self.toolbar.actionTriggered.connect(lambda action: QTimer.singleShot(
@@ -329,6 +336,8 @@ class KSpaceView(QWidget):
         return i if d[i] <= GRAB_PIXELS else None
 
     def _on_press(self, event):
+        self._click = (event.x, event.y, event.button) if self.kspace is not None and \
+            event.inaxes is self.ax else None
         if self.kspace is None or event.inaxes is not self.ax or event.button != 1 \
                 or getattr(self.toolbar, "mode", "") or self.calc is None:
             return
@@ -349,8 +358,27 @@ class KSpaceView(QWidget):
         self._line.set_data(self.vertices[:, 0], self.vertices[:, 1])
         self.canvas.draw_idle()
 
+    def pick_at(self, point):
+        """The reduced k of an in-plane point, snapped as a vertex would be."""
+        return [float(c) for c in snap(point, self.kspace)]
+
+    def _picked(self, event, point):
+        gui = getattr(event, "guiEvent", None)
+        try:
+            position = gui.globalPosition().toPoint()
+        except AttributeError:
+            position = QCursor.pos()
+        self.kpoint_picked.emit(self.pick_at(point), position)
+
     def _on_release(self, event):
+        click, self._click = self._click, None
+        is_click = click is not None and click[2] == event.button and \
+            np.hypot(event.x - click[0], event.y - click[1]) <= CLICK_PIXELS
         if self._drag is None:
+            if is_click and event.inaxes is self.ax and event.xdata is not None and (
+                    event.button == 3 or (event.button == 1 and not self.add.isChecked()
+                                          and not getattr(self.toolbar, "mode", ""))):
+                self._picked(event, (event.xdata, event.ydata))
             return
         index, self._drag = self._drag, None
         if self._press is None:                    # it was dragged: move it
@@ -359,3 +387,5 @@ class KSpaceView(QWidget):
         self._press = None
         if self.add.isChecked():                   # a click on it: pass through it again
             self.add_point(self.vertices[index])
+        else:                                      # a pick of the vertex's k
+            self._picked(event, self.vertices[index])

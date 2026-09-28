@@ -9,7 +9,10 @@ entry. In order:
   other parameters kept), unless it holds that value already;
 - every calculation kind applicable to the system with such a parameter,
   added with the picked values and its defaults otherwise, named after
-  where it came from ("at E = 0.3 from c1");
+  where it came from ("at E = 0.3 from c1"); a parameter that may be left
+  empty (the LDOS's k-point, empty: over the k-mesh) gives two, without it
+  and with it, and an existing calculation that leaves it empty keeps it
+  so;
 - the swept parameters of a sweep, set: the Document at that point of the
   phase diagram, and the sweep's calculation run there;
 - a picked k-point as a new vertex of the k-path of every calculation that
@@ -50,12 +53,39 @@ def _taken(spec, values):
             if p.quantity is not None and p.quantity in values}
 
 
+def _optional(spec, name):
+    """Whether a parameter may be left empty, which is a mode of its own
+    (an LDOS without a k-point is over the k-mesh)."""
+    return getattr(spec.param_map[name], "optional", False)
+
+
+def _variants(spec, values):
+    """The parameters a new calculation takes from picked values: those
+    without the optional ones first (the LDOS at the energy, over the
+    k-mesh), then with them (the LDOS at the energy and the k-point)."""
+    taken = _taken(spec, values)
+    required = {name: v for name, v in taken.items() if not _optional(spec, name)}
+    out = [required] if required else []
+    if taken != required:
+        out.append(taken)
+    return out
+
+
 def _value_text(value):
     return pick_tools.kpoint_text(value) if isinstance(value, list) else pick_tools.number(value)
 
 
 def _assignments(params):
     return ", ".join(f"{name} = {_value_text(value)}" for name, value in params.items())
+
+
+def _where(values):
+    """Where a new calculation is: "at E = 0.3 · k = (...)", "on 3 sites"."""
+    at = pick_tools.describe({q: v for q, v in values.items() if q != "sites"})
+    sites = values.get("sites") or []
+    on = "" if not sites else f"on the site at ({pick_tools.number(sites[0][0])}, " \
+        f"{pick_tools.number(sites[0][1])})" if len(sites) == 1 else f"on {len(sites)} sites"
+    return " ".join(part for part in (f"at {at}" if at else "", on) if part)
 
 
 def fermi_term(system):
@@ -109,22 +139,22 @@ def targets(document, system_id, values, source=None, mode=None, dimensionality=
             continue
         if not _fits(spec, dimensionality):
             continue
+        # an optional parameter left empty keeps its mode (an LDOS over the mesh stays so)
         changed = {name: value for name, value in _taken(spec, values).items()
-                   if calc.params.get(name) != value}
+                   if calc.params.get(name) != value
+                   and not (_optional(spec, name) and calc.params.get(name) is None)}
         if changed:
             out.append({"target": "set", "calculation": calc.id, "params": changed,
                         "label": f"{calc.id} {spec.label}: {_assignments(changed)}"})
     for spec in registry.entries("calculation"):
         if system.kind not in spec.systems or not _fits(spec, dimensionality):
             continue
-        params = _taken(spec, values)
-        if not params:
-            continue
-        taken = {p.quantity for p in spec.params if p.name in params}
-        text = pick_tools.describe({q: v for q, v in values.items() if q in taken})
-        name = f"at {text}" + (f" from {source}" if source else "")
-        out.append({"target": "add", "system": system_id, "kind": spec.kind, "params": params,
-                    "name": name, "label": f"new {spec.label} at {text}"})
+        for params in _variants(spec, values):
+            taken = {p.quantity for p in spec.params if p.name in params}
+            where = _where({q: v for q, v in values.items() if q in taken})
+            out.append({"target": "add", "system": system_id, "kind": spec.kind,
+                        "params": params, "name": where + (f" from {source}" if source else ""),
+                        "label": f"new {spec.label} {where}"})
     if values.get("parameter"):
         run = None
         if source is not None:

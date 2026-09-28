@@ -63,6 +63,28 @@ def test_new_editors_commit(panel):
     assert session.document.find(keep)[-1].params["condition"] == "abs(y) < 3"
 
 
+def test_an_optional_vector_can_be_empty(panel):
+    """The LDOS's k-point (phase 7): empty boxes are None, over the k-mesh;
+    three numbers are one k-point; emptied again, it is None again."""
+    panel, session = panel
+    calc = session.do("add_calculation", system="s1", kind="ldos")
+    panel.show_item(session, calc)
+    editor = panel.form.editors["k"]
+    assert isinstance(editor, FloatVectorEditor)
+    assert [e.text() for e in editor.edits] == ["", "", ""]
+    assert editor.edits[0].placeholderText() == "empty"
+    for edit, text in zip(editor.edits, ("0.5", "0", "0")):
+        edit.setText(text)
+    editor.edits[2].editingFinished.emit()
+    assert session.document.calculation(calc).params["k"] == [0.5, 0.0, 0.0]
+    panel.show_item(session, calc)
+    editor = panel.form.editors["k"]
+    for edit in editor.edits:
+        edit.setText("")
+    editor.edits[0].editingFinished.emit()
+    assert session.document.calculation(calc).params["k"] is None
+
+
 def test_lattice_parameters(panel):
     """A lattice that takes parameters (a ribbon's width) shows them in the
     system's form; an edit goes through set_param on the system."""

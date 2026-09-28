@@ -131,13 +131,21 @@ def test_the_targets_of_an_energy_and_a_kpoint():
                                dimensionality=2)
     order = [t["target"] for t in found]
     assert order == sorted(order, key=["set", "add", "kpath", "fermi_level"].index)
-    assert kinds(found, "set") == [{"target": "set", "calculation": ldos,
-                                    "params": {"energy": 0.3},
-                                    "label": f"{ldos} Local density of states: energy = 0.3"}]
-    added = {t["kind"]: t for t in kinds(found, "add")}
-    assert {"ldos", "fermi_surface"} <= set(added)
-    assert added["ldos"]["params"] == {"energy": 0.3}
-    assert added["ldos"]["name"] == f"at E = 0.3 from {bands_}"
+    k = [1 / 3, 1 / 3, 0.0]
+    assert kinds(found, "set") == [{                    # over the mesh it stays: energy only
+        "target": "set", "calculation": ldos, "params": {"energy": 0.3},
+        "label": f"{ldos} Local density of states: energy = 0.3"}]
+    added = kinds(found, "add")
+    assert {"ldos", "fermi_surface", "eigenstate", "qpi"} <= {t["kind"] for t in added}
+    ldos_new = [t for t in added if t["kind"] == "ldos"]      # over the mesh, then at that k
+    assert [t["params"] for t in ldos_new] == [{"energy": 0.3}, {"energy": 0.3, "k": k}]
+    assert [t["name"] for t in ldos_new] == [
+        f"at E = 0.3 from {bands_}", f"at E = 0.3 · k = (0.333, 0.333, 0) from {bands_}"]
+    state = next(t for t in added if t["kind"] == "eigenstate")
+    assert state["label"] == "new Eigenstate at E = 0.3 · k = (0.333, 0.333, 0)"
+    d.do("set_param", entry=ldos, name="k", value=[0.0, 0.0, 0.0])     # at a k: moved in k
+    found = targets_of.targets(d.document, s, values, source=bands_)
+    assert kinds(found, "set")[0]["params"] == {"energy": 0.3, "k": k}
     path = kinds(found, "kpath")
     assert [t["calculation"] for t in path] == [bands_]
     assert path[0]["kpath"] == ["G", [1 / 3, 1 / 3, 0.0]]         # the default path: from Γ
@@ -177,7 +185,9 @@ def test_sites_and_sweeps():
     sweep = d.do("add_calculation", system=s, kind="sweep", params={
         "calculation": gap, "entry": t1, "param": "m", "component": 2})
     found = targets_of.targets(d.document, s, {"sites": [[0.0, 0.0, 0.0]]})
-    assert [t["target"] for t in found] == ["select_sites", "region"]
+    assert [t["target"] for t in found] == ["add", "select_sites", "region"]
+    assert found[0]["kind"] == "site_dos" and found[0]["name"] == "on the site at (0, 0)"
+    assert found[0]["params"] == {"positions": [[0.0, 0.0, 0.0]]}
     point = [{"entry": t1, "param": "m", "component": 2, "value": 0.4}]
     found = targets_of.targets(d.document, s, {"parameter": point}, source=sweep)
     assert found == [{"target": "parameter", "set": point, "run": gap,

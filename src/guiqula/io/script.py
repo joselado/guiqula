@@ -201,6 +201,7 @@ def _parts(plan, skipped=None):
         else:
             lines.append(call_code(stage.spec, ctx))
         helpers |= ctx.helpers
+    helpers |= set(plan.spec.helpers)          # the calculation's own (the DOS on sites)
     for helper in sorted(helpers, key=lambda f: f.__name__):   # site_field, painted_field...
         head += ["", inspect.getsource(helper).rstrip(), "", ""]
     lines.append("")

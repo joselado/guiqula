@@ -1769,7 +1769,7 @@ the package and upstream's user guide only (the guide stays, for the in-app help
 maintainer's choice); upstream's examples were removed from `vendor/` and from the whole
 history before the first push, and `tools/update_vendor.sh` no longer copies them.
 
-**Phase 7, calculations from picks (proposed 2026-09-28; part 1 built the same day).** Asked
+**Phase 7, calculations from picks (proposed 2026-09-28; parts 1 and 2 built the same day).** Asked
 for on 2026-09-28: to do calculations by picking parameters from the plots,
 taking some bands and computing the LDOS at an energy selected on them, or
 the LDOS at an energy and a k-point picked there, or the Fermi surface at
@@ -2111,6 +2111,45 @@ maintainer to confirm or change):
   `nk` points where pyqula walks one on a finite system (it stopped at 0.1)
   and `nk + 1` on its default three-dimensional path; it now counts the
   points walked.
+
+Part 2, built 2026-09-28. The LDOS gains `k` (empty: the k-mesh, as before;
+a k-point: `get_ldos(ks=[k])`, one diagonalization), and three calculations
+join the registry, each with its engine case against a direct pyqula call
+(exported and run by the script test), a cost, `guide=` and `pyqula=`:
+`eigenstate` (Eigenstate: `htk.eigenvectors.get_eigenvectors` at `k`, the
+state nearest `energy` or the one of index `band`, its weight per site by
+`h.full2profile`, the energy on the colour bar), `site_dos` (DOS on sites:
+`h.get_dos(operator=P)` with P the diagonal projector on the components of
+the sites within `tol` of `positions`, sparse, found with
+`core.nearest.nearest_site`, which the exported script defines; an engine
+test checks that the projectors of all the sites add up to the whole DOS,
+in Nambu too), and `qpi` (Quasiparticle interference: `h.get_qpi` at one
+energy, `response` or `pm`, two-dimensional systems only, a map over q
+whose click yields its energy, since q is not a k-point of the system).
+The k-space tab picks the k-point under a click (Add points off) or a
+right click, snapped as a vertex would be, and the Structure tab has
+Calculate on selection next to Region from selection; the window's `pick`
+and `pick_to` take `system` and `values` for both. Tests: the new cases
+in `tests/engine/test_entries.py`, the eigenstate of a picked band point
+at the band's energy, a click in the k-space tab and the selection's menu
+in `tests/ui/test_picks.py`.
+
+Decided while building part 2:
+
+- a parameter that may be left empty, which is a mode of its own (the
+  LDOS's `k`: over the k-mesh), gives two new-calculation targets, without
+  it and with it, so a pick on the bands still offers the LDOS at that
+  energy over the whole zone (the first example of the request) as well as
+  at that k-point; an existing calculation that leaves it empty keeps it
+  so when it is moved;
+- the eigenstate's `k` is a plain vector, Γ by default, rather than an
+  optional one (it has no mode without a k), and the entry is called
+  Eigenstate (the menu read "new Eigenstate at k at E = ...");
+- the DOS on sites is computed by exact diagonalization only (the Green's
+  function and KPM modes of the DOS would need their own projector
+  handling);
+- a calculation's `helpers` now reach its exported script (they reached it
+  from terms and ops only), which the DOS on sites needs.
 
 ### Where the section 13 items land
 

@@ -538,6 +538,13 @@ def calc_system(name):
         for term, params in terms:
             h.add_heisenberg(Jij=[1.0]) if term == "heisenberg" else \
                 h.add_interaction(Jij=[params.get("J1", 1.0)])
+    elif name == "swave":          # a superconductor: Nambu, four components per site
+        s = d.do("add_system", lattice="honeycomb_lattice")
+        d.do("add_term", system=s, kind="onsite", params={"mu": 0.3})
+        d.do("add_term", system=s, kind="swave", params={"delta": 0.2})
+        h = geometry.honeycomb_lattice().get_hamiltonian(has_spin=True)
+        h.add_onsite(0.3)
+        h.add_swave(0.2)
     elif name == "chain":          # one-dimensional, for the surface DOS at its end
         s = d.do("add_system", lattice="chain")
         d.do("set_construction", system=s, has_spin=False)
@@ -615,12 +622,45 @@ def _op(p):
     return {} if p.get("operator") is None else {"operator": p["operator"]}
 
 
+def _direct_eigenstate(h, p):
+    energies, states = pq("htk.eigenvectors").get_eigenvectors(h, k=p["k"])
+    energies = np.real(energies)
+    i = int(np.argmin(np.abs(energies - p["energy"]))) if p["band"] is None else p["band"]
+    return {"weight": np.real(h.full2profile(np.abs(states[i]) ** 2)), "energy": energies[i],
+            "energies": energies}
+
+
+def _direct_site_dos(h, p):
+    """The projector on the sites, written out: 1 on every component of the
+    sites within tol of a position."""
+    r = np.asarray(h.geometry.r)
+    picked = np.asarray(p["positions"], dtype=float)
+    block = h.intra.shape[0] // len(r)
+    diagonal = np.zeros(h.intra.shape[0])
+    for i, position in enumerate(r):
+        if np.min(np.linalg.norm(picked - position, axis=1)) < p["tol"]:
+            diagonal[block * i:block * (i + 1)] = 1.0
+    es, ds = h.get_dos(energies=_energies(p), delta=p["delta"], nk=p["nk"],
+                       operator=np.diag(diagonal), write=False)
+    return {"energies": es, "dos": ds}
+
+
+def _direct_qpi(h, p):
+    q, _, qpi = h.get_qpi(energies=[p["energy"]], nk=p["nk"], delta=p["delta"], mode=p["mode"],
+                          write=False)
+    return {"qx": np.asarray(q)[:, 0], "qy": np.asarray(q)[:, 1], "qpi": np.asarray(qpi)[0]}
+
+
 # the arrays a direct pyqula call gives, for normalized parameters p
 DIRECT = {
     "bands": _direct_bands,
     "dos": _direct_dos,
     "ldos": lambda h, p: {"ldos": h.get_ldos(e=p["energy"], delta=p["delta"], nk=p["nk"], nrep=1,
-                                             write=False, return_rd=True, **_op(p))[1]},
+                                             write=False, return_rd=True, **_op(p),
+                                             **({} if p["k"] is None else {"ks": [p["k"]]}))[1]},
+    "eigenstate": _direct_eigenstate,
+    "site_dos": _direct_site_dos,
+    "qpi": _direct_qpi,
     "density": lambda h, p: {"density": h.get_vev(nk=p["nk"])},
     "magnetization": lambda h, p: {"magnetization": h.get_magnetization(nk=p["nk"])},
     "real_space_chern": lambda h, p: {"marker": pq("topology").real_space_chern(h)[1]},
@@ -676,7 +716,18 @@ CALC_CASES = {
             ({"ne": 30, "nk": 8, "delta": 0.1, "operator": "sublattice"}, "rashba", None),
             ({"ne": 40, "nk": 4, "delta": 0.1, "mode": "KPM", "seed": 3}, "rashba", None)],
     "ldos": [({"energy": 0.5, "delta": 0.1, "nk": 6}, "rashba", None),
-             ({"energy": 0.2, "delta": 0.1, "nk": 1, "operator": "sublattice"}, "flake", None)],
+             ({"energy": 0.2, "delta": 0.1, "nk": 1, "operator": "sublattice"}, "flake", None),
+             ({"energy": 0.5, "delta": 0.1, "k": [1 / 3, 1 / 3, 0]}, "rashba", None)],
+    "eigenstate": [({"k": [1 / 3, 1 / 3, 0], "energy": 0.3}, "rashba",       # normalized
+                    lambda a: abs(a["weight"].sum() - 1) < 1e-8),
+                   ({"band": 5, "energy": 9.0}, "flake",                    # by its index
+                    lambda a: a["energy"] == np.sort(a["energies"])[5]),
+                   ({"energy": 0.2}, "swave", lambda a: abs(a["weight"].sum() - 1) < 1e-8)],
+    "site_dos": [({"positions": [[-0.5, 0, 0]], "ne": 30, "nk": 6, "delta": 0.1}, "rashba",
+                  None),
+                 ({"positions": [[0.5, 0, 0]], "ne": 20, "nk": 4, "delta": 0.1}, "swave", None)],
+    "qpi": [({"energy": 0.5, "nk": 10}, "rashba", None),
+            ({"energy": 0.3, "nk": 8, "mode": "pm"}, "haldane", None)],
     "density": [({"nk": 6}, "zeeman", None)],
     "magnetization": [({"nk": 6}, "zeeman", lambda a: a["magnetization"][:, 2].min() < -0.05)],
     "real_space_chern": [({}, "flake", None)],
@@ -708,6 +759,7 @@ CALC_CASES = {
                      ({"ntries": 500, "temperatures": 2, "show": "magnetization"}, "ising", None)],
 }
 PLOT_KINDS = {"ldos": "structure_scalar", "density": "structure_scalar",
+              "eigenstate": "structure_scalar", "site_dos": "lines", "qpi": "heatmap",
               "magnetization": "structure_vector", "real_space_chern": "structure_scalar",
               "fermi_surface": "heatmap", "spectral_function": "heatmap",
               "berry_curvature": "heatmap", "chern": "scalar", "gap": "scalar"}
@@ -750,6 +802,40 @@ def test_calculation(pyqula, kind, case):
         assert result.kspace is None
     if check is not None:
         assert check(result.arrays), result.arrays
+
+
+def test_the_dos_on_every_site_is_the_dos(pyqula):
+    """The projectors on the sites add up to the identity, in Nambu too,
+    where pyqula's get_operator of a function of position would carry
+    opposite signs on the hole block."""
+    for name in ("rashba", "swave"):
+        d, s, h = calc_system(name)
+        common = {"ne": 25, "nk": 4, "delta": 0.1}
+        whole = d.do("add_calculation", system=s, kind="site_dos", params=dict(
+            common, positions=[list(map(float, r)) for r in h.geometry.r]))
+        parts = [d.do("add_calculation", system=s, kind="site_dos",
+                      params=dict(common, positions=[list(map(float, r))]))
+                 for r in h.geometry.r]
+        total = d.do("add_calculation", system=s, kind="dos", params=dict(common, emin=-4.0,
+                                                                         emax=4.0))
+        dos = run_calculation(d.document, total).arrays["dos"]
+        assert np.allclose(run_calculation(d.document, whole).arrays["dos"], dos, atol=1e-10)
+        assert np.allclose(sum(run_calculation(d.document, c).arrays["dos"] for c in parts),
+                           dos, atol=1e-10)
+
+
+def test_the_eigenstate_of_a_band_point(pyqula):
+    """A pick on the bands gives the k-point and the energy of a band: the
+    eigenstate there is that band's state, at that energy."""
+    from guiqula.core import picks
+    d, s, h = calc_system("rashba")
+    bands = d.do("add_calculation", system=s, kind="bands", params={"nk": 30})
+    result = run_calculation(d.document, bands)
+    picked = picks.pick(result, 7, float(result.arrays["energies"][7, 2]))["values"]
+    state = d.do("add_calculation", system=s, kind="eigenstate", params={
+        "k": picked["kpoint"], "energy": picked["energy"]})
+    arrays = run_calculation(d.document, state).arrays
+    assert float(arrays["energy"]) == pytest.approx(picked["energy"], abs=1e-10)
 
 
 def test_a_picked_cell_of_the_fermi_surface_is_on_it(pyqula):

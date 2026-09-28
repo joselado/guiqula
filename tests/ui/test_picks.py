@@ -156,16 +156,19 @@ def test_a_box_on_an_ldos_map_picks_the_atoms_inside_it(window, qtbot, shot):
         assert 0 < len(inside) < len(positions)
         picked = session.act("pick", calculation=calc, box=box)
         assert picked["sites"] == inside and picked["label"] == f"{len(inside)} sites"
-        assert [t["target"] for t in picked["targets"]] == ["select_sites", "region"]
+        assert [t["target"] for t in picked["targets"]] == ["add", "select_sites", "region"]
+        assert picked["targets"][0]["kind"] == "site_dos"          # the DOS on them
         view.pick_tools["box"].setChecked(True)             # the tool is on the view
         assert view._selector is not None
         shot(view, "box_tool")
         view.pick_tools["box"].setChecked(False)
-        done = session.act("pick_to", calculation=calc, box=box, target=1)
+        done = session.act("pick_to", calculation=calc, box=box,
+                           target=of(picked["targets"], "region"))
         region = session.document.system("s1").regions[-1]
         assert done["region"] == region.id and len(region.select["positions"]) == len(inside)
         session.undo()
-        done = session.act("pick_to", calculation=calc, box=box, target=0)
+        done = session.act("pick_to", calculation=calc, box=box,
+                           target=of(picked["targets"], "select_sites"))
         assert done["sites"] == len(inside) and window.current_tab() == "structure"
         one = session.act("pick", calculation=calc, x=float(positions[0, 0]),
                           y=float(positions[0, 1]))
@@ -238,3 +241,63 @@ def test_run_at_once(window, qtbot):
     finally:
         session.act("run_at_once", enabled=False)
         session.do("remove", entry=calc)
+
+
+def test_a_click_in_the_kspace_tab_picks_a_kpoint(window, qtbot, shot):
+    """With Add points off, a click in the zone is a k-point (snapped onto
+    K here), and the eigenstate there is computed."""
+    settle(qtbot, window)
+    session = window.session
+    window.select("s1")
+    window.viewport.setCurrentIndex(1)                       # the k-space tab
+    view = window.kspace_view
+    qtbot.waitUntil(lambda: view.ax is not None, timeout=10_000)
+    from guiqula.ui import kspace as tools
+    k_point = tools.special_images(view.kspace)["K"]
+    px, py = view.ax.transData.transform(k_point)
+    for name in ("button_press_event", "button_release_event"):
+        MouseEvent(name, view.canvas, px, py, button=1)._process()
+    menu = window._pick_menu
+    qtbot.waitUntil(lambda: menu.isVisible(), timeout=5000)
+    labels = [a.text() for a in menu.actions() if a.objectName().startswith("pickTarget_")]
+    assert any(text.startswith("new Eigenstate at k = (") for text in labels), labels
+    assert any(text.startswith("new Local density of states at k = (") for text in labels)
+    shot(menu, "kspace_menu")
+    menu.close()
+    k = tools.snap(k_point, view.kspace)
+    picked = session.act("pick", system="s1", values={"kpoint": k})
+    session.act("run_at_once", enabled=True)
+    try:
+        done = session.act("pick_to", system="s1", values={"kpoint": k},
+                           target=of(picked["targets"], "add", kind="eigenstate"))
+        view = shown(window, qtbot, done["calculation"])
+        assert view.result.params["k"] == pytest.approx(k)
+        assert abs(view.result.arrays["weight"].sum() - 1) < 1e-8
+        assert "|ψ|² of the state at E = " in view.result.plot["clabel"]
+        shot(view, "eigenstate")
+    finally:
+        session.act("run_at_once", enabled=False)
+        session.undo()
+
+
+def test_the_dos_on_the_selected_sites(window, qtbot, shot):
+    settle(qtbot, window)
+    session = window.session
+    window.select("s1")
+    window.viewport.setCurrentIndex(0)
+    assert session.act("select_sites", indices=[0, 3]) == 2
+    menu = window._selection_menu()
+    labels = {a.text(): a for a in menu.actions() if a.objectName().startswith("pickTarget_")}
+    assert "new DOS on sites on 2 sites" in labels, list(labels)
+    assert not any("region" in text or "select" in text for text in labels)   # buttons of their own
+    menu.close()
+    labels["new DOS on sites on 2 sites"].trigger()
+    calc = session.document.calculations[-1]
+    try:
+        assert calc.kind == "site_dos" and len(calc.params["positions"]) == 2
+        session.do("set_params", entry=calc.id, params={"ne": 60, "nk": 4})
+        view = run(window, qtbot, calc.id)
+        assert view.result.plot["kind"] == "lines" and view.result.arrays["dos"].max() > 0
+        shot(view, "site_dos")
+    finally:
+        session.do("remove", entry=calc.id)

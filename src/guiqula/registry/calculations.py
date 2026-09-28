@@ -1,9 +1,11 @@
 """Calculations. Each adapter returns plain arrays (never figures, PLAN.md
 3.3) and names the plot kind that draws them (PLAN.md 3.4)."""
+from guiqula.core.nearest import nearest_site
 from guiqula.registry import cost
 from guiqula.registry.base import entry
 from guiqula.registry import kpaths
-from guiqula.registry.params import ChoiceParam, FloatParam, IntParam, KPathParam, SeedParam
+from guiqula.registry.params import (ChoiceParam, FloatParam, FloatVectorParam, IntParam,
+                                     KPathParam, PositionsParam, SeedParam)
 
 
 def _path(h, ctx, fraction=False):
@@ -219,10 +221,24 @@ def scalar(kind, label, value, code, rows, params=(), cost_=None, group="Topolog
 
 
 # ---- real space
+def _kpoint(name="k", doc=""):
+    """A k-point in reduced coordinates, which a pick sets (quantity kpoint)."""
+    return FloatVectorParam(name, None, "k-point", doc, length=3, optional=True,
+                            quantity="kpoint")
+
+
 def _ldos(h, ctx):
+    k = ctx.value("k")
+    extra = {} if k is None else {"ks": [k]}          # one diagonalization, at that k
     _, d = h.get_ldos(e=ctx.value("energy"), delta=ctx.value("delta"), nk=ctx.value("nk"),
-                      nrep=1, write=False, return_rd=True, **_operator_kwarg(ctx))
+                      nrep=1, write=False, return_rd=True, **_operator_kwarg(ctx), **extra)
     return {"ldos": d}
+
+
+def _ldos_cost(p, size):
+    if p["k"] is not None:
+        return cost.diagonalization(size["dimension"])
+    return _mesh_cost()(p, size)
 
 
 entry("calculation", "ldos", "Local density of states",
@@ -231,15 +247,132 @@ entry("calculation", "ldos", "Local density of states",
       IntParam("nk", 10, "k-points", "k-points per direction of the mesh (periodic systems)",
                minimum=1),
       _operator(),
+      _kpoint(doc="reduced coordinates [k1, k2, k3] of one k-point, the states at that k "
+                  "alone (a pick on the bands sets it); empty: the mesh of nk"),
       group="Real space", doc="Density of states at one energy on every site (pyqula's "
-                             "get_ldos), drawn on the structure.",
+                             "get_ldos), drawn on the structure; over the k-mesh, or at one "
+                             "k-point.",
       apply=_ldos, script=lambda ctx: [
           f"_, ldos = h.get_ldos(e={ctx.code('energy')}, delta={ctx.code('delta')}, "
-          f"nk={ctx.code('nk')}, nrep=1, write=False, return_rd=True{_operator_code(ctx)})",
+          f"nk={ctx.code('nk')}, nrep=1, write=False, return_rd=True{_operator_code(ctx)}"
+          + ("" if ctx.value("k") is None else f", ks=[{ctx.code('k')}]") + ")",
           "arrays = dict(ldos=ldos)"],
       plot={"kind": "structure_scalar", "values": "ldos", "clabel": "LDOS"},
-      cost=_mesh_cost(),
+      cost=_ldos_cost,
       guide=("Local density of states", "guiqula: Picking from a plot"), pyqula=("h.get_ldos",))
+
+
+def _eigenstate(h, ctx):
+    import numpy as np
+    from pyqula.htk import eigenvectors
+    energies, states = eigenvectors.get_eigenvectors(h, k=ctx.value("k"))
+    energies = np.real(energies)
+    band = ctx.value("band")
+    if band is None:
+        i = int(np.argmin(np.abs(energies - ctx.value("energy"))))
+    elif band < len(energies):
+        i = band
+    else:
+        raise ValueError(f"band {band}: there are {len(energies)} states (0 to "
+                         f"{len(energies) - 1})")
+    return {"weight": np.real(h.full2profile(np.abs(states[i]) ** 2)),
+            "energy": np.array(energies[i]), "energies": energies}
+
+
+def _eigenstate_script(ctx):
+    band = ctx.value("band")
+    pick = f"int(np.argmin(np.abs(energies - {ctx.code('energy')})))" if band is None else \
+        repr(band)
+    return [f"energies, states = eigenvectors.get_eigenvectors(h, k={ctx.code('k')})",
+            "energies = np.real(energies)",
+            f"i = {pick}",
+            "arrays = dict(weight=np.real(h.full2profile(np.abs(states[i]) ** 2)), "
+            "energy=np.array(energies[i]), energies=energies)"]
+
+
+entry("calculation", "eigenstate", "Eigenstate",
+      FloatVectorParam("k", (0.0, 0.0, 0.0), "k-point", "reduced coordinates [k1, k2, k3] "
+                       "(a pick on the bands or a click in the k-space tab sets it); a "
+                       "finite system has one k and ignores it", quantity="kpoint"),
+      FloatParam("energy", 0.0, "energy", "the state nearest this energy is drawn",
+                 quantity="energy"),
+      IntParam("band", None, "band", "the state by its index at k, from the lowest (0); "
+                                     "empty: the one nearest the energy", minimum=0,
+               optional=True),
+      group="Real space", doc="The weight of one eigenstate on every site, |psi(r)|^2 summed "
+                             "over the spin and Nambu components (pyqula's get_eigenvectors "
+                             "and full2profile): the state nearest an energy at a k-point.",
+      modules=("htk.eigenvectors",), apply=_eigenstate, script=_eigenstate_script,
+      plot=lambda params, arrays: {
+          "kind": "structure_scalar", "values": "weight",
+          "clabel": f"|ψ|² of the state at E = {float(arrays['energy']):.4g}"},
+      cost=lambda p, size: cost.diagonalization(size["dimension"]),
+      guide=("Electronic band structures", "Local density of states",
+             "guiqula: Picking from a plot"),
+      pyqula=("htk.eigenvectors.get_eigenvectors", "h.full2profile"))
+
+
+def _projector(h, positions, tol):
+    """A diagonal matrix with 1 on every component (spin, Nambu) of the
+    sites within tol of the positions: the operator of a DOS on sites. Not
+    pyqula's get_operator of a function of position, which builds it with
+    add_onsite and so carries opposite signs on the hole block of a Nambu
+    Hamiltonian, where it is no projector."""
+    import numpy as np
+    from scipy import sparse
+    r = np.asarray(h.geometry.r, dtype=float)
+    find = nearest_site(positions, tol)
+    sites = [i for i, p in enumerate(r) if find(p) >= 0]
+    if not sites:
+        raise ValueError(f"no site is within {tol} of the positions")
+    size = h.intra.shape[0]
+    block = size // len(r)
+    diagonal = np.zeros(size)
+    for i in sites:
+        diagonal[block * i:block * (i + 1)] = 1.0
+    return sparse.diags(diagonal, format="csc")
+
+
+def _site_dos(h, ctx):
+    import numpy as np
+    P = _projector(h, ctx.value("positions"), ctx.value("tol"))
+    es, ds = h.get_dos(energies=_energies(ctx), delta=ctx.value("delta"), nk=ctx.value("nk"),
+                       operator=P, write=False)
+    return {"energies": np.asarray(es, dtype=float), "dos": np.asarray(ds, dtype=float)}
+
+
+def _site_dos_script(ctx):
+    return [
+        "from scipy import sparse",
+        "r = np.asarray(h.geometry.r, dtype=float)",
+        f"find = nearest_site({ctx.code('positions')}, {ctx.code('tol')})",
+        "sites = [i for i, p in enumerate(r) if find(p) >= 0]",
+        "block = h.intra.shape[0] // len(r)",
+        "diagonal = np.zeros(h.intra.shape[0])",
+        "for i in sites:",
+        "    diagonal[block * i:block * (i + 1)] = 1.0",
+        f"es, ds = h.get_dos(energies={_energies_code(ctx)}, delta={ctx.code('delta')}, "
+        f"nk={ctx.code('nk')}, operator=sparse.diags(diagonal, format='csc'), write=False)",
+        "arrays = dict(energies=np.asarray(es, dtype=float), dos=np.asarray(ds, dtype=float))"]
+
+
+entry("calculation", "site_dos", "DOS on sites",
+      PositionsParam("positions", (), "sites", "the positions of the sites (a pick on a result "
+                                               "drawn on the atoms, or the canvas selection, "
+                                               "sets them)", quantity="sites"),
+      FloatParam("tol", 0.05, "tolerance", "a site this close to a position is one of them",
+                 minimum=1e-6),
+      *_energies_params(-4.0, 4.0, 200),
+      FloatParam("delta", 0.05, "broadening", "Lorentzian width", minimum=1e-9),
+      IntParam("nk", 20, "k-points", "k-points per direction of the mesh", minimum=1),
+      group="Real space", doc="Density of states projected on chosen sites (pyqula's get_dos "
+                             "with the projector on them as the operator): the local spectrum "
+                             "an STM tip sees there.",
+      apply=_site_dos, script=_site_dos_script, helpers=(nearest_site,),
+      plot={"kind": "lines", "x": "energies", "y": "dos", "xlabel": "energy",
+            "ylabel": "DOS on the sites", "picks": {"x": "energy"}},
+      cost=_mesh_cost(2.0),
+      guide=("Density of states", "guiqula: Picking from a plot"), pyqula=("h.get_dos",))
 
 entry("calculation", "density", "Electron density",
       IntParam("nk", 10, "k-points", "k-points per direction of the mesh (periodic systems)",
@@ -312,6 +445,39 @@ entry("calculation", "fermi_surface", "Fermi surface",
       cost=lambda p, size: p["nk"] ** 2 * cost.diagonalization(size["dimension"]),
       extra={"dimensions": (2,)},        # a pick offers it on two-dimensional systems only
       guide=("Fermi surfaces", "guiqula: Picking from a plot"), pyqula=("h.get_fermi_surface",))
+
+
+def _qpi(h, ctx):
+    import numpy as np
+    q, _, qpi = h.get_qpi(energies=[ctx.value("energy")], nk=ctx.value("nk"),
+                          delta=ctx.value("delta"), mode=ctx.value("mode"), write=False)
+    q = np.asarray(q, dtype=float)
+    return {"qx": q[:, 0], "qy": q[:, 1], "qpi": np.asarray(qpi, dtype=float)[0]}
+
+
+entry("calculation", "qpi", "Quasiparticle interference",
+      FloatParam("energy", 0.0, "energy", quantity="energy"),
+      IntParam("nk", 20, "k-points", "k-points per direction", minimum=2),
+      FloatParam("delta", 0.1, "broadening", "Lorentzian width", minimum=1e-9),
+      ChoiceParam("mode", "response", choices=("response", "pm"), label="method",
+                  doc="response: the joint density of states of the clean bands; pm: the "
+                      "autoconvolution of the k-resolved spectral weight, slower"),
+      group="Spectral", doc="The quasiparticle interference pattern at one energy of a "
+                           "two-dimensional system over q (pyqula's get_qpi): what the Fourier "
+                           "transform of an STM conductance map around a defect shows.",
+      apply=_qpi, script=lambda ctx: [
+          f"q, _, qpi = h.get_qpi(energies=[{ctx.code('energy')}], nk={ctx.code('nk')}, "
+          f"delta={ctx.code('delta')}, mode={ctx.code('mode')}, write=False)",
+          "q = np.asarray(q, dtype=float)",
+          "arrays = dict(qx=q[:, 0], qy=q[:, 1], qpi=np.asarray(qpi, dtype=float)[0])"],
+      plot={"kind": "heatmap", "x": "qx", "y": "qy", "c": "qpi", "xlabel": "qx",
+            "ylabel": "qy", "clabel": "QPI", "equal": True,
+            "picks": {"fixed": {"energy": "energy"}}},      # q is not a k-point of the system
+      cost=lambda p, size: cost.kmesh(p["nk"], 2) * cost.diagonalization(size["dimension"])
+      * (4 if p["mode"] == "pm" else 1) + 1e-7 * (2 * p["nk"]) ** 2 * p["nk"] ** 2,
+      extra={"dimensions": (2,)},
+      guide=("Quasiparticle interference", "guiqula: Picking from a plot"),
+      pyqula=("h.get_qpi",))
 
 
 def _spectral_function(h, ctx):
