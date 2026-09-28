@@ -1,0 +1,25 @@
+#!/usr/bin/env python
+"""Start guiqula from this source checkout, with nothing installed.
+
+    ./guiqula [--offscreen] [--remote] [preset|file]   the window
+    ./guiqula run|script|serve|mcp|desktop ...         the subcommands
+
+It takes the same arguments as the installed guiqula command, whose main()
+it runs, with src/ put on the path of this interpreter and, through
+PYTHONPATH, of the programs it starts again with -m guiqula (the window
+that guiqula mcp opens). It can be linked from a directory on $PATH.
+"""
+import os
+import sys
+from pathlib import Path
+
+SRC = str(Path(__file__).resolve().parent / "src")
+sys.path.insert(0, SRC)
+os.environ["PYTHONPATH"] = os.pathsep.join(
+    p for p in [SRC, os.environ.get("PYTHONPATH")] if p)
+
+from guiqula.__main__ import main  # noqa: E402  (after the sys.path insert)
+
+# the workers are spawned, and a spawned child runs this file again as __mp_main__
+if __name__ == "__main__":
+    sys.exit(main())

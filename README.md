@@ -248,8 +248,10 @@ Python file in the user's plugins folder works too (Help > Plugins).
 
 ## Development
 
-Nothing needs installing in a source checkout: `PYTHONPATH=src python -m guiqula` starts the
-window, and `python -m pytest` runs the tests (offscreen Qt, worker processes). `PLAN.md` is
+Nothing needs installing in a source checkout: `./guiqula` starts the window and takes the
+same arguments and subcommands as the installed `guiqula` (it is the same as
+`PYTHONPATH=src python -m guiqula`, and it can be linked from a directory on your `PATH`),
+and `python -m pytest` runs the tests (offscreen Qt, worker processes). `PLAN.md` is
 the design document and `CLAUDE.md` the development guide.
 
 ## License

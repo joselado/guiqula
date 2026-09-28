@@ -257,13 +257,16 @@ installed (2026-09-26). Importing pyqtgraph prints a NumPy-ABI traceback from th
 ## Commands
 
 Nothing is installed: pytest puts `src/` on the path (`pyproject.toml`), and `tools/drive.py`
-does it itself. Keep this section in sync with what exists.
+and the launcher `./guiqula` do it themselves (the launcher also through `PYTHONPATH`, for
+what `env.launcher()` starts, and its `__main__` guard is what keeps the spawned workers
+from running `main()` again). Keep this section in sync with what exists.
 
 ```bash
 python -m pytest                       # everything (offscreen Qt, worker processes; 5-6 min)
 python -m pytest -m "not slow"         # skip the wheel build
 python -m pytest tests/core            # pure Python, under a second
 python -m pytest tests/engine -k zeeman  # one area / one test
+./guiqula [preset|file]                # the window, from the checkout (any subcommand below too)
 PYTHONPATH=src python -m guiqula [preset|file]         # the window (--offscreen, --version)
 PYTHONPATH=src python -m guiqula run honeycomb_zeeman_rashba --calc c1 --out out --script
 PYTHONPATH=src python -m guiqula script honeycomb_zeeman_rashba --calc c1   # print the script
