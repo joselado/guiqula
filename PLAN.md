@@ -1855,9 +1855,10 @@ Found while verifying (a screenshot through drive.py): the vertex ticks of
 a spectral function along a custom k-path are placed at the vertices'
 indices (`_path`'s note "xticks") on an axis that runs from 0 to 1, so the
 vertical lines at 12, 18 and 28 stretch the axis and squash the map into
-its left edge; part 1 fixes it by dividing the tick positions by the
-number of path points (the arrays and the exported script unchanged), the
-same mapping the picks use to take a fraction to its index.
+its left edge; fixed the same day in a commit of its own, by dividing the
+tick positions by the number of path points (the arrays and the exported
+script unchanged), the same mapping the picks will use to take a fraction
+to its index.
 
 Two more sources come at no cost once the targets exist, and the same
 target list serves them: the k-space tab (a click on the zone, with Add

@@ -724,6 +724,11 @@ def test_calculation(pyqula, kind, case):
     if kind == "bands":
         assert progress and progress[-1] == pytest.approx(1.0)
         assert result.plot["kind"] == ("colored_scatter" if p["operator"] else "lines")
+    if p.get("kpath") is not None:       # the vertices' ticks sit on the k axis drawn: the
+        positions = [x for x, _ in result.plot["xticks"]]     # bands' indices, pyqula's
+        k = result.arrays["k"]                                # fractions for kdos_bands
+        assert positions[0] == k.min() and positions[-1] == pytest.approx(k.max()), \
+            (result.plot["xticks"], k.min(), k.max())
     if check is not None:
         assert check(result.arrays), result.arrays
 

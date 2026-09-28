@@ -6,10 +6,13 @@ from guiqula.registry import kpaths
 from guiqula.registry.params import ChoiceParam, FloatParam, IntParam, KPathParam, SeedParam
 
 
-def _path(h, ctx):
+def _path(h, ctx, fraction=False):
     """{"kpath": the k-points, "ticks": vertex indices} of a calculation's
     k-path, or {} for pyqula's default path; the names of its vertices go
-    to the plot (the note "xticks")."""
+    to the plot (the note "xticks"), at the vertices' indices, which is the
+    k axis of the bands, or, with fraction, at their fraction of the path,
+    index / number of points, which is the k axis pyqula gives a spectral
+    function (kdos.write_kdos_bands)."""
     import numpy as np
     kpath = ctx.value("kpath")
     if kpath is None:
@@ -18,7 +21,8 @@ def _path(h, ctx):
     b = np.array([g.b1, g.b2, g.b3])
     ks, ticks = kpaths.path_points(b, kpaths.vertices_of(g, kpath), ctx.value("nk"))
     names = kpaths.tick_names(b, g.dimensionality, kpath, kpaths.special_points(g))
-    ctx.note("xticks", [[int(i), name] for i, name in zip(ticks, names)])
+    scale = 1.0 / len(ks) if fraction else 1
+    ctx.note("xticks", [[int(i) * scale, name] for i, name in zip(ticks, names)])
     return {"kpath": ks, "ticks": ticks}
 
 
@@ -286,7 +290,7 @@ entry("calculation", "fermi_surface", "Fermi surface",
 
 def _spectral_function(h, ctx):
     from pyqula import kdos
-    path = _path(h, ctx)
+    path = _path(h, ctx, fraction=True)        # pyqula's k axis: index / number of points
     extra = {"kpath": path["kpath"]} if path else {}
     out = kdos.kdos_bands(h, energies=_energies(ctx), delta=ctx.value("delta"),
                           nk=ctx.value("nk"), mode=ctx.value("mode"), **_operator_kwarg(ctx),
