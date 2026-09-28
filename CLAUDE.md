@@ -40,8 +40,9 @@ desktop`, icons), and the maintainer answered its report, decisions 25 to 45 (PL
 section 7): a public GitHub repository without CI, pip as the only installer (no frozen
 builds), Python 3.12 and 3.13, 0.0.1 as the first release. Phase 7 (calculations from
 picks on the plots: the vocabulary, the targets, the new calculations, the markers) is done
-(2026-09-28, in three parts); its report, decisions 55 to 62 (PLAN.md section 7, end of
-phase 7), is not answered yet. Nothing is uploaded or pushed without the maintainer.
+(2026-09-28, in three parts); of its report, decisions 55 to 62 (PLAN.md section 7, end of
+phase 7), the maintainer answered 55 to 57 (they stand as built) and the others stand as
+built. Nothing is uploaded or pushed without the maintainer.
 
 ## Code map
 

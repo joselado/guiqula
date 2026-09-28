@@ -2207,6 +2207,12 @@ your answer:
     inside the map;
 62. a marker of sites (rings) is drawn and listed, but not dragged.
 
+Maintainer's answers to the phase-7 report (2026-09-28, asked one by one,
+the three that change behaviour): 55, the optional `name` stays in the
+Document; 56, Run at once stays off in the tests and drivers and on in the
+program; 57, the Fermi-level target keeps adding to the shift the picked
+result saw. 58 to 62 were not asked and stand as built.
+
 ### Where the section 13 items land
 
 | Phase | Items |
