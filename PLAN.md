@@ -1769,6 +1769,284 @@ the package and upstream's user guide only (the guide stays, for the in-app help
 maintainer's choice); upstream's examples were removed from `vendor/` and from the whole
 history before the first push, and `tools/update_vendor.sh` no longer copies them.
 
+**Phase 7, calculations from picks (proposed 2026-09-28, not built).** Asked
+for on 2026-09-28: to do calculations by picking parameters from the plots,
+taking some bands and computing the LDOS at an energy selected on them, or
+the LDOS at an energy and a k-point picked there, or the Fermi surface at
+an energy picked from the bands, with every combination that makes sense
+and an architecture of the interface that keeps them open. This block is
+the plan as proposed; its decisions for the maintainer are at its end,
+numbered 46 onwards after the phase-6 ones, and nothing of it is built.
+
+*The idea.* A plot draws one quantity against one or two others, so a
+point of it is a small set of physical values: a point of a band structure
+is a k-point and an energy, a point of a density of states is an energy, a
+cell of a Fermi surface is a k-point at the energy the surface was computed
+at, an atom of an LDOS map is a site, and a point of a sweep curve is a
+value of the swept parameter. Any calculation whose parameters take those
+quantities can be started from the point, or moved to it: the LDOS at the
+picked energy, the LDOS at the picked k-point and energy, the Fermi surface
+at that energy, the whole Document at that point of a phase diagram. What
+keeps this open is that the pairs (bands to LDOS, DOS to Fermi surface) are
+never written down: the plot kinds declare what their axes carry and the
+parameters declare what they take, both in a closed vocabulary of
+quantities, and what a click can do is computed from the declarations, as
+sweeps and sliders fall out of the Document being data (13.10). Adding a
+source or a target is then one declaration on an existing entry.
+
+*The vocabulary* (`core/picks.py`, numpy only, like `nearest.py`):
+
+- `energy`: an energy in units of the hopping; the y of a band structure
+  or a spectral function, the x of a density of states, the `energy` of an
+  LDOS, a Fermi surface or a QPI map, the y of a surface spectral function;
+- `kpoint`: a point of the Brillouin zone in reduced coordinates (units of
+  the reciprocal lattice vectors, as `KPathParam` stores a vertex and as
+  pyqula's `hkgen(k)` takes it); the k of a band point or of a column of the
+  spectral function, a cell of a Fermi-surface or Berry-curvature map, a
+  vertex of a k-path, a click on the k-space tab;
+- `sites`: sites, stored by position with a tolerance as regions and
+  `remove_atoms` store them (never by index, so a pick survives a change
+  upstream as far as it is meaningful); an atom of a result drawn on the
+  structure, the canvas selection;
+- `parameter`: the value of one parameter of the Document, named as sweeps
+  and sliders name it (entry, param, component); the axis of a sweep curve,
+  the two axes of a sweep map;
+- `frequency`: the x of the optical conductivity, listed so that the
+  vocabulary is complete; nothing takes it yet.
+
+*Sources.* A calculation's plot spec names what its axes yield in `picks`:
+`{"x": "kpath", "y": "energy"}` for the bands, `{"x": "energy"}` for the
+DOS, `{"x": "kmesh", "y": "kmesh"}` for a map over the zone, `{"x":
+"kpath", "y": "energy"}` for the spectral function, `{"y": "energy"}` for
+the surface one (its k runs along the surface and is not a k-point of the
+system), `{"x": "parameter"}` and `{"x": "parameter", "y": "parameter"}`
+for a sweep (whose axes `sweeps.axes` already names), and a result drawn on
+the atoms yields `sites` by its kind: the nearest atom on a click, or
+several with box and lasso tools on the result view (decision 54; the
+canvas's own tools, `ui/structure.py`, reused on the result's positions,
+so that a box drag or a lasso on an LDOS map picks the atoms inside it and
+the menu offers the targets for all of them). `core/picks.py` turns a position on
+the plot into the quantities: `pick(result, x, y, radius)` snaps to the
+nearest drawn point when the plot has points (a band point, a site, a
+sampled value of a sweep: the readout's nearest-point rule, so what the
+readout names is what a pick takes) and takes the cursor's coordinates
+otherwise (an energy on a DOS or a spectral function, a cell of a map), and
+returns `{"energy": 0.3, "kpoint": [1/3, 1/3, 0], ...}`, a label ("E =
+0.30, k = (0.33, 0.33, 0)") and the snapped point, to draw. A Fermi surface
+yields its own energy with the k-point, so a click on it is a (k, E) pair.
+What the results must carry for this, verified on 2026-09-28: the bands
+carry the k index (0 to nk - 1) and the spectral function pyqula's fraction
+along the path (`ik / len(kpath)`, `kdos.write_kdos_bands`), so both gain a
+`kpoints` array, the reduced k of every path point from
+`h.geometry.get_kpath(kpath, nk=nk, write=False)`, the call pyqula makes
+inside, so the exported script produces it too and `test_script_export`
+keeps comparing; a map over the zone (Fermi surface, Berry curvature) is in
+pyqula's mesh coordinates (-1 to 1), which the k-space tab already turns
+into reduced k with the `k2K` matrix of the build summary, so the engine
+attaches `kspace` (the reciprocal vectors and `k2K`, `engine/structure.kspace`)
+to such a Result as it attaches `structure` to a result drawn on the atoms,
+and a pick uses the result's own snapshot, never the current build; a
+surface spectral function's k is 0 to 1 along the surface. A result saved
+before phase 7 carries neither `kpoints` nor `kspace` (project files keep
+the results), so a pick on it yields the energy alone and the menu says to
+run the calculation again for the k-point; a result drawn in 3D (a
+geometry that is not flat) has no picks, as its readout has no points.
+Found while verifying (a screenshot through drive.py): the vertex ticks of
+a spectral function along a custom k-path are placed at the vertices'
+indices (`_path`'s note "xticks") on an axis that runs from 0 to 1, so the
+vertical lines at 12, 18 and 28 stretch the axis and squash the map into
+its left edge; part 1 fixes it by dividing the tick positions by the
+number of path points (the arrays and the exported script unchanged), the
+same mapping the picks use to take a fraction to its index.
+
+Two more sources come at no cost once the targets exist, and the same
+target list serves them: the k-space tab (a click on the zone, with Add
+points off, yields a k-point: the LDOS or the eigenstate at that k) and the
+structure canvas (the selection yields sites: the DOS on the selected sites
+next to "region from selection").
+
+*Targets.* A parameter declares the quantity it takes: `FloatParam("energy",
+..., quantity="energy")` on the LDOS, the Fermi surface and the QPI map; a
+k-point parameter (a `FloatVectorParam` of length 3 with
+`quantity="kpoint"`) on the LDOS at a k-point and on the eigenstate;
+`PositionsParam(quantity="sites")` on the DOS of sites; `KPathParam` takes a
+k-point as a new vertex. `registry/picks.py` (pyqula-free, like
+`pipeline.py`) lists what a pick can do on a system, in this order: for
+every existing calculation of the system with a parameter taking a picked
+quantity, "c3: energy = 0.30" (its other parameters kept: the broadening,
+the mesh); for every calculation kind applicable to the system's kind with
+such a parameter, "new LDOS at E = 0.30", the other parameters at their
+defaults; for a `parameter`, "set t1 m[z] = 0.4", which puts the Document
+at that point of the phase diagram; for a k-point, "add k to the k-path of
+c1"; for sites, "select" and "region from the sites" (the window's existing
+actions); and for an energy one target that is not a parameter, "Fermi
+level to E": every calculation that counts the states below zero energy
+(the Chern number, the gap, the density, the magnetization, the total
+energy; not a mean field at a fixed filling, which pyqula solves at the
+Fermi energy that filling needs, whatever the shift) is then computed at
+the picked energy. It adds an `onsite` term with `mu = -E` named "Fermi
+level", or updates the term of that name a previous pick added; the sign
+shifts the spectrum so that the picked energy sits at zero. It is offered
+on a stack without pairing only: on a Nambu Hamiltonian `add_onsite` enters
+with opposite signs on the electron and hole blocks (`shift_fermi` through
+`spinless2full`), a chemical potential that changes the pairing problem
+rather than shifting the BdG spectrum, whose zero is the Fermi level
+already. Locks (13.16) apply: a pick into a
+locked calculation is refused by the dispatcher and the refusal is shown,
+as a slider's is.
+
+*The gesture.* Every result view answers a right click at a point, in any
+navigation mode, with a menu: a title line with the picked values, then the
+targets; choosing one runs a window action, and the readout says what
+would be picked before the click. The alternative is a Pick toggle on the
+view's toolbar with the left button, as the k-space tab has Add points; a
+right click needs no mode and does not fight pan and zoom, whose right
+button matplotlib uses for a drag only.
+
+*Actions* (the window's, so they join `WINDOW_ACTIONS`, and drive.py, the
+remote API and the MCP add-on get them for free): `pick(calculation, x, y)`
+returns the quantities, the label and the targets of a point in data
+coordinates; `pick_to(calculation, x, y, target)` does one target, by its
+index in that list or as the dict itself. A new calculation is added, named
+after its origin ("ldos at E = 0.30 from c1", the `rename` mutation, so the
+outliner says where it came from) and shown; a set goes through
+`set_param`. Whether it then runs is not the pick's business but a general
+switch's (the maintainer's answer to decision 48): Run > Run at once, kept
+in the settings like the theme, applying to every calculation, from a pick
+or not. With it on, a calculation runs as soon as it is added (from the
+palette too) or one of its parameters is set (from its form, a pick, a
+command), through the cost guard; with it off, nothing runs until Run (F5)
+or the automatic re-run of cheap stale results, which stays as it is,
+since it answers another question (a result made stale by a change
+upstream). A swept parameter has no calculation of its own, so what runs
+after "set t1 m[z] = 0.4" is the sweep's inner calculation, the bands at
+that point of the phase diagram; the system's other results go stale as
+usual.
+
+*The Document is unchanged.* A pick is a gesture that emits ordinary
+commands (`add_calculation`, `set_param`, `add_term`, `rename`,
+`run_calculation`), so the schema, the keys, the exported scripts and the
+undo texts need nothing, and an undo takes a pick back as one step. The
+alternative, a live link stored in the Document (a `from_pick` parameter
+analogous to a `from_result` Field, so that the LDOS follows the pick made
+on the bands), is not proposed: the picked value is a number the user
+chose, and following it live is what part 3 builds, in the view state.
+
+*Markers (part 3): sliders drawn on plots.* After a pick, the value stays
+drawn on the source plot: a horizontal line at E across the bands or the
+DOS, a dot at k on the Fermi surface, a vertical line on the sweep curve, a
+ring around the atom. The marker is bound to what it set (entry, param,
+component), which is exactly what a slider holds (13.10), so a marker is a
+slider drawn on a result view: dragging it sets the parameter through
+`do_merged` and `end_merge` (one undo step per drag) and, with the
+automatic re-run on, the LDOS follows the line as it is dragged across the
+bands; a slider, a form edit or an undo moves the marker too, since it
+shows the parameter's current value. A slider spec gains `on` (the
+calculation whose view draws it) and the axis follows from that view's
+`picks`; the Sliders dock lists the markers with the sliders; they are view
+state next to overlays and sliders (kept in the project's `ui` block,
+pruned when the entry goes) and reached through the existing `slider`
+(with `on`), `set_slider` and `remove_slider` actions.
+
+*New calculations (part 2)*, each with its case in
+`tests/engine/test_entries.py` (exported and run by the script test), a
+cost, `guide=` and `pyqula=`:
+
+- the LDOS gains an optional k-point (`k`; empty: the mesh of `nk`):
+  pyqula's `get_ldos(ks=[k])` diagonalizes at that k alone
+  (`ldos.get_ldos_tb`, mode arpack, which the entry uses; an explicit k is
+  incompatible with the Green's function mode), so the cost is one
+  diagonalization; the forms' vector editor gains an empty state; old
+  documents load unchanged;
+- `eigenstate` (Eigenstate at k): the eigenstates at a k-point
+  (`htk.eigenvectors.get_eigenvectors(h, k=k)`; a finite system has no k),
+  the one whose energy is nearest the picked energy (or a band index), its
+  weight per site summed over the spin and Nambu components
+  (`h.full2profile`, which handles both), drawn on the structure, the energy
+  found in the caption. No guide section covers eigenstates; the entry names
+  "Electronic band structures" and "Local density of states";
+- `site_dos` (DOS on sites): the density of states projected on chosen
+  sites, `h.get_dos(operator=P)` with P a diagonal matrix with 1 on every
+  component of the sites within the tolerance of the picked positions (one
+  per site spinless, two spinful, four in Nambu, the block sizes
+  `full2profile` uses), which `get_operator` takes as a raw matrix. Not
+  `get_operator(callable)`, which builds its operator with `add_onsite` and
+  so carries opposite signs on the hole block of a Nambu Hamiltonian, where
+  it is no projector; an engine test against that call would be wrong on
+  both sides. A curve against energy. The same projector as the operator of
+  the bands (their weight on the sites) is its natural second use, and a
+  region as the operator of any calculation is the generalization, later;
+- `qpi` (Quasiparticle interference, listed as missing in section 5):
+  `h.get_qpi(energies=[E], nk=, delta=, mode=, write=False)` on a
+  two-dimensional system, a map over q at the picked energy; its cost grows
+  as nk squared and then the autoconvolution.
+
+*Tests.* `tests/core/test_picks.py`: a band point to its k-point and
+energy, a heatmap cell to reduced k through `k2K`, a site and a sweep
+sample snapped, a spectral-function column from its fraction;
+`tests/core/test_registry.py`: every `picks` and every `quantity` in the
+closed vocabulary, and every parameter with a quantity of a type the picks
+can set; `tests/engine`: the cases of the new calculations against direct
+pyqula calls, a bands result whose `kpoints` equal `get_kpath`'s, a
+Fermi-surface result whose `kspace` maps a cell to the reduced k the
+k-space tab gives; `tests/ui/test_picks.py`: a pick on the bands view
+offscreen (`pick` lists the targets, `pick_to` adds and runs an LDOS whose
+energy is the picked one and shows it), the menu of a synthetic right
+click (built by a method of its own and shown with `popup()`, never
+`exec()`, so the test reads its actions without blocking the event loop),
+a locked calculation refused with a message, a box on an LDOS map picking
+the atoms inside it, a marker drawn and
+dragged setting the parameter in one undo step; the help test for the new
+entries' anchors and for the user guide's section "Picking from a plot";
+the `WINDOW_ACTIONS` test; drive.py examples in CLAUDE.md.
+
+*Parts.* 1: the vocabulary, `core/picks.py`, `registry/picks.py`,
+`kpoints` and `kspace` on the results, the menu, the two actions, the
+sources bands, DOS, Fermi surface, spectral function, structure plots and
+sweeps, and the targets LDOS, Fermi surface, Fermi level, the swept
+parameter, the k-path vertex and the site selection. 2: the new
+calculations, and the k-space tab and the canvas as sources. 3: the
+markers.
+
+Decisions for the maintainer:
+46. a pick is a gesture emitting ordinary commands and the Document does
+    not change (against a live link stored in it);
+47. a right-click menu on every result view, with no mode to switch
+    (against a Pick toggle on the toolbar);
+48. a pick runs its target at once, through the cost guard, whether it adds
+    a calculation or sets one; the existing calculations of the system are
+    listed before the new ones;
+49. the LDOS gains an optional k-point (against a separate entry "LDOS at a
+    k-point");
+50. which of the new calculations to build: the eigenstate at k, the DOS on
+    sites, QPI;
+51. the markers as sliders drawn on plots, in part 3 (or first, or not at
+    all);
+52. the Fermi-level target: an onsite term named "Fermi level" with
+    `mu = -E`, updated by the next pick;
+53. the k-space tab and the structure canvas as sources, in part 2;
+54. one site per click on a result drawn on the atoms; several through the
+    canvas selection ("select" puts the site there, where box and lasso
+    extend it).
+
+Maintainer's answers (2026-09-28, asked one by one): 46, a pick is a
+gesture emitting ordinary commands, the Document holds the number, and a
+marker of part 3 drives one parameter as a slider does (the live link in
+the Document, and a marker driving several parameters, were explained and
+not taken); 47, both gestures: a Pick toggle on the view's toolbar (a left
+click with it on) and the right click in any mode, two paths to one menu;
+48, not a rule of the picks but a general switch, "run at once", applying
+to all calculations: on, a calculation runs as soon as it is added or set,
+off, only when explicitly asked (assumed: a Run-menu switch kept in the
+settings, on by default, going through the cost guard, next to the
+existing re-run of cheap stale results, which stays); 49, the LDOS gains
+an optional k-point; 50, all three new calculations: the eigenstate at k,
+the DOS on sites and QPI; 51, the markers in part 3, after the
+calculations; 52, the Fermi-level target as an onsite term named "Fermi
+level", on stacks without pairing; 53, the k-space tab and the canvas as
+sources, in part 2; 54, several sites at once: the result views drawn on
+the atoms get box and lasso tools too, next to the one-atom click.
+
 ### Where the section 13 items land
 
 | Phase | Items |
@@ -1779,6 +2057,7 @@ history before the first push, and `tools/update_vendor.sh` no longer copies the
 | 3 | 13.12 cost guard; 13.8 Hamiltonian view (first version: bonds and onsite); Fields: constant, expression, piecewise (section 3.8) |
 | 4 | 13.5 classical systems; 13.7 trust prompt (arrives with Python nodes); 14.1 remote console; 13.9 Brillouin-zone canvas; 13.10 sliders and sweeps; 13.11 overlays; Fields: profile, interpolated, painted, from_result (section 3.8) |
 | 5 | 13.16 teaching presets and exports; 13.13 in-app help from pyqula's documentation |
+| 7 (proposed) | 13.17 calculations from picks |
 
 ## 8. Risks and mitigations
 
@@ -2064,6 +2343,18 @@ onward are features (placement per phase at the end of section 7).
 
 16. **Teaching use.** A preset gallery, one-click export of figure plus data plus
    script, and presets with locked parameters, for use in courses.
+
+17. **Calculations from picks** (asked 2026-09-28, proposed in section 7,
+   phase 7, not built). A point of a plot is a set of physical values (an
+   energy, a k-point, a site, a parameter value), and any calculation whose
+   parameters take them can be started from it or moved to it: the LDOS at
+   an energy picked on the bands, the LDOS at a picked k-point and energy,
+   the Fermi surface at that energy, the Document at a point of a phase
+   diagram. Plot kinds declare what their axes carry and parameters what
+   they take, in one closed vocabulary, so the combinations are computed,
+   never listed; a pick emits ordinary commands and the Document does not
+   change; a picked value can stay on the plot as a draggable marker, a
+   slider drawn on the plot.
 
 ## 14. Plan review (2026-09-26)
 
