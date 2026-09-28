@@ -469,11 +469,16 @@ the origin, not the position vector: subscripts are not allowed, so the
 coordinates are `x, y, z` (phase 1 choice, 2026-09-26). Script export
 writes `x` as `r[0]` and `r` as `np.linalg.norm(r)` inside `lambda r:`.
 One arithmetic holds in the engine, the canvas previews and the exported
-script alike (a review decision of 2026-09-28, open to the maintainer): a
-comparison is 1.0 where it holds and 0.0 elsewhere wherever it appears, so
-`(x > 0) + (y > 0)` is 2 where both hold and `-(x > 0)` works; `&`, `|`,
-`^` and `~` are logical on such truth values; a value that is not a real
-number (`(-8)**(1/3)`) is refused when typed and when evaluated; a function
+script alike (a review decision of 2026-09-28, which the maintainer
+confirmed the same day over numpy's booleans and over refusing arithmetic
+on a comparison): a comparison is 1.0 where it holds and 0.0 elsewhere
+wherever it appears, so `(x > 0) + (y > 0)` is 2 where both hold and
+`-(x > 0)` works; `&`, `|`, `^` and `~` are logical on such truth values;
+a value that is not a real
+number is refused when typed if the expression does not depend on the
+position (`(-8)**(1/3)`), and is NaN at the sites where it is not real
+otherwise (`sqrt(x)` where x < 0, `(-8)**(x/3)`), which the preview greys
+out and counts; a function
 takes exactly its own arguments (a ufunc would read one more as the array
 to write into). The lattice constants are not in scope yet. The engine
 and the exporter accept `constant` and `expression` from phase 1; the UI
@@ -2275,8 +2280,8 @@ supersede quantum-lattice; both can coexist.
 Every question this section held has been settled by a decision recorded
 where it was built, so what follows says where each one went (2026-09-28);
 the recommendations for the in-app help are kept in full, since they are
-written nowhere else, and the one point still open to the maintainer is at
-the end.
+written nowhere else, and the last point that was open to the maintainer
+closes the section.
 
 - The k-path editor for non-standard cells is the Brillouin-zone canvas of
   phase 4, part 4b (13.9, `ui/kspace.py`, phase-4 decision 16): it draws the
@@ -2357,12 +2362,11 @@ commented on.
      button on each form, with Help > pyqula user guide and guiqula user
      guide for the whole texts.
 
-One point is still open to the maintainer, the arithmetic of the
-expressions, a review decision of 2026-09-28 recorded in 3.8 and built as
-written there: a comparison is 1.0 where it holds and 0.0 elsewhere wherever
-it appears, `&`, `|`, `^` and `~` are logical on such truth values, a value
-that is not a real number is refused, and a function takes exactly its own
-arguments.
+The last point that was open to the maintainer, the arithmetic of the
+expressions (3.8, a review decision of 2026-09-28), was answered the same
+day: a comparison stays the number 1.0 where it holds and 0.0 elsewhere, as
+built, rather than numpy's booleans (whose `+` is an or and whose `-`
+fails) or a refusal of any arithmetic on a comparison. Nothing is open.
 
 ## 12. Decisions (made by the maintainer, 2026-09-26)
 

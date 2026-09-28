@@ -20,9 +20,9 @@ plain Qt theme, trust prompt for Python nodes, in-app help rendered from pyqula'
 documentation, whose open design points phase 5 settled), and section 14's
 review decisions of the same day (the console is a remote REPL in the worker,
 a thin UI already in phase 1, invalid entries are skipped and flagged). Section 11 records
-where each of its former open questions was settled; the one point still open to the
-maintainer is the expression arithmetic of 3.8. Read it before designing anything; update
-it when a decision changes.
+where each of its former open questions was settled, the expression arithmetic of 3.8
+last (a comparison is 1.0 or 0.0, confirmed on 2026-09-28), so no design question is open.
+Read it before designing anything; update it when a decision changes.
 
 Status (2026-09-26): phases 0 to 3 are done and the maintainer has answered the phase-3
 report (PLAN.md section 7 says what each phase built, what was left for later, and the
