@@ -236,8 +236,9 @@ itself, use those rather than copying lists: `operatorlist.get_operator_names()`
 
 ## Headless Qt (how the UI is tested and driven without clicking)
 
-The interpreter is conda's Python 3.12 with PySide6 6.11.1. Offscreen rendering works, but
-the platform plugin is only found when its path is given explicitly:
+The interpreter on `PATH` is anaconda's base Python 3.14.6 with PySide6 6.11.0 (2026-09-28),
+which is outside the declared 3.12 and 3.13; the whole suite passes on it. Offscreen
+rendering works, but the platform plugin is only found when its path is given explicitly:
 
 ```bash
 QT_QPA_PLATFORM=offscreen \
@@ -250,9 +251,12 @@ Under that setup a window builds, buttons can be clicked with `.click()`, and
 An interactive matplotlib `QtAgg` canvas embeds and renders offscreen too. The harmless
 message `This plugin does not support propagateSizeHints()` is printed by the offscreen
 plugin. `guiqula.env.configure_qt(offscreen=True)` sets both variables; `tests/conftest.py`,
-`tools/drive.py` and `guiqula --offscreen` call it. `pytest-qt` 4.5 and `pyqtgraph` 0.14 are
-installed (2026-09-26). Importing pyqtgraph prints a NumPy-ABI traceback from the conda base's
-`bottleneck`, which was built against NumPy 1.x; pyqtgraph catches it and works.
+`tools/drive.py` and `guiqula --offscreen` call it. `pytest-qt` 4.5.0 is installed in it
+(without it every test using `qapp` or `qtbot` errors at setup); `pyqtgraph`, the `fast`
+extra, is not, and no test needs it. `tests/ui/test_startup.py`'s 2.0 s budget is tight on
+this interpreter: it passes on a quiet machine, but the start took 2.2 to 3.0 s at a load
+average of about 5 and 3.6 s at 16 (2026-09-28), so a failure there under load is the
+load before it is the code.
 
 ## Commands
 
