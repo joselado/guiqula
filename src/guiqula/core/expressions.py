@@ -27,9 +27,14 @@ negates; ``&``, ``|``, ``^`` and ``~`` are the logical and, or, exclusive
 or and not of such truth values (any nonzero number is true), 1.0 or 0.0
 as well. ``and``/``or``/``if`` are not available because they do not act
 elementwise on arrays. A chained comparison ``-2 < x < 2``, which Python
-evaluates with ``and``, is read as ``(-2 < x) & (x < 2)``. A value that is
-not a real number (a negative number to a fractional power, as in
-``(-8)**(1/3)``) is refused.
+evaluates with ``and``, is read as ``(-2 < x) & (x < 2)``. A complex
+value is refused when evaluated: Python makes one of a negative number to
+a fractional power between literals, as in ``(-8)**(1/3)``, and a Field
+evaluates an expression that does not depend on the position as soon as
+it is typed, so that one is refused there. The coordinates are numpy
+numbers, so an expression of the position that is not real at some sites
+(``sqrt(x)`` where x < 0, ``(-8)**(x/3)``) is NaN there instead, and a
+division by zero inf, which the preview greys out and counts.
 """
 import ast
 import copy
