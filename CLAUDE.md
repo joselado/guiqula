@@ -17,11 +17,12 @@ phase 6), the architecture (headless core + command API + worker process + Qt vi
 layout, the phased plan, and section 13's further decisions (several systems per document,
 regions, headless runner, classical spin/lattice-gas/Ising systems as their own system kinds,
 plain Qt theme, trust prompt for Python nodes, in-app help rendered from pyqula's own
-documentation, whose open design points are at the end of section 11), and section 14's
+documentation, whose open design points phase 5 settled), and section 14's
 review decisions of the same day (the console is a remote REPL in the worker,
-a thin UI already in phase 1, invalid entries are skipped and flagged; the review items
-still open are at the end of section 11). Read it before designing anything; update it when
-a decision changes.
+a thin UI already in phase 1, invalid entries are skipped and flagged). Section 11 records
+where each of its former open questions was settled; the one point still open to the
+maintainer is the expression arithmetic of 3.8. Read it before designing anything; update
+it when a decision changes.
 
 Status (2026-09-26): phases 0 to 3 are done and the maintainer has answered the phase-3
 report (PLAN.md section 7 says what each phase built, what was left for later, and the
@@ -32,7 +33,7 @@ the remaining Fields and the brush); the maintainer asked for phase 5 without co
 on its report, so its items stand as built. Phase 5 (polish) is done (2026-09-27, in four
 parts: settings, themes, shortcuts, undo; teaching exports and locks; performance; the in-app
 help); its report, numbered design items 1 to 14 and decisions 15 to 24 (PLAN.md section 7,
-end of phase 5; items 1 to 7 are the in-app help's open points of section 11), was not
+end of phase 5; items 1 to 7 are the in-app help's recommendations, kept in section 11), was not
 commented on (phase 6 was asked for), so its items stand as built. Phase 6 (distribution
 and the add-on) is done (2026-09-27, in three parts: remote control and the MCP add-on;
 plugins; distribution: README, PyPI metadata, sdist and wheel, conda file, `guiqula

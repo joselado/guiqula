@@ -6,14 +6,15 @@ framework decision, the architecture, and the phased plan. It is the reference
 for every later design discussion; update it when a decision changes.
 
 Status: **all decisions in sections 12 and 13 made on 2026-09-26 (13.13, in-app
-help from pyqula's documentation, decided after phase 1, with open design
-points in section 11); the plan review of the same day is in section 14
-(decided items) and at the end of section 11 (items still open).** Phases 0 to 3 were
+help from pyqula's documentation, decided after phase 1, its open design
+points settled in phase 5 and recorded in section 11); the plan review of the
+same day is in section 14, and its one item left open then is settled in
+section 11.** Phases 0 to 3 were
 done on 2026-09-26 and phase 4 on 2026-09-27 (section 7); the maintainer asked
 for phase 5 without commenting on the phase-4 report, so its items stand as
 built. Phase 5 (polish) was done on 2026-09-27; its report (design items 1
 to 14, the first seven being the recommendations for the open points of the
-in-app help in section 11, and decisions 15 to 24) was not commented on
+in-app help, recorded in section 11, and decisions 15 to 24) was not commented on
 (phase 6 was asked for), so its items stand as built. Phase 6 (distribution and the add-on) was done on 2026-09-27 in
 three parts (remote control and the MCP add-on; plugins; distribution,
 verified on Linux); the maintainer answered its report (decisions 25 to 45
@@ -261,29 +262,34 @@ Semantics, borrowed from Blender's modifier stack:
 
 ### 3.2 Registry: how functionality is added
 
-One Python module per entry, discovered at import (built-ins) or from a
-plugins directory (the per-user config directory from `platformdirs`, plus a `guiqula.plugins`
-entry-point group for pip-installed extensions; built in phase 6, part 2:
-`registry/plugins.py`, `plugin_template/`). An entry declares:
+One `entry(...)` call per entry, grouped by family in the modules of
+`registry/` (built-ins) or in a plugin (the `plugins` folder of the user
+config directory, plus a `guiqula.plugins` entry-point group for
+pip-installed extensions; built in phase 6, part 2: `registry/plugins.py`,
+`plugin_template/`). An entry declares:
 
 ```python
-@term("zeeman", label="Zeeman / exchange field", group="Magnetism",
-      formula=r"\sum_i \vec m(\vec r_i)\cdot\vec\sigma_i",
-      doc="Adds a local exchange field; breaks time reversal.",
-      requires=("spin",))
-class Zeeman:
-    m: Vec3Expr = (0.0, 0.0, 0.0)   # each component scalar or expression
-    def apply(self, h, ctx): h.add_zeeman(ctx.vec3(self.m))
-    def script(self, ctx): return f"h.add_zeeman({ctx.py(self.m)})"
+entry("term", "zeeman", "Zeeman / exchange field",
+      VectorFieldParam("m", (0.0, 0.0, 0.1), "field (mx, my, mz)", "exchange field"),
+      group="Magnetism", formula=r"\sum_i \vec m(\vec r_i)\cdot\vec\sigma_i",
+      doc="Local exchange field acting on the spin; breaks time-reversal symmetry.",
+      requires=("spin",), call=Call("h.add_zeeman", "m"),
+      guide=("Including an external Zeeman field",))
 ```
 
 From this single declaration the program derives the properties form, the
 tooltip/formula, the validation, the outliner label, the script-export line,
-and the JSON schema for save/load. An entry also declares the system kinds it
-applies to (`quantum`, `classical_spin`, `lattice_gas`, `ising`), so each kind
-gets its own palette from one registry. Calculations declare the same way plus a
-`plot` kind (see 3.4). Adding a term or a calculation is one file and one
-test; nothing else changes.
+the help, and the JSON schema for save/load. The `Call` drives both the
+engine and the script export; an entry with no single pyqula call behind it
+gives `apply` and `script` instead, and names the calls it makes with
+`pyqula=` (the bands name `h.get_bands`), so that its help shows their
+docstrings. `guide=` names the sections of pyqula's guide its help shows, or
+of guiqula's own with "guiqula: " in front. An entry also declares the system
+kinds it applies to (`quantum`, `classical_spin`, `lattice_gas`, `ising`), so
+each kind gets its own palette from one registry. Calculations declare the
+same way plus a `plot` kind (see 3.4). Adding a term or a calculation is one
+`entry(...)` call and its case in `tests/engine/test_entries.py`; nothing
+else changes.
 
 Name lists come from pyqula itself, never hand-copied:
 `operatorlist.get_operator_names()`, `meanfield.get_guess_names()`,
@@ -1235,7 +1241,7 @@ themes, keyboard shortcuts, undo, tooltips; (2) teaching exports, locked
 parameters, example and teaching presets; (3) performance; (4) the in-app
 help and guiqula's user guide.
 Design (2026-09-27), numbered for the maintainer; items 1 to 7 are the
-recommendations for the open points of 13.13 at the end of section 11:
+recommendations for the open points of 13.13, recorded in section 11:
 8. a settings file (JSON in the user config directory,
    `$GUIQULA_CONFIG_DIR` for the tests and drivers) holds the theme, the
    recent files and 13.7's "always trust" preference (off by default; it
@@ -2266,77 +2272,46 @@ supersede quantum-lattice; both can coexist.
 
 ## 11. Open questions for later phases
 
-- k-path editor UX for non-standard cells (pyqula's `get_default_kpath` covers
-  the common ones).
-- How much of a mean-field result to persist in project files (size vs
-  reproducibility).
-- Whether sweeps should be a calculation kind or a first-class "study" object
-  with its own outliner section.
-- How a classical texture is handed to a quantum system's exchange term
-  (result reference in the Document, or a copied array), and how staleness
-  propagates across that link.
-- Raised in the 2026-09-26 review (section 14) and not yet decided (review
-  items 7, 9, 10, 13 and 14 were decided the same day, section 14 items 6
-  to 10):
-  - (review 8) the build cache lives in worker memory and a cancel kills the
-    worker, so every cancel discards it; accept the loss (builds are cheap),
-    or keep the cache in the interactive worker and only kill batch workers.
-    With review 7 adopted, phase 1 does the latter: a cancel kills only the
-    batch worker running that job, whose cache is lost; the interactive
-    worker's cache survives.
+Every question this section held has been settled by a decision recorded
+where it was built, so what follows says where each one went (2026-09-28);
+the recommendations for the in-app help are kept in full, since they are
+written nowhere else, and the one point still open to the maintainer is at
+the end.
 
-- In-app help (13.13): open points found by the code review of the decision
-  (2026-09-26, after phase 1), numbered as reported to the maintainer. None
-  affects phase 1 code; settle them when phase 5 is designed.
-  1. Docstrings: the UI process never imports pyqula (13.15), and pyqula
-     sets many docstrings only at import time (`helptk.get_docstring`, 14
-     methods in `hamiltonians.py` and one in `geometry.py`, e.g.
-     `set_filling`, `get_ldos`), so
-     parsing the source misses them. Candidates: extract the text when
-     `tools/update_vendor.sh` refreshes the copy, or ask the worker.
-  2. Packaging: `vendor/pyqula_user_guide.md` is not in the wheel. Shipping
-     it needs a packaging change, since `vendor/pyqula` must stay an exact
-     copy of upstream and `guiqula/_vendor` is not a package.
-  3. Coverage: the guide has no section for many entries (the lattice
-     constructors including `lieb_lattice`, `bulk2ribbon`, Anderson
-     disorder), and custom entries (bands, DOS, remove_atoms) have no single
-     pyqula call whose docstring could be shown; where a docstring exists it
-     is often one line (`add_zeeman`) or missing (`get_dos`,
-     `bulk2ribbon`). The plan needs a rule for these, consistent with "not
-     written again in guiqula", and for guiqula-only concepts (Fields,
-     regions, Python nodes).
-  4. Math: the guide is LaTeX-heavy (`$$` blocks, `pmatrix`), and
-     PySide6-Essentials has no QtWebEngine, so a MathJax view would work on
-     the development machine (the Addons wheel is installed) but not for a
-     pip install. Candidates: matplotlib mathtext per equation, or images
-     rendered at refresh time. (Phase 2 renders the registry's formulas
-     with mathtext, `ui/formulas.py`; mathtext has no `pmatrix` or
-     multi-line environments, so the guide's equations may still need the
-     second route.)
-  5. Refresh workflow: the anchor test runs in pytest, not in
-     `update_vendor.sh`, so an upstream section rename makes the refresh
-     commit red, and fixing the anchor means editing the registry, which
-     "commit a refresh on its own" (CLAUDE.md) forbids. Decide which rule
-     gives: the script runs the anchor test, or anchor fixes may join the
-     refresh commit.
-  6. Stale text: PLAN.md still says help and tooltips are written in
-     guiqula or reused from quantum-lattice in the phase 5 description
-     (section 7), section 4 ("tooltips and formula images can be reused"),
-     section 9 ("tooltips with physics") and the 3.2 example (hand-written
-     `doc=`). Every registry entry has a hand-written `doc` and `formula`
-     whose role next to pyqula's text is undecided, and 3.2 lists no anchor
-     field.
-  7. Smaller points: "anchor" is undefined, and a naive heading scan picks up
-     `#` comment lines in the guide's code blocks (some duplicated); the
-     refresh script copies the guide with a bare `cp` after the package
-     rsync, so a moved upstream guide leaves a mixed copy and an outdated
-     VENDOR.md; with `GUIQULA_PYQULA_PATH` set, the help and the running code
-     come from different pyqula versions; section 4's layout has no place
-     for a help panel.
+- The k-path editor for non-standard cells is the Brillouin-zone canvas of
+  phase 4, part 4b (13.9, `ui/kspace.py`, phase-4 decision 16): it draws the
+  Wigner-Seitz cell of the geometry's own reciprocal lattice and stores the
+  vertices in reduced coordinates, snapping them only onto the points pyqula
+  names for that geometry, so a non-standard cell needs nothing of its own.
+  A 3D zone is drawn by its k3 = 0 cut, so a vertex off that plane is typed,
+  as a label or in reduced coordinates, rather than clicked.
+- How much of a mean-field result a project file keeps is phase-4 decision
+  12 (part 4a): the results, with the total energy in their reports, and not
+  the converged mean-field Hamiltonian.
+- Sweeps are a calculation kind collecting numbers, not a study object of the
+  outliner, phase-4 decision 13 (part 4a, `registry/sweeps.py`).
+- A classical texture reaches a quantum system's exchange term by reference,
+  through a `from_result` Field, phase-4 decision 11 (part 3): a reader of a
+  stale result is flagged, not marked stale itself, and its key follows the
+  data it read (`Result.reads`).
+- Review item 8, the build cache lost on every cancel, was settled by phase 1
+  once review item 7 was adopted: cancelling a calculation kills only the
+  batch worker running it, so the interactive worker's cache survives, and
+  the interactive worker is killed only when a build has run 10 s and a newer
+  build of the same system is asked for (phase-4 decision 10).
 
-  Recommendations (2026-09-27, phase-5 design; numbered as the points, and
-  items 1 to 7 of the phase-5 design in section 7), built as written in
-  phase 5, part 4, pending the maintainer's confirmation:
+The in-app help (13.13) had seven open points, found by the code review of
+that decision after phase 1: docstrings that pyqula sets only at import
+time, which a parse of the source misses; pyqula's guide missing from the
+wheel; entries with no section in the guide or no single pyqula call behind
+them; the guide's LaTeX, with no QtWebEngine in PySide6-Essentials; a refresh
+of the vendored copy against "commit a refresh on its own"; stale text about
+hand-written help; and what an anchor is, with a few smaller points. The
+recommendations below answer them in that order (2026-09-27, the phase-5
+design, where they are items 1 to 7 in section 7). Phase 5, part 4 built them
+as written, and they stand as built, since the phase-5 report was not
+commented on.
+
   1. Read the docstrings statically in the UI process, from the source of
      the pyqula copy in use (an AST parse, lazily at the first help
      request): `helptk.get_docstring(f)` is a decorator that copies `f`'s
@@ -2370,7 +2345,8 @@ supersede quantum-lattice; both can coexist.
   6. Sections 4, 7 and 9 are corrected (2026-09-27). An entry's `doc` stays
      guiqula's one-line summary (tooltip, palette, search) and its
      `formula` the image; neither replaces pyqula's text. 3.2's declaration
-     gains `guide=` and `pyqula=`.
+     gains `guide=` and `pyqula=` (its example was brought up to date on
+     2026-09-28).
   7. An anchor is a heading's text as written in the guide, found outside
      fenced code blocks; a heading used twice is addressed as "Parent >
      Heading", and the test refuses an ambiguous one. The refresh script
@@ -2380,6 +2356,13 @@ supersede quantum-lattice; both can coexist.
      shows. The help is a dock tabbed with Properties, opened by F1 or a ?
      button on each form, with Help > pyqula user guide and guiqula user
      guide for the whole texts.
+
+One point is still open to the maintainer, the arithmetic of the
+expressions, a review decision of 2026-09-28 recorded in 3.8 and built as
+written there: a comparison is 1.0 where it holds and 0.0 elsewhere wherever
+it appears, `&`, `|`, `^` and `~` are logical on such truth values, a value
+that is not a real number is refused, and a function takes exactly its own
+arguments.
 
 ## 12. Decisions (made by the maintainer, 2026-09-26)
 
@@ -2487,9 +2470,8 @@ onward are features (placement per phase at the end of section 7).
    registry entry names exists in the vendored guide, so a renamed upstream
    section fails at refresh time. The guide ships with the package next to
    the vendored pyqula. Phase 5. The code review of this decision found
-   design points it leaves open; they are listed at the end of section 11
-   with the recommendations phase 5 built (part 4), for the maintainer to
-   confirm.
+   design points it leaves open; section 11 records them with the
+   recommendations phase 5 built (part 4), which stand as built.
 
 14. **Crash reports.** On an unexpected error, write a bundle with log,
    traceback, Document snapshot and versions to the user data directory and
@@ -2528,8 +2510,8 @@ onward are features (placement per phase at the end of section 7).
 A read-through of this document against the vendored pyqula before phase 0.
 Items keep the numbers of that review so they can be referred to. The
 maintainer's answers are recorded here; the verified facts were folded into
-sections 3.1, 3.3, 3.8, 6, 7 and 8; the items without an answer yet are at
-the end of section 11. Items 6 to 10 were answered after phase 0 ("7 9 10 13
+sections 3.1, 3.3, 3.8, 6, 7 and 8; review item 8, the one without an
+answer then, is settled in section 11. Items 6 to 10 were answered after phase 0 ("7 9 10 13
 14 ok as your recommendation").
 
 1. **Console as a remote REPL** (review item 6; resolves section 4 against
