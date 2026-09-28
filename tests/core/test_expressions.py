@@ -132,3 +132,18 @@ def test_a_value_that_is_not_real_is_refused():
     with pytest.raises(ExpressionError, match="not a real number"):
         e.evaluate_positions(np.zeros((3, 3)))
     assert Expression("(8)**(1/3) + 0*x").at((1.0, 0.0, 0.0)) == pytest.approx(2.0)
+
+
+def test_a_value_that_is_not_finite_is_nan_or_inf():
+    """sqrt(x) where x < 0 and 1/x at x = 0 are NaN and inf, on arrays and
+    at one position, as numpy gives them: the floating-point warning numpy
+    raised from the evaluation, whose builtins are empty, was
+    KeyError('__import__') on Python 3.14 with NumPy 2.4."""
+    import warnings
+    x = np.array([-1.0, 0.0, 4.0])
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        values = Expression("sqrt(x)").evaluate_positions(np.column_stack([x, 0 * x, 0 * x]))
+        assert np.isnan(values[0]) and values[1:].tolist() == [0.0, 2.0]
+        assert Expression("1/x").at((0.0, 0.0, 0.0)) == np.inf
+        assert np.isnan(Expression("log(x)").at((-1.0, 0.0, 0.0)))

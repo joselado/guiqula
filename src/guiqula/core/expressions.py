@@ -267,7 +267,11 @@ class Expression:
         if "r" in self.names:
             namespace["r"] = np.sqrt(np.asarray(x) ** 2 + np.asarray(y) ** 2 + np.asarray(z) ** 2)
         try:
-            value = eval(self._code, {"__builtins__": {}}, namespace)
+            # a value that is not finite is NaN or inf, without a warning: a warning
+            # raised from this frame, whose builtins are empty, is KeyError('__import__')
+            # (Python 3.14, NumPy 2.4)
+            with np.errstate(all="ignore"):
+                value = eval(self._code, {"__builtins__": {}}, namespace)
         except (ArithmeticError, ValueError, TypeError) as error:
             raise ExpressionError(f"evaluating {self.source!r}: {error}") from None
         if np.iscomplexobj(value):
