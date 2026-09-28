@@ -262,8 +262,8 @@ def test_a_worker_that_cannot_start_is_not_restarted_without_end(monkeypatch, tm
 def test_a_process_that_cannot_be_started_leaves_the_worker_stopped(monkeypatch):
     """Process.start() raising (a spawn while the main module is still being
     imported, as in a launcher without its __main__ guard): the error reaches
-    the caller, and the worker is left not running, so stop and kill (the
-    shutdown at exit), poll and a later shutdown of the manager work."""
+    the caller of the worker's start, and the worker is left not running, so
+    stop and kill (the shutdown at exit) work."""
     import multiprocessing
     import multiprocessing.context
     from guiqula.worker import client
@@ -272,15 +272,50 @@ def test_a_process_that_cannot_be_started_leaves_the_worker_stopped(monkeypatch)
         raise RuntimeError("no process today")
 
     worker = client._Worker("batch", False, multiprocessing.get_context("spawn"))
+    monkeypatch.setattr(multiprocessing.context.SpawnProcess, "start", refuse)
+    with pytest.raises(RuntimeError, match="no process today"):
+        worker.start()
+    assert worker.process is None and not os.path.exists(worker.scratch)
+    worker.stop()
+    worker.kill()
+
+
+def test_a_restart_that_cannot_start_a_process_is_retried_from_poll(monkeypatch):
+    """A worker that died while running a job, restarted from poll() when the
+    system refuses a process: the job fails with the reason, poll() never
+    raises (it runs from the window's timer), the start is tried again after
+    the pause, and after START_ATTEMPTS the jobs of its role fail; a restart
+    once processes can be started brings the worker back."""
+    import multiprocessing.context
+    import signal
+    from guiqula.worker import client
+
+    def refuse(self):
+        raise RuntimeError("no process today")
+
     with JobManager(batch=1, interactive=False, warm=False) as m:
+        m.wait_ready(120)
+        events = []
+        m.subscribe(lambda kind, payload: events.append(payload) if kind == "worker" else None)
+        worker = m.workers["batch"][0]
+        job = m.submit("sleep", {"seconds": 60})
+        wait_running(m, job)
+        monkeypatch.setattr(client, "START_PAUSE", 0.05)
         monkeypatch.setattr(multiprocessing.context.SpawnProcess, "start", refuse)
-        with pytest.raises(RuntimeError, match="no process today"):
-            worker.start()
-        assert worker.process is None and not os.path.exists(worker.scratch)
-        worker.stop()
-        worker.kill()
-        with pytest.raises(RuntimeError, match="no process today"):
-            m.restart("batch")
-        assert m.workers["batch"][0].process is None
-        m.poll(0.05)
-    assert m.closed
+        os.kill(worker.process.pid, signal.SIGKILL)
+        m.wait(job, 60)
+        assert job.status == "failed"
+        assert "it could not start again: RuntimeError: no process today" in job.error
+        assert worker.process is None and worker.failures == 1
+        assert any(p["broken"] and p["pid"] is None for p in events)   # the window's message
+        deadline = time.monotonic() + 60
+        while worker.failures < client.START_ATTEMPTS:
+            assert time.monotonic() < deadline
+            m.poll(0.05)
+        later = m.wait(m.submit("sleep", {"seconds": 0.1}), 60)
+        assert later.status == "failed"
+        assert "cannot start: RuntimeError: no process today" in later.error
+        monkeypatch.undo()
+        m.restart("batch")
+        again = m.wait(m.submit("sleep", {"seconds": 0.1}), 120)
+        assert again.status == "done", again.error

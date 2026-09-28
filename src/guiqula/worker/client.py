@@ -13,9 +13,10 @@ job kills only the worker running it, together with the pool pyqula may
 have started inside it; the other workers and their caches are untouched
 (the phase-1 reading of review item 8).
 
-A worker that dies before it is ready (pyqula cannot be imported, say) is
-started again after a pause, at most START_ATTEMPTS times in a row; then
-the jobs of its role fail with the reason it gave, until restart(role).
+A worker that dies before it is ready (pyqula cannot be imported, say), or
+whose process cannot be started at all, is started again after a pause, at
+most START_ATTEMPTS times in a row; then the jobs of its role fail with the
+reason it gave, until restart(role).
 poll() reads each worker for at most POLL_BUDGET seconds, so a job that
 prints without end cannot keep the UI's timer from returning. Finished
 jobs are forgotten beyond the newest FINISHED_KEPT (their results are the
@@ -190,6 +191,9 @@ class JobManager:
         self._listeners = []
         self._finished = deque()     # ids of finished jobs, oldest first
         self.closed = False
+        # worker.start(), not _start(): a process that cannot be started here raises,
+        # as in a spawned child that is still importing a main module without its
+        # __main__ guard, which must stop at this line instead of running on
         for worker in self._all_workers():
             worker.start()
 
@@ -234,8 +238,7 @@ class JobManager:
             worker = _Worker("console", False, context)
             self.workers["console"] = [worker]
             self.queues["console"] = deque()
-            worker.start()
-            self._emit("worker", worker.info())
+            self._start(worker)
         return self.submit("console", {"code": code, "document": document_json, "system": system,
                                        "trusted": trusted, "results": results}, "console", timeout,
                            label="console")
@@ -310,7 +313,8 @@ class JobManager:
                 job = worker.job
                 if worker.ready:
                     self._restart(worker)
-                    why = "it was restarted"
+                    why = ("it was restarted" if worker.process is not None
+                           else f"it could not start again: {worker.broken}")
                 else:
                     self._broke(worker, code)
                     why = f"it could not start: {worker.broken}"
@@ -326,8 +330,7 @@ class JobManager:
                                                           f"start: {worker.broken}")
                 elif time.monotonic() >= worker.start_at:
                     worker.start_at = None
-                    worker.start()
-                    self._emit("worker", worker.info())
+                    self._start(worker)
             job = worker.job
             if job is not None and job.timeout and job.started and now - job.started > job.timeout:
                 self._restart(worker)
@@ -384,10 +387,22 @@ class JobManager:
         for listener in list(self._listeners):
             listener(kind, payload)
 
+    def _start(self, worker):
+        """Start a worker after the manager's own start. One whose process
+        cannot be started (the system refuses a process, say) is one that
+        died before it was ready: tried again after the pause, never an
+        exception out of poll()."""
+        try:
+            worker.start()
+        except Exception as error:
+            worker.broken = f"{type(error).__name__}: {error}"
+            self._broke(worker, None)
+            return
+        self._emit("worker", worker.info())
+
     def _restart(self, worker):
         worker.kill()
-        worker.start()
-        self._emit("worker", worker.info())
+        self._start(worker)
 
     def _broke(self, worker, code):
         """A worker died before it was ready: start it again after a pause
