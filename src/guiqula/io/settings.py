@@ -10,6 +10,10 @@ tools/drive.py unless asked) never depend on what a user chose.
 - ``remote``: let other programs drive the window through a localhost
   socket (remote control, the Claude add-on, PLAN.md 3.7; off unless the
   user turns it on).
+- ``run_at_once``: a calculation runs as soon as it is added or one of its
+  parameters is set (from its form, a pick on a plot, a command), through
+  the cost guard; off, only when asked (Run, F5). On unless the user turns
+  it off (PLAN.md phase 7, answer 48).
 
 A missing, unreadable or malformed file gives the defaults (a broken
 settings file must not stop the program); unknown keys are kept, so an
@@ -22,7 +26,9 @@ from guiqula import env
 
 FILE = "settings.json"
 RECENT_LIMIT = 10
-DEFAULTS = {"theme": "system", "always_trust": False, "recent": [], "remote": False}
+DEFAULTS = {"theme": "system", "always_trust": False, "recent": [], "remote": False,
+            "run_at_once": True}
+SWITCHES = ("always_trust", "remote", "run_at_once")       # true or false
 CHOICES = {"theme": ("system", "light", "dark")}
 
 
@@ -46,8 +52,9 @@ def load():
     for name, choices in CHOICES.items():
         if values[name] not in choices:
             values[name] = DEFAULTS[name]
-    values["always_trust"] = values["always_trust"] is True
-    values["remote"] = values["remote"] is True
+    for name in SWITCHES:
+        if not isinstance(values[name], bool):
+            values[name] = DEFAULTS[name]
     recent = values["recent"] if isinstance(values["recent"], list) else []
     values["recent"] = [p for p in recent if isinstance(p, str)][:RECENT_LIMIT]
     return values
@@ -72,7 +79,7 @@ def put(name, value):
         raise SettingsError(f"unknown setting {name!r}; known: {sorted(DEFAULTS)}")
     if name in CHOICES and value not in CHOICES[name]:
         raise SettingsError(f"{name} must be one of {CHOICES[name]}, not {value!r}")
-    if name in ("always_trust", "remote") and not isinstance(value, bool):
+    if name in SWITCHES and not isinstance(value, bool):
         raise SettingsError(f"{name} must be true or false")
     values = load()
     values[name] = value

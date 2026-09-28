@@ -48,7 +48,8 @@ a `Session`.
 
 - `core/`: `document.py` (pydantic models; ids unique across the document; a quantum
   system's Hamiltonian = construction, terms, mean-field block; a classical system's
-  `model` = the model entry's set-up and its terms; `terms_of(system)`), `fields.py` and
+  `model` = the model entry's set-up and its terms; `terms_of(system)`; an op, term or
+  calculation may have a `name`, left out of the JSON when empty, never in a key), `fields.py` and
   `locks.py` (what a teaching preset locks: an entry, `t1.m`, `s1/geometry`; the
   dispatcher refuses any mutation that changes a locked thing, comparing before and after),
   `expressions.py` (Fields: constant, expression, piecewise over regions, from_result,
@@ -57,16 +58,23 @@ a `Session`.
   nearest to a position within a tolerance, by a cell hash: regions by positions, painted
   and from_result Fields and the canvas selection must use it, never an N x M scan), `results.py` (the `Result` dataclass
   that crosses the process boundary; a result drawn on the atoms carries its geometry in
-  `structure`, and the ResultRefs its from_result Fields read in `reads`; `ResultRef`,
-  what a from_result Field reads), `bonds.py` (a Field known on the sites only, painted,
+  `structure`, a map over the zone its reciprocal frame in `kspace`, and the ResultRefs its
+  from_result Fields read in `reads`; `ResultRef`, what a from_result Field reads),
+  `picks.py` (phase 7: a point of a plot as the values it stands for, in the closed
+  vocabulary `QUANTITIES`; a plot spec's `picks` names what its axes carry, `AXES`: kpath,
+  kmesh, energy, parameter, frequency, and `fixed`; a result on the atoms yields sites; a
+  bands or spectral-function result carries `kpoints`, reduced, (0, 3) in 0D),
+  `bonds.py` (a Field known on the sites only, painted,
   from_result or a region by positions, at the bond midpoints where pyqula evaluates the
   parameters declared `FieldParam(bond=True)`: the mean of the two ends, a region holding
   a bond when it holds both), `hashing.py`.
 - `registry/`: one declaration per lattice, op, term, mean field and calculation
   (`lattices.py`, `geometry_ops.py`, `terms.py`, `meanfield.py`, `calculations.py`,
   `classical.py` for the classical models, terms and calculations, `python_nodes.py`,
-  `sweeps.py`, a calculation that runs another one over parameter values; `kpaths.py`, the
-  points of a k-path); an
+  `sweeps.py`, a calculation that runs another one over parameter values, and `command`,
+  the mutation that sets one number of the Document (sliders, picks); `kpaths.py`, the
+  points of a k-path; `picks.py`, the targets of picked values, computed from the
+  parameters' `quantity` and never listed by pairs); an
   entry's `systems` names the system kinds it applies to. A
   declarative `Call("h.add_zeeman", "m")` drives both the engine and the script export; a
   custom entry gives `apply` and `script`. `pipeline.py` plans a system without pyqula: the
@@ -133,8 +141,8 @@ a `Session`.
   script export (a sweep exports a loop), result files, `autosave.py` (autosave and
   recovery), `crashreport.py`, `bundle.py` (Export figure, data and script: one folder
   per result, the figure drawn by the window in the light theme), `settings.py` (the user's theme, recent files, always
-  trust, remote control; `$GUIQULA_CONFIG_DIR`; only the interactive program's window, `use_settings=True`,
-  reads or writes it).
+  trust, remote control, run at once; `$GUIQULA_CONFIG_DIR`; only the interactive program's window, `use_settings=True`,
+  reads or writes it, so tests and drivers run with Run at once off unless they turn it on).
 - `desktop.py`: `guiqula desktop` (the menu entry, icon and `.guiqula` file type for the
   current user: freedesktop files on Linux, a Start menu shortcut and registry keys on
   Windows, `~/Applications/guiqula.app` on macOS; from a checkout it carries `src/`);
@@ -148,8 +156,10 @@ a `Session`.
   dispatcher actions `select`, `workspace`, `tool`, `select_sites`, `region_from_selection`,
   `remove_selected`, `canvas_view`, `preview`, `auto_rerun`, `projection`, `overlay`,
   `slider`, `set_slider`, `remove_slider`, `paint`, `theme`, `export_bundle`, `help`,
-  `remote`; a new one joins `remote/api.py`'s `WINDOW_ACTIONS`; File > Allow remote
-  control starts the server, polled from the window's timer),
+  `remote`, `pick`, `pick_to`, `run_at_once`; a new one joins `remote/api.py`'s
+  `WINDOW_ACTIONS`; File > Allow remote control starts the server, polled from the window's
+  timer; a pick emits ordinary commands, and the pick menu is built by `pick_menu` and
+  shown with `popup()`, never `exec()`),
   `help.py` (the Help dock: F1, a form's ?, the guides; Markdown in a QTextBrowser, whose
   `loadResource` serves the equations), `shortcuts.py` (the one
   table of keyboard shortcuts: menus, the canvas and outliner keys, the dialog; a test
@@ -160,7 +170,8 @@ a `Session`.
   (canvas, its three views,
   selection tools, and the mplot3d drawing of geometries that are not flat), `plots.py`
   (`PlotView` per calculation, `plot_<id>`; lines, colored_scatter, heatmap,
-  structure_scalar, structure_vector, scalar), `jobpanel.py`,
+  structure_scalar, structure_vector, scalar; the right click, the Pick, Box and Lasso
+  toggles, `pick_requested`), `jobpanel.py`,
   `console.py` (the console dock), `bars.py` (recovery, error, cost and trust bars),
   `errors.py` (exception hook), `theme.py` (light and dark: the colour names are the active
   theme's, rebound by `apply`; every figure is drawn inside `theme.drawing(figure)`). The
@@ -299,6 +310,10 @@ python tools/drive.py honeycomb_zeeman_rashba --run c1 \
     --python "session.act('export_bundle', calculation='c1', path='out/c1_bands')"
                                                    # figure, data, script in one folder
                                                    # (--do runs before --run, --python after)
+python tools/drive.py honeycomb_zeeman_rashba --run c1 --python "session.act('run_at_once'); \
+    p = session.act('pick', calculation='c1', x=20, y=0.5); print(p['label'], \
+    [t['label'] for t in p['targets']]); session.act('pick_to', calculation='c1', x=20, \
+    y=0.5, target=0)"                              # a pick on the bands (phase 7)
 PYTHONPATH=src python -m guiqula --remote preset      # the window, remote control on (3.7)
 PYTHONPATH=src python -m guiqula serve preset         # a session without a window, remotely driven
 PYTHONPATH=src python -m guiqula mcp [--attach|--headless] [--document D]   # the MCP add-on

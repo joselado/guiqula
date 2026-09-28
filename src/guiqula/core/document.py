@@ -18,7 +18,10 @@ whatever its kind.
 Parameters are stored as plain JSON (``params``); their meaning and
 validation belong to the registry entry named by ``kind``. An entry whose
 kind a plugin provides records that plugin (``plugin``), so a document
-opened without it says which one is missing.
+opened without it says which one is missing. An op, a term or a
+calculation may have a ``name`` (a pick names what it adds after where it
+came from: "at E = 0.3 from c1", the "Fermi level" term); the keys hash
+kinds and parameters only, so a name never makes a result stale.
 """
 import json
 import math
@@ -56,14 +59,17 @@ class _Kind(_Model):
     that provided the kind when it was added (phase-6 answer 37),
     "distribution==version", or "plugins/<file>.py" for the user's plugins
     folder; "" for guiqula's own, and then left out of the JSON, so that a
-    document without plugins is written as before."""
+    document without plugins is written as before. The name of an entry
+    or a calculation is left out when empty in the same way (phase 7)."""
     plugin: str = ""
 
     @model_serializer(mode="wrap")
     def _without_empty_plugin(self, handler):
         data = handler(self)
-        if isinstance(data, dict) and not data.get("plugin"):
-            data.pop("plugin", None)
+        if isinstance(data, dict):
+            for key in ("plugin", "name"):
+                if key in data and not data[key]:
+                    del data[key]
         return data
 
 
@@ -76,6 +82,7 @@ class Entry(_Kind):
     """A geometry op or a Hamiltonian term."""
     id: str
     kind: str
+    name: str = ""                 # what it is for ("Fermi level"); "" is left out of the JSON
     enabled: bool = True
     params: dict[str, Any] = Field(default_factory=dict)
     region: str | None = None      # terms only: restrict to this region
@@ -157,6 +164,7 @@ class Calculation(_Kind):
     id: str
     system: str
     kind: str
+    name: str = ""                 # where it came from ("at E = 0.3 from c1"); "" is left out
     params: dict[str, Any] = Field(default_factory=dict)
 
 

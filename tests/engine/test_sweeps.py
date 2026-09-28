@@ -40,7 +40,8 @@ def test_a_curve_equals_direct_calls(pyqula, repo, tmp_path):
     assert np.allclose(result.arrays["value"], np.linspace(0.0, 0.8, 5))
     assert np.allclose(result.arrays["chern"], expected, atol=1e-10)
     assert result.plot == {"kind": "lines", "x": "value", "y": "chern", "xlabel": "t2 mass",
-                           "ylabel": "chern"}
+                           "ylabel": "chern", "picks": {"x": "parameter"},     # phase 7
+                           "parameters": {"x": [t2, "mass", None]}}
     assert progress[-1] == pytest.approx(1.0)
     got = run_scripts([export_script(d.document, sweep)], repo, tmp_path)[0]
     assert set(got) == set(result.arrays)
@@ -56,6 +57,7 @@ def test_a_map_of_two_parameters(pyqula, repo, tmp_path):
     chern = np.round(result.arrays["chern"]).astype(int)
     assert chern.shape == (3, 3) and chern[0, 0] == -chern[0, 2] != 0 and chern[2, 2] == 0
     assert result.plot["kind"] == "heatmap"
+    assert result.plot["parameters"] == {"x": [t2, "mass", None], "y": [t1, "t", None]}
     got = run_scripts([export_script(d.document, sweep)], repo, tmp_path)[0]
     assert np.allclose(got["chern"], result.arrays["chern"], atol=1e-10)
 

@@ -6,6 +6,13 @@ pyqula takes. Term parameters that are numbers are Fields (PLAN.md 3.8):
 FieldParam and VectorFieldParam. ``native=False`` marks a pyqula argument
 that does not accept a function of position; such a Field must be constant,
 and the form says so.
+
+``quantity`` names what a parameter of a calculation takes from a pick on
+a plot (PLAN.md phase 7, the closed vocabulary of core/picks.py): an
+"energy" (a FloatParam), a "kpoint" (a FloatVectorParam of three reduced
+coordinates), "sites" (a PositionsParam); a calculation with such a
+parameter is a target of every pick that yields the quantity. A KPathParam
+takes a picked k-point as a new vertex without declaring it.
 """
 import math
 import numbers
@@ -20,18 +27,19 @@ class ParamError(ValueError):
 class Param:
     type_name = "param"
 
-    def __init__(self, name, default, label=None, doc=""):
+    def __init__(self, name, default, label=None, doc="", quantity=None):
         self.name = name
         self.default = default
         self.label = label or name
         self.doc = doc
+        self.quantity = quantity
 
     def normalize(self, value):
         return value
 
     def describe(self):
         return {"name": self.name, "type": self.type_name, "default": self.default,
-                "label": self.label, "doc": self.doc}
+                "label": self.label, "doc": self.doc, "quantity": self.quantity}
 
     def __repr__(self):
         return f"{type(self).__name__}({self.name!r})"
@@ -127,8 +135,8 @@ class IntParam(Param):
     type_name = "int"
 
     def __init__(self, name, default, label=None, doc="", minimum=None, maximum=None,
-                 optional=False):
-        super().__init__(name, default, label, doc)
+                 optional=False, quantity=None):
+        super().__init__(name, default, label, doc, quantity)
         self.minimum, self.maximum = minimum, maximum
         self.optional = optional
 
@@ -163,8 +171,8 @@ class SeedParam(IntParam):
 class IntVectorParam(Param):
     type_name = "int_vector"
 
-    def __init__(self, name, default, label=None, doc="", minimum=None):
-        super().__init__(name, list(default), label, doc)
+    def __init__(self, name, default, label=None, doc="", minimum=None, quantity=None):
+        super().__init__(name, list(default), label, doc, quantity)
         self.length = len(default)
         self.minimum = minimum
 
@@ -214,8 +222,8 @@ class PositionsParam(Param):
     """A list of [x, y, z] positions."""
     type_name = "positions"
 
-    def __init__(self, name="positions", default=(), label=None, doc=""):
-        super().__init__(name, list(default), label, doc)
+    def __init__(self, name="positions", default=(), label=None, doc="", quantity=None):
+        super().__init__(name, list(default), label, doc, quantity)
 
     def normalize(self, value):
         if not isinstance(value, (list, tuple)):

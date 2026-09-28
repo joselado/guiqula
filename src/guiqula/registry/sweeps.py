@@ -78,6 +78,24 @@ def _set(params, param, component, value):
         params[param] = current
 
 
+def command(document, target, param, component, value):
+    """(mutation, arguments) that set one parameter of the Document to a
+    number, as a slider or a pick on a sweep does: set_param on an entry
+    (or on a system, its lattice), set_meanfield or set_model on
+    <system>/meanfield and <system>/model; a component of a vector is set
+    in the vector the entry holds."""
+    value = float(value)
+    if component is not None:
+        current = list(locate(document, target)[1].get(param) or [0.0, 0.0, 0.0])
+        current[component] = value
+        value = current
+    if target.endswith("/meanfield"):
+        return "set_meanfield", {"system": target.split("/")[0], "params": {param: value}}
+    if target.endswith("/model"):
+        return "set_model", {"system": target.split("/")[0], "params": {param: value}}
+    return "set_param", {"entry": target, "name": param, "value": value}
+
+
 def with_value(document, target, param, component, value):
     """A copy of the Document with one parameter set to value."""
     document = document.copy_deep()
@@ -166,14 +184,20 @@ def label(target, param, component):
 
 
 def _plot(params, arrays):
+    """A curve, or a map of two parameters; its axes yield the swept
+    parameters' values to a pick ("parameters": what each axis sets)."""
     names = [n for n in arrays if n not in ("value", "value2")]
     output = params["output"] if params["output"] in names else names[0]
-    x = label(params["entry"], params["param"], params["component"])
+    first = [params["entry"], params["param"], params["component"]]
+    x = label(*first)
     if "value2" in arrays:
+        second = [params["entry2"], params["param2"], params["component2"]]
         return {"kind": "heatmap", "x": "value", "y": "value2", "c": output, "xlabel": x,
-                "ylabel": label(params["entry2"], params["param2"], params["component2"]),
-                "clabel": output}
-    return {"kind": "lines", "x": "value", "y": output, "xlabel": x, "ylabel": output}
+                "ylabel": label(*second), "clabel": output,
+                "picks": {"x": "parameter", "y": "parameter"},
+                "parameters": {"x": first, "y": second}}
+    return {"kind": "lines", "x": "value", "y": output, "xlabel": x, "ylabel": output,
+            "picks": {"x": "parameter"}, "parameters": {"x": first}}
 
 
 entry("calculation", "sweep", "Sweep",

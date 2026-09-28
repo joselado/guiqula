@@ -1,0 +1,240 @@
+"""Calculations from picks (PLAN.md phase 7), driven offscreen: a point of
+the bands picked through the window's pick and pick_to actions, the menu
+of a right click on a result view, a locked calculation refusing, a box on
+an LDOS map picking the atoms inside it, the Fermi-level target, a sweep
+picked at a point of its curve, and the Run at once switch."""
+import numpy as np
+import pytest
+from matplotlib.backend_bases import MouseEvent
+
+from guiqula.commands import CommandError
+from guiqula.registry import picks as pick_targets
+from guiqula.ui.app import build_main_window
+
+
+@pytest.fixture(scope="module")
+def window(qapp):
+    window = build_main_window()
+    window.show()
+    window.resize(1400, 900)
+    window.start_session("honeycomb_zeeman_rashba", warm=False)
+    yield window
+    window.close()
+
+
+def settle(qtbot, window, timeout=120_000):
+    session = window.session
+    qtbot.waitUntil(lambda: not window.build_timer.isActive() and all(
+        session.build_is_current(s.id) or s.id in session.build_errors
+        for s in session.document.systems), timeout=timeout)
+
+
+def shown(window, qtbot, calc, timeout=300_000):
+    """Wait until a calculation has a current result drawn in its view."""
+    window.show_result(calc)
+    qtbot.waitUntil(lambda: window.session.result(calc) is not None
+                    and not window.session.is_stale(calc)
+                    and window.plots[calc].result is window.session.result(calc),
+                    timeout=timeout)
+    return window.plots[calc]
+
+
+def run(window, qtbot, calc):
+    window.session.run_calculation(calc, wait=True, timeout=600)
+    assert window.session.calc_jobs[calc].status == "done", window.session.calc_jobs[calc].error
+    return shown(window, qtbot, calc)
+
+
+def band_point(result, ik=10, band=7):
+    energies = np.asarray(result.arrays["energies"])
+    return float(result.arrays["k"][ik]), float(energies[ik, band])
+
+
+def of(targets, what, **match):
+    return next(i for i, t in enumerate(targets) if t["target"] == what
+                and all(t.get(k) == v for k, v in match.items()))
+
+
+def test_a_pick_on_the_bands_adds_an_ldos_at_that_energy(window, qtbot, shot):
+    settle(qtbot, window)
+    session = window.session
+    view = run(window, qtbot, "c1")
+    x, y = band_point(view.result)
+    picked = session.act("pick", calculation="c1", x=x + 0.2, y=y + 0.001)    # snapped
+    assert picked["values"]["energy"] == pytest.approx(y)
+    assert picked["values"]["kpoint"] == pytest.approx(list(view.result.arrays["kpoints"][10]))
+    assert picked["label"].startswith("E = ")
+    kinds = {t["kind"] for t in picked["targets"] if t["target"] == "add"}
+    assert {"ldos", "fermi_surface"} <= kinds
+    assert any(t["target"] == "kpath" and t["calculation"] == "c1" for t in picked["targets"])
+    assert any(t["target"] == "fermi_level" for t in picked["targets"])
+    steps = len(session.dispatcher.history()["undo"])
+    session.act("run_at_once", enabled=True)
+    try:
+        done = session.act("pick_to", calculation="c1", x=x, y=y,
+                           target=of(picked["targets"], "add", kind="ldos"))
+        calc = done["calculation"]
+        ldos = session.document.calculation(calc)
+        assert ldos.kind == "ldos" and ldos.params["energy"] == pytest.approx(y)
+        assert ldos.name.startswith("at E = ") and ldos.name.endswith("from c1")
+        assert window.current_tab() == calc              # shown, and run at once
+        view = shown(window, qtbot, calc)
+        assert view.result.params["energy"] == pytest.approx(y)
+        assert "from c1" in window.outliner.item(calc).text(0)
+        shot(window, "ldos_from_a_band_point")
+        assert len(session.dispatcher.history()["undo"]) == steps + 1     # one step
+        session.undo()
+        assert calc not in {c.id for c in session.document.calculations}
+    finally:
+        session.act("run_at_once", enabled=False)
+
+
+def test_the_menu_of_a_right_click(window, qtbot, shot):
+    settle(qtbot, window)
+    session = window.session
+    view = shown(window, qtbot, "c1")
+    x, y = band_point(view.result, ik=30, band=8)
+    px, py = view.ax.transData.transform((x, y))
+    for name in ("button_press_event", "button_release_event"):       # a right click
+        MouseEvent(name, view.canvas, px, py, button=3)._process()
+    menu = window._pick_menu
+    qtbot.waitUntil(lambda: menu.isVisible(), timeout=5000)
+    title = menu.findChild(type(menu.actions()[0]), "pickTitle")
+    assert title is not None and title.text().startswith(f"E = ")
+    shot(menu, "menu")
+    labels = [a.text() for a in menu.actions() if a.objectName().startswith("pickTarget_")]
+    fermi = next(i for i, text in enumerate(labels) if text.startswith("new Fermi surface"))
+    menu.findChild(type(title), f"pickTarget_{fermi}").trigger()
+    menu.close()
+    calc = session.document.calculations[-1]
+    assert calc.kind == "fermi_surface" and calc.params["energy"] == pytest.approx(y)
+    assert "readout" and view.readout is not None
+    session.undo()
+
+
+def test_the_readout_says_what_a_pick_takes(window, qtbot):
+    settle(qtbot, window)
+    view = shown(window, qtbot, "c1")
+    x, y = band_point(view.result)
+    px, py = view.ax.transData.transform((x, y))
+    MouseEvent("motion_notify_event", view.canvas, px, py)._process()
+    assert "a pick takes E = " in view.readout.text() and "k = (" in view.readout.text()
+
+
+def test_a_locked_calculation_refuses_the_pick(window, qtbot):
+    settle(qtbot, window)
+    session = window.session
+    calc = session.do("add_calculation", system="s1", kind="ldos", params={"nk": 2})
+    session.do("lock", target=f"{calc}.energy")
+    try:
+        view = shown(window, qtbot, "c1")
+        x, y = band_point(view.result)
+        picked = session.act("pick", calculation="c1", x=x, y=y)
+        index = of(picked["targets"], "set", calculation=calc)
+        with pytest.raises(CommandError, match="locked"):
+            session.act("pick_to", calculation="c1", x=x, y=y, target=index)
+        menu = window.pick_menu("c1", x, y)                   # from the menu: shown, not raised
+        menu.findChild(type(menu.actions()[0]), f"pickTarget_{index}").trigger()
+        assert "locked" in window.log.toPlainText().splitlines()[-1]
+        assert session.document.calculation(calc).params["energy"] == 0.0
+    finally:
+        session.do("unlock")
+        session.do("remove", entry=calc)
+
+
+def test_a_box_on_an_ldos_map_picks_the_atoms_inside_it(window, qtbot, shot):
+    settle(qtbot, window)
+    session = window.session
+    calc = session.do("add_calculation", system="s1", kind="ldos", params={"nk": 2,
+                                                                        "delta": 0.2})
+    try:
+        view = run(window, qtbot, calc)
+        positions = np.asarray(view.result.structure["positions"])
+        box = [-0.1, -2.0, 1.6, 2.0]
+        inside = [i for i, (px, py, _) in enumerate(positions)
+                  if -0.1 <= px <= 1.6 and -2 <= py <= 2]
+        assert 0 < len(inside) < len(positions)
+        picked = session.act("pick", calculation=calc, box=box)
+        assert picked["sites"] == inside and picked["label"] == f"{len(inside)} sites"
+        assert [t["target"] for t in picked["targets"]] == ["select_sites", "region"]
+        view.pick_tools["box"].setChecked(True)             # the tool is on the view
+        assert view._selector is not None
+        shot(view, "box_tool")
+        view.pick_tools["box"].setChecked(False)
+        done = session.act("pick_to", calculation=calc, box=box, target=1)
+        region = session.document.system("s1").regions[-1]
+        assert done["region"] == region.id and len(region.select["positions"]) == len(inside)
+        session.undo()
+        done = session.act("pick_to", calculation=calc, box=box, target=0)
+        assert done["sites"] == len(inside) and window.current_tab() == "structure"
+        one = session.act("pick", calculation=calc, x=float(positions[0, 0]),
+                          y=float(positions[0, 1]))
+        assert one["values"]["sites"] == [pytest.approx(list(positions[0]))]
+    finally:
+        session.do("remove", entry=calc)
+
+
+def test_the_fermi_level_target(window, qtbot):
+    settle(qtbot, window)
+    session = window.session
+    view = shown(window, qtbot, "c1")
+    x, y = band_point(view.result)
+    picked = session.act("pick", calculation="c1", x=x, y=y)
+    done = session.act("pick_to", calculation="c1", x=x, y=y,
+                       target=of(picked["targets"], "fermi_level"))
+    term = session.document.find(done["term"])[4]
+    assert term.kind == "onsite" and term.name == pick_targets.FERMI_LEVEL
+    assert term.params["mu"] == pytest.approx(-y)
+    again = session.act("pick", calculation="c1", x=x, y=y)     # updates the same term
+    target = again["targets"][of(again["targets"], "fermi_level")]
+    assert target["term"] == term.id
+    session.undo()
+    assert not any(t.name == pick_targets.FERMI_LEVEL
+                   for t in session.document.system("s1").hamiltonian.terms)
+
+
+def test_a_point_of_a_sweep_sets_its_parameter(window, qtbot):
+    settle(qtbot, window)
+    session = window.session
+    gap = session.do("add_calculation", system="s1", kind="total_energy", params={"nk": 2})
+    sweep = session.do("add_calculation", system="s1", kind="sweep", params={
+        "calculation": gap, "entry": "t2", "param": "c", "start": 0.0, "stop": 0.2, "steps": 3})
+    try:
+        view = run(window, qtbot, sweep)
+        x = float(view.result.arrays["value"][1])
+        y = float(view.result.arrays["energy"][1])
+        picked = session.act("pick", calculation=sweep, x=x, y=y)
+        assert picked["values"]["parameter"] == [
+            {"entry": "t2", "param": "c", "component": None, "value": pytest.approx(0.1)}]
+        target = of(picked["targets"], "parameter")
+        assert picked["targets"][target]["run"] == gap
+        done = session.act("pick_to", calculation=sweep, x=x, y=y, target=target)
+        assert done["calculation"] == gap
+        assert session.document.find("t2")[4].params["c"] == pytest.approx(0.1)
+        session.undo()
+        assert session.document.find("t2")[4].params["c"] == 0.1        # the preset's
+    finally:
+        session.do("remove", entry=sweep)
+        session.do("remove", entry=gap)
+
+
+def test_run_at_once(window, qtbot):
+    """Off, adding or setting a calculation runs nothing; on, it runs."""
+    settle(qtbot, window)
+    session = window.session
+    assert window.run_at_once is False           # tests and drivers: off unless asked
+    calc = session.do("add_calculation", system="s1", kind="dos", params={"ne": 20, "nk": 2})
+    try:
+        assert calc not in session.calc_jobs
+        session.act("run_at_once", enabled=True)
+        assert window.run_at_once_action.isChecked()
+        session.do("set_param", entry=calc, name="ne", value=30)
+        assert calc in session.calc_jobs
+        shown(window, qtbot, calc)
+        session.do("set_param", entry="t2", name="c", value=0.12)     # not the calculation's
+        assert session.status(calc) == "stale" and session.calc_jobs[calc].done
+        session.undo()
+        assert session.status(calc) == "done"
+    finally:
+        session.act("run_at_once", enabled=False)
+        session.do("remove", entry=calc)

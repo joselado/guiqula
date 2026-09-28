@@ -129,10 +129,12 @@ def run_calculation(document, calc_id, cache=None, progress=None, trusted=True, 
     if ctx.notes.get("xticks"):            # the vertices of a k-path, named
         plot["xticks"] = ctx.notes["xticks"]
     geometry = structure.describe(built.g) if plot["kind"] in STRUCTURE_PLOTS else None
+    over_the_zone = "kmesh" in (plot.get("picks") or {}).values()
     return Result(calculation=calc_id, kind=plan.kind, key=plan.key, params=plan.params,
                   arrays=arrays, plot=plot,
                   reports=built.reports, mode=built.mode, document=document.to_json(),
                   structure=geometry, reads=reads(built.plan),
+                  kspace=structure.frame(built.g) if over_the_zone else None,
                   meta={"seconds": seconds, "build_seconds": build_seconds,
                         "cores": parallel.cores,
                         "guiqula": guiqula.__version__, "pyqula": provenance()})

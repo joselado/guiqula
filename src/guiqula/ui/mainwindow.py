@@ -11,7 +11,15 @@ preview of the Field being edited (PLAN.md 3.8), which a Field editor
 selects when the user looks at it. The cost guard (13.12) shows the rough
 duration of the selected calculation in the status bar and asks, in a
 non-modal bar, before running one that takes minutes; stale results of
-cheap calculations can be re-run automatically (opt-in, Run menu).
+cheap calculations can be re-run automatically (opt-in, Run menu), and
+with Run at once (a setting, on in the interactive program) a calculation
+runs as soon as it is added or one of its parameters is set.
+
+A result view answers a right click (or a click with its Pick toggle, or
+a box or a lasso on a result drawn on the atoms) with the menu of what the
+point stands for and what can be done with it (PLAN.md phase 7): the
+actions pick and pick_to, which emit ordinary commands, so an undo takes a
+pick back and the Document holds plain numbers.
 
 The window is a client of a Session: every change goes through the
 dispatcher. The selected item, the workspace, the canvas tool and the site
@@ -46,10 +54,12 @@ from PySide6.QtWidgets import (QApplication, QButtonGroup, QComboBox, QCompleter
 import guiqula
 from guiqula import vendoring
 from guiqula.core import fields
+from guiqula.core import picks as pick_tools
 from guiqula.core import regions as region_tools
 from guiqula.io import bundle, crashreport, project, settings
 from guiqula.registry import base as registry
 from guiqula.registry import cost, pipeline
+from guiqula.registry import picks as pick_targets
 from guiqula.registry.params import VectorFieldParam
 from guiqula.ui.bars import MessageBar
 from guiqula.ui.console import ConsoleWidget
@@ -71,7 +81,8 @@ WORKSPACES = ("geometry", "hamiltonian", "calculate")
 # actions of the window itself: they change what is shown, not the Document
 WINDOW_ACTIONS = ("select", "workspace", "tool", "select_sites", "canvas_view", "preview",
                   "auto_rerun", "projection", "overlay", "slider", "set_slider",
-                  "remove_slider", "paint", "theme", "export_bundle", "help")
+                  "remove_slider", "paint", "theme", "export_bundle", "help", "pick", "pick_to",
+                  "run_at_once")
 STRUCTURE_TAB = 0
 KSPACE_TAB = 1
 # a new classical system: its lattice, and a supercell the usual orders fit in
@@ -143,6 +154,8 @@ class MainWindow(QMainWindow):
         self.canvas_view = "structure"
         self.field_preview = None      # (entry, parameter) the field view draws
         self.auto_rerun = False
+        self.run_at_once = False       # the setting (io/settings.py) in the interactive program
+        self._pick_menu = None         # the pick menu shown last (kept alive while it is open)
         self._auto_keys = {}           # calculation id -> key it was last re-run for
         self._auto_jobs = set()        # ids of the jobs the auto re-run started
         self._searched = (None, 0.0)   # (text, time) of the last palette search
@@ -268,6 +281,7 @@ class MainWindow(QMainWindow):
             self.set_theme(stored["theme"])
             self.always_trust_action.setChecked(stored["always_trust"])
             self.set_remote(stored["remote"], remember=False)
+            self.set_run_at_once(stored["run_at_once"], remember=False)
 
     # ---- construction helpers
     def _dock(self, title, widget, name, area):
@@ -623,6 +637,15 @@ class MainWindow(QMainWindow):
         self.auto_rerun_action.setToolTip(f"a stale result is computed again as soon as the "
                                           f"geometry is rebuilt, when it takes less than "
                                           f"{AUTO_RERUN_SECONDS:g} s")
+        self.run_at_once_action = self._action(
+            run, "Run calculations at &once", lambda: self._act(
+                "run_at_once", enabled=self.run_at_once_action.isChecked()),
+            name="runAtOnceAction")
+        self.run_at_once_action.setCheckable(True)
+        self.run_at_once_action.setToolTip("a calculation runs as soon as it is added or one of "
+                                           "its parameters is set (its form, a pick on a plot, "
+                                           "a command), through the cost guard; off, only Run "
+                                           "(F5) runs it")
         run.setToolTipsVisible(True)
         help_menu = self.menuBar().addMenu("&Help")
         self._action(help_menu, "&Help on the selected entry", lambda: self.show_help(),
@@ -692,6 +715,10 @@ class MainWindow(QMainWindow):
         dispatcher.register_action("help", self.help)
         dispatcher.register_action("remote", lambda enabled=True: self.set_remote(
             enabled, remember=False))
+        dispatcher.register_action("pick", self.pick)
+        dispatcher.register_action("pick_to", self.pick_to)
+        dispatcher.register_action("run_at_once", lambda enabled=True: self.set_run_at_once(
+            enabled))
         self.help_panel.session = session
         session.view_state = self.view_state
         self.timer.start(POLL_MS)
@@ -803,6 +830,11 @@ class MainWindow(QMainWindow):
             self._update_trust()
             for text in self.session.dropped_results:
                 self.message(text, error=True)
+        if event is not None and event["type"] == "mutation" \
+                and not self.session.dispatcher.merging:        # a slider's drag: at its end
+            calc = self._set_calculation(event)
+            if calc is not None:
+                self._ran_at_once(calc)
 
     def _update_title(self):
         path = self.session.path
@@ -1619,6 +1651,7 @@ class MainWindow(QMainWindow):
             view.export_requested.connect(self.export_bundle_dialog)
             view.detach_requested.connect(self.toggle_detached)
             view.overlay_menu_requested.connect(self._fill_overlay_menu)
+            view.pick_requested.connect(self._pick_requested)
             self.plots[calc] = view
             self.viewport.addTab(view, calc)
             self._draw_result(calc)
@@ -1820,30 +1853,20 @@ class MainWindow(QMainWindow):
 
     def set_slider(self, index, value, dragging=False):
         """Set a slider's parameter; the steps of one drag are one undo step."""
+        from guiqula.registry import sweeps
         spec = self.sliders[index]
         value = min(max(float(value), spec["min"]), spec["max"])
         entry, param, component = spec["entry"], spec["param"], spec["component"]
-        if component is not None:
-            from guiqula.registry import sweeps
-            current = list(sweeps.locate(self.session.document, entry)[1].get(param))
-            current[component] = value
-            value_sent = current
-        else:
-            value_sent = value
         key = f"slider:{index}:{entry}:{param}:{component}"
-        if entry.endswith("/meanfield"):
-            command = ("set_meanfield", {"system": entry.split("/")[0],
-                                         "params": {param: value_sent}})
-        elif entry.endswith("/model"):
-            command = ("set_model", {"system": entry.split("/")[0], "params": {param: value_sent}})
-        else:
-            command = ("set_param", {"entry": entry, "name": param, "value": value_sent})
+        command = sweeps.command(self.session.document, entry, param, component, value)
         try:
             self.session.do_merged(key, command[0], **command[1])
         finally:
             if not dragging:
                 self.session.dispatcher.end_merge()
         self.sliders_panel.show_values([self._slider_value(s) for s in self.sliders])
+        if not dragging and any(c.id == entry for c in self.session.document.calculations):
+            self._ran_at_once(entry)           # released: the calculation it moved
         return value
 
     def _fill_overlay_menu(self, calc):
@@ -1993,6 +2016,183 @@ class MainWindow(QMainWindow):
                 self._auto_jobs.add(job["id"])
                 started.append(calc.id)
         return started
+
+    # ---- run at once (PLAN.md phase 7, answer 48)
+    def set_run_at_once(self, enabled=True, remember=True):
+        """Run every calculation as soon as it is added or one of its
+        parameters is set, through the cost guard (off: only when asked);
+        the interactive program keeps the choice in the settings file.
+        Returns whether it is on."""
+        self.run_at_once = bool(enabled)
+        self.run_at_once_action.setChecked(self.run_at_once)
+        if remember and self.use_settings:
+            settings.put("run_at_once", self.run_at_once)
+        return self.run_at_once
+
+    def _set_calculation(self, event):
+        """The calculation a mutation added or set a parameter of, or None."""
+        name, args = event.get("name"), event.get("args") or {}
+        if name == "add_calculation":
+            return event.get("result")
+        if name in ("set_param", "set_params") and any(
+                c.id == args.get("entry") for c in self.session.document.calculations):
+            return args["entry"]
+        return None
+
+    def _ran_at_once(self, calc):
+        """Run a calculation that was just added or set, when Run at once
+        is on and it has no current result (an undo, or a value set back,
+        brings an earlier result back, which needs no run). Returns the job
+        id, or None."""
+        if not self.run_at_once or self.session is None or \
+                (self.session.result(calc) is not None and not self.session.is_stale(calc)):
+            return None
+        self.session.jobs.supersede("run", calc)
+        job = self.run_guarded(calc)
+        return job["id"] if isinstance(job, dict) else None
+
+    # ---- picks (PLAN.md phase 7)
+    def pick(self, calculation, x=None, y=None, box=None, polygon=None):
+        """What a point of a calculation's result stands for, and what can
+        be done with it: {"calculation", "system", "values", "label",
+        "notes", "targets", "point", "sites"}. x, y: a position in the
+        plot's data coordinates (snapped to the drawn point the readout
+        names there); box [x0, y0, x1, y1] or polygon [[x, y], ...]: the
+        atoms inside, on a result drawn on them."""
+        from guiqula.remote.api import jsonable
+        view = self.plots.get(calculation)
+        result = view.result if view is not None and view.result is not None else \
+            self.session.result(calculation)
+        system = self.session.document.calculation(calculation).system
+        if result is None:
+            raise ValueError(f"{calculation} has no result to pick from: run it first")
+        index = sites = None
+        if box is not None or polygon is not None:
+            if view is None or view.points is None or not len(view.points[0]):
+                raise ValueError(f"{calculation}: show its result drawn flat on the atoms to "
+                                 f"pick them with a box or a lasso")
+            xy = np.column_stack(view.points[:2])
+            sites = structure_tools.indices_in_box(xy, *box) if box is not None else \
+                structure_tools.indices_in_polygon(xy, polygon)
+            sites = [int(i) for i in sites]
+        elif x is None or y is None:
+            raise ValueError("give x and y, a box or a polygon")
+        elif view is not None:
+            index, x, y = view.snap(float(x), float(y))
+        picks_y = view is None or view.picks_y()
+        picked = pick_tools.pick(result, x, y if picks_y else None, index=index, sites=sites)
+        build = self.builds.get(system)
+        try:
+            mode = self.session.plan_system(system).mode
+        except Exception:
+            mode = None
+        picked["targets"] = pick_targets.targets(
+            self.session.document, system, picked["values"], source=calculation, mode=mode,
+            dimensionality=build["dimensionality"] if build else None,
+            snapshot=pick_targets.snapshot_of(result))
+        picked.update(calculation=calculation, system=system, sites=sites)
+        return jsonable(picked)
+
+    def pick_to(self, calculation, target, x=None, y=None, box=None, polygon=None):
+        """Do one target of a pick: its index in the list pick() gives for
+        the same position, or the target dict itself. Returns what was
+        done: {"target", and "calculation", "term", "region" or "sites"}."""
+        if not isinstance(target, dict):
+            targets = self.pick(calculation, x, y, box, polygon)["targets"]
+            if isinstance(target, bool) or not isinstance(target, int) \
+                    or not 0 <= target < len(targets):
+                raise ValueError(f"target is a dict or an index from 0 to {len(targets) - 1}")
+            target = targets[target]
+        return self._do_target(target)
+
+    def _do_target(self, target):
+        from guiqula.registry import sweeps
+        kind = target.get("target")
+        session = self.session
+        if kind == "set":
+            session.do("set_params", entry=target["calculation"], params=target["params"])
+            self.show_result(target["calculation"])
+            return {"target": kind, "calculation": target["calculation"]}
+        if kind == "add":
+            calc = session.do("add_calculation", system=target["system"], kind=target["kind"],
+                              params=target["params"], name=target.get("name", ""))
+            self.select_calculation(calc)
+            self.show_result(calc)
+            return {"target": kind, "calculation": calc}
+        if kind == "kpath":
+            session.do("set_param", entry=target["calculation"], name=target["param"],
+                       value=target["kpath"])
+            self.show_result(target["calculation"])
+            return {"target": kind, "calculation": target["calculation"]}
+        if kind == "parameter":
+            key = f"pick:{time.time()}"                   # several parameters: one undo step
+            try:
+                for point in target["set"]:
+                    name, args = sweeps.command(session.document, point["entry"], point["param"],
+                                                point["component"], point["value"])
+                    session.do_merged(key, name, **args)
+            finally:
+                session.dispatcher.end_merge()
+            run = target.get("run")
+            if run and any(c.id == run for c in session.document.calculations):
+                self._ran_at_once(run)
+                self.show_result(run)
+            return {"target": kind, "calculation": run}
+        if kind == "fermi_level":
+            if target.get("term"):
+                session.do("set_param", entry=target["term"], name="mu", value=target["mu"])
+                term = target["term"]
+            else:
+                term = session.do("add_term", system=target["system"], kind="onsite",
+                                  params={"mu": target["mu"]}, name=pick_targets.FERMI_LEVEL)
+            return {"target": kind, "term": term}
+        if kind == "region":
+            region = session.do("add_region", system=target["system"], select={
+                "kind": "positions", "positions": target["positions"], "tol": REGION_TOLERANCE})
+            self.select(region)
+            return {"target": kind, "region": region}
+        if kind == "select_sites":
+            if self.current_system() != target["system"]:
+                self.select(target["system"])
+                self._refresh_structure()
+            count = self.select_sites(positions=target["positions"])
+            self.viewport.setCurrentIndex(STRUCTURE_TAB)
+            return {"target": kind, "sites": count}
+        raise ValueError(f"unknown target {kind!r}")
+
+    def pick_menu(self, calculation, x=None, y=None, box=None, polygon=None):
+        """The menu of a pick (built, not shown: the view pops it up, a test
+        reads its actions): the picked values, why something could not be
+        picked, then the targets."""
+        menu = QMenu(self)
+        menu.setObjectName("pickMenu")
+        menu.setToolTipsVisible(True)
+        try:
+            picked = self.pick(calculation, x, y, box, polygon)
+        except Exception as error:
+            menu.addAction(str(error)).setEnabled(False)
+            return menu
+        title = menu.addAction(picked["label"] or "nothing to pick here")
+        title.setObjectName("pickTitle")
+        title.setEnabled(False)
+        for note in picked["notes"]:
+            menu.addAction(note).setEnabled(False)
+        menu.addSeparator()
+        for i, target in enumerate(picked["targets"]):
+            action = menu.addAction(target["label"])
+            action.setObjectName(f"pickTarget_{i}")
+            action.triggered.connect(lambda checked=False, t=target: self._act(
+                "pick_to", calculation=calculation, target=t))
+        if not picked["targets"] and picked["label"]:
+            menu.addAction("no calculation takes these values").setEnabled(False)
+        return menu
+
+    def _pick_requested(self, calculation, where, position):
+        """A result view asks for the pick menu at a point."""
+        if self._pick_menu is not None:
+            self._pick_menu.deleteLater()
+        self._pick_menu = self.pick_menu(calculation, **where)
+        self._pick_menu.popup(position)
 
     def show_meanfield(self):
         system = self._target_system()

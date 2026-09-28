@@ -7,7 +7,11 @@ structure_vector) carries the geometry it was computed on in
 dimensionality, sublattice, bonds, image_bonds), since the UI process has
 no built geometry of the snapshot it came from; ``arrays`` holds only what
 the calculation itself returns, which is what an exported script
-reproduces."""
+reproduces. In the same way a map over the Brillouin zone (a plot whose
+``picks`` name a ``kmesh`` axis: the Fermi surface, the Berry curvature)
+carries in ``kspace`` the reciprocal vectors and the ``k2K`` matrix of the
+geometry it ran on (engine/structure.frame), which take pyqula's mesh
+coordinates to reduced k when a point of it is picked (core/picks.py)."""
 from dataclasses import dataclass, field
 
 # plot kinds the UI draws (ui/plots.py implements each once)
@@ -48,6 +52,7 @@ class Result:
     reads: dict = field(default_factory=dict)     # {calculation id: ResultRef} its from_result
                                                   # Fields read: what its script needs, even
                                                   # once that calculation has run again
+    kspace: dict | None = None                    # reciprocal and k2K, for maps over the zone
 
     @property
     def skipped(self):

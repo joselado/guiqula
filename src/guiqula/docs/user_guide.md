@@ -134,9 +134,50 @@ readout of the point under the mouse, Save data, Export, Detach (a window of its
 Overlay. A result becomes stale (its tab and the outliner say so) when anything it depends
 on changes; Run computes it again. Run > Re-run cheap results automatically does that for
 results estimated under three seconds. Before a run estimated above a minute, a bar asks.
+Run > Run calculations at once, a setting kept like the theme and on by default, runs a
+calculation as soon as it is added or one of its parameters is set, from its form, a pick
+on a plot or a command, through the same bar; off, a calculation waits for Run.
 
 An undo, or a value set back, makes the earlier result that matches the document current
 again, without a re-run.
+
+## Picking from a plot
+
+A point of a plot stands for a few physical values, and a calculation can be started or
+moved there. A right click on a result, in any mode of its toolbar, or a click with its
+Pick toggle on, opens a menu whose first line says what the point is: the energy and the
+k-point of a point of the bands or of a spectral function, the energy on a density of
+states, the k-point of a cell of a Fermi surface together with the energy the surface was
+computed at, the value of the swept parameter on a sweep, a site of a result drawn on the
+atoms. The point is the one the readout names, the drawn point nearest the cursor, or the
+cursor itself when none is close, and the readout says what a pick would take as the mouse
+moves, so you know it before clicking.
+
+The menu then lists what takes those values. The calculations of the system with a
+parameter of that kind come first, moved to the picked value with their other parameters
+kept; then a new calculation of every kind that takes it (the LDOS or the Fermi surface at
+the picked energy), with its defaults otherwise and named after where it came from,
+`at E = 0.3 from c1`. On a sweep the menu sets the document at that point of the phase diagram
+and runs the swept calculation there; a picked k-point can become a new vertex of the
+k-path of the bands; picked sites can be selected on the Structure tab or made a region.
+On a result drawn flat on the atoms, the Box and Lasso toggles of its toolbar pick every
+atom inside a drag, as the canvas tools select them.
+
+A picked energy can also become the Fermi level: an onsite term named `Fermi level` whose
+mu shifts the spectrum so that the picked energy sits at zero, updated by the next pick of
+this kind, so that every calculation counting the states below zero energy (the Chern
+number, the gap, the density, the magnetization) is computed at that energy, while a mean
+field at a fixed filling finds the Fermi energy of its filling whatever the shift. It is
+offered without pairing only, since in Bogoliubov-de Gennes form an onsite energy enters
+the electron and hole blocks with opposite signs, which changes the pairing problem
+instead of shifting the spectrum, whose zero is the Fermi level already.
+
+A pick is a set of ordinary commands, meaning that the document holds plain numbers, an
+undo takes a pick back as one step, and a locked parameter refuses it with a message in
+the log; whether what it added or moved runs at once is the choice of Run > Run
+calculations at once. A result saved before picks existed carries no k-points, and a pick
+on it gives the energy alone until it is computed again. The window's actions `pick` and
+`pick_to` do the same for `tools/drive.py` and for remote control.
 
 ## Sweeps and sliders
 

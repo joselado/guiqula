@@ -26,19 +26,41 @@ def _path(h, ctx, fraction=False):
     return {"kpath": ks, "ticks": ticks}
 
 
+def _kpoints(h, ctx, path):
+    """The reduced k (N, 3) of every point of a calculation's path, in
+    units of the reciprocal lattice vectors (what a pick on the plot takes,
+    core/picks.py): the custom path's points, or pyqula's default path as
+    get_bands and kdos_bands make it inside; (0, 3) for a finite system,
+    which has no k."""
+    import numpy as np
+    if int(h.geometry.dimensionality) == 0:
+        return np.zeros((0, 3))
+    ks = path["kpath"] if path else h.geometry.get_kpath(None, nk=ctx.value("nk"), write=False)
+    return np.asarray(ks, dtype=float).reshape(-1, 3)
+
+
+def _kpoints_script(ctx):
+    """The line of an exported script that sets kpoints as _kpoints does."""
+    ks = "ks" if ctx.value("kpath") is not None else \
+        f"h.geometry.get_kpath(None, nk={ctx.code('nk')}, write=False)"
+    return [f"kpoints = np.zeros((0, 3)) if h.geometry.dimensionality == 0 else "
+            f"np.asarray({ks}, dtype=float).reshape(-1, 3)"]
+
+
 def _bands(h, ctx):
     import numpy as np
     nk, operator = ctx.value("nk"), ctx.value("operator")
     path = _path(h, ctx)
-    total = len(path["kpath"]) if path else nk
-    kwargs = {"nk": nk, "write": False, "callback": ctx.progress_callback(total)}
+    kpoints = _kpoints(h, ctx, path)
+    # the points pyqula walks: one in 0D, nk + 1 on its default 3D path
+    kwargs = {"nk": nk, "write": False, "callback": ctx.progress_callback(max(len(kpoints), 1))}
     if path:
         kwargs["kpath"] = path["kpath"]
     if operator is not None:
         kwargs["operator"] = operator
     out = h.get_bands(**kwargs)
     k_index = np.unique(out[0])
-    arrays = {"k": k_index, "energies": out[1].reshape(len(k_index), -1)}
+    arrays = {"k": k_index, "energies": out[1].reshape(len(k_index), -1), "kpoints": kpoints}
     if operator is not None:
         arrays["weights"] = out[2].reshape(len(k_index), -1)
     if path:
@@ -58,12 +80,12 @@ def _bands_script(ctx):
     lines = _path_script(ctx) + [
         f"out = h.get_bands(nk={ctx.code('nk')}{op}{path}, write=False)",
         "k = np.unique(out[0])",
-        "energies = out[1].reshape(len(k), -1)"]
+        "energies = out[1].reshape(len(k), -1)"] + _kpoints_script(ctx)
     if operator is None:
-        lines.append("arrays = dict(k=k, energies=energies)")
+        lines.append("arrays = dict(k=k, energies=energies, kpoints=kpoints)")
     else:
         lines += ["weights = out[2].reshape(len(k), -1)",
-                  "arrays = dict(k=k, energies=energies, weights=weights)"]
+                  "arrays = dict(k=k, energies=energies, weights=weights, kpoints=kpoints)"]
     if ctx.value("kpath") is not None:
         lines.append("arrays['ticks'] = ticks")
     return lines
@@ -77,7 +99,8 @@ def _with_ticks(plot, params, arrays):
 
 
 def _bands_plot(params, arrays):
-    plot = {"x": "k", "y": "energies", "xlabel": "k-path point", "ylabel": "energy"}
+    plot = {"x": "k", "y": "energies", "xlabel": "k-path point", "ylabel": "energy",
+            "picks": {"x": "kpath", "y": "energy"}}
     if params.get("operator") is None:
         return _with_ticks(dict(plot, kind="lines"), params, arrays)
     return _with_ticks(dict(plot, kind="colored_scatter", c="weights",
@@ -95,7 +118,8 @@ entry("calculation", "bands", "Band structure",
       apply=_bands, script=_bands_script, plot=_bands_plot,
       cost=lambda p, size: p["nk"] * cost.diagonalization(size["dimension"])
       * (2 if p["operator"] else 1),
-      guide=("Electronic band structures", "guiqula: The k-space tab"), pyqula=("h.get_bands",))
+      guide=("Electronic band structures", "guiqula: The k-space tab",
+             "guiqula: Picking from a plot"), pyqula=("h.get_bands",))
 
 
 def _dos(h, ctx):
@@ -142,7 +166,7 @@ entry("calculation", "dos", "Density of states",
       group="Spectral", doc="Density of states on an energy window.",
       apply=_dos, script=_dos_script, cost=_dos_cost,
       plot=lambda params: {"kind": "lines", "x": "energies", "y": "dos",
-                           "xlabel": "energy", "ylabel": "DOS"},
+                           "xlabel": "energy", "ylabel": "DOS", "picks": {"x": "energy"}},
       guide=("Density of states", "Chebyshev kernel polynomial (KPM) methods"), pyqula=("h.get_dos",))
 
 
@@ -202,7 +226,7 @@ def _ldos(h, ctx):
 
 
 entry("calculation", "ldos", "Local density of states",
-      FloatParam("energy", 0.0, "energy"),
+      FloatParam("energy", 0.0, "energy", quantity="energy"),
       FloatParam("delta", 0.05, "broadening", "Lorentzian width", minimum=1e-9),
       IntParam("nk", 10, "k-points", "k-points per direction of the mesh (periodic systems)",
                minimum=1),
@@ -215,7 +239,7 @@ entry("calculation", "ldos", "Local density of states",
           "arrays = dict(ldos=ldos)"],
       plot={"kind": "structure_scalar", "values": "ldos", "clabel": "LDOS"},
       cost=_mesh_cost(),
-      guide=("Local density of states",), pyqula=("h.get_ldos",))
+      guide=("Local density of states", "guiqula: Picking from a plot"), pyqula=("h.get_ldos",))
 
 entry("calculation", "density", "Electron density",
       IntParam("nk", 10, "k-points", "k-points per direction of the mesh (periodic systems)",
@@ -272,7 +296,7 @@ def _fermi_surface(h, ctx):
 
 
 entry("calculation", "fermi_surface", "Fermi surface",
-      FloatParam("energy", 0.0, "energy"),
+      FloatParam("energy", 0.0, "energy", quantity="energy"),
       FloatParam("delta", 0.05, "broadening", "Lorentzian width", minimum=1e-9),
       IntParam("nk", 60, "k-points", "k-points per direction", minimum=2),
       _operator(),
@@ -283,9 +307,11 @@ entry("calculation", "fermi_surface", "Fermi surface",
           f"delta={ctx.code('delta')}, write=False{_operator_code(ctx)})",
           "arrays = dict(kx=kx, ky=ky, weight=weight)"],
       plot={"kind": "heatmap", "x": "kx", "y": "ky", "c": "weight", "xlabel": "kx",
-            "ylabel": "ky", "clabel": "spectral weight", "equal": True},
+            "ylabel": "ky", "clabel": "spectral weight", "equal": True,
+            "picks": {"x": "kmesh", "y": "kmesh", "fixed": {"energy": "energy"}}},
       cost=lambda p, size: p["nk"] ** 2 * cost.diagonalization(size["dimension"]),
-      guide=("Fermi surfaces",), pyqula=("h.get_fermi_surface",))
+      extra={"dimensions": (2,)},        # a pick offers it on two-dimensional systems only
+      guide=("Fermi surfaces", "guiqula: Picking from a plot"), pyqula=("h.get_fermi_surface",))
 
 
 def _spectral_function(h, ctx):
@@ -295,7 +321,8 @@ def _spectral_function(h, ctx):
     out = kdos.kdos_bands(h, energies=_energies(ctx), delta=ctx.value("delta"),
                           nk=ctx.value("nk"), mode=ctx.value("mode"), **_operator_kwarg(ctx),
                           **extra)
-    arrays = {"k": out[0], "energies": out[1], "weight": out[2]}
+    arrays = {"k": out[0], "energies": out[1], "weight": out[2],
+              "kpoints": _kpoints(h, ctx, path)}
     if path:
         arrays["ticks"] = path["ticks"]
     return arrays
@@ -316,12 +343,14 @@ entry("calculation", "spectral_function", "Spectral function",
       modules=("kdos",), apply=_spectral_function, script=lambda ctx: _path_script(ctx) + [
           f"out = kdos.kdos_bands(h, energies={_energies_code(ctx)}, delta={ctx.code('delta')}, "
           f"nk={ctx.code('nk')}, mode={ctx.code('mode')}{_operator_code(ctx)}"
-          + (", kpath=ks" if ctx.value("kpath") is not None else "") + ")",
-          "arrays = dict(k=out[0], energies=out[1], weight=out[2])"]
+          + (", kpath=ks" if ctx.value("kpath") is not None else "") + ")"]
+      + _kpoints_script(ctx) + ["arrays = dict(k=out[0], energies=out[1], weight=out[2], "
+                                "kpoints=kpoints)"]
       + (["arrays['ticks'] = ticks"] if ctx.value("kpath") is not None else []),
       plot=lambda params, arrays: _with_ticks(
           {"kind": "heatmap", "x": "k", "y": "energies", "c": "weight",
-           "xlabel": "k-path point", "ylabel": "energy", "clabel": "A(k, E)"}, params, arrays),
+           "xlabel": "k-path point", "ylabel": "energy", "clabel": "A(k, E)",
+           "picks": {"x": "kpath", "y": "energy"}}, params, arrays),
       cost=lambda p, size: p["nk"] * cost.diagonalization(size["dimension"])
       * (1 if p["mode"] == "ED" else p["ne"] / 3),
       guide=("Momentum resolved spectral functions",), pyqula=("kdos.kdos_bands",))
@@ -338,10 +367,11 @@ def _surface_plot(params, arrays):
     import numpy as np
     if len(np.unique(np.round(arrays["k"], 10))) < 2:        # one-dimensional: no k
         return {"kind": "lines", "x": "energies", "y": "surface", "xlabel": "energy",
-                "ylabel": "surface DOS"}
+                "ylabel": "surface DOS", "picks": {"x": "energy"}}
+    # its k runs along the surface, 0 to 1: not a k-point of the system
     return {"kind": "heatmap", "x": "k", "y": "energies", "c": "surface",
             "xlabel": "k along the surface", "ylabel": "energy",
-            "clabel": "surface spectral function"}
+            "clabel": "surface spectral function", "picks": {"y": "energy"}}
 
 
 entry("calculation", "surface_spectral_function", "Surface spectral function",
@@ -378,7 +408,8 @@ entry("calculation", "berry_curvature", "Berry curvature map",
           f"kx, ky, b = h.get_berry_curvature(nk={ctx.code('nk')}, write=False)",
           "arrays = dict(kx=np.asarray(kx), ky=np.asarray(ky), berry=np.asarray(b))"],
       plot={"kind": "heatmap", "x": "kx", "y": "ky", "c": "berry", "xlabel": "kx",
-            "ylabel": "ky", "clabel": "Berry curvature", "symmetric": True, "equal": True},
+            "ylabel": "ky", "clabel": "Berry curvature", "symmetric": True, "equal": True,
+            "picks": {"x": "kmesh", "y": "kmesh"}},
       cost=lambda p, size: 3 * p["nk"] ** 2 * cost.diagonalization(size["dimension"]),
       guide=("Chern number",), pyqula=("h.get_berry_curvature",))
 
@@ -492,7 +523,8 @@ entry("calculation", "optical_conductivity", "Optical conductivity",
           "arrays = dict(omega=np.asarray(omega), real=sigma[:, a, b].real, "
           "imag=sigma[:, a, b].imag)"],
       plot=lambda params: {"kind": "lines", "x": "omega", "y": "real", "xlabel": "frequency",
-                           "ylabel": f"Re sigma_{params['component']}"},
+                           "ylabel": f"Re sigma_{params['component']}",
+                           "picks": {"x": "frequency"}},
       cost=lambda p, size: 3 * cost.kmesh(p["nk"], size["dimensionality"])
       * cost.diagonalization(size["dimension"]),
       guide=("Optical conductivity",), pyqula=("h.get_optical_conductivity",))

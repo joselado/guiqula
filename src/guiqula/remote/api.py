@@ -84,6 +84,13 @@ WINDOW_ACTIONS = {
     "help": "entry, or guide (pyqula, guiqula, plugins) and anchor: show help in the Help "
             "dock",
     "remote": "enabled: remote control on or off",
+    "pick": "calculation, and x, y (data coordinates of its plot) or box=[x0, y0, x1, y1] or "
+            "polygon (atoms of a result drawn on them): what the point stands for (an energy, "
+            "a k-point, a parameter, sites) and the targets that take it",
+    "pick_to": "calculation, target (an index into pick's targets for the same x, y, box or "
+               "polygon, or the target itself): start or move a calculation there",
+    "run_at_once": "enabled: a calculation runs as soon as it is added or one of its "
+                   "parameters is set",
 }
 
 

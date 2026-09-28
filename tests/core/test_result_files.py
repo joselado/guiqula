@@ -43,6 +43,21 @@ def test_round_trip_without_geometry(tmp_path):
     assert loaded.structure is None and loaded.summary()["sites"] is None
 
 
+def test_round_trip_of_a_map_over_the_zone(tmp_path):
+    """The reciprocal frame a pick maps its cells with (phase 7) is kept
+    apart from the arrays; a one-dimensional frame has no k2K."""
+    for k2K in (np.array([[0.5, 0.5, 0], [-0.5, 0.5, 0], [0, 0, 1.0]]), None):
+        saved = result(kspace={"reciprocal": np.eye(3), "k2K": k2K})
+        arrays, _ = result_files.save(saved, tmp_path / f"map{k2K is None}")
+        loaded = result_files.load(arrays)
+        assert set(loaded.arrays) == {"ldos"}
+        assert np.array_equal(loaded.kspace["reciprocal"], np.eye(3))
+        assert (loaded.kspace["k2K"] is None) if k2K is None else \
+            np.array_equal(loaded.kspace["k2K"], k2K)
+    arrays, _ = result_files.save(result(), tmp_path / "flat")
+    assert result_files.load(arrays).kspace is None
+
+
 def test_any_array_name_survives(tmp_path):
     """A Python calculation names its arrays freely: structure_factor was
     read back as geometry (and the result dropped on reopening), file and

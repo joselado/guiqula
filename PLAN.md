@@ -1769,14 +1769,15 @@ the package and upstream's user guide only (the guide stays, for the in-app help
 maintainer's choice); upstream's examples were removed from `vendor/` and from the whole
 history before the first push, and `tools/update_vendor.sh` no longer copies them.
 
-**Phase 7, calculations from picks (proposed 2026-09-28, not built).** Asked
+**Phase 7, calculations from picks (proposed 2026-09-28; part 1 built the same day).** Asked
 for on 2026-09-28: to do calculations by picking parameters from the plots,
 taking some bands and computing the LDOS at an energy selected on them, or
 the LDOS at an energy and a k-point picked there, or the Fermi surface at
 an energy picked from the bands, with every combination that makes sense
 and an architecture of the interface that keeps them open. This block is
 the plan as proposed; its decisions for the maintainer are at its end,
-numbered 46 onwards after the phase-6 ones, and nothing of it is built.
+numbered 46 onwards after the phase-6 ones, followed by the answers and by
+what each part built.
 
 *The idea.* A plot draws one quantity against one or two others, so a
 point of it is a small set of physical values: a point of a band structure
@@ -2047,6 +2048,69 @@ calculations; 52, the Fermi-level target as an onsite term named "Fermi
 level", on stacks without pairing; 53, the k-space tab and the canvas as
 sources, in part 2; 54, several sites at once: the result views drawn on
 the atoms get box and lasso tools too, next to the one-atom click.
+
+Part 1, built 2026-09-28. `core/picks.py` holds the vocabulary (`QUANTITIES`,
+and `AXES`, what an axis carries: kpath, kmesh, energy, parameter, frequency)
+and `pick(result, x, y, index, sites)`, which reads a point as its values:
+a place along a k-path through the result's `kpoints`, a cell of a map
+through its `kspace` (the node of the mesh nearest the cursor, taken to
+reduced k by `k2K`), the swept parameters of a sweep through the
+`parameters` its plot spec names, the value a calculation holds through
+`fixed` (the Fermi surface's energy), the sites of a result on the atoms by
+position. The snapping is the readout's own: the window asks the view for
+the drawn point nearest the cursor within its radius, so what the readout
+names is what the pick takes, and the readout now says so ("a pick takes
+E = 0.3 · k = (0.333, 0.333, 0)"). `registry/picks.py` computes the targets
+in the order proposed; the new-calculation targets come from the
+parameters' `quantity` (`energy` on the LDOS and the Fermi surface), and a
+calculation of two-dimensional systems only says so in `extra["dimensions"]`
+(the Fermi surface), so it is not offered on a ribbon. The bands and the
+spectral function carry `kpoints` (the exported scripts compute it too, and
+`test_script_export` compares it; (0, 3) on a finite system, which has no
+k), the Fermi surface and the Berry curvature map carry `kspace` (the
+reciprocal vectors and `k2K`, kept in project and result files), and an
+engine test takes the brightest cells of a Fermi surface to reduced k and
+diagonalizes there, finding a state within the broadening of its energy
+(with `k2K` transposed the test fails, which was checked). The window has
+the actions `pick` and `pick_to`, the menu (`pick_menu`, shown with
+`popup()`), the right click in any mode and the Pick toggle (decision 47:
+both), and Box and Lasso toggles on a result drawn flat on the atoms
+(decision 54); Run > Run calculations at once is the general switch of
+answer 48, kept in the settings (`run_at_once`, on by default), with the
+action `run_at_once`; it runs a calculation after `add_calculation`,
+`set_param` or `set_params` on it, unless an earlier result came back
+(an undo, a value set back), and after the release of a slider on one of
+its parameters, never during the drag. Tests: `tests/core/test_picks.py`,
+the vocabulary in `tests/core/test_registry.py` and on every result of
+`tests/engine/test_entries.py`, `tests/ui/test_picks.py`; the guide's
+section "Picking from a plot", named by the bands, the LDOS and the Fermi
+surface.
+
+What the plan did not say, and was decided while building it (for the
+maintainer to confirm or change):
+
+- names: the plan names a new calculation after where it came from and
+  keeps the Fermi level as a term "of that name", but calculations and
+  terms had no name, so the Document gains one schema addition, an
+  optional `name` on ops, terms and calculations, left out of the JSON when
+  empty (documents without names are written byte for byte as before) and
+  never in a key; `rename` takes them, `add_term` and `add_calculation`
+  take `name`, the outliner shows it after the kind;
+- run at once is off in a window that does not read the settings (the
+  tests, `tools/drive.py`, `guiqula --offscreen`), as the theme is left
+  alone there, so that nothing a driver adds starts a run it did not ask
+  for; the interactive program starts with it on;
+- the Fermi level adds to the shift the picked result saw: an energy is
+  picked on a spectrum the previous Fermi-level term (if the result's
+  snapshot had one) had moved already, so the new mu is that term's mu
+  minus the energy, not minus the energy alone;
+- a pick on a sweep sets its parameters as one undo step (a merged step,
+  as a slider's drag) and runs the swept calculation there when Run at
+  once is on;
+- found and fixed on the way: the progress of a band structure counted
+  `nk` points where pyqula walks one on a finite system (it stopped at 0.1)
+  and `nk + 1` on its default three-dimensional path; it now counts the
+  points walked.
 
 ### Where the section 13 items land
 
@@ -2346,7 +2410,7 @@ onward are features (placement per phase at the end of section 7).
    script, and presets with locked parameters, for use in courses.
 
 17. **Calculations from picks** (asked 2026-09-28, proposed in section 7,
-   phase 7, not built). A point of a plot is a set of physical values (an
+   phase 7, being built). A point of a plot is a set of physical values (an
    energy, a k-point, a site, a parameter value), and any calculation whose
    parameters take them can be started from it or moved to it: the LDOS at
    an energy picked on the bands, the LDOS at a picked k-point and energy,

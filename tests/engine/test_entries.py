@@ -10,6 +10,7 @@ import pytest
 
 from guiqula import registry
 from guiqula.commands import Dispatcher
+from guiqula.core.picks import AXES
 from guiqula.engine.build import build_system
 from guiqula.engine.calculations import run_calculation
 
@@ -560,6 +561,15 @@ def _direct_path(h, p):
                               p["nk"])
 
 
+def _direct_kpoints(h, p, kpath):
+    """The reduced k of the path points: the one given, else what pyqula's
+    get_bands and kdos_bands walk (klist.get_kpath); none in 0D."""
+    if h.geometry.dimensionality == 0:
+        return np.zeros((0, 3))
+    ks = kpath if kpath is not None else h.geometry.get_kpath(None, nk=p["nk"], write=False)
+    return np.asarray(ks, dtype=float).reshape(-1, 3)
+
+
 def _direct_bands(h, p):
     kwargs = {"nk": p["nk"]} if p["operator"] is None else {"nk": p["nk"],
                                                              "operator": p["operator"]}
@@ -568,7 +578,8 @@ def _direct_bands(h, p):
         kwargs["kpath"], ticks = _direct_path(h, p)
     out = h.get_bands(write=False, **kwargs)
     nk = len(np.unique(out[0]))
-    arrays = {"k": np.unique(out[0]), "energies": out[1].reshape(nk, -1)}
+    arrays = {"k": np.unique(out[0]), "energies": out[1].reshape(nk, -1),
+              "kpoints": _direct_kpoints(h, p, kwargs.get("kpath"))}
     if p["operator"] is not None:
         arrays["weights"] = out[2].reshape(nk, -1)
     if ticks is not None:
@@ -583,6 +594,7 @@ def _direct_spectral(h, p):
     arrays = dict(zip(("k", "energies", "weight"), pq("kdos").kdos_bands(
         h, energies=_energies(p), delta=p["delta"], nk=p["nk"], mode=p["mode"], **_op(p),
         **extra)))
+    arrays["kpoints"] = _direct_kpoints(h, p, extra.get("kpath"))
     if ticks is not None:
         arrays["ticks"] = ticks
     return arrays
@@ -657,7 +669,8 @@ CALC_CASES = {
     "bands": [({"nk": 30}, "rashba", None), ({"nk": 30, "operator": "sz"}, "rashba", None),
               ({"nk": 20, "kpath": ["G", "K", "M", "G"]}, "haldane",   # neighbouring K and M
                lambda a: list(a["ticks"]) == [0, 12, 18, 28]),     # |b|/sqrt3, /2sqrt3, /2
-              ({"nk": 20, "kpath": [[0, 0, 0], [0.5, 0, 0], [0.5, 0.5, 0]]}, "haldane", None)],
+              ({"nk": 20, "kpath": [[0, 0, 0], [0.5, 0, 0], [0.5, 0.5, 0]]}, "haldane", None),
+              ({"nk": 10}, "flake", lambda a: a["kpoints"].shape == (0, 3))],   # no k in 0D
     "dos": [({"ne": 30, "nk": 8, "delta": 0.1}, "rashba", None),
             ({"ne": 15, "nk": 8, "delta": 0.1, "mode": "Green"}, "rashba", None),
             ({"ne": 30, "nk": 8, "delta": 0.1, "operator": "sublattice"}, "rashba", None),
@@ -729,8 +742,36 @@ def test_calculation(pyqula, kind, case):
         k = result.arrays["k"]                                # fractions for kdos_bands
         assert positions[0] == k.min() and positions[-1] == pytest.approx(k.max()), \
             (result.plot["xticks"], k.min(), k.max())
+    picks = result.plot.get("picks") or {}            # the closed vocabulary (phase 7)
+    assert all(picks[axis] in AXES for axis in ("x", "y") if axis in picks), picks
+    if "kmesh" in picks.values():                    # a map over the zone keeps its frame
+        assert result.kspace is not None and result.kspace["k2K"] is not None
+    else:
+        assert result.kspace is None
     if check is not None:
         assert check(result.arrays), result.arrays
+
+
+def test_a_picked_cell_of_the_fermi_surface_is_on_it(pyqula):
+    """The brightest cell of a Fermi surface, taken to reduced k through the
+    k2K the result keeps (core/picks.py), is a k at which the Hamiltonian
+    has a state at the surface's energy: a transposed k2K picks a k-point
+    elsewhere."""
+    from guiqula.core import picks
+    d, s, h = calc_system("zeeman")
+    energy, delta = 0.4, 0.05
+    c = d.do("add_calculation", system=s, kind="fermi_surface",
+             params={"energy": energy, "nk": 24, "delta": delta})
+    result = run_calculation(d.document, c)
+    weight = np.asarray(result.arrays["weight"]).ravel()
+    order = np.argsort(weight)[::-1][:5]           # the brightest cells, not only the first
+    hk = h.get_hk_gen()
+    for i in order:
+        picked = picks.pick(result, result.arrays["kx"][i], result.arrays["ky"][i])
+        assert picked["values"]["energy"] == energy
+        k = picked["values"]["kpoint"]
+        gap = np.min(np.abs(np.linalg.eigvalsh(hk(k)) - energy))
+        assert gap < 2 * delta, (k, gap)
 
 
 def test_terms_above_a_pairing_are_applied_before_nambu(pyqula):

@@ -124,6 +124,12 @@ class Dispatcher:
         released)."""
         self._merge = None
 
+    @property
+    def merging(self):
+        """Whether the latest mutation belongs to a merged step still open
+        (a slider being dragged)."""
+        return self._merge is not None
+
     def _do(self, name, args, merge):
         function = MUTATIONS.get(name)
         if function is None:

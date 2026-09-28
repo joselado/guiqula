@@ -147,9 +147,11 @@ def set_notes(document, notes):
 
 @mutation
 def rename(document, entry, name):
+    """Name a system, region, op, term or calculation ("" takes an entry's
+    name away)."""
     family, _, _, _, obj = document.find(entry)
-    if family not in ("system", "region"):
-        raise CommandError(f"only systems and regions have names, {entry!r} is a {family}")
+    if family not in ("system", "region", "op", "term", "calculation"):
+        raise CommandError(f"{entry!r} is a {family}, which has no name")
     obj.name = _text("name", name)
 
 
@@ -166,9 +168,10 @@ def add_geometry_op(document, system, kind, params=None, index=None, enabled=Tru
 
 
 @mutation
-def add_term(document, system, kind, params=None, region=None, index=None, enabled=True):
+def add_term(document, system, kind, params=None, region=None, index=None, enabled=True,
+             name=""):
     """Add a term to a system's Hamiltonian, or to its classical model (at
-    the end, or at index); returns its id."""
+    the end, or at index), with an optional name; returns its id."""
     target = document.system(system)
     params = _normalize("term", kind, params)
     spec = registry.get("term", kind)
@@ -176,7 +179,8 @@ def add_term(document, system, kind, params=None, region=None, index=None, enabl
         raise CommandError(f"{spec.label} does not apply to a {target.kind} system; it is a "
                            f"term of {', '.join(spec.systems)} systems")
     term = Entry(id=document.new_id("term"), kind=kind, enabled=_flag("enabled", enabled),
-                 params=params, region=region, plugin=plugins.origin(spec))
+                 params=params, region=region, plugin=plugins.origin(spec),
+                 name=_text("name", name))
     _insert(terms_of(target), term, index)
     return term.id
 
@@ -216,8 +220,8 @@ def set_selection(document, entry, select):
 
 
 @mutation
-def add_calculation(document, system, kind, params=None):
-    """Add a calculation on a system; returns its id."""
+def add_calculation(document, system, kind, params=None, name=""):
+    """Add a calculation on a system, with an optional name; returns its id."""
     target = document.system(system)
     params = _normalize("calculation", kind, params)
     spec = registry.get("calculation", kind)
@@ -225,7 +229,8 @@ def add_calculation(document, system, kind, params=None):
         raise CommandError(f"{spec.label} does not apply to a {target.kind} system; it is a "
                            f"calculation of {', '.join(spec.systems)} systems")
     calc = Calculation(id=document.new_id("calculation"), system=system, kind=kind,
-                       params=params, plugin=_plugin("calculation", kind))
+                       params=params, plugin=_plugin("calculation", kind),
+                       name=_text("name", name))
     document.calculations.append(calc)
     return calc.id
 

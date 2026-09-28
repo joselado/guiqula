@@ -24,6 +24,36 @@ def test_term_numbers_are_fields(spec):
             pytest.fail(f"{spec.kind}.{p.name} is a bare number, not a Field")
 
 
+def test_quantities_are_in_the_vocabulary():
+    """A parameter takes a quantity of core/picks.py's closed vocabulary, of
+    a type a pick can set (PLAN.md phase 7), and every plot spec written as
+    a dict names axes it knows (the callables are checked on the results
+    of tests/engine/test_entries.py)."""
+    from guiqula.core.picks import AXES, QUANTITIES
+    from guiqula.registry.params import FloatVectorParam, PositionsParam
+    settable = {"energy": FloatParam, "frequency": FloatParam, "kpoint": FloatVectorParam,
+                "sites": PositionsParam}
+    taken = set()
+    for spec in registry.entries():
+        for p in spec.params:
+            if p.quantity is None:
+                continue
+            assert p.quantity in QUANTITIES, (spec.kind, p.name, p.quantity)
+            assert spec.family == "calculation", (spec.kind, p.name)
+            assert isinstance(p, settable[p.quantity]), (spec.kind, p.name)
+            if isinstance(p, FloatVectorParam):
+                assert p.length == 3, (spec.kind, p.name)
+            taken.add(p.quantity)
+            assert p.describe()["quantity"] == p.quantity
+        if isinstance(spec.plot, dict) and spec.plot.get("picks"):
+            picks = spec.plot["picks"]
+            assert set(picks) <= {"x", "y", "fixed"}, spec.kind
+            assert all(picks[a] in AXES for a in ("x", "y") if a in picks), spec.kind
+            assert all(q in QUANTITIES and n in spec.param_map
+                       for q, n in picks.get("fixed", {}).items()), spec.kind
+    assert "energy" in taken
+
+
 def test_stochastic_terms_have_seeds():
     assert registry.get("term", "anderson_disorder").seed_param is not None
 

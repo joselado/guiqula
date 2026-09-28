@@ -222,8 +222,9 @@ def test_result_tabs_readout_and_detach(window, qtbot, shot):
     px, py = view.ax.transData.transform((x, y))
     MouseEvent("motion_notify_event", view.canvas, px, py)._process()
     i = view.point_near(int(px), int(py))       # events carry whole pixels; points are close
-    assert abs(i - 10) <= 2 and view.readout.text() == view.readout_text(i)
+    assert abs(i - 10) <= 2 and view.readout.text().startswith(view.readout_text(i))
     assert view.readout.text().startswith(f"energy {view.points[0][i]:.6g} · DOS ")
+    assert view.readout.text().endswith(f"a pick takes E = {view.points[0][i]:.3g}")
     session.do("set_param", entry="t2", name="c", value=0.2)
     index = window.viewport.indexOf(view)
     assert window.viewport.tabText(index) == "c2 dos (stale)"

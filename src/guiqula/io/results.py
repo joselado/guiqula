@@ -4,7 +4,8 @@ Document snapshot that produced it). Readable without guiqula: every
 array of the calculation is in the npz under its own name.
 
 The npz also holds the geometry of a result drawn on the atoms (members
-``structure_<name>``) and the results its from_result Fields read
+``structure_<name>``), the reciprocal frame of a map over the Brillouin
+zone (``kspace_reciprocal``, ``kspace_k2K``), and the results its from_result Fields read
 (``reads_<calculation>_positions``, ``reads_<calculation>_<array>``); the
 json's ``layout`` says which members those are, so an array of the
 calculation may have any name (a Python calculation's ``structure_factor``
@@ -56,6 +57,10 @@ def to_bytes(result):
         for name, value in structure.items():
             member = layout["structure"][name] = _free(STRUCTURE_PREFIX + name, taken)
             members[member] = value
+    kspace = {k: v for k, v in (result.kspace or {}).items() if v is not None}
+    if kspace:
+        layout["kspace"] = {name: _free(f"kspace_{name}", taken) for name in kspace}
+        members.update({layout["kspace"][name]: value for name, value in kspace.items()})
     if result.reads:
         layout["reads"] = {}
         for calc, ref in sorted(result.reads.items()):
@@ -88,6 +93,10 @@ def from_bytes(npz, text):
     if structure:
         structure.setdefault("sublattice", None)
         structure["dimensionality"] = int(structure["dimensionality"])
+    kspace = None
+    if "kspace" in layout:
+        kspace = {"reciprocal": None, "k2K": None}
+        kspace.update({name: members.pop(member) for name, member in layout["kspace"].items()})
     reads = {}
     for calc, entry in layout.get("reads", {}).items():
         positions = members.pop(entry["positions"]) if entry["positions"] else None
@@ -97,7 +106,7 @@ def from_bytes(npz, text):
     snapshot = meta.pop("document", None)
     document = json.dumps(snapshot) if snapshot else ""
     return Result(arrays=members, document=document, structure=structure or None, reads=reads,
-                  **meta)
+                  kspace=kspace, **meta)
 
 
 def save(result, path):

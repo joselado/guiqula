@@ -22,7 +22,16 @@ Kinds (the ``kind`` of a Result's plot spec, which also names the arrays):
 Every calculation gets its own PlotView (a tab of the viewport, which can
 be detached into a floating dock): the navigation toolbar (pan, zoom, save
 the figure), Save data (the arrays and the metadata, io/results.py),
-Detach, Overlay, and a readout of the data point under the mouse.
+Detach, Overlay, and a readout of the data point under the mouse, which
+also says what a pick there would take.
+
+Picks (PLAN.md phase 7): a right click on the plot, in any mode, or a
+left click with the Pick toggle on, asks the window for the menu of what
+the point stands for (core/picks.py) and what can be done with it
+(registry/picks.py); on a result drawn flat on the atoms, the Box and
+Lasso toggles pick every atom inside a drag, as the canvas's tools select
+them. The view only reports where (pick_requested); the window's pick and
+pick_to actions do the rest, so that drivers reach them too.
 
 Overlays (decision 13.11): the curves of other results drawn on the same
 axes, each in its colour with a legend, or the difference of this result
@@ -34,14 +43,18 @@ lists what can be overlaid in the Overlay menu.
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
+from matplotlib.widgets import LassoSelector, RectangleSelector
 from PySide6.QtCore import Signal
+from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import QLabel, QMenu, QToolButton, QVBoxLayout, QWidget
 
+from guiqula.core import picks as pick_tools
 from guiqula.core.results import PLOT_KINDS as KINDS  # noqa: F401 (the kinds drawn here)
 from guiqula.ui import structure as structure_tools
 from guiqula.ui import theme
 
 READOUT_PIXELS = 12      # the readout names a data point this close to the mouse
+CLICK_PIXELS = 3         # a press released this close to where it started is a click
 CURVES = ("lines", "colored_scatter")       # plot kinds that overlay
 OVERLAY_MODES = ("overlay", "difference")
 
@@ -301,6 +314,9 @@ class PlotView(QWidget):
     export_requested = Signal(str)        # figure, data and script (io/bundle.py)
     detach_requested = Signal(str)
     overlay_menu_requested = Signal(str)      # the window fills the Overlay menu
+    # calculation id, where ({"x", "y"} in data coordinates, {"box"} or {"polygon"}), the
+    # global position of the menu: the window shows what can be done there
+    pick_requested = Signal(str, object, object)
 
     def __init__(self, calc_id="", parent=None):
         super().__init__(parent)
@@ -345,6 +361,22 @@ class PlotView(QWidget):
         self.overlay.menu().aboutToShow.connect(
             lambda: self.overlay_menu_requested.emit(self.calc_id))
         self.toolbar.addWidget(self.overlay)
+        self.toolbar.addSeparator()
+        self.pick_tools = {}
+        for tool, text, tip in (
+                ("pick", "Pick", "a click picks what the point stands for (an energy, a "
+                                 "k-point, a parameter, a site) and offers what to do with it; "
+                                 "a right click does the same in any mode"),
+                ("box", "Box", "pick the atoms inside a box drawn on the result"),
+                ("lasso", "Lasso", "pick the atoms inside a lasso drawn on the result")):
+            button = QToolButton()
+            button.setText(text)
+            button.setCheckable(True)
+            button.setObjectName(f"{tool}Tool{suffix}")
+            button.setToolTip(tip)
+            button.toggled.connect(lambda on, t=tool: self._tool_toggled(t, on))
+            self.toolbar.addWidget(button)
+            self.pick_tools[tool] = button
         self.readout = QLabel("")
         self.readout.setObjectName(f"readout{suffix}")
         self.caption = QLabel("No result yet: choose a calculation and press Run (F5).")
@@ -362,8 +394,12 @@ class PlotView(QWidget):
         self.points = None
         self.stale = False
         self.overlays = []
+        self._press = None                 # (x, y, button) of a press on the canvas, in pixels
+        self._selector = None
         self._update_buttons()
         self.canvas.mpl_connect("motion_notify_event", self._on_motion)
+        self.canvas.mpl_connect("button_press_event", self._on_press)
+        self.canvas.mpl_connect("button_release_event", self._on_release)
 
     def _update_buttons(self):
         self.save_data.setEnabled(self.result is not None and bool(self.calc_id))
@@ -372,6 +408,14 @@ class PlotView(QWidget):
         self.overlay.setVisible(bool(self.calc_id))
         self.overlay.setEnabled(self.result is not None and self.ax is not None
                                 and self.result.plot["kind"] in CURVES)
+        pickable = bool(self.calc_id) and self.result is not None and self.ax is not None \
+            and bool(pick_tools.spec_of(self.result))
+        on_atoms = pickable and self.result.plot["kind"] in ON_STRUCTURE \
+            and getattr(self.ax, "name", "") != "3d"
+        for tool, button in self.pick_tools.items():
+            button.setVisible(on_atoms if tool in ("box", "lasso") else pickable)
+            if button.isChecked() and not button.isVisible():
+                button.setChecked(False)
 
     def show_result(self, result, title="", caption="", stale=False, overlays=()):
         """Draw a result; one that cannot be drawn (arrays a plugin or a
@@ -393,6 +437,7 @@ class PlotView(QWidget):
         self.caption.setText(caption)
         self.readout.setText("")
         self._update_buttons()
+        self._install_selector()
 
     def clear(self, caption=""):
         self.result = self.ax = self.points = None
@@ -403,6 +448,7 @@ class PlotView(QWidget):
         self.readout.setText("")
         self.canvas.draw_idle()
         self._update_buttons()
+        self._install_selector()
 
     def set_detached(self, detached):
         self.detach.setText("Attach" if detached else "Detach")
@@ -434,11 +480,113 @@ class PlotView(QWidget):
             text += f" · {plot.get('clabel', plot.get('c'))} {_number(c[i])}"
         return text
 
+    def snap(self, x, y):
+        """(index, x, y) of the drawn point nearest to a position in data
+        coordinates, within the readout's radius (what the readout names
+        there), or (None, x, y) when there is none."""
+        if self.ax is None or self.points is None or not len(self.points[0]):
+            return None, x, y
+        px, py = self.ax.transData.transform((x, y))
+        i = self.point_near(px, py)
+        if i is None:
+            return None, x, y
+        return i, float(self.points[0][i]), float(self.points[1][i])
+
+    def picks_y(self):
+        """Whether the y of a point is what the plot's spec says it carries:
+        not when the difference of two results is drawn instead."""
+        return not any(mode == "difference" for _, _, mode in self.overlays)
+
     def _on_motion(self, event):
         if self.result is None or event.inaxes is not self.ax or event.xdata is None:
             if self.readout.text():
                 self.readout.setText("")
             return
         i = self.point_near(event.x, event.y)
-        self.readout.setText(self.readout_text(i) if i is not None else
-                             f"({_number(event.xdata)}, {_number(event.ydata)})")
+        text = self.readout_text(i) if i is not None else \
+            f"({_number(event.xdata)}, {_number(event.ydata)})"
+        if self.calc_id and pick_tools.spec_of(self.result):
+            x, y = (self.points[0][i], self.points[1][i]) if i is not None else \
+                (event.xdata, event.ydata)
+            try:
+                label = pick_tools.pick(self.result, x, y if self.picks_y() else None,
+                                        index=i)["label"]
+            except Exception:               # arrays a plugin shaped otherwise
+                label = ""
+            if label:
+                text += f" · a pick takes {label}"
+        self.readout.setText(text)
+
+    # ---- picks: the gestures (the window does the rest)
+    def _tool_toggled(self, tool, on):
+        if on:
+            for other, button in self.pick_tools.items():
+                if other != tool and button.isChecked():
+                    button.setChecked(False)
+            mode = str(getattr(self.toolbar, "mode", ""))   # pan and zoom would take the clicks
+            if mode == "pan/zoom":
+                self.toolbar.pan()
+            elif mode == "zoom rect":
+                self.toolbar.zoom()
+        self._install_selector()
+
+    def tool(self):
+        """The pick toggle that is on, or None."""
+        return next((t for t, b in self.pick_tools.items() if b.isChecked()), None)
+
+    def _install_selector(self):
+        if self._selector is not None:
+            self._selector.set_active(False)
+            self._selector = None
+        tool = self.tool()
+        if self.ax is None or tool not in ("box", "lasso") or getattr(self.ax, "name", "") == "3d":
+            return
+        if tool == "box":
+            self._selector = RectangleSelector(
+                self.ax, self._on_box, useblit=False, button=[1], interactive=False,
+                props={"edgecolor": theme.SELECTED, "fill": False, "linewidth": 1.5})
+        else:
+            self._selector = LassoSelector(self.ax, self._on_lasso, useblit=False, button=[1],
+                                           props={"color": theme.SELECTED, "linewidth": 1.5})
+
+    def _navigating(self):
+        return bool(getattr(self.toolbar, "mode", ""))
+
+    @staticmethod
+    def _global(event):
+        gui = getattr(event, "guiEvent", None)
+        try:
+            return gui.globalPosition().toPoint()
+        except AttributeError:
+            return QCursor.pos()
+
+    def _on_press(self, event):
+        self._press = (event.x, event.y, event.button) if event.inaxes is self.ax else None
+
+    def _on_release(self, event):
+        press, self._press = self._press, None
+        if press is None or self.result is None or event.inaxes is not self.ax \
+                or event.xdata is None or press[2] != event.button \
+                or np.hypot(event.x - press[0], event.y - press[1]) > CLICK_PIXELS:
+            return
+        right = event.button == 3
+        left = event.button == 1 and self.tool() == "pick" and not self._navigating()
+        if right or left:
+            self.pick_requested.emit(self.calc_id, {"x": float(event.xdata),
+                                                    "y": float(event.ydata)},
+                                     self._global(event))
+
+    def _on_box(self, press, release):
+        if self._navigating() or None in (press.xdata, release.xdata):
+            return
+        self.pick_requested.emit(self.calc_id, {"box": [float(press.xdata), float(press.ydata),
+                                                        float(release.xdata),
+                                                        float(release.ydata)]},
+                                 self._global(release))
+
+    def _on_lasso(self, vertices):
+        if self._navigating() or len(vertices) < 3:
+            return
+        self.pick_requested.emit(self.calc_id, {"polygon": [[float(x), float(y)]
+                                                            for x, y in vertices]},
+                                 QCursor.pos())

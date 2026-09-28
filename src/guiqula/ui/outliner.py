@@ -287,8 +287,10 @@ class Outliner(QTreeWidget):
         return item
 
     def _add_entry(self, parent, entry, family, stage, report, status):
-        item = self._add(parent, entry.id, [f"{entry.id}  {_label(family, entry.kind)}", status],
-                         movable=True)
+        text = f"{entry.id}  {_label(family, entry.kind)}"
+        if entry.name:
+            text += f" · {entry.name}"
+        item = self._add(parent, entry.id, [text, status], movable=True)
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
         item.setCheckState(0, Qt.CheckState.Checked if entry.enabled else Qt.CheckState.Unchecked)
         if isinstance(entry.params.get("code"), str):          # a Python node: its code
@@ -345,9 +347,10 @@ class Outliner(QTreeWidget):
 
     def _add_calculation(self, session, parent, calc):
         status, error = self._calculation_status(session, calc.id)
-        item = self._add(parent, calc.id,
-                         [f"{calc.id}  {_label('calculation', calc.kind)} on {calc.system}", status],
-                         tooltip=error, movable=True)
+        text = f"{calc.id}  {_label('calculation', calc.kind)} on {calc.system}"
+        if calc.name:
+            text += f" · {calc.name}"
+        item = self._add(parent, calc.id, [text, status], tooltip=error, movable=True)
         if status.startswith("failed"):
             item.setForeground(1, QBrush(QColor(theme.ERROR)))
         elif status == "stale" or status.endswith("(stale)"):
