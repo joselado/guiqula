@@ -21,7 +21,10 @@ verified on Linux); the maintainer answered its report (decisions 25 to 45
 in section 7) the same day: a public GitHub repository without CI, pip as
 the only installer (the frozen builds dropped), Python 3.12 and 3.13, the
 plugin recorded in the documents, and 0.0.1 as the first release, which
-the maintainer uploads.
+the maintainer uploads. After phase 7, the maintainer asked for the 3D
+drawings (structures, magnetization) to be done optionally by pyvista,
+turned and zoomed with the mouse as in a pyvista window; built on
+2026-09-29 (section 7, after the phase-7 answers; decisions 63 to 70).
 
 ## 1. Requirements (as stated by the maintainer)
 
@@ -99,7 +102,10 @@ model. That is also what makes the Claude add-on (requirement 9) cheap.
   installed here and can back an optional `[3d]` extra later; they are heavy
   and need a working OpenGL stack, so they stay optional. (Phase 4 part 1
   drew 3D with matplotlib's mplot3d instead, because Qt refuses OpenGL
-  widgets offscreen; a decision for the maintainer, section 7.)
+  widgets offscreen; a decision for the maintainer, section 7. On
+  2026-09-29 pyvista became the optional second 3D drawing, View > 3D
+  drawing, the `[3d]` extra: it renders off-screen and the window paints
+  the image, so it needs no OpenGL from Qt; section 7, decisions 63 to 70.)
 
 ## 3. Architecture: headless core, command API, Qt view
 
@@ -687,7 +693,8 @@ One window, one document, three workspaces switched by tabs in the header
   macOS through a release workflow. The maintainer's answers to the phase-6
   report dropped the frozen builds and the workflows: pip is the only
   installer, with `guiqula desktop`; `packaging/README.md`.)
-- Optional extras: `[3d]` (pyqtgraph.opengl / pyvista), `[fast]` (pyqtgraph).
+- Optional extras: `[3d]` (pyvista, the 3D drawing of View > 3D drawing,
+  2026-09-29), `[fast]` (pyqtgraph).
   (A `[claude]` extra for the MCP server was planned; the server needs no
   dependency, decision 27.)
 - Look and feel: plain Qt Widgets with the Fusion style and a light/dark
@@ -2224,6 +2231,63 @@ Document; 56, Run at once stays off in the tests and drivers and on in the
 program; 57, the Fermi-level target keeps adding to the shift the picked
 result saw. 58 to 62 were not asked and stand as built.
 
+**After phase 7: the 3D drawing with pyvista (asked and built 2026-09-29).**
+The maintainer asked that 3D drawings (magnetization, structures) can
+optionally be made with pyvista, turned and zoomed as when using pyvista
+normally. Built: `ui/pyvista_view.py`, a scene (`draw_scene`, the overlays
+of `draw_structure_3d` one by one: sites by sublattice or by value with a
+colour bar, bonds or the Hamiltonian view's hoppings coloured by phase,
+the faded neighbouring cells, the unit cell, arrows, the region, the
+removed positions, the selection) and its widget (`SceneView`: Reset view,
+Save image, a hint of the gestures); View > 3D drawing (matplotlib or
+pyvista), the window action `renderer_3d` (in `remote/api.py`'s
+`WINDOW_ACTIONS` too) and the setting of the same name; the structure
+canvas and every result view on the atoms swap their matplotlib canvas for
+the scene when they draw in 3D. Asked before building (one question): a
+result on the atoms follows the canvas's 3D box, so "3d" draws the
+magnetization of a flat lattice in 3D as well, and "auto" keeps it flat
+with its picks (the maintainer's answer, the recommended option). Found
+while building: a widget on a QToolBar is shown and hidden by its action,
+Qt ignores the widget's own setVisible, so the Pick, Box and Lasso buttons
+of a result drawn in 3D were never hidden (they only looked so when the
+toolbar overflowed); `PlotView` now hides them through their actions.
+Verified offscreen (tests/ui/test_pyvista_view.py, screenshots), with
+VTK's events sent without a mouse; not verified: the widget on the Wayland
+desktop with a real mouse, and a HiDPI screen (the image is rendered at
+the device pixel ratio, which is 1 offscreen). Decisions taken while
+building, for the maintainer to confirm:
+
+63. pyvista renders off-screen and the widget paints its image, the mouse
+    going to a VTK interactor with the trackball camera style (pyvista's
+    default), not pyvistaqt's QtInteractor, which embeds a VTK window in
+    Qt: VTK's QVTKRenderWindowInteractor crashed on the offscreen platform
+    the tests, drive.py and the remote screenshots use (verified), and in
+    its default form it draws into an X window, which Qt on a Wayland
+    desktop does not have (not tried here); about 20 ms a frame for a
+    diamond cell here; pyvistaqt is not a dependency;
+64. the choice is a setting (matplotlib by default), not part of the
+    Document, since it depends on what is installed on the machine; the
+    tests and drivers start with matplotlib;
+65. Export (io/bundle.py) and the remote `plot` keep matplotlib's figure,
+    in the same projection (mplot3d in 3D); Save image in the scene writes
+    the view as drawn;
+66. the camera stays when the same system (the same result view) is drawn
+    again, after an edit, a new result or a change of theme, and fits the
+    sites again from the same angle when they changed; Reset view is the
+    oblique view fitted to the sites and the unit cell, not to the faded
+    cells around them;
+67. above 4000 sites they are points drawn as spheres, not sphere glyphs;
+    the hoppings of the Hamiltonian view take six line widths by amplitude,
+    since VTK draws one width per actor; atoms under arrows are drawn
+    smaller, so that an arrow centred on its site shows;
+68. no readout, picks or markers in the scene, as in mplot3d; the canvas
+    keys (Home, Ctrl+A, Del) work on the scene too;
+69. a pyvista that cannot draw leaves the drawing to mplot3d and the
+    caption says why; one that cannot start (no OpenGL) is not tried again
+    in the session, and the menu entry is greyed out when pyvista is not
+    installed;
+70. the `[3d]` extra is `pyvista>=0.48`, the version tested.
+
 ### Where the section 13 items land
 
 | Phase | Items |
@@ -2246,7 +2310,7 @@ result saw. 58 to 62 were not asked and stand as built.
 | numba/BLAS not thread-safe with Qt threads | calculations only in the worker process |
 | Windows `spawn` cannot pickle lambdas | expressions are strings compiled in the worker; Python nodes are source strings |
 | Qt plugin discovery under conda | launcher sets `QT_QPA_PLATFORM_PLUGIN_PATH` when the default lookup fails |
-| OpenGL under conda for 3D | 3D is an optional extra; 2D canvas never needs it |
+| OpenGL under conda for 3D | 3D is an optional extra; 2D canvas never needs it; pyvista renders off-screen with whatever VTK finds (X through XWayland, else EGL, verified without a display), and a pyvista that cannot draw leaves the drawing to mplot3d, saying why in the caption |
 | jax as a pyqula hard dependency on Windows | CPU wheels exist; mean-field solvers that need jax degrade to linear mixing if import fails |
 | scope creep (pyqula has ~150 modules) | registry-driven design; Python nodes cover the long tail; phases fix the first wave |
 | `add_*` upgrades spinless → spinful → Nambu silently | engine pre-scans the stack's requirements and sets the mode once; outliner shows the mode after each term (3.1) |

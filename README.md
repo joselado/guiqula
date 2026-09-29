@@ -24,7 +24,8 @@ pip install guiqula
 ```
 
 (or `pipx install guiqula`, or `uv tool install guiqula`, to keep it in an environment of its
-own). Then:
+own; `pip install "guiqula[3d]"` adds pyvista, for 3D drawings turned and zoomed with the
+mouse). Then:
 
 ```
 guiqula                      # the window
@@ -72,7 +73,8 @@ cached.
 - Band structures, coloured by any observable (spin, position, sublattice, valley...);
   density of states; spectral functions of the bulk and of surfaces; Fermi surfaces; gaps;
   total energies.
-- Local density of states, electron density and magnetization, drawn on the atoms.
+- Local density of states, electron density and magnetization, drawn on the atoms, in 3D
+  when asked (with pyvista, optionally: turned, panned and zoomed with the mouse).
 - Topology: Chern and spin Chern numbers, Z2 invariants, Berry curvature maps and along a
   path, local Chern markers.
 - Optical conductivity.

@@ -395,7 +395,7 @@ entry("calculation", "magnetization", "Magnetization",
       script=lambda ctx: [
           f"arrays = dict(magnetization=h.get_magnetization(nk={ctx.code('nk')}))"],
       plot={"kind": "structure_vector", "vectors": "magnetization", "clabel": "magnetization"},
-      cost=_mesh_cost(3.0),
+      cost=_mesh_cost(3.0), guide=("guiqula: Drawing in 3D",),
       pyqula=("h.get_magnetization",))
 
 

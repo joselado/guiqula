@@ -71,11 +71,11 @@ from guiqula.ui.kspace import KSpaceView
 from guiqula.ui.sliders import SlidersPanel
 from guiqula.ui.jobpanel import JobPanel
 from guiqula.ui.outliner import Outliner, pseudo_ids, system_of
-from guiqula.ui.plots import PlotView
+from guiqula.ui.plots import PlotView, in_3d as plot_in_3d
 from guiqula.ui.properties import PropertiesPanel
 from guiqula.ui import structure as structure_tools
 from guiqula.ui.structure import StructureView
-from guiqula.ui import formulas, shortcuts, theme
+from guiqula.ui import formulas, pyvista_view, shortcuts, theme
 
 POLL_MS = 30
 BUILD_DELAY_MS = 150
@@ -85,7 +85,7 @@ WORKSPACES = ("geometry", "hamiltonian", "calculate")
 WINDOW_ACTIONS = ("select", "workspace", "tool", "select_sites", "canvas_view", "preview",
                   "auto_rerun", "projection", "overlay", "slider", "set_slider",
                   "remove_slider", "paint", "theme", "export_bundle", "help", "pick", "pick_to",
-                  "run_at_once")
+                  "run_at_once", "renderer_3d")
 STRUCTURE_TAB = 0
 KSPACE_TAB = 1
 # a new classical system: its lattice, and a supercell the usual orders fit in
@@ -286,6 +286,10 @@ class MainWindow(QMainWindow):
             self.always_trust_action.setChecked(stored["always_trust"])
             self.set_remote(stored["remote"], remember=False)
             self.set_run_at_once(stored["run_at_once"], remember=False)
+            try:
+                self.set_renderer_3d(stored["renderer_3d"], remember=False)
+            except ValueError as error:          # pyvista chosen, and gone since
+                self.message(f"3D drawing with matplotlib: {error}", error=True)
 
     # ---- construction helpers
     def _dock(self, title, widget, name, area):
@@ -633,6 +637,26 @@ class MainWindow(QMainWindow):
             action.setCheckable(True)
             group.addAction(action)
             self.theme_actions[choice] = action
+        drawing = view.addMenu("3D &drawing")
+        drawing.setObjectName("renderer3dMenu")
+        group = QActionGroup(self)
+        self.renderer_actions = {}
+        for choice, text, tip in (
+                ("matplotlib", "&matplotlib", "matplotlib's mplot3d: drag to turn the drawing"),
+                ("pyvista", "&pyvista", "pyvista: drag to turn, shift+drag or the middle "
+                                        "button to pan, the wheel or the right button to "
+                                        "zoom, as in a pyvista window")):
+            action = self._action(drawing, text, lambda checked=False, c=choice:
+                                  self._act("renderer_3d", name=c), name=f"renderer_{choice}")
+            action.setCheckable(True)
+            action.setToolTip(tip)
+            group.addAction(action)
+            self.renderer_actions[choice] = action
+        self.renderer_actions["matplotlib"].setChecked(True)
+        if not pyvista_view.available():
+            self.renderer_actions["pyvista"].setEnabled(False)
+            self.renderer_actions["pyvista"].setToolTip(pyvista_view.unavailable_reason())
+        drawing.setToolTipsVisible(True)
         view.addSeparator()
         for dock in self.docks.values():
             view.addAction(dock.toggleViewAction())
@@ -674,16 +698,21 @@ class MainWindow(QMainWindow):
             crashreport.reports_dir()))
         canvas = self.structure.canvas
         canvas.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        actions = []
         for tool in structure_tools.TOOLS:
-            self._widget_action(canvas, f"{tool} tool", lambda checked=False, t=tool:
-                                self.set_tool(t), f"tool_{tool}")
+            actions.append(self._widget_action(canvas, f"{tool} tool", lambda checked=False,
+                                               t=tool: self.set_tool(t), f"tool_{tool}"))
         for shortcut, args in (("select_all", {"all": True}), ("select_none", {"indices": []}),
                                ("select_invert", {"all": True, "mode": "toggle"})):
-            self._widget_action(canvas, shortcut.replace("_", " "), lambda checked=False, a=args:
-                                self._act("select_sites", **a), shortcut)
-        self._widget_action(canvas, "remove selected", lambda: self._act("remove_selected")
-                            if self.structure.selected().size else None, "remove_selected")
-        self._widget_action(canvas, "show everything", self.structure.fit, "fit")
+            actions.append(self._widget_action(
+                canvas, shortcut.replace("_", " "), lambda checked=False, a=args:
+                self._act("select_sites", **a), shortcut))
+        actions.append(self._widget_action(canvas, "remove selected", lambda: self._act(
+            "remove_selected") if self.structure.selected().size else None, "remove_selected"))
+        actions.append(self._widget_action(canvas, "show everything", self.structure.fit,
+                                           "fit"))
+        self.structure.scene.canvas.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.structure.scene.canvas.addActions(actions)       # the same keys on pyvista's
 
     # ---- session
     def start_session(self, document=None, **options):
@@ -729,6 +758,8 @@ class MainWindow(QMainWindow):
         dispatcher.register_action("pick_to", self.pick_to)
         dispatcher.register_action("run_at_once", lambda enabled=True: self.set_run_at_once(
             enabled))
+        dispatcher.register_action("renderer_3d", lambda name="matplotlib":
+                                   self.set_renderer_3d(name))
         self.help_panel.session = session
         session.view_state = self.view_state
         self.timer.start(POLL_MS)
@@ -1024,12 +1055,50 @@ class MainWindow(QMainWindow):
         return name
 
     def set_projection(self, name):
-        """How the structure canvas draws the geometry: auto (3D when it is
-        not flat), xy or 3d."""
+        """How the structure canvas and the results on the atoms draw the
+        geometry: auto (3D when it is not flat), xy or 3d."""
         self.structure.set_projection(name)
-        if self.session is not None:
-            self._refresh_structure()
+        self._redraw_3d()
         return name
+
+    def set_renderer_3d(self, name="matplotlib", remember=True):
+        """What draws in 3D, the canvas and the results on the atoms:
+        matplotlib (mplot3d) or pyvista (ui/pyvista_view.py); the
+        interactive program keeps the choice in the settings file. Returns
+        the choice."""
+        if name == "pyvista" and not pyvista_view.available():
+            reason = pyvista_view.unavailable_reason()
+            self.renderer_actions["pyvista"].setEnabled(False)
+            self.renderer_actions["pyvista"].setToolTip(reason)
+            self.renderer_actions[self.structure.renderer_3d].setChecked(True)
+            raise ValueError(reason)
+        self.structure.set_renderer_3d(name)
+        self.renderer_actions[name].setEnabled(True)
+        self.renderer_actions[name].setChecked(True)
+        if remember and self.use_settings:
+            settings.put("renderer_3d", name)
+        self._redraw_3d()
+        return name
+
+    def _redraw_3d(self):
+        """Draw again what the projection or the 3D drawing decide: the
+        canvas, and the result views whose drawing they change (the others
+        keep their zoom)."""
+        def drawing(view):
+            three_d = view.result is not None and plot_in_3d(view.result, view.projection)
+            return three_d, view.renderer_3d if three_d else None
+        changed = []
+        for calc, view in self.plots.items():
+            before = drawing(view)
+            view.projection = self.structure.projection
+            view.renderer_3d = self.structure.renderer_3d
+            if drawing(view) != before:
+                changed.append(calc)
+        if self.session is None:
+            return
+        self._refresh_structure()
+        for calc in changed:
+            self._draw_result(calc, force=True)
 
     def preview_field(self, entry, param):
         """Draw a Field of a term (or of a mean field, <system>/meanfield) on
@@ -1246,8 +1315,8 @@ class MainWindow(QMainWindow):
             self.set_canvas_view(ui["canvas_view"])
         if ui.get("tool") in structure_tools.TOOLS:
             self.set_tool(ui["tool"])
-        self.structure.set_projection(ui.get("projection") if ui.get("projection") in
-                                      structure_tools.PROJECTIONS else "auto")
+        self.set_projection(ui.get("projection") if ui.get("projection") in
+                            structure_tools.PROJECTIONS else "auto")    # the result views too
         if isinstance(ui.get("calculation"), str) and self.calc_box.findData(ui["calculation"]) >= 0:
             self.select_calculation(ui["calculation"])
         selected = ui.get("selected", "")
@@ -1666,6 +1735,8 @@ class MainWindow(QMainWindow):
         if view is None:
             self.session.document.calculation(calc)
             view = PlotView(calc)
+            view.projection = self.structure.projection
+            view.renderer_3d = self.structure.renderer_3d
             view.save_requested.connect(self.save_result_dialog)
             view.export_requested.connect(self.export_bundle_dialog)
             view.detach_requested.connect(self.toggle_detached)
@@ -2142,7 +2213,7 @@ class MainWindow(QMainWindow):
             fig = Figure(figsize=(7, 4.5), dpi=100, layout="constrained")
             FigureCanvasAgg(fig)
             plot_tools.draw(fig, result, f"{calculation} · {result.kind} · {result.mode}",
-                            overlays, theme_name="light")
+                            overlays, theme_name="light", projection=self.structure.projection)
             fig.savefig(png, dpi=200)
             fig.savefig(pdf)
 

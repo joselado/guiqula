@@ -55,7 +55,12 @@ class WindowHooks:
         return {"selected": window.selected, "workspace": window.workspace,
                 "canvas_view": window.canvas_view, "tab": window.current_tab(),
                 "result_views": list(window.plots), "theme": window.theme_choice,
-                "selected_sites": int(len(window.structure.selected()))}
+                "selected_sites": int(len(window.structure.selected())),
+                "projection": window.structure.projection,
+                "renderer_3d": window.structure.renderer_3d}
+
+    def projection(self):
+        return self.window.structure.projection
 
     def busy(self):
         return self.window.build_timer.isActive()

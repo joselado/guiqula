@@ -3,6 +3,8 @@ process never loads pyqula, jax or numba; those live in the worker."""
 import json
 
 HEAVY = {"pyqula", "jax", "jaxlib", "numba", "scipy"}   # scipy: the worker finds the bonds
+# the 3D drawing with pyvista loads them at its first drawing (ui/pyvista_view.py)
+LATER = {"pyvista", "vtkmodules", "vtk"}
 
 # Measured on the development machine on 2026-09-26 (PLAN.md 13.15), warm
 # file cache, offscreen, from the first guiqula import to a shown window:
@@ -36,4 +38,5 @@ def test_startup(run_python):
     assert result.returncode == 0, result.stderr
     out = json.loads(result.stdout.strip().splitlines()[-1])
     assert HEAVY.isdisjoint(out["loaded"]), sorted(HEAVY & set(out["loaded"]))
+    assert LATER.isdisjoint(out["loaded"]), sorted(LATER & set(out["loaded"]))
     assert out["seconds"] < BUDGET_SECONDS, f"startup took {out['seconds']:.2f} s"

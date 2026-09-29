@@ -3,7 +3,8 @@
 # The scientific stack comes from conda-forge; guiqula itself (with its copy of pyqula)
 # and Qt (PySide6-Essentials) from PyPI: conda's pyside6 would not satisfy pip's
 # PySide6-Essentials requirement, and two Qt copies in one environment break the window.
-# The list mirrors pyproject.toml (tests/test_packaging.py checks it).
+# The list mirrors pyproject.toml (tests/test_packaging.py checks it). The 3D drawing with
+# pyvista (View > 3D drawing) is optional: add pyvista>=0.48 to the list to have it.
 name: guiqula
 channels:
   - conda-forge

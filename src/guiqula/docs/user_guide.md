@@ -51,7 +51,8 @@ its ops, applied in order: changing an op, or the lattice, rebuilds everything a
 and keeps the terms. Ops that act on positions (keep or remove sites where a condition
 holds, remove atoms) store positions or expressions, not indices, so they survive a
 change of the supercell. A geometry that is not flat is drawn in 3D; the 3D box on the
-canvas toolbar switches to the xy projection, where the selection tools work.
+canvas toolbar switches to the xy projection, where the selection tools work (see Drawing
+in 3D).
 
 ## Selections and regions
 
@@ -140,6 +141,28 @@ on a plot or a command, through the same bar; off, a calculation waits for Run.
 
 An undo, or a value set back, makes the earlier result that matches the document current
 again, without a re-run.
+
+## Drawing in 3D
+
+A geometry that is not flat (a 3D lattice, buckled or stacked layers) is drawn in 3D on the
+canvas, and so is a result on its atoms: a magnetization, a local density of states, a
+density. The 3D box on the canvas toolbar decides for both: when it is checked, a flat
+geometry is drawn in 3D too, which is the way to see the magnetization of graphene as
+arrows in space rather than as in-plane arrows and dots, and when it is not, everything is
+drawn in the xy projection, where the selection tools, the readout and the picks work.
+
+View > 3D drawing chooses what draws in 3D. matplotlib, the default, draws with mplot3d,
+which turns with a drag. pyvista draws with VTK, and the view is handled with the mouse as
+in a pyvista window: a drag turns it, shift and a drag (or the middle button) pans, the
+wheel (or a drag with the right button) zooms, and ctrl and a drag spins it about the line
+of sight. Reset view goes back to the first, oblique view with everything in sight, Home
+(on the canvas) fits everything in sight from the current angle, and Save image writes the
+view as it is drawn. The camera stays where it was left when the same system is drawn
+again, after an edit, a new result or a change of theme. The choice is kept with the
+settings. pyvista is an optional dependency (`pip install "guiqula[3d]"`), and without it
+the entry is greyed out; if pyvista cannot draw at all (no OpenGL), the drawing is left to
+matplotlib and the caption says why. Note that Export writes matplotlib's figure in both
+cases, in the same projection.
 
 ## Picking from a plot
 
@@ -272,8 +295,8 @@ protection.
 Edit > Undo and Redo say which step they take back; Edit > Undo history goes back several
 steps at once, and the selection follows. What is shown (the selection, the workspace,
 the sliders, the overlays, the theme) is not undone. View > Theme chooses light, dark or
-the desktop's scheme. The settings (theme, recent files, always trust, remote control)
-are a file in the user configuration directory.
+the desktop's scheme. The settings (theme, recent files, always trust, remote control, run
+at once, the 3D drawing) are a file in the user configuration directory.
 
 ## Headless use
 

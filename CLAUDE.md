@@ -43,7 +43,9 @@ builds), Python 3.12 and 3.13, 0.0.1 as the first release. Phase 7 (calculations
 picks on the plots: the vocabulary, the targets, the new calculations, the markers) is done
 (2026-09-28, in three parts); of its report, decisions 55 to 62 (PLAN.md section 7, end of
 phase 7), the maintainer answered 55 to 57 (they stand as built) and the others stand as
-built. Nothing is uploaded or pushed without the maintainer.
+built. After phase 7, the 3D drawing with pyvista (View > 3D drawing, 2026-09-29; decisions
+63 to 70 at the end of PLAN.md's section 7, for the maintainer to confirm). Nothing is
+uploaded or pushed without the maintainer.
 
 ## Code map
 
@@ -160,7 +162,7 @@ a `Session`.
   dispatcher actions `select`, `workspace`, `tool`, `select_sites`, `region_from_selection`,
   `remove_selected`, `canvas_view`, `preview`, `auto_rerun`, `projection`, `overlay`,
   `slider`, `set_slider`, `remove_slider`, `paint`, `theme`, `export_bundle`, `help`,
-  `remote`, `pick`, `pick_to`, `run_at_once`; a new one joins `remote/api.py`'s
+  `remote`, `pick`, `pick_to`, `run_at_once`, `renderer_3d`; a new one joins `remote/api.py`'s
   `WINDOW_ACTIONS`; File > Allow remote control starts the server, polled from the window's
   timer; a pick emits ordinary commands, and the pick menu is built by `pick_menu` and
   shown with `popup()`, never `exec()`; `pick` and `pick_to` take a calculation and a
@@ -173,7 +175,12 @@ a `Session`.
   `properties.py` + `forms.py` (forms from the parameter declarations; the `f(r)` Field
   editor), `formulas.py` (mathtext images; rich tooltips of the palettes), `structure.py`
   (canvas, its three views,
-  selection tools, and the mplot3d drawing of geometries that are not flat), `plots.py`
+  selection tools, and the mplot3d drawing of geometries that are not flat), `pyvista_view.py`
+  (the 3D drawing with pyvista, View > 3D drawing, the `renderer_3d` action and setting:
+  rendered off-screen and painted as an image, the mouse sent to VTK's trackball camera,
+  `SceneCanvas.send`/`drag` without a mouse; pyvista imported at the first drawing, never
+  at startup; the canvas and each `PlotView` swap their matplotlib canvas for its
+  `SceneView`, and a result on the atoms follows the canvas's projection), `plots.py`
   (`PlotView` per calculation, `plot_<id>`; lines, colored_scatter, heatmap,
   structure_scalar, structure_vector, scalar; the right click, the Pick, Box and Lasso
   toggles, `pick_requested`; the markers, sliders with `on` drawn by `set_markers` and
@@ -270,7 +277,11 @@ message `This plugin does not support propagateSizeHints()` is printed by the of
 plugin. `guiqula.env.configure_qt(offscreen=True)` sets both variables; `tests/conftest.py`,
 `tools/drive.py` and `guiqula --offscreen` call it. `pytest-qt` 4.5.0 is installed in it
 (without it every test using `qapp` or `qtbot` errors at setup); `pyqtgraph`, the `fast`
-extra, is not, and no test needs it. `tests/ui/test_startup.py`'s 2.0 s budget is tight on
+extra, is not, and no test needs it. pyvista 0.48.4 with VTK 9.6.2, the `3d` extra, is
+installed (`tests/ui/test_pyvista_view.py` skips without it); it renders off-screen through
+XWayland here and falls back to EGL by itself without a display, while a VTK widget
+embedded in Qt (`QVTKRenderWindowInteractor`) segfaults on the offscreen platform, which
+is why `ui/pyvista_view.py` paints an image instead. `tests/ui/test_startup.py`'s 2.0 s budget is tight on
 this interpreter: it passes on a quiet machine, but the start took 2.2 to 3.0 s at a load
 average of about 5 and 3.6 s at 16 (2026-09-28), so a failure there under load is the
 load before it is the code.
@@ -308,6 +319,10 @@ python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "console", "code": "h
                                                    # the console; its output is in the report
 python tools/drive.py project.guiqula --trust ...   # run the Python nodes of a file (13.7)
 python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "theme", "name": "dark"}' --shot dark.png
+python tools/drive.py honeycomb_hubbard --do '{"do": "renderer_3d", "name": "pyvista"}' \
+    --do '{"do": "projection", "name": "3d"}' --do '{"do": "add_calculation", "system": "s1",
+    "kind": "magnetization", "params": {"nk": 4}}' --run c3 --widget plot_c3 --shot m.png
+                                                   # the 3D drawing with pyvista
 python tools/drive.py preset --do '{"do": "set_param", ...}' --do '{"do": "undo"}'
                                                    # undo, redo (steps), history
 python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "select", "entry": "t1"}' \

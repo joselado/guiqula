@@ -72,7 +72,8 @@ WINDOW_ACTIONS = {
     "canvas_view": "name: structure, hamiltonian or field",
     "preview": "entry, param: a term's Field drawn on the structure",
     "auto_rerun": "enabled: re-run cheap stale results",
-    "projection": "name: auto, xy or 3d (how the canvas draws the geometry)",
+    "projection": "name: auto, xy or 3d (how the canvas and the results on the atoms draw "
+                  "the geometry)",
     "overlay": "calc, other (None clears), mode=overlay|difference: two results on one axes",
     "paint": "value, indices or point=[x, y] and radius, entry, param, component: paint a "
              "Field on sites",
@@ -92,6 +93,8 @@ WINDOW_ACTIONS = {
                "polygon, or the target itself): start or move a calculation there",
     "run_at_once": "enabled: a calculation runs as soon as it is added or one of its "
                    "parameters is set",
+    "renderer_3d": "name: matplotlib or pyvista, what draws in 3D (pyvista: turned and zoomed "
+                   "with the mouse)",
 }
 
 
@@ -470,7 +473,8 @@ class RemoteAPI:
         FigureCanvasAgg(figure)
         title = f"{calculation}: {result.kind}" + \
             (" (stale)" if self.session.is_stale(calculation) else "")
-        plots.draw(figure, result, title, theme_name=theme)
+        projection = self.window.projection() if self.window is not None else "auto"
+        plots.draw(figure, result, title, theme_name=theme, projection=projection)
         buffer = io.BytesIO()
         figure.savefig(buffer, format="png")
         return {"png": base64.b64encode(buffer.getvalue()).decode(), "calculation": calculation}

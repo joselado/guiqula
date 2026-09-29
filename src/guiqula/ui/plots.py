@@ -43,6 +43,15 @@ window turns into the slider's value: the parameter follows, one undo step
 per drag, and the marker follows the parameter when a slider, a form or an
 undo changes it.
 
+3D: a result on the atoms is drawn in 3D as the canvas's 3D box says
+(the window hands over its projection: auto, 3D when the geometry is not
+flat; xy; 3d, so that a magnetization on a flat lattice can be turned
+too), by matplotlib's mplot3d or, when View > 3D drawing says pyvista, by
+pyvista (ui/pyvista_view.py), which takes the place of the figure and of
+the navigation actions of the toolbar; a result drawn in 3D has no readout,
+picks or markers. The exported figure (io/bundle.py) is matplotlib's,
+drawn with the same projection.
+
 Overlays (decision 13.11): the curves of other results drawn on the same
 axes, each in its colour with a legend, or the difference of this result
 and another one with the same x (two densities of states on one energy
@@ -56,11 +65,12 @@ from matplotlib.figure import Figure
 from matplotlib.widgets import LassoSelector, RectangleSelector
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QCursor
-from PySide6.QtWidgets import QLabel, QMenu, QToolButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QMenu, QStackedWidget, QToolButton, QVBoxLayout, QWidget
 
 from guiqula.core import picks as pick_tools
 from guiqula.core.results import PLOT_KINDS as KINDS  # noqa: F401 (the kinds drawn here)
 from guiqula.ui import structure as structure_tools
+from guiqula.ui.pyvista_view import SceneView
 from guiqula.ui import theme
 
 READOUT_PIXELS = 12      # the readout names a data point this close to the mouse
@@ -170,9 +180,34 @@ def along_a_line(result):
         structure_tools.on_a_line(result.structure)
 
 
+def in_3d(result, projection="auto"):
+    """Whether a result is drawn in 3D: one on the atoms, by the canvas's
+    projection (auto: when its geometry is not flat)."""
+    if result.plot["kind"] not in ON_STRUCTURE or result.structure is None:
+        return False
+    if projection == "auto":
+        return not structure_tools.is_flat(result.structure)
+    return projection == "3d"
+
+
+def on_atoms(result):
+    """What a result on the atoms draws on its geometry: the keywords of
+    draw_structure (site_values, or arrows)."""
+    plot = result.plot
+    if plot["kind"] == "structure_scalar":
+        return {"site_values": {
+            "values": np.asarray(result.arrays[plot["values"]], dtype=float).ravel(),
+            "label": plot.get("clabel", plot["values"]),
+            "symmetric": plot.get("symmetric", False)}}
+    return {"arrows": {"vectors": np.asarray(result.arrays[plot["vectors"]],
+                                             dtype=float).reshape(-1, 3),
+                       "label": plot.get("clabel", plot["vectors"])}}
+
+
 def _structure_scalar(ax, result):
     build, plot = _on_structure(result), result.plot
-    values = np.asarray(result.arrays[plot["values"]], dtype=float).ravel()
+    overlays = on_atoms(result)
+    values = overlays["site_values"]["values"]
     if along_a_line(result) and getattr(ax, "name", "") != "3d":
         x = np.asarray(build["positions"])[:, 0]
         order = np.argsort(x)
@@ -180,18 +215,14 @@ def _structure_scalar(ax, result):
         ax.scatter(x, values, c=values, cmap=structure_tools.SEQUENTIAL_MAP, s=18, zorder=2)
         ax.set_ylabel(plot.get("clabel", plot["values"]))
         return x, values, values
-    _draw_on(ax)(ax, build, site_values={
-        "values": values, "label": plot.get("clabel", plot["values"]),
-        "symmetric": plot.get("symmetric", False)})
+    _draw_on(ax)(ax, build, **overlays)
     return _site_points(ax, build, values)
 
 
 def _structure_vector(ax, result):
-    build, plot = _on_structure(result), result.plot
-    vectors = np.asarray(result.arrays[plot["vectors"]], dtype=float).reshape(-1, 3)
-    _draw_on(ax)(ax, build, arrows={
-        "vectors": vectors, "label": plot.get("clabel", plot["vectors"])})
-    return _site_points(ax, build, np.linalg.norm(vectors, axis=1))
+    build, overlays = _on_structure(result), on_atoms(result)
+    _draw_on(ax)(ax, build, **overlays)
+    return _site_points(ax, build, np.linalg.norm(overlays["arrows"]["vectors"], axis=1))
 
 
 def scalar_rows(result):
@@ -273,19 +304,19 @@ def _draw_overlays(ax, result, overlays):
         ax.legend(handles=handles, fontsize=8)
 
 
-def draw(figure, result, title="", overlays=(), theme_name=None):
+def draw(figure, result, title="", overlays=(), theme_name=None, projection="auto"):
     """Draw a Result, with the overlays [(label, Result, mode)], in a theme
-    (the active one by default); returns the Axes and the points (x, y, c
-    or None) the readout looks up."""
+    (the active one by default) and, on the atoms, in 3D as the projection
+    says (in_3d); returns the Axes and the points (x, y, c or None) the
+    readout looks up."""
     with theme.drawing(figure, theme_name):
-        return _draw(figure, result, title, overlays)
+        return _draw(figure, result, title, overlays, projection)
 
 
-def _draw(figure, result, title, overlays):
+def _draw(figure, result, title, overlays, projection="auto"):
     figure.clear()
     plot = result.plot
-    three_d = plot["kind"] in ON_STRUCTURE and result.structure is not None and \
-        not structure_tools.is_flat(result.structure)
+    three_d = in_3d(result, projection)
     ax = figure.add_subplot(111, projection="3d" if three_d else None)
     overlays = [o for o in overlays if can_overlay(result, o[1], o[2])]
     difference = [(label, other) for label, other, mode in overlays if mode == "difference"]
@@ -316,6 +347,15 @@ def _draw(figure, result, title, overlays):
 
 def _number(value):
     return f"{value:.6g}"
+
+
+def _same_sites(a, b):
+    """Whether two results on the atoms carry the same positions (a result
+    of the same geometry computed again keeps its camera)."""
+    ra = np.asarray((a.structure or {}).get("positions", np.zeros((0, 3))))
+    rb = np.asarray((b.structure or {}).get("positions", np.zeros((0, 3))))
+    return ra.shape == rb.shape and bool(np.allclose(ra, rb, rtol=0.0,
+                                                     atol=structure_tools.SAME_SITE))
 
 
 class PlotView(QWidget):
@@ -397,12 +437,22 @@ class PlotView(QWidget):
         self.caption.setObjectName(f"plotCaption{suffix}")
         self.caption.setWordWrap(True)
         self.caption.setMinimumHeight(2 * self.caption.fontMetrics().lineSpacing())
+        self.scene = SceneView(f"plotScene{suffix}")        # pyvista loads at its first drawing
+        self.stack = QStackedWidget()
+        self.stack.addWidget(self.canvas)
+        self.stack.addWidget(self.scene)
+        # the toolbar's own actions (home, pan, zoom, save the figure), which the scene replaces
+        navigation = {text for text, *_ in NavigationToolbar2QT.toolitems if text}
+        self._navigation = [a for a in self.toolbar.actions() if a.text() in navigation]
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.addWidget(self.toolbar)
-        layout.addWidget(self.canvas, 1)
+        layout.addWidget(self.stack, 1)
         layout.addWidget(self.readout)
         layout.addWidget(self.caption)
+        self.projection = "auto"           # the canvas's (the window sets both)
+        self.renderer_3d = "matplotlib"
+        self.in_scene = False              # the result is drawn by pyvista (self.scene)
         self.result = None
         self.ax = None
         self.points = None
@@ -439,11 +489,33 @@ class PlotView(QWidget):
         """Draw a result; one that cannot be drawn (arrays a plugin or a
         Python calculation shaped otherwise than its plot kind) says why in
         the caption, and its data can still be saved."""
+        was_scene = self.in_scene and self.result is not None and \
+            _same_sites(self.result, result)
         self.result = result
         self.stale = stale
         self.overlays = list(overlays)
+        if self.renderer_3d == "pyvista" and in_3d(result, self.projection):
+            try:
+                self.scene.show_scene(_on_structure(result), keep=was_scene, fit=False,
+                                      title=title, **on_atoms(result))
+            except Exception as error:
+                self.scene.forget()
+                caption = " · ".join(filter(None, [
+                    caption, f"drawn with matplotlib: pyvista could not draw ({error})"]))
+            else:
+                self._show_canvas(False)
+                self.figure.clear()
+                self.ax = self.points = None
+                self._marker_artists = []
+                self.caption.setText(caption)
+                self.readout.setText("")
+                self._update_buttons()
+                self._install_selector()
+                return
+        self._show_canvas(True)
         try:
-            self.ax, self.points = draw(self.figure, result, title, overlays)
+            self.ax, self.points = draw(self.figure, result, title, overlays,
+                                        projection=self.projection)
             self._marker_artists = []
             self._draw_markers()
             self.canvas.draw()    # now: the limits and the layout are final for the readout
@@ -459,7 +531,23 @@ class PlotView(QWidget):
         self._update_buttons()
         self._install_selector()
 
+    def _show_canvas(self, canvas):
+        """The matplotlib figure and the toolbar's navigation, or pyvista's
+        scene."""
+        self.in_scene = not canvas
+        self.stack.setCurrentWidget(self.canvas if canvas else self.scene)
+        if not canvas:
+            mode = str(getattr(self.toolbar, "mode", ""))     # the scene takes the mouse now
+            if mode == "pan/zoom":
+                self.toolbar.pan()
+            elif mode == "zoom rect":
+                self.toolbar.zoom()
+        for action in self._navigation:
+            action.setVisible(canvas)
+
     def clear(self, caption=""):
+        self.scene.forget()
+        self._show_canvas(True)
         self._marker_artists = []
         self._dragging = None
         self.result = self.ax = self.points = None

@@ -14,6 +14,10 @@ tools/drive.py unless asked) never depend on what a user chose.
   parameters is set (from its form, a pick on a plot, a command), through
   the cost guard; off, only when asked (Run, F5). On unless the user turns
   it off (PLAN.md phase 7, answer 48).
+- ``renderer_3d``: what draws in 3D, the canvas and the results on the
+  atoms: "matplotlib" (mplot3d) or "pyvista" (turned and zoomed with the
+  mouse as in a pyvista window; the optional [3d] extra). matplotlib unless
+  the user chooses pyvista.
 
 A missing, unreadable or malformed file gives the defaults (a broken
 settings file must not stop the program); unknown keys are kept, so an
@@ -27,9 +31,9 @@ from guiqula import env
 FILE = "settings.json"
 RECENT_LIMIT = 10
 DEFAULTS = {"theme": "system", "always_trust": False, "recent": [], "remote": False,
-            "run_at_once": True}
+            "run_at_once": True, "renderer_3d": "matplotlib"}
 SWITCHES = ("always_trust", "remote", "run_at_once")       # true or false
-CHOICES = {"theme": ("system", "light", "dark")}
+CHOICES = {"theme": ("system", "light", "dark"), "renderer_3d": ("matplotlib", "pyvista")}
 
 
 class SettingsError(ValueError):

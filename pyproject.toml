@@ -48,6 +48,8 @@ dependencies = [
 
 [project.optional-dependencies]
 fast = ["pyqtgraph>=0.13"]
+# View > 3D drawing: pyvista (and VTK) draw in 3D; 0.48 is the version tested
+3d = ["pyvista>=0.48"]
 # setuptools: tests/test_packaging.py builds the sdist and the wheel without isolation
 test = ["pytest>=7.4", "pytest-qt>=4.4", "setuptools>=77", "build"]
 

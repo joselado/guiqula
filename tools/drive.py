@@ -20,8 +20,11 @@ Window actions work too: select, workspace, tool, select_sites,
 region_from_selection, remove_selected, canvas_view (structure, hamiltonian,
 field), preview (a term's Field on the structure), auto_rerun, theme
 (system, light, dark), export_bundle (calculation, path: figure, data and
-script in one folder), help (entry, or guide and anchor: the Help dock); the session's undo, redo (with "steps") and
-history; lock and unlock are mutations. The driven window never reads or writes the settings file. Every
+script in one folder), help (entry, or guide and anchor: the Help dock),
+projection (auto, xy, 3d), renderer_3d (matplotlib, pyvista: the 3D drawing,
+whose widgets are structureScene and plotScene_<calculation id>); the
+session's undo, redo (with "steps") and history; lock and unlock are
+mutations. The driven window never reads or writes the settings file. Every
 calculation's result has its own view, plot_<calculation id>. After each command the driver
 waits for the rebuild of the geometry, so a selection sees the new sites.
 The report printed last is JSON: the document outline, the builds, job and
@@ -198,6 +201,8 @@ def main(argv=None):
             report["selected"] = window.selected
             report["workspace"] = window.workspace
             report["canvas_view"] = window.canvas_view
+            report["projection"] = window.structure.projection
+            report["renderer_3d"] = window.structure.renderer_3d
             report["tab"] = window.current_tab()
             report["result_views"] = list(window.plots)
             report["selection"] = len(window.structure.selected())

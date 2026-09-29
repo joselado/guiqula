@@ -24,12 +24,16 @@ functions below do the geometry, so tests and drivers use them without a
 mouse.
 
 A geometry that is not flat (a three-dimensional lattice, buckled or
-stacked layers) is drawn in 3D (matplotlib's mplot3d: drag to turn it) with
-the same overlays; the 3D box switches between that and the xy projection,
-where the selection tools work (they act on x and y only). pyqtgraph's
-OpenGL view was the plan (PLAN.md section 2), but Qt refuses OpenGL widgets
-on the offscreen platform the tests and tools/drive.py use, and PyOpenGL
-is not a dependency.
+stacked layers) is drawn in 3D with the same overlays; the 3D box switches
+between that and the xy projection, where the selection tools work (they
+act on x and y only). The 3D drawing is matplotlib's mplot3d (drag to turn
+it) or, when View > 3D drawing says so, pyvista's (ui/pyvista_view.py:
+turned, panned and zoomed with the mouse as in a pyvista window), which
+takes the place of the matplotlib canvas and its toolbar; a pyvista that
+cannot draw leaves the drawing to mplot3d and the caption says why.
+pyqtgraph's OpenGL view was the plan (PLAN.md section 2), but Qt refuses
+OpenGL widgets on the offscreen platform the tests and tools/drive.py use,
+and PyOpenGL is not a dependency.
 """
 import itertools
 
@@ -44,7 +48,7 @@ from matplotlib import cm, colors as mcolors
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
 from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit,
-                               QToolButton, QVBoxLayout, QWidget)
+                               QStackedWidget, QToolButton, QVBoxLayout, QWidget)
 
 from guiqula.core.nearest import nearest_indices
 from guiqula.ui import theme
@@ -571,15 +575,24 @@ class StructureView(QWidget):
         for widget in self.paint_widgets:
             top.addWidget(widget)
             widget.hide()
+        from guiqula.ui.pyvista_view import SceneView     # it imports this module
+        self.scene = SceneView("structureScene")          # pyvista loads at its first drawing
+        top.insertWidget(0, self.scene.bar, 1)            # in the toolbar's place
+        self.scene.bar.hide()
+        self.stack = QStackedWidget()
+        self.stack.addWidget(self.canvas)
+        self.stack.addWidget(self.scene)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.addLayout(top)
-        layout.addWidget(self.canvas, 1)
+        layout.addWidget(self.stack, 1)
         layout.addWidget(self.caption)
         self.system_id = None
         self.build = None
         self.ax = None
+        self.in_scene = False            # the geometry is drawn by pyvista (self.scene)
         self.projection = "auto"
+        self.renderer_3d = "matplotlib"
         self.tool = "pick"
         self.selected_positions = np.zeros((0, 3))
         self._selection_artist = None
@@ -627,6 +640,15 @@ class StructureView(QWidget):
         self.projection = projection
         return projection
 
+    def set_renderer_3d(self, renderer):
+        """What draws in 3D: matplotlib (mplot3d) or pyvista; the window
+        redraws."""
+        from guiqula.ui.pyvista_view import RENDERERS
+        if renderer not in RENDERERS:
+            raise ValueError(f"unknown 3D drawing {renderer!r}; choices: {list(RENDERERS)}")
+        self.renderer_3d = renderer
+        return renderer
+
     def in_3d(self, build=None):
         """Whether a build is drawn in 3D with the current projection."""
         build = build if build is not None else self.build
@@ -640,8 +662,9 @@ class StructureView(QWidget):
         still there. Drawn in the active theme. When nothing drawn changed
         (an edit whose rebuild is on its way: only the caption says
         "updating…"), only the caption is updated."""
-        drawing = (system_id, id(build), self.in_3d(build), theme.name)
-        if self.ax is not None and drawing == self._drawn and _same(overlays, self._overlays):
+        drawing = (system_id, id(build), self.in_3d(build), self.renderer_3d, theme.name)
+        if (self.ax is not None or self.in_scene) and drawing == self._drawn and \
+                _same(overlays, self._overlays):
             self._caption = caption
             self._update_selection()
             return
@@ -652,6 +675,7 @@ class StructureView(QWidget):
     def _show_structure(self, system_id, build, caption, **overlays):
         three_d = self.in_3d(build)
         was_3d = self.ax is not None and getattr(self.ax, "name", "") == "3d"
+        was_scene = self.in_scene and system_id == self.system_id and self.build is not None
         limits = angles = None
         if self.ax is not None and system_id == self.system_id and self.build is not None:
             if was_3d and three_d:
@@ -668,6 +692,24 @@ class StructureView(QWidget):
         self.system_id, self.build = system_id, build
         self.box_3d.setChecked(three_d)
         self.figure.clear()
+        note = ""
+        if three_d and self.renderer_3d == "pyvista":
+            try:
+                # the camera stays for the same system, and fits again when the sites changed
+                self.scene.show_scene(build, keep=was_scene, fit=not same_sites,
+                                      selected=self.selected(), **overlays)
+            except Exception as error:
+                self.scene.forget()
+                note = f"drawn with matplotlib: pyvista could not draw ({error})"
+            else:
+                self._show_canvas(False)
+                self.ax = self._selection_artist = None
+                self._caption = caption
+                self._install_tool()
+                self._update_selection()
+                return
+        self._show_canvas(True)
+        caption = " · ".join(filter(None, [caption, note]))
         if three_d:
             self.ax = self.figure.add_subplot(111, projection="3d")
             self._selection_artist = draw_structure_3d(self.ax, build, selected=self.selected(),
@@ -691,8 +733,19 @@ class StructureView(QWidget):
         self._install_tool()
         self._update_selection()
 
+    def _show_canvas(self, canvas):
+        """The matplotlib canvas and its toolbar, or pyvista's scene."""
+        self.in_scene = not canvas
+        self.stack.setCurrentWidget(self.canvas if canvas else self.scene)
+        self.toolbar.setVisible(canvas)
+        self.scene.bar.setVisible(not canvas)
+        if not canvas:
+            self.stop_navigating()
+
     def clear(self, caption=""):
         self._drawn, self._overlays = None, None
+        self.scene.forget()
+        self._show_canvas(True)
         self.system_id, self.build, self.ax = None, None, None
         self._selector = self._selection_artist = None
         self.selected_positions = np.zeros((0, 3))
@@ -722,7 +775,9 @@ class StructureView(QWidget):
 
     def _update_selection(self):
         indices = self.selected()
-        if self._selection_artist is not None and self.build is not None:
+        if self.in_scene and self.build is not None:
+            self.scene.set_selection(np.asarray(self.build["positions"])[indices].reshape(-1, 3))
+        elif self._selection_artist is not None and self.build is not None:
             chosen = np.asarray(self.build["positions"])[indices].reshape(-1, 3)
             if hasattr(self._selection_artist, "_offsets3d"):
                 self._selection_artist._offsets3d = (chosen[:, 0], chosen[:, 1], chosen[:, 2])
@@ -780,7 +835,7 @@ class StructureView(QWidget):
                                            props=props)
 
     def _is_3d(self):
-        return getattr(self.ax, "name", "") == "3d"
+        return self.in_scene or getattr(self.ax, "name", "") == "3d"
 
     def _navigating(self):
         return bool(getattr(self.toolbar, "mode", ""))
@@ -873,6 +928,9 @@ class StructureView(QWidget):
 
     def fit(self):
         """Show the whole geometry again (after zooming or panning)."""
+        if self.in_scene:
+            self.scene.fit()
+            return
         if self.ax is None:
             return
         if self._is_3d():
