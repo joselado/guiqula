@@ -361,9 +361,10 @@ class PlotView(QWidget):
                                "(Ctrl+Shift+E)")
         self.export.clicked.connect(lambda: self.export_requested.emit(self.calc_id))
         self.toolbar.addSeparator()
-        self.toolbar.addWidget(self.export)
-        self.toolbar.addWidget(self.save_data)
-        self.toolbar.addWidget(self.detach)
+        # a widget on a toolbar is shown and hidden by its action (Qt ignores its setVisible)
+        self._shown_by = {}
+        for widget in (self.export, self.save_data, self.detach):
+            self._shown_by[widget] = self.toolbar.addWidget(widget)
         self.overlay = QToolButton()
         self.overlay.setText("Overlay")
         self.overlay.setObjectName(f"overlay{suffix}")
@@ -373,7 +374,7 @@ class PlotView(QWidget):
         self.overlay.setMenu(QMenu(self.overlay))
         self.overlay.menu().aboutToShow.connect(
             lambda: self.overlay_menu_requested.emit(self.calc_id))
-        self.toolbar.addWidget(self.overlay)
+        self._shown_by[self.overlay] = self.toolbar.addWidget(self.overlay)
         self.toolbar.addSeparator()
         self.pick_tools = {}
         for tool, text, tip in (
@@ -388,7 +389,7 @@ class PlotView(QWidget):
             button.setObjectName(f"{tool}Tool{suffix}")
             button.setToolTip(tip)
             button.toggled.connect(lambda on, t=tool: self._tool_toggled(t, on))
-            self.toolbar.addWidget(button)
+            self._shown_by[button] = self.toolbar.addWidget(button)
             self.pick_tools[tool] = button
         self.readout = QLabel("")
         self.readout.setObjectName(f"readout{suffix}")
@@ -420,8 +421,8 @@ class PlotView(QWidget):
     def _update_buttons(self):
         self.save_data.setEnabled(self.result is not None and bool(self.calc_id))
         self.export.setEnabled(self.result is not None and bool(self.calc_id))
-        self.detach.setVisible(bool(self.calc_id))
-        self.overlay.setVisible(bool(self.calc_id))
+        self._shown_by[self.detach].setVisible(bool(self.calc_id))
+        self._shown_by[self.overlay].setVisible(bool(self.calc_id))
         self.overlay.setEnabled(self.result is not None and self.ax is not None
                                 and self.result.plot["kind"] in CURVES)
         pickable = bool(self.calc_id) and self.result is not None and self.ax is not None \
@@ -429,8 +430,9 @@ class PlotView(QWidget):
         on_atoms = pickable and self.result.plot["kind"] in ON_STRUCTURE \
             and getattr(self.ax, "name", "") != "3d"
         for tool, button in self.pick_tools.items():
-            button.setVisible(on_atoms if tool in ("box", "lasso") else pickable)
-            if button.isChecked() and not button.isVisible():
+            shown = on_atoms if tool in ("box", "lasso") else pickable
+            self._shown_by[button].setVisible(shown)
+            if button.isChecked() and not shown:
                 button.setChecked(False)
 
     def show_result(self, result, title="", caption="", stale=False, overlays=()):

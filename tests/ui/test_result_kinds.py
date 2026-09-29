@@ -96,6 +96,9 @@ def test_three_dimensional_geometry(window, qtbot, shot):
     calc = session.do("add_calculation", system="s1", kind="magnetization", params={"nk": 3})
     view = run(window, qtbot, calc)
     assert isinstance(view.ax, Axes3D)                      # the result follows the geometry
+    # the box and the lasso pick on the flat drawing only; a widget on a toolbar is hidden
+    # by its action (Qt ignores its setVisible)
+    assert not any(view._shown_by[view.pick_tools[t]].isVisible() for t in ("box", "lasso"))
     shot(view, "magnetization_3d")
     session.do("set_lattice", system="s1", lattice="honeycomb_lattice")
     settle(qtbot, window)
