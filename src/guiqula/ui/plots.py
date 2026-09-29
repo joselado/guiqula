@@ -20,7 +20,7 @@ Kinds (the ``kind`` of a Result's plot spec, which also names the arrays):
   [array, label] pairs.
 
 Every calculation gets its own PlotView (a tab of the viewport, which can
-be detached into a floating dock): the navigation toolbar (pan, zoom, save
+be detached into a window of its own): the navigation toolbar (pan, zoom, save
 the figure), Save data (the arrays and the metadata, io/results.py),
 Detach, Overlay, and a readout of the data point under the mouse, which
 also says what a pick there would take.
@@ -68,7 +68,7 @@ import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
 from matplotlib.widgets import LassoSelector, RectangleSelector
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import QLabel, QMenu, QStackedWidget, QToolButton, QVBoxLayout, QWidget
 
@@ -362,6 +362,28 @@ def _same_sites(a, b):
     rb = np.asarray((b.structure or {}).get("positions", np.zeros((0, 3))))
     return ra.shape == rb.shape and bool(np.allclose(ra, rb, rtol=0.0,
                                                      atol=structure_tools.SAME_SITE))
+
+
+class ResultWindow(QWidget):
+    """A detached PlotView, in a top-level window of its own. It is a plain
+    window and not a floating QDockWidget on purpose: a floating dock draws
+    its own title bar and moves itself, which a Wayland compositor ignores
+    (a client cannot place its windows there), so the plot could not be
+    moved; a plain window gets the decoration of the desktop (on Wayland,
+    Qt's client-side one), which asks the compositor for the move."""
+
+    def __init__(self, calc_id, view, parent=None):
+        super().__init__(parent, Qt.WindowType.Window)
+        self.setObjectName(f"resultWindow_{calc_id}")
+        self.view = view
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(view)
+
+    def release(self):
+        """Give the view back, to be placed somewhere else."""
+        self.layout().removeWidget(self.view)
+        self.view.setParent(None)
 
 
 class PlotView(QWidget):

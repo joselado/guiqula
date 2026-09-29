@@ -8,6 +8,7 @@ import pytest
 from matplotlib.backend_bases import MouseEvent
 from matplotlib.collections import LineCollection
 from matplotlib.quiver import Quiver
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QLineEdit, QPushButton
 
 from guiqula.engine.calculations import run_calculation
@@ -228,12 +229,19 @@ def test_result_tabs_readout_and_detach(window, qtbot, shot):
     session.do("set_param", entry="t2", name="c", value=0.2)
     index = window.viewport.indexOf(view)
     assert window.viewport.tabText(index) == "c2 dos (stale)"
-    assert window.toggle_detached("c2") is True             # into a floating dock
-    assert window.viewport.indexOf(view) < 0 and window.plot_docks["c2"].isFloating()
+    assert window.toggle_detached("c2") is True             # into a window of its own
+    detached = window.plot_windows["c2"]
+    assert window.viewport.indexOf(view) < 0 and view.parent() is detached
+    # a decorated top-level window, which the compositor can move: a floating dock is a
+    # frameless Tool window that moves itself, which Wayland ignores
+    flags = detached.windowFlags()
+    assert detached.isWindow() and detached.isVisible()
+    assert flags & Qt.WindowType.WindowType_Mask == Qt.WindowType.Window
+    assert not flags & Qt.WindowType.FramelessWindowHint
     assert view.detach.text() == "Attach"
-    shot(window.plot_docks["c2"], "detached")
+    shot(detached, "detached")
     view.detach.click()                                     # Attach
-    assert "c2" not in window.plot_docks and window.viewport.indexOf(view) > 0
+    assert "c2" not in window.plot_windows and window.viewport.indexOf(view) > 0
     window.viewport.tabCloseRequested.emit(window.viewport.indexOf(view))
     assert "c2" not in window.plots and window.current_tab() == "structure"
     window.select("c1")

@@ -2,7 +2,7 @@
 (Geometry, Hamiltonian, Calculate) that change the palette toolbar and
 the emphasis, not the data; the outliner on the left, the viewport (the
 Structure tab and one closable tab per calculation's result, which can be
-detached into floating docks) in the centre, the properties form and the
+detached into windows of their own) in the centre, the properties form and the
 jobs on the right, the log at the bottom, and the status bar.
 
 The structure canvas has three views: the sites and bonds (the Geometry
@@ -71,7 +71,7 @@ from guiqula.ui.kspace import KSpaceView
 from guiqula.ui.sliders import SlidersPanel
 from guiqula.ui.jobpanel import JobPanel
 from guiqula.ui.outliner import Outliner, pseudo_ids, system_of
-from guiqula.ui.plots import PlotView, in_3d as plot_in_3d
+from guiqula.ui.plots import PlotView, ResultWindow, in_3d as plot_in_3d
 from guiqula.ui.properties import PropertiesPanel
 from guiqula.ui import structure as structure_tools
 from guiqula.ui.structure import StructureView
@@ -151,9 +151,9 @@ class MainWindow(QMainWindow):
         self._unsubscribe = None
         self._last_crash_text = None
         self._pending_sites = None     # (system, positions) to select once it is built
-        self.plots = {}                # calculation id -> PlotView (a tab or a floating dock)
+        self.plots = {}                # calculation id -> PlotView (a tab or a window)
         self.overlays = {}             # calculation id -> [(other calculation, mode)] drawn over it
-        self.plot_docks = {}           # calculation id -> QDockWidget of a detached view
+        self.plot_windows = {}         # calculation id -> ResultWindow of a detached view
         self.canvas_view = "structure"
         self.field_preview = None      # (entry, parameter) the field view draws
         self.auto_rerun = False
@@ -1755,7 +1755,7 @@ class MainWindow(QMainWindow):
             self.show_result(calc)
         self._update_status()
 
-    # ---- result views: one tab (or floating dock) per calculation
+    # ---- result views: one tab (or window) per calculation
     @property
     def plot(self):
         """The result view of the selected calculation (made on first use)."""
@@ -1789,19 +1789,19 @@ class MainWindow(QMainWindow):
         return view
 
     def show_result(self, calc):
-        """Bring a calculation's result view forward (its tab, or its dock)."""
+        """Bring a calculation's result view forward (its tab, or its window)."""
         view = self.result_view(calc)
-        dock = self.plot_docks.get(calc)
-        if dock is not None:
-            dock.show()
-            dock.raise_()
+        window = self.plot_windows.get(calc)
+        if window is not None:
+            window.show()
+            window.raise_()
         else:
             self.viewport.setCurrentWidget(view)
         return calc
 
     def close_result(self, calc):
         view = self.plots.pop(calc, None)
-        dock = self.plot_docks.pop(calc, None)
+        window = self.plot_windows.pop(calc, None)
         if view is None:
             return
         index = self.viewport.indexOf(view)
@@ -1812,9 +1812,9 @@ class MainWindow(QMainWindow):
                 self.viewport.setCurrentIndex(STRUCTURE_TAB)
         view.hide()
         view.deleteLater()               # may run inside a signal of its own tab bar
-        if dock is not None:
-            dock.hide()
-            dock.deleteLater()
+        if window is not None:
+            window.hide()
+            window.deleteLater()
 
     def _close_tab(self, index):
         widget = self.viewport.widget(index)
@@ -1822,29 +1822,27 @@ class MainWindow(QMainWindow):
             self.close_result(widget.calc_id)
 
     def toggle_detached(self, calc):
-        """Move a result view into a floating dock, or back into its tab."""
+        """Move a result view into a window of its own (a plain window, not a
+        floating dock, so that it can be moved on Wayland too: see
+        ResultWindow), or back into its tab."""
         view = self.plots[calc]
-        dock = self.plot_docks.pop(calc, None)
-        if dock is not None:
-            dock.setWidget(None)
-            view.setParent(None)
-            dock.hide()
-            dock.deleteLater()
+        window = self.plot_windows.pop(calc, None)
+        if window is not None:
+            window.release()
+            window.hide()
+            window.deleteLater()
             self.viewport.addTab(view, self._tab_text(calc))
             self.viewport.setCurrentWidget(view)
             view.set_detached(False)
             return False
         self.viewport.removeTab(self.viewport.indexOf(view))
-        dock = QDockWidget(f"Result {calc}", self)
-        dock.setObjectName(f"resultDock_{calc}")
-        dock.setWidget(view)
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
-        dock.setFloating(True)
-        dock.resize(640, 480)
-        dock.show()
+        window = ResultWindow(calc, view, self)
+        window.setWindowTitle(f"Result {calc}")
+        window.resize(640, 480)
+        window.show()
         view.show()
         view.set_detached(True)
-        self.plot_docks[calc] = dock
+        self.plot_windows[calc] = window
         return True
 
     def _tab_text(self, calc):
@@ -1864,9 +1862,9 @@ class MainWindow(QMainWindow):
         index = self.viewport.indexOf(view)
         if index >= 0:
             self.viewport.setTabText(index, self._tab_text(calc))
-        dock = self.plot_docks.get(calc)
-        if dock is not None:
-            dock.setWindowTitle(f"Result {self._tab_text(calc)}")
+        window = self.plot_windows.get(calc)
+        if window is not None:
+            window.setWindowTitle(f"Result {self._tab_text(calc)}")
         if result is None:
             if view.result is not None or not view.caption.text().startswith(calc):
                 view.clear(f"{calc}: no result yet; press Run (F5).")

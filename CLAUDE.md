@@ -49,7 +49,8 @@ built. After phase 7, the 3D drawing with pyvista (View > 3D drawing, 2026-09-29
 the axes centred in their panels; decisions 71 to 79, same place, for the maintainer to
 confirm), and moving in space (2026-09-29: Blender's controls in the 3D scene, Inkscape's on
 the flat drawings, pyvista the default in the program when installed; decisions 80 to 87,
-same place, for the maintainer to confirm). Nothing is uploaded or pushed without the
+same place, for the maintainer to confirm), and a detached plot is a window of its own, since a
+floating dock could not be moved on Wayland (decision 88, same place). Nothing is uploaded or pushed without the
 maintainer.
 
 ## Code map
@@ -193,7 +194,7 @@ a `Session`.
   (Inkscape's controls on a matplotlib canvas, `CanvasNavigation`, on the structure canvas
   and the results drawn flat on the atoms; `bind_keys` makes the QShortcuts of the table's
   "2D canvas" context; the "3D canvas" keys are the scene's own `keyPressEvent`), `plots.py`
-  (`PlotView` per calculation, `plot_<id>`; lines, colored_scatter, heatmap,
+  (`PlotView` per calculation, `plot_<id>`, and `ResultWindow`, the plain window of a detached one, never a floating dock, which Wayland cannot move; lines, colored_scatter, heatmap,
   structure_scalar, structure_vector, scalar; the right click, the Pick, Box and Lasso
   toggles, `pick_requested`; the markers, sliders with `on` drawn by `set_markers` and
   dragged through `marker_moved`), `jobpanel.py`,

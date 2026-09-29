@@ -96,7 +96,7 @@ model. That is also what makes the Claude add-on (requirement 9) cheap.
   cursor readouts, click-to-select (used e.g. to pick a k-point or an atom),
   and publication export (PNG/PDF/SVG plus the raw data) all come for free.
   Every plot lives in a tab of the central viewport and can be detached into a
-  floating dock.
+  window of its own.
 - **pyqtgraph** (pip, pure Python, installed in phase 0) as the fast path for the
   structure canvas once systems have thousands of atoms, and for slider-driven
   live updates. Not needed for phase 1; the canvas starts on matplotlib too.
@@ -582,7 +582,7 @@ One window, one document, three workspaces switched by tabs in the header
 - **Viewport** (centre): a Structure tab always present (2D canvas with
   pan/zoom, atom picking, colour by sublattice/onsite/magnetization/LDOS,
   unit cell and neighbour cells, 3D view for 3D lattices), plus one closable
-  tab per result. Tabs can be dragged out as floating docks to compare plots
+  tab per result. A tab can be detached into a window of its own to compare plots
   side by side.
 - **Properties** (right): the form for the selected entry, generated from its
   schema. Each numeric field has an `f(r)` toggle to switch to an expression.
@@ -858,7 +858,7 @@ checkbox and the converged energy; a form; a toolbar button), the last
 stage of the plan, entering the mode pre-scan (it needs spin), run only
 with the calculations: the interactive builds stop before it and report it
 as deferred; one closable tab per calculation's result (`plot_<id>`) with
-Save data, Detach into a floating dock and back (a button: dragging a tab
+Save data, Detach into a window of its own and back (a button: dragging a tab
 out is not offered), a readout of the data point under the mouse, and
 "(stale)" in the tab; search boxes with completion on the op, term and
 calculation palettes; the cost guard of 13.12 (`registry/cost.py`: an
@@ -2444,7 +2444,20 @@ Decisions taken while building, for the maintainer to confirm:
 87. the window action `view_3d` (name: front, back, right, left, top,
     bottom, perspective, orthographic, flip, all, selected, reset; and a
     calculation for a result view instead of the canvas) moves the scene for
-    drivers, and refuses when nothing is drawn with pyvista there.
+    drivers, and refuses when nothing is drawn with pyvista there;
+88. a detached result is a plain top-level window (`ResultWindow`, in
+    `ui/plots.py`) and not a floating dock (2026-09-29, after the maintainer could
+    not move a detached plot). On a Wayland desktop (GNOME, Qt 6.11 here) a
+    floating `QDockWidget` is a frameless tool window with frame margins of
+    zero, which draws its own title bar and moves itself by asking for a new
+    position, and a compositor does not let a client place its windows; a plain
+    window gets the decoration of the desktop (Qt's client-side one on Wayland,
+    the window manager's elsewhere, margins of 11, 49, 11 and 11 here), which
+    asks the compositor for the move. Closing the window hides it and selecting
+    the calculation shows it again, as the dock did, and Attach puts the view back
+    in its tab. The other docks (outliner, properties, jobs, log, console, help)
+    are still `QDockWidget`s, so floating one of them has the same limit on
+    Wayland; that is left as it is.
 
 Maintainer's answers after building (2026-09-29, asked one by one, the
 three that change behaviour): 82, alt and the left button emulate the
