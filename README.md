@@ -24,8 +24,8 @@ pip install guiqula
 ```
 
 (or `pipx install guiqula`, or `uv tool install guiqula`, to keep it in an environment of its
-own; `pip install "guiqula[3d]"` adds pyvista, for 3D drawings turned and zoomed with the
-mouse). Then:
+own; `pip install "guiqula[3d]"` adds pyvista, for 3D drawings moved as in Blender's
+viewport). Then:
 
 ```
 guiqula                      # the window

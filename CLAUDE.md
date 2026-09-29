@@ -47,7 +47,10 @@ built. After phase 7, the 3D drawing with pyvista (View > 3D drawing, 2026-09-29
 63 to 70 at the end of PLAN.md's section 7, for the maintainer to confirm), and the look
 (2026-09-29: the plot text size, View > Plot text; the check boxes drawn by a proxy style;
 the axes centred in their panels; decisions 71 to 79, same place, for the maintainer to
-confirm). Nothing is uploaded or pushed without the maintainer.
+confirm), and moving in space (2026-09-29: Blender's controls in the 3D scene, Inkscape's on
+the flat drawings, pyvista the default in the program when installed; decisions 80 to 87,
+same place, for the maintainer to confirm). Nothing is uploaded or pushed without the
+maintainer.
 
 ## Code map
 
@@ -149,8 +152,9 @@ a `Session`.
   script export (a sweep exports a loop), result files, `autosave.py` (autosave and
   recovery), `crashreport.py`, `bundle.py` (Export figure, data and script: one folder
   per result, the figure drawn by the window in the light theme), `settings.py` (the user's theme, plot text size, recent files, always
-  trust, remote control, run at once, 3D drawing; `$GUIQULA_CONFIG_DIR`; only the interactive program's window, `use_settings=True`,
-  reads or writes it, so tests and drivers run with Run at once off unless they turn it on).
+  trust, remote control, run at once, 3D drawing (pyvista unless matplotlib was chosen or pyvista is missing); the file holds
+  only what was set, `settings.chosen`; `$GUIQULA_CONFIG_DIR`; only the interactive program's window,
+  `use_settings=True`, reads or writes it, so tests and drivers run with Run at once off unless they turn it on).
 - `desktop.py`: `guiqula desktop` (the menu entry, icon and `.guiqula` file type for the
   current user: freedesktop files on Linux, a Start menu shortcut and registry keys on
   Windows, `~/Applications/guiqula.app` on macOS; from a checkout it carries `src/`);
@@ -164,7 +168,7 @@ a `Session`.
   dispatcher actions `select`, `workspace`, `tool`, `select_sites`, `region_from_selection`,
   `remove_selected`, `canvas_view`, `preview`, `auto_rerun`, `projection`, `overlay`,
   `slider`, `set_slider`, `remove_slider`, `paint`, `theme`, `export_bundle`, `help`,
-  `remote`, `pick`, `pick_to`, `run_at_once`, `renderer_3d`, `plot_text`; a new one joins `remote/api.py`'s
+  `remote`, `pick`, `pick_to`, `run_at_once`, `renderer_3d`, `view_3d`, `plot_text`; a new one joins `remote/api.py`'s
   `WINDOW_ACTIONS`; File > Allow remote control starts the server, polled from the window's
   timer; a pick emits ordinary commands, and the pick menu is built by `pick_menu` and
   shown with `popup()`, never `exec()`; `pick` and `pick_to` take a calculation and a
@@ -179,10 +183,16 @@ a `Session`.
   (canvas, its three views,
   selection tools, and the mplot3d drawing of geometries that are not flat), `pyvista_view.py`
   (the 3D drawing with pyvista, View > 3D drawing, the `renderer_3d` action and setting:
-  rendered off-screen and painted as an image, the mouse sent to VTK's trackball camera,
-  `SceneCanvas.send`/`drag` without a mouse; pyvista imported at the first drawing, never
-  at startup; the canvas and each `PlotView` swap their matplotlib canvas for its
-  `SceneView`, and a result on the atoms follows the canvas's projection), `plots.py`
+  rendered off-screen and painted as an image, moved as Blender's viewport is, the widget
+  applying the mouse and the numpad to a `navigation.Turntable` and setting the camera,
+  `SceneCanvas.send`/`drag` without a mouse, `SceneView.set_view` and the `view_3d` action;
+  pyvista imported at the first drawing, never at startup; the canvas and each `PlotView`
+  swap their matplotlib canvas for its `SceneView`, and a result on the atoms follows the
+  canvas's projection), `navigation.py` (the arithmetic of moving, without Qt, VTK or
+  matplotlib: `Turntable`, the limits of a flat view, `ZoomHistory`), `canvas_navigation.py`
+  (Inkscape's controls on a matplotlib canvas, `CanvasNavigation`, on the structure canvas
+  and the results drawn flat on the atoms; `bind_keys` makes the QShortcuts of the table's
+  "2D canvas" context; the "3D canvas" keys are the scene's own `keyPressEvent`), `plots.py`
   (`PlotView` per calculation, `plot_<id>`; lines, colored_scatter, heatmap,
   structure_scalar, structure_vector, scalar; the right click, the Pick, Box and Lasso
   toggles, `pick_requested`; the markers, sliders with `on` drawn by `set_markers` and
@@ -332,6 +342,9 @@ python tools/drive.py honeycomb_hubbard --do '{"do": "renderer_3d", "name": "pyv
                                                    # the 3D drawing with pyvista
 python tools/drive.py preset --do '{"do": "set_param", ...}' --do '{"do": "undo"}'
                                                    # undo, redo (steps), history
+python tools/drive.py honeycomb_hubbard --do '{"do": "renderer_3d", "name": "pyvista"}' \
+    --do '{"do": "projection", "name": "3d"}' --do '{"do": "view_3d", "name": "top"}' \
+    --widget structureScene --shot top.png             # Blender's views: front, right, top, ...
 python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "select", "entry": "t1"}' \
     --do '{"do": "help"}' --widget helpDock --shot help.png   # an entry's help (13.13)
 python tools/drive.py honeycomb_zeeman_rashba --run c1 \

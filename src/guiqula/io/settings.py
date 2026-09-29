@@ -15,9 +15,10 @@ tools/drive.py unless asked) never depend on what a user chose.
   the cost guard; off, only when asked (Run, F5). On unless the user turns
   it off (PLAN.md phase 7, answer 48).
 - ``renderer_3d``: what draws in 3D, the canvas and the results on the
-  atoms: "matplotlib" (mplot3d) or "pyvista" (turned and zoomed with the
-  mouse as in a pyvista window; the optional [3d] extra). matplotlib unless
-  the user chooses pyvista.
+  atoms: "matplotlib" (mplot3d) or "pyvista" (moved in space as Blender's
+  viewport is; the optional [3d] extra). pyvista unless the user chooses
+  matplotlib, and matplotlib whenever pyvista is not installed and the user
+  never chose it (`chosen`).
 - ``plot_text``: the size of the text of every drawing (the labels, the
   ticks, the titles of the plots, the canvas and the k-space tab, and of
   the exported figures): "small", "normal" or "large" (ui/theme.py's
@@ -25,7 +26,10 @@ tools/drive.py unless asked) never depend on what a user chose.
 
 A missing, unreadable or malformed file gives the defaults (a broken
 settings file must not stop the program); unknown keys are kept, so an
-older version does not erase what a newer one wrote.
+older version does not erase what a newer one wrote. The file holds only
+the settings that were set, never the defaults filled in, so that a default
+can change (renderer_3d did) without a file written earlier keeping the old
+one.
 """
 import json
 import os
@@ -35,7 +39,7 @@ from guiqula import env
 FILE = "settings.json"
 RECENT_LIMIT = 10
 DEFAULTS = {"theme": "system", "always_trust": False, "recent": [], "remote": False,
-            "run_at_once": True, "renderer_3d": "matplotlib", "plot_text": "normal"}
+            "run_at_once": True, "renderer_3d": "pyvista", "plot_text": "normal"}
 SWITCHES = ("always_trust", "remote", "run_at_once")       # true or false
 CHOICES = {"theme": ("system", "light", "dark"), "renderer_3d": ("matplotlib", "pyvista"),
            "plot_text": ("small", "normal", "large")}
@@ -49,14 +53,18 @@ def path():
     return env.user_config_dir() / FILE
 
 
-def load():
-    """The settings, defaults filled in for what is missing or invalid."""
+def _stored():
+    """What the file holds, as it is (a broken file holds nothing)."""
     try:
         stored = json.loads(path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        stored = {}
-    if not isinstance(stored, dict):
-        stored = {}
+        return {}
+    return stored if isinstance(stored, dict) else {}
+
+
+def load():
+    """The settings, defaults filled in for what is missing or invalid."""
+    stored = _stored()
     values = dict(DEFAULTS, **stored)
     for name, choices in CHOICES.items():
         if values[name] not in choices:
@@ -82,6 +90,12 @@ def get(name):
     return load()[name]
 
 
+def chosen(name):
+    """Whether the file holds a value for this setting: the user (or a
+    command) set it, and it is not the default filled in."""
+    return name in _stored()
+
+
 def put(name, value):
     """Change one setting; returns the settings."""
     if name not in DEFAULTS:
@@ -90,10 +104,10 @@ def put(name, value):
         raise SettingsError(f"{name} must be one of {CHOICES[name]}, not {value!r}")
     if name in SWITCHES and not isinstance(value, bool):
         raise SettingsError(f"{name} must be true or false")
-    values = load()
-    values[name] = value
-    save(values)
-    return values
+    stored = _stored()              # only what was set is written, so that `chosen` can tell
+    stored[name] = value
+    save(stored)
+    return load()
 
 
 def add_recent(file_path):

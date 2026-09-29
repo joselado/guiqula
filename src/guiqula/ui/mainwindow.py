@@ -288,8 +288,12 @@ class MainWindow(QMainWindow):
             self.always_trust_action.setChecked(stored["always_trust"])
             self.set_remote(stored["remote"], remember=False)
             self.set_run_at_once(stored["run_at_once"], remember=False)
+            renderer = stored["renderer_3d"]
+            if renderer == "pyvista" and not pyvista_view.available() \
+                    and not settings.chosen("renderer_3d"):
+                renderer = "matplotlib"          # the default, and pyvista is not installed
             try:
-                self.set_renderer_3d(stored["renderer_3d"], remember=False)
+                self.set_renderer_3d(renderer, remember=False)
             except ValueError as error:          # pyvista chosen, and gone since
                 self.message(f"3D drawing with matplotlib: {error}", error=True)
 
@@ -659,9 +663,9 @@ class MainWindow(QMainWindow):
         self.renderer_actions = {}
         for choice, text, tip in (
                 ("matplotlib", "&matplotlib", "matplotlib's mplot3d: drag to turn the drawing"),
-                ("pyvista", "&pyvista", "pyvista: drag to turn, shift+drag or the middle "
-                                        "button to pan, the wheel or the right button to "
-                                        "zoom, as in a pyvista window")):
+                ("pyvista", "&pyvista", "pyvista, moved as in Blender: the middle button "
+                                        "orbits, with shift it pans, with ctrl it zooms, the "
+                                        "wheel zooms, the numpad gives the views")):
             action = self._action(drawing, text, lambda checked=False, c=choice:
                                   self._act("renderer_3d", name=c), name=f"renderer_{choice}")
             action.setCheckable(True)
@@ -777,6 +781,7 @@ class MainWindow(QMainWindow):
         dispatcher.register_action("renderer_3d", lambda name="matplotlib":
                                    self.set_renderer_3d(name))
         dispatcher.register_action("plot_text", lambda name="normal": self.set_plot_text(name))
+        dispatcher.register_action("view_3d", self.set_view_3d)
         self.help_panel.session = session
         session.view_state = self.view_state
         self.timer.start(POLL_MS)
@@ -1096,6 +1101,24 @@ class MainWindow(QMainWindow):
             settings.put("renderer_3d", name)
         self._redraw_3d()
         return name
+
+    def set_view_3d(self, name, calculation=None):
+        """Move the pyvista view (SceneView.set_view: front, back, right,
+        left, top, bottom, perspective, orthographic, flip, all, selected or
+        reset) of the canvas, or of a result view when a calculation is
+        given. Returns the name of the view shown."""
+        if calculation:
+            if calculation not in self.plots:
+                raise ValueError(f"no result view of {calculation!r}")
+            view = self.plots[calculation]
+        else:
+            view = self.structure
+        if not view.in_scene:
+            raise ValueError("nothing is drawn in 3D with pyvista there (View > 3D drawing, "
+                             "and a geometry that is not flat or the 3D projection)")
+        scene = view.scene
+        scene.set_view(name)
+        return scene.canvas.view.description()
 
     def _redraw_3d(self):
         """Draw again what the projection or the 3D drawing decide: the

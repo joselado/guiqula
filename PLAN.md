@@ -24,7 +24,9 @@ plugin recorded in the documents, and 0.0.1 as the first release, which
 the maintainer uploads. After phase 7, the maintainer asked for the 3D
 drawings (structures, magnetization) to be done optionally by pyvista,
 turned and zoomed with the mouse as in a pyvista window; built on
-2026-09-29 (section 7, after the phase-7 answers; decisions 63 to 70).
+2026-09-29 (section 7, after the phase-7 answers; decisions 63 to 70). The
+maintainer then asked for the controls of Blender in the 3D scene and of
+Inkscape on the flat drawings (section 7, after the look; decisions 80 to 87).
 
 ## 1. Requirements (as stated by the maintainer)
 
@@ -2353,6 +2355,105 @@ taken while building, for the maintainer to confirm:
     menu-indicator subcontrol; Fusion drew a small one under the text's
     corner);
 79. the axis labels sit 3 points from the ticks (matplotlib's 4).
+
+**Moving in space (asked and built 2026-09-29).** The maintainer asked that
+the 3D plots have the same controls as Blender has to move in space, and the
+2D geometry plots the same controls as Inkscape. Asked before building (one
+pick list): what draws in 3D by default, since the Blender controls need
+pyvista's scene; the maintainer picked pyvista when it is installed. Built:
+`ui/navigation.py` (the arithmetic without Qt, VTK or matplotlib: the
+turntable camera `Turntable`, the limits of a flat view, the zoom history),
+`ui/canvas_navigation.py` (Inkscape's controls on a matplotlib canvas:
+`CanvasNavigation`, `bind_keys`), the camera and keys of
+`ui/pyvista_view.py` rewritten (`SceneCanvas` moves the camera itself;
+`SceneView` gets the View menu and `set_view`), the window action `view_3d`
+(in `remote/api.py`'s `WINDOW_ACTIONS` too), the shortcut table's contexts
+"2D canvas" and "3D canvas", "Moving in space" in the user guide. Verified
+offscreen (tests/ui/test_navigation.py, tests/ui/test_pyvista_view.py, the
+window's keys with QTest, screenshots); not verified: a real middle button
+and wheel on the Wayland desktop, a touchpad, a numpad with NumLock off, and
+the typed "+", "~" and "`" on a real keyboard layout (QTest sends the key
+codes, not the platform's mapping). The manuals of both programs could not
+be fetched: Blender's keymap source confirmed the numpad views, the orbit
+and pan steps, numpad 5, Home and numpad period, and the rest of both
+mappings (Inkscape's keys and steps, the sign and speed of Blender's drags,
+alt and the left button) is from memory, so a key that differs from the
+program is a one-line change in `ui/navigation.py` or `ui/pyvista_view.py`.
+Decisions taken while building, for the maintainer to confirm:
+
+80. the pyvista scene is moved as Blender's viewport, replacing 63's
+    trackball camera: the camera is `navigation.Turntable` (a target, a
+    distance, an azimuth about z and an elevation, so z stays up), the widget
+    applies the mouse and the keys to it and sets the pyvista camera; no VTK
+    interactor style is involved (the interactor only sizes the render
+    window). Middle drag orbits (0.007 radians a pixel, upside down past a
+    pole with the horizontal drag reversed, as Blender's turntable), shift
+    pans, ctrl zooms (dragging up zooms in, the distance following the
+    pointer's distance from the top edge); the wheel zooms by 1.2 a notch,
+    ctrl and shift with the wheel pan by 32 pixels; the numpad gives the
+    front, right and top views (ctrl: the opposite side), steps the orbit
+    by 15 degrees (ctrl: the pan), toggles the projection (5), half a turn
+    (9), zooms (+, -), frames the selected sites (.); Home frames everything;
+81. an axis view is orthographic and turning away from it returns to
+    perspective, as Blender's auto perspective; toggling with 5 is a choice
+    that turning does not undo. The view is named as Blender names it (User
+    Perspective, Top Orthographic) on the View button of the scene bar,
+    which is also a menu of the views, the projection and the framing, for
+    a keyboard without a numpad. Top-row digits do not emulate the numpad
+    (Blender's option is off by default), so 3 and 4 keep Inkscape's
+    meaning on both kinds of drawing;
+82. the plain left button does nothing in the scene (Blender keeps it for
+    selecting, and the scene has no selection); alt and the left button
+    emulate the middle button always, alt+shift the pan and alt+ctrl the
+    zoom (Blender's emulation of a three button mouse, which is a preference
+    there); on a Linux desktop that takes alt and a drag to move windows
+    this needs the desktop setting changed, and the user guide says so;
+83. not built of Blender's navigation: roll (shift and numpad 4 or 6), the
+    navigation gizmo, zooming towards the pointer, the fly and walk modes,
+    the camera view (numpad 0), the trackball orbit;
+84. the flat drawings move as Inkscape's canvas, on the structure canvas
+    and the results drawn flat on the atoms only (not the bands, the
+    densities of states, the k-space tab, nor a curve against x, which keep
+    matplotlib's toolbar): the wheel scrolls 40 pixels a notch, shift and
+    the wheel scrolls sideways, ctrl and the wheel zooms about the pointer
+    by the square root of two a notch, the middle button drags (a click zooms
+    in, with shift out), Space turns the left button into the same drag
+    (the box and lasso step aside), ctrl and the arrows scroll, + or = and -
+    zoom, 3 zooms to the selected sites (everything when none), 4 and Home
+    show the whole drawing, the backtick and the shifted backtick (or ~) go
+    to the previous and the next zoom; a zoom, not a scroll or a drag, is
+    put on the history. The plain wheel no longer zooms there (it did until
+    now); the toolbar's Pan and Zoom modes are kept, and the mouse belongs to
+    them while one is on. Not built of Inkscape's: 1:1, the page keys (there
+    is no page), the rotation of the canvas, autoscroll at the edges, the
+    zoom tool;
+85. the keys are in the table under two contexts the widgets handle
+    themselves, "2D canvas" and "3D canvas", bound as QShortcuts on the
+    canvas (`bind_keys`), not as the window's actions; + - 3 4 and ctrl and
+    the arrows work in the scene too (zoom, frame the selected sites, frame
+    everything, pan); the numpad keys of the scene accept the shortcut
+    override, so that numpad 3 is the right view and not the digit's zoom;
+86. pyvista is the default in the program's window when it is installed
+    (`renderer_3d` in the settings, replacing 64's matplotlib), and matplotlib when it is not and the
+    user never chose it, without a message; a user who chose pyvista and
+    lost it is told, as before. Tests and drivers still start with
+    matplotlib. So that "never chose it" can be told, the settings file now
+    holds only what was set (it wrote every default before, which would have
+    frozen a default for good in a file written earlier), and
+    `settings.chosen(name)` says whether a setting is in it;
+87. the window action `view_3d` (name: front, back, right, left, top,
+    bottom, perspective, orthographic, flip, all, selected, reset; and a
+    calculation for a result view instead of the canvas) moves the scene for
+    drivers, and refuses when nothing is drawn with pyvista there.
+
+Maintainer's answers after building (2026-09-29, asked one by one, the
+three that change behaviour): 82, alt and the left button emulate the
+middle button always (not a switch, not off); 84, Space and the left
+button as a pan is kept (it is not Inkscape's own default, whose Space
+toggles to the selector), and the Inkscape controls stay on the structure
+canvas and the results drawn on the atoms, not on the k-space, bands or
+density of states tabs. 80, 81, 83, 85, 86 and 87 were not asked and stand
+as built.
 
 ### Where the section 13 items land
 

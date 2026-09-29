@@ -93,8 +93,11 @@ WINDOW_ACTIONS = {
                "polygon, or the target itself): start or move a calculation there",
     "run_at_once": "enabled: a calculation runs as soon as it is added or one of its "
                    "parameters is set",
-    "renderer_3d": "name: matplotlib or pyvista, what draws in 3D (pyvista: turned and zoomed "
-                   "with the mouse)",
+    "renderer_3d": "name: matplotlib or pyvista, what draws in 3D (pyvista: moved as in "
+                   "Blender's viewport)",
+    "view_3d": "name: front, back, right, left, top, bottom, perspective, orthographic, "
+               "flip, all, selected or reset, and calculation (a result view; the canvas "
+               "when left out): move the pyvista view",
     "plot_text": "name: small, normal or large, the size of the text of every drawing",
 }
 

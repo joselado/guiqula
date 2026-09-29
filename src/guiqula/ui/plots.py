@@ -25,6 +25,11 @@ the figure), Save data (the arrays and the metadata, io/results.py),
 Detach, Overlay, and a readout of the data point under the mouse, which
 also says what a pick there would take.
 
+A result drawn flat on the atoms moves as Inkscape's canvas does (the
+wheel scrolls, ctrl and the wheel zooms, the middle button or Space and
+the left button drag it; ui/canvas_navigation.py); the other plots keep
+matplotlib's toolbar and its pan and zoom modes.
+
 Picks (PLAN.md phase 7): a right click on the plot, in any mode, or a
 left click with the Pick toggle on, asks the window for the menu of what
 the point stands for (core/picks.py) and what can be done with it
@@ -70,8 +75,9 @@ from PySide6.QtWidgets import QLabel, QMenu, QStackedWidget, QToolButton, QVBoxL
 from guiqula.core import picks as pick_tools
 from guiqula.core.results import PLOT_KINDS as KINDS  # noqa: F401 (the kinds drawn here)
 from guiqula.ui import structure as structure_tools
-from guiqula.ui.pyvista_view import SceneView
 from guiqula.ui import theme
+from guiqula.ui.canvas_navigation import CanvasNavigation, bind_keys
+from guiqula.ui.pyvista_view import SceneView
 
 READOUT_PIXELS = 12      # the readout names a data point this close to the mouse
 CLICK_PIXELS = 3         # a press released this close to where it started is a click
@@ -468,6 +474,28 @@ class PlotView(QWidget):
         self.canvas.mpl_connect("motion_notify_event", self._on_motion)
         self.canvas.mpl_connect("button_press_event", self._on_press)
         self.canvas.mpl_connect("button_release_event", self._on_release)
+        self.navigation = CanvasNavigation(
+            self.canvas, lambda: self.ax, active=self._on_the_atoms, fit=self._fit_2d,
+            on_hand=self._hand_changed)
+        bind_keys(self.canvas, self.navigation.key_handlers())
+        bind_keys(self.scene.canvas, self.scene.key_handlers())
+
+    def _on_the_atoms(self):
+        """Whether Inkscape's controls apply: a result drawn flat on the
+        atoms, not a curve against x."""
+        return self.result is not None and self.result.plot["kind"] in ON_STRUCTURE \
+            and getattr(self.ax, "name", "") != "3d" and not along_a_line(self.result)
+
+    def _fit_2d(self):
+        self.ax.set_autoscale_on(True)
+        self.ax.autoscale_view()
+        self.canvas.draw_idle()
+
+    def _hand_changed(self, hand):
+        """Space held: the left button drags the drawing, so the box and
+        lasso stand aside."""
+        if self._selector is not None:
+            self._selector.set_active(not hand)
 
     def _update_buttons(self):
         self.save_data.setEnabled(self.result is not None and bool(self.calc_id))
@@ -492,6 +520,7 @@ class PlotView(QWidget):
         the caption, and its data can still be saved."""
         was_scene = self.in_scene and self.result is not None and \
             _same_sites(self.result, result)
+        self.navigation.history.clear()            # drawn again: the earlier zooms are gone
         self.result = result
         self.stale = stale
         self.overlays = list(overlays)
@@ -547,6 +576,7 @@ class PlotView(QWidget):
             action.setVisible(canvas)
 
     def clear(self, caption=""):
+        self.navigation.history.clear()
         self.scene.forget()
         self._show_canvas(True)
         self._marker_artists = []
@@ -764,7 +794,8 @@ class PlotView(QWidget):
             return QCursor.pos()
 
     def _on_press(self, event):
-        self._press = (event.x, event.y, event.button) if event.inaxes is self.ax else None
+        self._press = (event.x, event.y, event.button) \
+            if event.inaxes is self.ax and not self.navigation.hand else None
         if self._press is not None and event.button == 1 and not self._navigating():
             self._dragging = self.marker_near(event.x, event.y)
             if self._dragging is not None:

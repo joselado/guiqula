@@ -4,18 +4,21 @@ user guide share.
 
 A shortcut's context says where it works: "window" anywhere in the main
 window; "outliner", "canvas" only while that widget has the focus (so that
-single keys never fire while typing into a box); "console" and "code
-editor" are keys those editors handle themselves, listed here so the
-dialog shows them. A key of the window context may not be used by any
-other shortcut (Qt would find it ambiguous when both are live); keys of
-widget contexts may repeat across widgets. tests/ui/test_shortcuts.py
-checks both, and that every shortcut of the table is bound in the window.
+single keys never fire while typing into a box); "console", "code editor",
+"2D canvas" and "3D canvas" are keys those widgets handle themselves (the
+last two are how the drawings are moved, ui/canvas_navigation.py and the
+numpad of ui/pyvista_view.py), listed here so the dialog shows them. A key
+of the window context may not be used by any other shortcut (Qt would find
+it ambiguous when both are live); keys of widget contexts may repeat across
+widgets. tests/ui/test_polish.py checks both, and that every shortcut of
+the table is bound in the window.
 """
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence
 
 WIDGET_CONTEXTS = ("outliner", "canvas")      # QAction shortcuts on one widget
-HANDLED_CONTEXTS = ("console", "code editor")  # keys the widget handles itself
+# keys the widget handles itself
+HANDLED_CONTEXTS = ("console", "code editor", "2D canvas", "3D canvas")
 
 # (id, keys, context, what it does)
 SHORTCUTS = (
@@ -56,6 +59,28 @@ SHORTCUTS = (
     ("remove_selected", ("Del", "Backspace"), "canvas",
      "remove the selected atoms (a Remove atoms op)"),
     ("fit", ("Home",), "canvas", "show the whole geometry"),
+    ("zoom_in", ("+", "="), "2D canvas", "zoom in (in 3D as well)"),
+    ("zoom_out", ("-",), "2D canvas", "zoom out (in 3D as well)"),
+    ("zoom_selection", ("3",), "2D canvas",
+     "zoom to the selected sites, or to everything when none is (in 3D as well)"),
+    ("zoom_drawing", ("4",), "2D canvas", "show the whole drawing (Home does it too)"),
+    ("zoom_previous", ("`",), "2D canvas", "the previous zoom"),
+    ("zoom_next", ("~", "Shift+`"), "2D canvas", "the next zoom"),
+    ("scroll_left", ("Ctrl+Left",), "2D canvas", "scroll left (pan left in 3D)"),
+    ("scroll_right", ("Ctrl+Right",), "2D canvas", "scroll right (pan right in 3D)"),
+    ("scroll_up", ("Ctrl+Up",), "2D canvas", "scroll up (pan up in 3D)"),
+    ("scroll_down", ("Ctrl+Down",), "2D canvas", "scroll down (pan down in 3D)"),
+    ("view_axes", ("Num+1", "Num+3", "Num+7"), "3D canvas", "front, right and top view"),
+    ("view_opposite", ("Ctrl+Num+1", "Ctrl+Num+3", "Ctrl+Num+7"), "3D canvas",
+     "back, left and bottom view"),
+    ("view_orbit", ("Num+4", "Num+6", "Num+8", "Num+2"), "3D canvas",
+     "orbit left, right, up and down by 15 degrees"),
+    ("view_pan", ("Ctrl+Num+4", "Ctrl+Num+6", "Ctrl+Num+8", "Ctrl+Num+2"), "3D canvas",
+     "pan left, right, up and down"),
+    ("view_projection", ("Num+5",), "3D canvas", "perspective or orthographic"),
+    ("view_flip", ("Num+9",), "3D canvas", "the opposite side of the view"),
+    ("view_zoom", ("Num++", "Num+-"), "3D canvas", "zoom in and out"),
+    ("view_selected", ("Num+.",), "3D canvas", "the selected sites in sight"),
     ("console_run", ("Return",), "console", "run the input"),
     ("console_newline", ("Shift+Return",), "console", "a new line in the input"),
     ("console_history", ("Up", "Down"), "console", "walk the history"),

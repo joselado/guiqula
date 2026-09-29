@@ -22,7 +22,9 @@ field), preview (a term's Field on the structure), auto_rerun, theme
 (system, light, dark), export_bundle (calculation, path: figure, data and
 script in one folder), help (entry, or guide and anchor: the Help dock),
 projection (auto, xy, 3d), renderer_3d (matplotlib, pyvista: the 3D drawing,
-whose widgets are structureScene and plotScene_<calculation id>); the
+whose widgets are structureScene and plotScene_<calculation id>), view_3d (name:
+front, back, right, left, top, bottom, perspective, orthographic, flip, all,
+selected, reset; calculation: a result's scene instead of the canvas's); the
 session's undo, redo (with "steps") and history; lock and unlock are
 mutations. The driven window never reads or writes the settings file. Every
 calculation's result has its own view, plot_<calculation id>. After each command the driver

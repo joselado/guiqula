@@ -25,6 +25,9 @@ def test_defaults_and_round_trip(config):
         settings.put("nope", 1)
     with pytest.raises(settings.SettingsError):
         settings.put("always_trust", "yes")
+    # the file holds what was set, not the defaults: a default can change later
+    assert json.loads(settings.path().read_text()) == {"theme": "dark", "always_trust": True}
+    assert settings.chosen("theme") and not settings.chosen("renderer_3d")
 
 
 def test_a_broken_file_gives_the_defaults_and_unknown_keys_stay(config):

@@ -60,7 +60,7 @@ On the Structure tab the pick, box and lasso tools select sites (shift adds, ctr
 toggles); the Select menu selects all, a sublattice, the edge sites (fewer neighbours
 than the rest) or the inverse. The pan and zoom buttons of the canvas toolbar take the
 clicks while they are on (Pick, Box and Lasso then show unchecked): click one of those three
-to select again; the mouse wheel zooms at any time. With sites selected:
+to select again; the drawing moves as described under Moving in space. With sites selected:
 
 - Remove selected adds (or extends) a Remove atoms op that deletes them by position;
 - Region from selection makes a named region of their positions.
@@ -151,18 +151,61 @@ geometry is drawn in 3D too, which is the way to see the magnetization of graphe
 arrows in space rather than as in-plane arrows and dots, and when it is not, everything is
 drawn in the xy projection, where the selection tools, the readout and the picks work.
 
-View > 3D drawing chooses what draws in 3D. matplotlib, the default, draws with mplot3d,
-which turns with a drag. pyvista draws with VTK, and the view is handled with the mouse as
-in a pyvista window: a drag turns it, shift and a drag (or the middle button) pans, the
-wheel (or a drag with the right button) zooms, and ctrl and a drag spins it about the line
-of sight. Reset view goes back to the first, oblique view with everything in sight, Home
-(on the canvas) fits everything in sight from the current angle, and Save image writes the
-view as it is drawn. The camera stays where it was left when the same system is drawn
-again, after an edit, a new result or a change of theme. The choice is kept with the
-settings. pyvista is an optional dependency (`pip install "guiqula[3d]"`), and without it
-the entry is greyed out; if pyvista cannot draw at all (no OpenGL), the drawing is left to
-matplotlib and the caption says why. Note that Export writes matplotlib's figure in both
-cases, in the same projection.
+View > 3D drawing chooses what draws in 3D. pyvista, the default when it is installed, draws
+with VTK and moves as Blender's viewport does (see Moving in space). matplotlib draws with
+mplot3d, which turns with a drag, and is what remains when pyvista is missing. Reset view
+goes back to the first, oblique view with everything in sight, Home (on the canvas) shows
+everything from the current angle, and Save image writes the view as it is drawn. The camera
+stays where it was left when the same system is drawn again, after an edit, a new result or a
+change of theme. The choice is kept with the settings. pyvista is an optional dependency
+(`pip install "guiqula[3d]"`), and without it the entry is greyed out; if pyvista cannot draw
+at all (no OpenGL), the drawing is left to matplotlib and the caption says why. Note that
+Export writes matplotlib's figure in both cases, in the same projection.
+
+## Moving in space
+
+The drawings move as the two programs this workbench borrows its look from do, so that the
+hands already know how: Inkscape's canvas for a geometry drawn flat (the Structure tab, and a
+result drawn on the atoms), and Blender's viewport for a geometry drawn in 3D with pyvista.
+The bands, the densities of states and the other plots keep the toolbar of matplotlib.
+
+On a flat drawing, as in Inkscape:
+
+- the wheel scrolls up and down, shift and the wheel scrolls sideways, and ctrl and the wheel
+  zooms about the pointer, by a factor of the square root of two a notch;
+- the middle button drags the drawing, and a click of it zooms in (shift and a click zooms out);
+- holding Space turns the left button into the same drag, the hand, which is how a touchpad
+  pans; the box and lasso tools step aside while it is held;
+- ctrl and the arrow keys scroll, + and - zoom, 3 zooms to the selected sites (to everything
+  when none is selected), 4 or Home shows the whole drawing, and the backtick goes back to the
+  previous zoom and its shifted key forward to the next one;
+- the Pan and Zoom buttons of the toolbar are still there, and while one is on the mouse
+  belongs to it.
+
+In the 3D scene, as in Blender:
+
+- the middle button orbits, as a turntable, meaning that z stays up (past a pole the view is
+  upside down and a horizontal drag turns the other way, as in Blender); shift and the middle
+  button pans, and ctrl and the middle button zooms (dragging up zooms in);
+- alt and the left button stand for the middle button (Blender's emulation of a three button
+  mouse), so a mouse without one works; a Linux desktop that takes alt and a drag to move
+  windows has to be told not to, or the middle button used;
+- the wheel zooms, and ctrl and the wheel, or shift and the wheel, move the view sideways or up
+  and down; the plain left button does nothing, since Blender keeps it for selecting and the
+  scene has no selection yet;
+- on the numpad, 1, 3 and 7 give the front, right and top views (ctrl: the opposite side, back,
+  left and bottom), 4, 6, 8 and 2 orbit by 15 degrees (ctrl: pan), 5 switches between the
+  perspective and the orthographic projection, 9 goes half way round, + and - zoom, and .
+  puts the selected sites in sight; Home shows everything;
+- an axis view is orthographic, and turning away from it returns to the perspective, as
+  Blender's auto perspective does, unless the projection was chosen with 5;
+- the View menu of the scene bar has the same views, the projection and the framing for a
+  keyboard without a numpad, and names the view as Blender does (User Perspective, Top
+  Orthographic).
+
+Blender's roll, its navigation gizmo, zooming towards the pointer and the fly mode are not
+there. The keys of both are in the table under Keyboard shortcuts, and the window action
+`view_3d` moves the scene for a driver (`front`, `top`, `orthographic`, `all` and the rest).
 
 ## Picking from a plot
 
@@ -407,6 +450,24 @@ functions only: the window loads the plugin too, and must start without pyqula.
 | canvas | Ctrl+I | invert the selection |
 | canvas | Del, Backspace | remove the selected atoms (a Remove atoms op) |
 | canvas | Home | show the whole geometry |
+| 2D canvas | +, = | zoom in (in 3D as well) |
+| 2D canvas | - | zoom out (in 3D as well) |
+| 2D canvas | 3 | zoom to the selected sites, or to everything when none is (in 3D as well) |
+| 2D canvas | 4 | show the whole drawing (Home does it too) |
+| 2D canvas | ` | the previous zoom |
+| 2D canvas | ~, Shift+` | the next zoom |
+| 2D canvas | Ctrl+Left | scroll left (pan left in 3D) |
+| 2D canvas | Ctrl+Right | scroll right (pan right in 3D) |
+| 2D canvas | Ctrl+Up | scroll up (pan up in 3D) |
+| 2D canvas | Ctrl+Down | scroll down (pan down in 3D) |
+| 3D canvas | Num+1, Num+3, Num+7 | front, right and top view |
+| 3D canvas | Ctrl+Num+1, Ctrl+Num+3, Ctrl+Num+7 | back, left and bottom view |
+| 3D canvas | Num+4, Num+6, Num+8, Num+2 | orbit left, right, up and down by 15 degrees |
+| 3D canvas | Ctrl+Num+4, Ctrl+Num+6, Ctrl+Num+8, Ctrl+Num+2 | pan left, right, up and down |
+| 3D canvas | Num+5 | perspective or orthographic |
+| 3D canvas | Num+9 | the opposite side of the view |
+| 3D canvas | Num++, Num+- | zoom in and out |
+| 3D canvas | Num+. | the selected sites in sight |
 | console | Return | run the input |
 | console | Shift+Return | a new line in the input |
 | console | Up, Down | walk the history |

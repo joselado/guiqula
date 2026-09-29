@@ -1,14 +1,19 @@
 """The 3D drawing with pyvista (View > 3D drawing, ui/pyvista_view.py),
-driven offscreen: the scene renders off-screen, the mouse (VTK's events,
-sent without a mouse) turns and zooms it as in a pyvista window, the canvas
-and the results on the atoms draw with it, the canvas's 3D box decides for
-the results too (a magnetization on a flat lattice drawn in 3D), and a
-pyvista that is missing or cannot draw leaves the drawing to mplot3d."""
+driven offscreen: the scene renders off-screen, the mouse and the keys
+move it as Blender's viewport does (PLAN.md phase 8: the middle button
+orbits as a turntable, shift pans, ctrl zooms, the wheel zooms, the numpad
+gives the views), the canvas and the results on the atoms draw with it, the
+canvas's 3D box decides for the results too (a magnetization on a flat
+lattice drawn in 3D), and a pyvista that is missing or cannot draw leaves
+the drawing to mplot3d."""
 import numpy as np
 import pytest
 from mpl_toolkits.mplot3d import Axes3D
 
 pytest.importorskip("pyvista")
+
+from PySide6.QtCore import Qt                         # noqa: E402
+from PySide6.QtTest import QTest                      # noqa: E402
 
 from guiqula.io import settings                       # noqa: E402
 from guiqula.ui import pyvista_view                   # noqa: E402
@@ -56,7 +61,7 @@ def distance(plotter):
     return float(np.linalg.norm(np.subtract(position, focus)))
 
 
-def test_the_scene_turns_and_zooms_as_in_pyvista(qapp, qtbot, tmp_path, shot):
+def test_the_scene_moves_as_in_blender(qapp, qtbot, tmp_path, shot):
     view = pyvista_view.SceneView("scene")
     qtbot.addWidget(view)
     view.resize(500, 400)
@@ -66,16 +71,33 @@ def test_the_scene_turns_and_zooms_as_in_pyvista(qapp, qtbot, tmp_path, shot):
     assert drawn(canvas) > 500                       # the sites and bonds are there
     assert plotter.actors.keys() >= {"sites", "bonds", "selection"}
     first = plotter.camera_position
-    canvas.drag((250, 200), (330, 170))              # a drag turns the view
+    canvas.drag((250, 200), (330, 170), button="LeftButton")     # the left button is not
+    assert np.allclose(plotter.camera_position[0], first[0])     # Blender's view button
+    canvas.drag((250, 200), (330, 170))              # the middle button orbits
     turned = plotter.camera_position
     assert not np.allclose(first[0], turned[0])
     assert np.allclose(first[1], turned[1])          # about the same point
     assert distance(plotter) == pytest.approx(distance_of(first), rel=1e-6)
+    assert view.canvas.view.description() == "User Perspective"
+    up = np.array(turned[2])
+    assert abs(np.dot(up, [0, 0, 1])) > 0.5          # a turntable: z stays up
+    canvas.drag((250, 200), (330, 170), button="LeftButton", alt=True)   # alt+left emulates it
+    assert not np.allclose(plotter.camera_position[0], turned[0])
+    turned = plotter.camera_position
     for _ in range(3):
         canvas.send("MouseWheelForward", 250, 200)   # the wheel zooms in
     assert distance(plotter) < 0.9 * distance_of(first)
-    canvas.drag((250, 200), (280, 200), shift=True)  # shift+drag pans
+    canvas.drag((250, 200), (280, 200), shift=True)  # shift and the middle button pan
     assert not np.allclose(plotter.camera_position[1], turned[1])
+    near = distance(plotter)
+    canvas.drag((250, 200), (250, 300), ctrl=True)   # ctrl and the middle button zoom
+    assert distance(plotter) > near                  # (down zooms out)
+    before = np.array(plotter.camera_position[1])
+    canvas.send("MouseWheelForward", 250, 200, ctrl=True)     # ctrl+wheel pans sideways
+    moved = np.array(plotter.camera_position[1]) - before
+    assert np.linalg.norm(moved) > 0
+    canvas.send("MouseWheelForward", 250, 200, shift=True)    # shift+wheel pans up
+    assert not np.allclose(plotter.camera_position[1], before + moved)
     shot(view, "turned")
     view.set_selection(np.zeros((0, 3)))
     assert "selection" not in plotter.actors
@@ -88,6 +110,90 @@ def test_the_scene_turns_and_zooms_as_in_pyvista(qapp, qtbot, tmp_path, shot):
     assert np.allclose(plotter.camera_position[0], kept[0])    # the camera stays
     saved = view.save_image(tmp_path / "view.png")
     assert (tmp_path / "view.png").stat().st_size > 1000, saved
+
+
+def numpad(canvas, key, *modifiers):
+    flags = Qt.KeyboardModifier.KeypadModifier
+    for modifier in modifiers:
+        flags |= modifier
+    QTest.keyClick(canvas, key, flags)
+
+
+def test_the_numpad_gives_the_views_of_blender(qapp, qtbot, shot):
+    view = pyvista_view.SceneView("scene")
+    qtbot.addWidget(view)
+    view.resize(500, 400)
+    view.show()
+    view.show_scene(CLUSTER, selected=[3])
+    canvas, plotter = view.canvas, view.canvas.plotter
+    canvas.setFocus()
+    ctrl = Qt.KeyboardModifier.ControlModifier
+    for key, name, opposite in ((Qt.Key.Key_1, "Front", "Back"), (Qt.Key.Key_3, "Right", "Left"),
+                                (Qt.Key.Key_7, "Top", "Bottom")):
+        numpad(canvas, key)
+        assert canvas.view.description() == f"{name} Orthographic"
+        assert plotter.camera.parallel_projection
+        numpad(canvas, key, ctrl)
+        assert canvas.view.description() == f"{opposite} Orthographic"
+    numpad(canvas, Qt.Key.Key_7)                       # top: looking down -z, x right, y up
+    position, focus, up = plotter.camera_position
+    assert np.allclose(np.subtract(position, focus)[:2], 0, atol=1e-6)
+    assert position[2] > focus[2] and np.allclose(up, [0, 1, 0], atol=1e-6)
+    shot(view, "top")
+    numpad(canvas, Qt.Key.Key_4)                       # orbiting leaves the axis view, and
+    assert canvas.view.description() == "User Perspective"     # with it the orthographic view
+    assert canvas.view.azimuth == pytest.approx(-90 - 15)
+    assert not plotter.camera.parallel_projection
+    numpad(canvas, Qt.Key.Key_1)                       # front: azimuth -90, elevation 0
+    azimuth, elevation = canvas.view.azimuth, canvas.view.elevation
+    numpad(canvas, Qt.Key.Key_6)
+    assert canvas.view.azimuth == pytest.approx(azimuth + 15)
+    numpad(canvas, Qt.Key.Key_8)
+    assert canvas.view.elevation == pytest.approx(elevation + 15)
+    numpad(canvas, Qt.Key.Key_2)
+    assert canvas.view.elevation == pytest.approx(elevation)
+    target = np.array(plotter.camera_position[1])
+    numpad(canvas, Qt.Key.Key_4, ctrl)                 # ctrl and the numpad pan
+    assert not np.allclose(plotter.camera_position[1], target)
+    assert not canvas.view.ortho
+    numpad(canvas, Qt.Key.Key_5)                       # 5 toggles the projection, by choice
+    assert canvas.view.ortho and plotter.camera.parallel_projection
+    numpad(canvas, Qt.Key.Key_4)                       # so turning keeps it orthographic
+    assert canvas.view.ortho
+    numpad(canvas, Qt.Key.Key_5)
+    assert not canvas.view.ortho
+    before = canvas.view.distance
+    numpad(canvas, Qt.Key.Key_Plus)
+    assert canvas.view.distance < before
+    numpad(canvas, Qt.Key.Key_Minus)
+    assert canvas.view.distance == pytest.approx(before)
+    before = canvas.view.azimuth
+    numpad(canvas, Qt.Key.Key_9)                       # half a turn about z
+    assert (canvas.view.azimuth - before) % 360 == pytest.approx(180)
+    numpad(canvas, Qt.Key.Key_Period)                  # the selected site (3) in sight
+    assert np.allclose(canvas.view.target, CLUSTER["positions"][3])
+    QTest.keyClick(canvas, Qt.Key.Key_Home)            # everything in sight
+    assert np.allclose(canvas.view.target, [0.5, 0.5, 0.5])
+
+
+def test_the_view_menu_and_names(qapp, qtbot):
+    view = pyvista_view.SceneView("scene")
+    qtbot.addWidget(view)
+    view.resize(500, 400)
+    view.show()
+    view.show_scene(CLUSTER)
+    assert view.view_button.text() == "View: User Perspective"
+    view.view_actions["top"].trigger()
+    assert view.view_button.text() == "View: Top Orthographic"
+    assert view.view_actions["orthographic"].isChecked()
+    view.view_actions["orthographic"].trigger()          # unchecked: perspective again
+    assert view.view_button.text() == "View: Top Perspective"
+    for name in pyvista_view.VIEW_NAMES:
+        assert view.set_view(name) == name
+    with pytest.raises(ValueError, match="unknown view"):
+        view.set_view("sideways")
+    view.set_view("reset")
+    assert view.view_button.text() == "View: User Perspective"
 
 
 def distance_of(camera):
@@ -148,6 +254,74 @@ def test_the_window_draws_in_3d_with_pyvista(window, qtbot, shot):
     session.act("renderer_3d", name="matplotlib")
 
 
+def test_the_keys_and_the_action_move_the_scene_of_the_window(window, qtbot):
+    session, structure = window.session, window.structure
+    session.act("renderer_3d", name="pyvista")
+    session.do("set_lattice", system="s1", lattice="diamond_lattice")
+    settle(qtbot, window)
+    canvas = structure.scene.canvas
+    assert structure.in_scene
+    window.viewport.setCurrentIndex(0)             # the Structure tab, not a result's
+    window.activateWindow()
+    canvas.setFocus()
+    qtbot.waitUntil(lambda: canvas.hasFocus(), timeout=5000)
+    numpad(canvas, Qt.Key.Key_3)          # the right view: the numpad, not the digit's shortcut
+    assert canvas.view.description() == "Right Orthographic"
+    QTest.keyClick(canvas, Qt.Key.Key_3)  # the digit zooms to the selection (all, when none)
+    assert canvas.view.description() == "Right Orthographic"
+    before = canvas.view.distance
+    QTest.keyClick(canvas, Qt.Key.Key_Plus)
+    assert canvas.view.distance < before
+    QTest.keyClick(canvas, Qt.Key.Key_Minus)
+    assert canvas.view.distance == pytest.approx(before)
+    target = canvas.view.target.copy()
+    QTest.keyClick(canvas, Qt.Key.Key_Left, Qt.KeyboardModifier.ControlModifier)
+    assert not np.allclose(canvas.view.target, target)      # Ctrl and the arrows pan
+    QTest.keyClick(canvas, Qt.Key.Key_Home)                 # the window's own Home
+    assert np.allclose(canvas.view.target, structure.scene.canvas.view.target)
+    assert session.act("view_3d", name="top") == "Top Orthographic"
+    assert session.act("view_3d", name="perspective") == "Top Perspective"
+    assert session.act("view_3d", name="reset") == "User Perspective"
+    with pytest.raises(ValueError, match="unknown view"):
+        session.act("view_3d", name="sideways")
+    with pytest.raises(ValueError, match="no result view"):
+        session.act("view_3d", name="top", calculation="c99")
+    session.act("renderer_3d", name="matplotlib")
+    with pytest.raises(ValueError, match="nothing is drawn in 3D"):
+        session.act("view_3d", name="top")
+    session.act("renderer_3d", name="pyvista")
+    session.do("set_lattice", system="s1", lattice="honeycomb_lattice")
+    settle(qtbot, window)
+    session.act("renderer_3d", name="matplotlib")
+
+
+def test_pyvista_is_the_default_of_the_program_when_it_can_draw(qapp, tmp_path, monkeypatch):
+    monkeypatch.setenv("GUIQULA_CONFIG_DIR", str(tmp_path))
+    window = build_main_window(use_settings=True)
+    try:
+        assert window.structure.renderer_3d == "pyvista"
+        assert window.renderer_actions["pyvista"].isChecked()
+    finally:
+        window.close()
+    # without pyvista, and never chosen: matplotlib, and nothing to complain about
+    monkeypatch.setattr(pyvista_view, "available", lambda: False)
+    monkeypatch.setattr(pyvista_view, "unavailable_reason", lambda: "pyvista is not installed")
+    window = build_main_window(use_settings=True)
+    try:
+        assert window.structure.renderer_3d == "matplotlib"
+        assert "not installed" not in window.log.toPlainText()
+    finally:
+        window.close()
+    # chosen by the user and gone since: matplotlib, and the window says so
+    settings.put("renderer_3d", "pyvista")
+    window = build_main_window(use_settings=True)
+    try:
+        assert window.structure.renderer_3d == "matplotlib"
+        assert "not installed" in window.log.toPlainText()
+    finally:
+        window.close()
+
+
 def test_without_pyvista_the_drawing_stays_with_matplotlib(window, qtbot, monkeypatch):
     session, structure = window.session, window.structure
     monkeypatch.setattr(pyvista_view, "available", lambda: False)
@@ -174,7 +348,10 @@ def test_without_pyvista_the_drawing_stays_with_matplotlib(window, qtbot, monkey
 def test_the_choice_is_a_setting(monkeypatch, tmp_path):
     monkeypatch.setenv("GUIQULA_CONFIG_DIR", str(tmp_path))
     assert settings.CHOICES["renderer_3d"] == pyvista_view.RENDERERS
-    assert settings.load()["renderer_3d"] == "matplotlib"
+    assert settings.load()["renderer_3d"] == "pyvista"       # the default, when it can draw
+    assert not settings.chosen("renderer_3d")
+    settings.put("renderer_3d", "matplotlib")
+    assert settings.load()["renderer_3d"] == "matplotlib" and settings.chosen("renderer_3d")
     settings.put("renderer_3d", "pyvista")
     assert settings.load()["renderer_3d"] == "pyvista"
     with pytest.raises(settings.SettingsError):

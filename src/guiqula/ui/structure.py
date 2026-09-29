@@ -16,8 +16,11 @@ the pure functions below turn build arrays into artists.
 
 Site selection (PLAN.md 13.2): the pick tool selects the atom under a
 click (a click on nothing clears), the box and lasso tools select what
-they enclose; with all three, shift adds and ctrl toggles. The mouse wheel
-zooms, and the toolbar pans and zooms (while it does, the tools are off).
+they enclose; with all three, shift adds and ctrl toggles. The drawing
+moves as Inkscape's canvas does (ui/canvas_navigation.py): the wheel
+scrolls, ctrl and the wheel zooms, the middle button or Space and the left
+button drag it; the toolbar still pans and zooms (while it does, the tools
+are off).
 The selection is kept as positions, so it survives a rebuild of the same
 geometry. The window turns it into a region or a removal op; the pure
 functions below do the geometry, so tests and drivers use them without a
@@ -28,9 +31,9 @@ stacked layers) is drawn in 3D with the same overlays; the 3D box switches
 between that and the xy projection, where the selection tools work (they
 act on x and y only). The 3D drawing is matplotlib's mplot3d (drag to turn
 it) or, when View > 3D drawing says so, pyvista's (ui/pyvista_view.py:
-turned, panned and zoomed with the mouse as in a pyvista window), which
-takes the place of the matplotlib canvas and its toolbar; a pyvista that
-cannot draw leaves the drawing to mplot3d and the caption says why.
+moved in space as Blender's viewport is), which takes the place of the
+matplotlib canvas and its toolbar; a pyvista that cannot draw leaves the
+drawing to mplot3d and the caption says why.
 pyqtgraph's OpenGL view was the plan (PLAN.md section 2), but Qt refuses
 OpenGL widgets on the offscreen platform the tests and tools/drive.py use,
 and PyOpenGL is not a dependency.
@@ -52,6 +55,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineE
 
 from guiqula.core.nearest import nearest_indices
 from guiqula.ui import theme
+from guiqula.ui.canvas_navigation import CanvasNavigation, bind_keys
 
 IMAGE_LIMIT = 3000       # above this many sites the neighbouring cells are not drawn
 RADIUS = 0.22            # of an atom, in pyqula's length unit (first neighbours at 1)
@@ -554,7 +558,8 @@ class StructureView(QWidget):
             lambda i: self.view_chosen.emit(self.view_box.itemData(i)))
         self.box_3d = QCheckBox("3D")
         self.box_3d.setObjectName("view3dBox")
-        self.box_3d.setToolTip("draw the geometry in 3D (drag to turn it); a geometry that is "
+        self.box_3d.setToolTip("draw the geometry in 3D (turn it with the middle button, or a drag "
+                               "with matplotlib); a geometry that is "
                                "not flat is drawn in 3D unless this is unchecked. The site "
                                "selection tools work on the flat (xy) drawing")
         self.box_3d.clicked.connect(
@@ -625,7 +630,12 @@ class StructureView(QWidget):
         self.canvas.mpl_connect("button_press_event", self._on_press)
         self.canvas.mpl_connect("motion_notify_event", self._on_paint_motion)
         self.canvas.mpl_connect("button_release_event", self._on_paint_release)
-        self.canvas.mpl_connect("scroll_event", self._on_scroll)
+        # Inkscape's controls: the wheel, the middle button, Space and the keys of "2D canvas"
+        self.navigation = CanvasNavigation(
+            self.canvas, lambda: self.ax, active=lambda: not self._is_3d(),
+            fit=self._fit_2d, selection=self._selected_xy, on_hand=self._hand_changed)
+        bind_keys(self.canvas, self.navigation.key_handlers())
+        bind_keys(self.scene.canvas, self.scene.key_handlers())    # Blender's, in the scene
 
     # ---- drawing
     def set_view(self, view):
@@ -708,6 +718,8 @@ class StructureView(QWidget):
             np.allclose(self.build["positions"], build["positions"], rtol=0.0, atol=SAME_SITE)
         if system_id != self.system_id:
             self.selected_positions = np.zeros((0, 3))
+        if system_id != self.system_id or not same_sites:
+            self.navigation.history.clear()      # the earlier zooms belong to another drawing
         self.system_id, self.build = system_id, build
         self.box_3d.setChecked(three_d)
         self.figure.clear()
@@ -762,6 +774,7 @@ class StructureView(QWidget):
 
     def clear(self, caption=""):
         self._drawn, self._overlays = None, None
+        self.navigation.history.clear()
         self.scene.forget()
         self._show_canvas(True)
         self.system_id, self.build, self.ax = None, None, None
@@ -898,6 +911,8 @@ class StructureView(QWidget):
 
     def _on_press(self, event):
         self._press_key = event.key          # the lasso's modifier (_on_lasso gets no event)
+        if self.navigation.hand or event.button == 2:      # Space or the middle button drags
+            return
         if self.paint.isChecked() and self.paint.isVisible() and self.build is not None \
                 and event.inaxes is self.ax and event.button == 1 and not self._navigating() \
                 and not self._is_3d():
@@ -933,17 +948,6 @@ class StructureView(QWidget):
         self.select(indices_in_polygon(self.build["positions"], vertices),
                     self._mode(self._press_key))
 
-    def _on_scroll(self, event):
-        if self.ax is None or event.inaxes is not self.ax or event.xdata is None \
-                or self._is_3d():
-            return
-        factor = 1 / 1.2 if event.button == "up" else 1.2
-        for get, set_, centre in ((self.ax.get_xlim, self.ax.set_xlim, event.xdata),
-                                  (self.ax.get_ylim, self.ax.set_ylim, event.ydata)):
-            low, high = get()
-            set_(centre - (centre - low) * factor, centre + (high - centre) * factor)
-        self.canvas.draw_idle()
-
     def fit(self):
         """Show the whole geometry again (after zooming or panning)."""
         if self.in_scene:
@@ -953,7 +957,21 @@ class StructureView(QWidget):
             return
         if self._is_3d():
             self.ax.autoscale_view()
+            self.canvas.draw_idle()
         else:
-            self.ax.set_autoscale_on(True)
-            self.ax.autoscale_view()
+            self.navigation.zoom_drawing()
+
+    def _fit_2d(self):
+        self.ax.set_autoscale_on(True)
+        self.ax.autoscale_view()
         self.canvas.draw_idle()
+
+    def _selected_xy(self):
+        """The selected sites in the xy drawing (the zoom to the selection)."""
+        return self.selected_positions[:, :2] if len(self.selected_positions) else None
+
+    def _hand_changed(self, hand):
+        """Space held: the left button drags the drawing, so the box and
+        lasso stand aside."""
+        if self._selector is not None:
+            self._selector.set_active(not hand)

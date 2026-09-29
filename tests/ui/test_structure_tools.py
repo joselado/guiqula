@@ -118,7 +118,7 @@ def test_pan_or_zoom_takes_the_clicks_until_a_tool_is_chosen(view, qtbot):
     qtbot.waitUntil(lambda: states[-1:] == [False])
 
 
-def test_selection_survives_a_rebuild_and_wheel_zooms(view):
+def test_selection_survives_a_rebuild_and_ctrl_wheel_zooms(view):
     view.select([0, 15])
     view.show_structure("s1", grid_build(), "same geometry again")
     assert view.selected().tolist() == [0, 15]
@@ -126,7 +126,7 @@ def test_selection_survives_a_rebuild_and_wheel_zooms(view):
     view.show_structure("s1", smaller, "a smaller flake")
     assert view.selected().tolist() == [0]           # (3, 3) is gone, (0, 0) stays
     width = np.diff(view.ax.get_xlim())[0]
-    mouse(view, "scroll_event", 1.0, 1.0, button="up", step=1)
+    mouse(view, "scroll_event", 1.0, 1.0, button="up", step=1, key="control")   # Inkscape's
     assert np.diff(view.ax.get_xlim())[0] < width
     view.show_structure("s2", smaller, "another system")
     assert view.selected().tolist() == []
