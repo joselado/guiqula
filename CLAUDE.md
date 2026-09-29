@@ -44,8 +44,10 @@ picks on the plots: the vocabulary, the targets, the new calculations, the marke
 (2026-09-28, in three parts); of its report, decisions 55 to 62 (PLAN.md section 7, end of
 phase 7), the maintainer answered 55 to 57 (they stand as built) and the others stand as
 built. After phase 7, the 3D drawing with pyvista (View > 3D drawing, 2026-09-29; decisions
-63 to 70 at the end of PLAN.md's section 7, for the maintainer to confirm). Nothing is
-uploaded or pushed without the maintainer.
+63 to 70 at the end of PLAN.md's section 7, for the maintainer to confirm), and the look
+(2026-09-29: the plot text size, View > Plot text; the check boxes drawn by a proxy style;
+the axes centred in their panels; decisions 71 to 79, same place, for the maintainer to
+confirm). Nothing is uploaded or pushed without the maintainer.
 
 ## Code map
 
@@ -146,8 +148,8 @@ a `Session`.
   (`src/guiqula/presets/*.json`, loadable by name, described by the Document's `notes`),
   script export (a sweep exports a loop), result files, `autosave.py` (autosave and
   recovery), `crashreport.py`, `bundle.py` (Export figure, data and script: one folder
-  per result, the figure drawn by the window in the light theme), `settings.py` (the user's theme, recent files, always
-  trust, remote control, run at once; `$GUIQULA_CONFIG_DIR`; only the interactive program's window, `use_settings=True`,
+  per result, the figure drawn by the window in the light theme), `settings.py` (the user's theme, plot text size, recent files, always
+  trust, remote control, run at once, 3D drawing; `$GUIQULA_CONFIG_DIR`; only the interactive program's window, `use_settings=True`,
   reads or writes it, so tests and drivers run with Run at once off unless they turn it on).
 - `desktop.py`: `guiqula desktop` (the menu entry, icon and `.guiqula` file type for the
   current user: freedesktop files on Linux, a Start menu shortcut and registry keys on
@@ -162,7 +164,7 @@ a `Session`.
   dispatcher actions `select`, `workspace`, `tool`, `select_sites`, `region_from_selection`,
   `remove_selected`, `canvas_view`, `preview`, `auto_rerun`, `projection`, `overlay`,
   `slider`, `set_slider`, `remove_slider`, `paint`, `theme`, `export_bundle`, `help`,
-  `remote`, `pick`, `pick_to`, `run_at_once`, `renderer_3d`; a new one joins `remote/api.py`'s
+  `remote`, `pick`, `pick_to`, `run_at_once`, `renderer_3d`, `plot_text`; a new one joins `remote/api.py`'s
   `WINDOW_ACTIONS`; File > Allow remote control starts the server, polled from the window's
   timer; a pick emits ordinary commands, and the pick menu is built by `pick_menu` and
   shown with `popup()`, never `exec()`; `pick` and `pick_to` take a calculation and a
@@ -187,7 +189,10 @@ a `Session`.
   dragged through `marker_moved`), `jobpanel.py`,
   `console.py` (the console dock), `bars.py` (recovery, error, cost and trust bars),
   `errors.py` (exception hook), `theme.py` (light and dark: the colour names are the active
-  theme's, rebound by `apply`; every figure is drawn inside `theme.drawing(figure)`). The
+  theme's, rebound by `apply`; every figure is drawn inside `theme.drawing(figure)`, whose
+  rc carries the plot text size, `text_size`, View > Plot text; `CheckStyle`, the proxy
+  style drawing the check boxes; `centre` and `Centring`, the axes box kept in the middle
+  of its figure after every draw). The
   window saves its view state as the Document's `ui` block (not a
   Command, not an unsaved change) and restores it on open and recovery. The window
   polls the session from a `QTimer` and starts the workers after it is shown; a form or tree
@@ -319,6 +324,8 @@ python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "console", "code": "h
                                                    # the console; its output is in the report
 python tools/drive.py project.guiqula --trust ...   # run the Python nodes of a file (13.7)
 python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "theme", "name": "dark"}' --shot dark.png
+python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "plot_text", "name": "large"}' \
+    --run c1 --widget plot_c1 --shot large.png     # the plot text size (small, normal, large)
 python tools/drive.py honeycomb_hubbard --do '{"do": "renderer_3d", "name": "pyvista"}' \
     --do '{"do": "projection", "name": "3d"}' --do '{"do": "add_calculation", "system": "s1",
     "kind": "magnetization", "params": {"nk": 4}}' --run c3 --widget plot_c3 --shot m.png

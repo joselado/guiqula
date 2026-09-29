@@ -107,7 +107,7 @@ class Outliner(QTreeWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("outliner")
-        self.setHeaderLabels(["entry", "status"])
+        self.setHeaderLabels(["Entry", "Status"])
         self.setColumnWidth(0, 230)
         self.setUniformRowHeights(True)
         self.setDragEnabled(True)

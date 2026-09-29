@@ -177,6 +177,7 @@ class KSpaceView(QWidget):
         self.figure = Figure(figsize=(6, 5), dpi=100, layout="constrained")
         self.canvas = FigureCanvasQTAgg(self.figure)
         self.canvas.setObjectName("kspaceCanvas")
+        self.centring = theme.Centring(self.canvas, lambda: self.ax)   # the zone in the middle
         self.toolbar = NavigationToolbar2QT(self.canvas, self)
         self.calc_box = QComboBox()
         self.calc_box.setObjectName("kpathCalculation")
@@ -267,17 +268,19 @@ class KSpaceView(QWidget):
         for name, point in special_images(kspace).items():
             ax.plot(*point, "o", color=theme.POINT, markersize=4, zorder=3)
             ax.annotate(NAMES.get(name, name), point, textcoords="offset points",
-                        xytext=(4, 4), fontsize=9)
+                        xytext=(4, 4), fontsize="small")
         self.vertices = path_vertices(kpath, kspace) if kpath else np.zeros((0, 2))
         self._line, = ax.plot(self.vertices[:, 0], self.vertices[:, 1], "-o",
                               color=theme.SELECTED, linewidth=2, markersize=6, zorder=4)
-        ax.set_aspect("equal", adjustable="box")
+        # the box fills the panel: the limits are widened, never cut, to the equal aspect
+        ax.set_aspect("equal", adjustable="datalim")
         extent = np.concatenate([zone, default, self.vertices]) if len(self.vertices) else \
             np.concatenate([zone, default])
         low, high = extent.min(axis=0), extent.max(axis=0)
-        margin = 0.15 * float(np.max(high - low)) + 1e-9
-        ax.set_xlim(low[0] - margin, high[0] + margin)
-        ax.set_ylim(low[1] - margin, high[1] + margin)
+        margin = 0.08 * float(np.max(high - low)) + 1e-9
+        ax.update_datalim([low - margin, high + margin])
+        ax.margins(0.0)
+        ax.autoscale_view()
         in_xy = np.allclose(plane_basis(b), np.eye(3)[:2])
         ax.set_xlabel("kx" if in_xy else "k along b1")
         ax.set_ylabel("ky" if in_xy else "k across b1, in the plane of b1 and b2")
@@ -285,7 +288,7 @@ class KSpaceView(QWidget):
             caption += (" · the k3 = 0 cut of the zone (the plane of b1 and b2) and the "
                         "points in it; a path leaving it is drawn projected")
         self.caption.setText(caption)
-        self.canvas.draw()
+        self.centring.settle()
 
     def clear(self, caption=""):
         self.kspace = self.ax = self._line = None

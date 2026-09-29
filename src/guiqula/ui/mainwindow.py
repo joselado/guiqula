@@ -85,7 +85,7 @@ WORKSPACES = ("geometry", "hamiltonian", "calculate")
 WINDOW_ACTIONS = ("select", "workspace", "tool", "select_sites", "canvas_view", "preview",
                   "auto_rerun", "projection", "overlay", "slider", "set_slider",
                   "remove_slider", "paint", "theme", "export_bundle", "help", "pick", "pick_to",
-                  "run_at_once", "renderer_3d")
+                  "run_at_once", "renderer_3d", "plot_text")
 STRUCTURE_TAB = 0
 KSPACE_TAB = 1
 # a new classical system: its lattice, and a supercell the usual orders fit in
@@ -280,9 +280,11 @@ class MainWindow(QMainWindow):
         self.set_workspace("geometry")
         self._update_actions()
         self.theme_actions[self.theme_choice].setChecked(True)
+        self.text_actions[theme.text_size].setChecked(True)
         if use_settings:
             stored = settings.load()
             self.set_theme(stored["theme"])
+            self.set_plot_text(stored["plot_text"], remember=False)
             self.always_trust_action.setChecked(stored["always_trust"])
             self.set_remote(stored["remote"], remember=False)
             self.set_run_at_once(stored["run_at_once"], remember=False)
@@ -637,6 +639,20 @@ class MainWindow(QMainWindow):
             action.setCheckable(True)
             group.addAction(action)
             self.theme_actions[choice] = action
+        sizes = view.addMenu("Plot &text")
+        sizes.setObjectName("plotTextMenu")
+        sizes.setToolTipsVisible(True)
+        group = QActionGroup(self)
+        self.text_actions = {}
+        for choice, text in (("small", "&Small"), ("normal", "&Normal"), ("large", "&Large")):
+            action = self._action(sizes, text, lambda checked=False, c=choice:
+                                  self._act("plot_text", name=c), name=f"plot_text_{choice}")
+            action.setCheckable(True)
+            action.setToolTip(f"the labels, ticks and titles of every drawing at "
+                              f"{theme.FONT_POINTS[choice]} points (the axis labels a fifth "
+                              f"larger)")
+            group.addAction(action)
+            self.text_actions[choice] = action
         drawing = view.addMenu("3D &drawing")
         drawing.setObjectName("renderer3dMenu")
         group = QActionGroup(self)
@@ -760,6 +776,7 @@ class MainWindow(QMainWindow):
             enabled))
         dispatcher.register_action("renderer_3d", lambda name="matplotlib":
                                    self.set_renderer_3d(name))
+        dispatcher.register_action("plot_text", lambda name="normal": self.set_plot_text(name))
         self.help_panel.session = session
         session.view_state = self.view_state
         self.timer.start(POLL_MS)
@@ -2211,9 +2228,12 @@ class MainWindow(QMainWindow):
 
         def figure(png, pdf):
             fig = Figure(figsize=(7, 4.5), dpi=100, layout="constrained")
-            FigureCanvasAgg(fig)
-            plot_tools.draw(fig, result, f"{calculation} · {result.kind} · {result.mode}",
-                            overlays, theme_name="light", projection=self.structure.projection)
+            canvas = FigureCanvasAgg(fig)
+            ax, _ = plot_tools.draw(fig, result, f"{calculation} · {result.kind} · "
+                                    f"{result.mode}", overlays, theme_name="light",
+                                    projection=self.structure.projection)
+            canvas.draw()
+            theme.centre(fig, ax)          # the axes in the middle, as in the window
             fig.savefig(png, dpi=200)
             fig.savefig(pdf)
 
@@ -2739,6 +2759,20 @@ class MainWindow(QMainWindow):
              "plugins": lambda: self.help_panel.show_plugins(remember=False)
              }[page[0]]()
         return applied
+
+    def set_plot_text(self, name="normal", remember=True):
+        """The size of the text of every drawing (ui/theme.py: small,
+        normal or large); what is drawn is drawn again. The interactive
+        program keeps the choice in the settings file. Returns the size."""
+        theme.set_text_size(name)
+        self.text_actions[name].setChecked(True)
+        if remember and self.use_settings:
+            settings.put("plot_text", name)
+        if self.session is not None:
+            self._refresh_structure()             # the k-space tab with it
+            for calc in list(self.plots):
+                self._draw_result(calc, force=True)
+        return name
 
     def set_always_trust(self, enabled):
         """Open every file with its Python nodes allowed to run (13.7's

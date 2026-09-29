@@ -2288,6 +2288,72 @@ building, for the maintainer to confirm:
     installed;
 70. the `[3d]` extra is `pyvista>=0.48`, the version tested.
 
+**The look (2026-09-29).** The maintainer asked for a better-looking
+interface, naming two things, the text of the plots (bigger axis labels
+and ticks, better centred) and the check boxes (a box to see that one can
+tick), and answered four pick lists on the rest: what "centred" meant
+(the axes box in the middle of its panel, the title over the panel, the
+labels on their axes, the k-space drawing filling its panel), how the
+plot text size is set (a View menu switch, kept like the theme), and
+which of the other things noticed to do now (all of them: the structure
+canvas's small ticks, pyvista's title, the forms' enabled row, a slightly
+larger UI font, the outliner's headers, the menu buttons' arrows, the
+colour bar labels, the check marks of the menus). Built in `ui/theme.py`
+(the sizes in `mpl_rc`, `CheckStyle`, `centre` and `Centring`, the font)
+and stripped from the drawing modules, with View > Plot text, the window
+action `plot_text` (in `remote/api.py`'s `WINDOW_ACTIONS`) and the
+setting of the same name; verified offscreen (tests/ui/test_polish.py,
+screenshots in both themes, the README's images made again). Decisions
+taken while building, for the maintainer to confirm:
+
+71. the plot text size is a setting with three sizes, small, normal and
+    large (9, 11 and 14 points as matplotlib's `font.size`, at the
+    figures' 100 dpi), normal bigger than before (matplotlib's 10); the
+    axis labels are a fifth larger than the base, the ticks and the title
+    at the base, a legend, a marker's label and a k-point's name smaller,
+    through matplotlib's relative sizes, so one number scales every
+    drawing: the result plots, the structure canvas (whose ticks were 8
+    points and its 3D labels 7), the k-space tab, the exported figures,
+    and pyvista's title and colour bar (in pixels, times the screen's
+    pixel ratio);
+72. the check boxes are drawn by a proxy style over Fusion
+    (`theme.CheckStyle`), since Fusion derives their border from the
+    window colour, faint in the light theme and invisible in the dark one
+    and out of the palette's reach: a box with a border of its own colour
+    (`CHECK_BORDER`), filled with the highlight colour and a white mark
+    when checked, a bar when partial, greyed when disabled; Fusion routes
+    the item views' boxes (the outliner) and the checkable menu entries
+    through the same primitive, so they get the same box;
+73. the axes box of every figure sits in the middle of its panel: after
+    each drawing the margins are measured and the constrained-layout rect
+    moved so that what the y label and the ticks take on one side and a
+    colour bar on the other balance (`theme.centre`; `Centring` does it
+    after every draw of a canvas, so a resize keeps it, with at most three
+    extra drawings, and `settle()` draws at once where the transforms are
+    read right after); the title, centred on the axes, is then centred on
+    the panel too; the exported figure is centred the same way; the
+    structure canvas moved from `tight_layout` to constrained layout for
+    this;
+74. a colour bar label of six characters or fewer (sz, LDOS, DOS, chern)
+    is upright above the bar at the axis labels' size; a longer one runs
+    along the bar; a horizontal bar keeps its label below;
+75. the widgets' font is the desktop's, raised to 10 points when it is
+    smaller (Qt's default is 9); the forms' titles went from 11 to 12;
+76. the k-space zone is drawn in an axes box that fills the panel
+    (`adjustable="datalim"`, the limits widened to the aspect) with an 8
+    percent margin instead of 15, rather than a square box in the middle
+    of a wide panel;
+77. pyvista's title is a text of fixed size centred at the top edge (a
+    corner annotation scales with the window and was drawn at twice
+    matplotlib's size);
+78. the forms' enabled box is a row labelled "enabled" like the
+    parameters; the outliner's headers are "Entry" and "Status"; a menu
+    button (New system, Add op, Select, Overlay) shows its drop-down arrow
+    centred at the right with room for it (a stylesheet rule on the
+    menu-indicator subcontrol; Fusion drew a small one under the text's
+    corner);
+79. the axis labels sit 3 points from the ticks (matplotlib's 4).
+
 ### Where the section 13 items land
 
 | Phase | Items |

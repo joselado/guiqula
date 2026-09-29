@@ -18,6 +18,10 @@ tools/drive.py unless asked) never depend on what a user chose.
   atoms: "matplotlib" (mplot3d) or "pyvista" (turned and zoomed with the
   mouse as in a pyvista window; the optional [3d] extra). matplotlib unless
   the user chooses pyvista.
+- ``plot_text``: the size of the text of every drawing (the labels, the
+  ticks, the titles of the plots, the canvas and the k-space tab, and of
+  the exported figures): "small", "normal" or "large" (ui/theme.py's
+  sizes). normal unless the user chooses another.
 
 A missing, unreadable or malformed file gives the defaults (a broken
 settings file must not stop the program); unknown keys are kept, so an
@@ -31,9 +35,10 @@ from guiqula import env
 FILE = "settings.json"
 RECENT_LIMIT = 10
 DEFAULTS = {"theme": "system", "always_trust": False, "recent": [], "remote": False,
-            "run_at_once": True, "renderer_3d": "matplotlib"}
+            "run_at_once": True, "renderer_3d": "matplotlib", "plot_text": "normal"}
 SWITCHES = ("always_trust", "remote", "run_at_once")       # true or false
-CHOICES = {"theme": ("system", "light", "dark"), "renderer_3d": ("matplotlib", "pyvista")}
+CHOICES = {"theme": ("system", "light", "dark"), "renderer_3d": ("matplotlib", "pyvista"),
+           "plot_text": ("small", "normal", "large")}
 
 
 class SettingsError(ValueError):

@@ -295,8 +295,11 @@ protection.
 Edit > Undo and Redo say which step they take back; Edit > Undo history goes back several
 steps at once, and the selection follows. What is shown (the selection, the workspace,
 the sliders, the overlays, the theme) is not undone. View > Theme chooses light, dark or
-the desktop's scheme. The settings (theme, recent files, always trust, remote control, run
-at once, the 3D drawing) are a file in the user configuration directory.
+the desktop's scheme. View > Plot text chooses the size of the text of every drawing, the
+labels, the ticks and the titles of the plots, of the canvas, of the k-space tab and of the
+exported figures: small, normal or large, so that a projector or a small screen gets a
+readable size too. The settings (theme, plot text, recent files, always trust, remote
+control, run at once, the 3D drawing) are a file in the user configuration directory.
 
 ## Headless use
 

@@ -345,11 +345,11 @@ class EntryForm(Form):
         self.system_id = owner.id if owner is not None else obj.system
         self.enabled = None
         if family in ("op", "term"):
-            self.enabled = QCheckBox("enabled")
+            self.enabled = QCheckBox()
             self.enabled.setObjectName("check_enabled")
             self.enabled.toggled.connect(lambda v: self.commit("set_enabled", entry=entry_id,
                                                                enabled=v))
-            self.rows.addRow("", self.enabled)
+            self.rows.addRow("enabled", self.enabled)
         self.region = None
         self.region_ids = ()
         if family == "term":
@@ -558,11 +558,11 @@ class MeanFieldForm(Form):
                              f"{self.system_id} · {spec.group}\n{spec.doc}")
             if spec.formula:
                 self.layout().insertWidget(2, self._formula(spec.formula))
-        self.enabled = QCheckBox("enabled")
+        self.enabled = QCheckBox()
         self.enabled.setObjectName("check_enabled")
         self.enabled.toggled.connect(lambda v: self.commit("set_meanfield", system=self.system_id,
                                                            enabled=v))
-        self.rows.addRow("", self.enabled)
+        self.rows.addRow("enabled", self.enabled)
         if spec is not None:
             self.add_editors(spec.params, spec.normalize_params({}) | block.params,
                              lambda name, value: self.commit(

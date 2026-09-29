@@ -95,6 +95,7 @@ WINDOW_ACTIONS = {
                    "parameters is set",
     "renderer_3d": "name: matplotlib or pyvista, what draws in 3D (pyvista: turned and zoomed "
                    "with the mouse)",
+    "plot_text": "name: small, normal or large, the size of the text of every drawing",
 }
 
 

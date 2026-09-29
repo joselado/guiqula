@@ -8,15 +8,44 @@ active theme: apply() rebinds them, and the canvas, the plots and the
 outliner read them when they draw, so a redraw follows a change of theme.
 A choice of "system" follows the desktop's colour scheme when Qt reports
 one (Qt 6.5), else it is light. mpl_rc() gives the matplotlib settings of
-the active theme (figure and axes colours, text, ticks), used around
-every drawing; exported figures are drawn with the light one (rc("light")).
+the active theme (figure and axes colours, text, ticks) and of the active
+plot text size, used around every drawing; exported figures are drawn
+with the light one (rc("light")).
+
+Plot text (the maintainer's request, 2026-09-29): the labels, the ticks,
+the titles and the legends of every drawing (the result plots, the
+structure canvas, the k-space tab, the exported figures, pyvista's title
+and colour bar) take their size from one setting, text_size, "small",
+"normal" or "large" (View > Plot text; io/settings.py keeps it), through
+matplotlib's relative sizes: FONT_POINTS gives the base, the axis labels
+are "large" (1.2 times it), the ticks and the title "medium", a legend, a
+marker's label and a k-point's name "small".
+
+Check boxes: Fusion draws the box of a check box with a border derived
+from the window colour, faint in the light theme and invisible in the
+dark one, so CheckStyle, a proxy over Fusion, draws the indicators of the
+check boxes, the item views (the outliner) and the checkable menu entries
+itself: a bordered box (CHECK_BORDER), filled with the highlight colour
+when checked, with a white mark.
+
+Centring (the same request): matplotlib puts the y label and its ticks
+left of the axes and a colour bar right of it, so the axes box sits off
+the middle of its panel; centre() balances the margins of a figure drawn
+with constrained layout, and Centring keeps a canvas centred across
+resizes.
 """
 from contextlib import contextmanager
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QGuiApplication, QPalette
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPalette, QPen
+from PySide6.QtWidgets import QProxyStyle, QStyle
 
 CHOICES = ("system", "light", "dark")
+TEXT_SIZES = ("small", "normal", "large")
+FONT_POINTS = {"small": 9, "normal": 11, "large": 14}   # matplotlib's font.size, in points
+UI_POINTS = 10          # the widgets' font is at least this size (Qt's default is 9)
+CENTRE_PIXELS = 1.5     # a shift of the axes smaller than this is not worth another drawing
+MOVES = 3               # drawings a centring may add after one (the labels changed width)
 
 COLORS = {
     "light": {
@@ -24,6 +53,7 @@ COLORS = {
         "FIGURE": "#ffffff", "AXES": "#ffffff", "GRID": "#b0b0b0",
         "ERROR": "#b3261e", "ERROR_BACKGROUND": "#fde7e4",
         "NOTICE_BACKGROUND": "#fff4d6", "NOTICE_BORDER": "#d8b24a", "DISABLED": "#8a8a8a",
+        "CHECK_BORDER": "#6e6e6e",
         "SUBLATTICE": {1.0: "#2f6db3", -1.0: "#d9822b", None: "#4a4a4a"},
         "ATOM_EDGE": "#ffffff", "ARROW": "#1e1e1e", "SELECTED": "#e0218a",
         "REGION": "#2e9e5b", "REMOVED": "#b3261e", "BOND": "#9a9a9a", "CELL": "#5b8fd0",
@@ -33,6 +63,7 @@ COLORS = {
         "FIGURE": "#262626", "AXES": "#1f1f1f", "GRID": "#4a4a4a",
         "ERROR": "#ff8a80", "ERROR_BACKGROUND": "#4a2320",
         "NOTICE_BACKGROUND": "#3d3420", "NOTICE_BORDER": "#8f7431", "DISABLED": "#7a7a7a",
+        "CHECK_BORDER": "#a0a0a0",
         "SUBLATTICE": {1.0: "#6aa6ee", -1.0: "#f0a24e", None: "#b8b8b8"},
         "ATOM_EDGE": "#1f1f1f", "ARROW": "#f0f0f0", "SELECTED": "#ff5cb4",
         "REGION": "#52c987", "REMOVED": "#ff6b61", "BOND": "#8a8a8a", "CELL": "#79a7e6",
@@ -80,6 +111,7 @@ PALETTES = {
 }
 
 name = "light"             # the active theme ("light" or "dark")
+text_size = "normal"       # the active plot text size (TEXT_SIZES)
 globals().update(COLORS[name])
 
 
@@ -96,14 +128,37 @@ def resolve(choice):
     return "dark" if scheme == Qt.ColorScheme.Dark else "light"
 
 
+def set_text_size(size="normal"):
+    """Make a plot text size the active one (what mpl_rc gives from now
+    on; the caller draws again); returns it."""
+    global text_size
+    if size not in TEXT_SIZES:
+        raise ValueError(f"unknown plot text size {size!r}; choose one of {TEXT_SIZES}")
+    text_size = size
+    return size
+
+
+def font_points(relative="medium", size=None):
+    """Points of a relative matplotlib size ("small", "medium", "large",
+    ...) at a plot text size (the active one by default): what a drawing
+    outside matplotlib (pyvista) uses to match the plots."""
+    from matplotlib.font_manager import font_scalings
+    return FONT_POINTS[size or text_size] * font_scalings[relative]
+
+
 def stylesheet():
+    # a menu button (New system, Add op, Overlay...) gets room for its arrow, drawn at the
+    # right and centred instead of Fusion's small one in the corner under the text
     return f"""
 QFrame#errorBar {{ background: {ERROR_BACKGROUND}; border-bottom: 1px solid {ERROR}; }}
 QFrame#recoveryBar, QFrame#trustBar, QFrame#costBar {{
     background: {NOTICE_BACKGROUND}; border-bottom: 1px solid {NOTICE_BORDER}; }}
 QLabel#formError {{ color: {ERROR}; }}
-QLabel#formTitle {{ font-weight: bold; font-size: 11pt; }}
+QLabel#formTitle {{ font-weight: bold; font-size: 12pt; }}
 QLabel#formDoc {{ color: {DOC}; }}
+QToolButton[popupMode="2"] {{ padding-right: 14px; }}
+QToolButton::menu-indicator {{ subcontrol-origin: padding; subcontrol-position: right center;
+    right: 3px; width: 10px; }}
 """
 
 
@@ -117,21 +172,84 @@ def palette(theme_name):
     return result
 
 
+class CheckStyle(QProxyStyle):
+    """Fusion, with the check boxes drawn here: a box with a visible
+    border in both themes (Fusion derives its border from the window
+    colour, which leaves no box in the dark theme), filled with the
+    highlight colour when checked, a bar for a partial state, greyed when
+    disabled. Fusion routes the item views' check boxes and the checkable
+    menu entries through the same primitive, so the outliner and the menus
+    get the same box."""
+
+    CHECKS = (QStyle.PrimitiveElement.PE_IndicatorCheckBox,
+              QStyle.PrimitiveElement.PE_IndicatorItemViewItemCheck)
+
+    def __init__(self):
+        super().__init__("Fusion")
+
+    def drawPrimitive(self, element, option, painter, widget=None):
+        if element not in self.CHECKS:
+            super().drawPrimitive(element, option, painter, widget)
+            return
+        state, colors = option.state, option.palette
+        on = bool(state & QStyle.StateFlag.State_On)
+        partial = bool(state & QStyle.StateFlag.State_NoChange)
+        enabled = bool(state & QStyle.StateFlag.State_Enabled)
+        hot = bool(state & (QStyle.StateFlag.State_MouseOver | QStyle.StateFlag.State_HasFocus))
+        highlight = colors.color(QPalette.ColorRole.Highlight)
+        if not enabled:
+            border = QColor(DISABLED)
+            fill = QColor(DISABLED) if on or partial else colors.color(QPalette.ColorRole.Window)
+            mark = colors.color(QPalette.ColorRole.Window)
+        elif on or partial:
+            border = fill = highlight
+            mark = colors.color(QPalette.ColorRole.HighlightedText)
+        else:
+            border = highlight if hot else QColor(CHECK_BORDER)
+            fill = colors.color(QPalette.ColorRole.Base)
+            mark = None
+        box = QRectF(option.rect).adjusted(0.5, 0.5, -0.5, -0.5)     # crisp one-pixel border
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(QPen(border, 1.0))
+        painter.setBrush(fill)
+        painter.drawRoundedRect(box, 2.0, 2.0)
+        if mark is not None:
+            painter.setPen(QPen(mark, 1.8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap,
+                                Qt.PenJoinStyle.RoundJoin))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            x, y, w, h = box.x(), box.y(), box.width(), box.height()
+            if on:
+                painter.drawPolyline([QPointF(x + 0.22 * w, y + 0.53 * h),
+                                      QPointF(x + 0.42 * w, y + 0.73 * h),
+                                      QPointF(x + 0.78 * w, y + 0.30 * h)])
+            else:
+                painter.drawLine(QPointF(x + 0.25 * w, y + 0.5 * h),
+                                 QPointF(x + 0.75 * w, y + 0.5 * h))
+        painter.restore()
+
+
 def apply(app, choice="light"):
-    """Give the application the Fusion style and a theme's palette, and
-    make its colours the active ones; returns the theme applied."""
+    """Give the application the Fusion style (with the check boxes of
+    CheckStyle), a theme's palette and a readable font, and make the
+    theme's colours the active ones; returns the theme applied."""
     global name
     name = resolve(choice)
     globals().update(COLORS[name])
-    app.setStyle("Fusion")
+    app.setStyle(CheckStyle())           # the application owns it and drops the previous one
     app.setPalette(palette(name))
     app.setStyleSheet(stylesheet())
+    font = app.font()
+    if 0 < font.pointSizeF() < UI_POINTS:
+        font.setPointSizeF(UI_POINTS)
+        app.setFont(font)
     app.setProperty("guiqula_theme", name)
     return name
 
 
-def mpl_rc(theme_name=None):
-    """matplotlib settings for drawing in a theme (the active one by default)."""
+def mpl_rc(theme_name=None, size=None):
+    """matplotlib settings for drawing in a theme (the active one by
+    default) at a plot text size (the active one by default)."""
     c = COLORS[theme_name or name]
     return {"figure.facecolor": c["FIGURE"], "figure.edgecolor": c["FIGURE"],
             "savefig.facecolor": c["FIGURE"], "savefig.edgecolor": c["FIGURE"],
@@ -142,14 +260,17 @@ def mpl_rc(theme_name=None):
             "grid.color": c["GRID"], "legend.facecolor": c["AXES"],
             "legend.edgecolor": c["MUTED"], "legend.labelcolor": c["TEXT"],
             "axes3d.xaxis.panecolor": c["AXES"], "axes3d.yaxis.panecolor": c["AXES"],
-            "axes3d.zaxis.panecolor": c["AXES"]}
+            "axes3d.zaxis.panecolor": c["AXES"],
+            "font.size": FONT_POINTS[size or text_size], "axes.labelsize": "large",
+            "axes.titlesize": "medium", "xtick.labelsize": "medium",
+            "ytick.labelsize": "medium", "legend.fontsize": "small", "axes.labelpad": 3.0}
 
 
 @contextmanager
 def rc(theme_name=None):
     """Draw with a theme's matplotlib settings: what is created inside
-    takes its colours (the figure's own background is set by the caller,
-    set_figure)."""
+    takes its colours and its text sizes (the figure's own background is
+    set by the caller, set_figure)."""
     import matplotlib
     with matplotlib.rc_context(mpl_rc(theme_name)):
         yield
@@ -161,7 +282,6 @@ def set_figure(figure, theme_name=None):
     color = COLORS[theme_name or name]["FIGURE"]
     figure.set_facecolor(color)
     figure.set_edgecolor(color)
-
 
 
 def finish(figure, theme_name=None):
@@ -191,3 +311,68 @@ def drawing(figure, theme_name=None):
     finally:
         if other:
             globals().update(COLORS[name])
+
+
+def centre(figure, ax):
+    """Balance the horizontal margins of a figure drawn with constrained
+    layout, so that its axes box sits in the middle: the y label and the
+    tick labels on the left, a colour bar on the right, push it aside
+    otherwise. Measured on the last drawing (the position the layout gave
+    the axes), so it is called after a draw; returns True when the layout
+    was changed, meaning that the figure must be drawn again."""
+    engine = figure.get_layout_engine()
+    if engine is None or ax is None or ax.figure is not figure or "rect" not in engine.get():
+        return False
+    width = figure.bbox.width
+    if width <= 0:
+        return False
+    rect = tuple(engine.get()["rect"])
+    left, bottom, span, height = rect
+    position = ax.get_position()
+    # what the decorations take on each side of the axes box, in pixels
+    on_left = (position.x0 - left) * width
+    on_right = (left + span - position.x1) * width
+    slack = on_left - on_right              # positive: the axes sits right of the middle
+    room = max(1.0 - abs(slack) / width, 0.2)
+    target = (0.0, bottom, room, height) if slack > 0 else (1.0 - room, bottom, room, height)
+    if all(abs(a - b) * width < CENTRE_PIXELS for a, b in zip(target, rect)):
+        return False
+    engine.set(rect=target)
+    return True
+
+
+class Centring:
+    """Keeps the axes of a canvas centred (centre): after every drawing,
+    when the labels moved the axes (a resize changes the room they take),
+    the canvas is drawn again; settle() draws at once, for a drawing whose
+    transforms are read right after it (the readout, a test). axes_of()
+    gives the axes to centre, or None."""
+
+    def __init__(self, canvas, axes_of):
+        self.canvas, self.axes_of = canvas, axes_of
+        self._settling = False
+        self._moves = 0
+        canvas.mpl_connect("draw_event", self._on_draw)
+
+    def _on_draw(self, event):
+        if self._settling:
+            return
+        ax = self.axes_of()
+        if ax is not None and self._moves < MOVES and centre(self.canvas.figure, ax):
+            self._moves += 1
+            self.canvas.draw_idle()
+        else:
+            self._moves = 0
+
+    def settle(self):
+        """Draw now, and again when centring moved the axes."""
+        self._settling = True
+        try:
+            self.canvas.draw()
+            for _ in range(MOVES):
+                ax = self.axes_of()
+                if ax is None or not centre(self.canvas.figure, ax):
+                    break
+                self.canvas.draw()
+        finally:
+            self._settling = False

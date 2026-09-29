@@ -110,7 +110,7 @@ def _colored_scatter(ax, result):
         limit = 1.0
     points = ax.scatter(xs.ravel(), y.ravel(), c=c.ravel(), s=6, cmap="coolwarm",
                         vmin=-limit, vmax=limit)
-    ax.figure.colorbar(points, ax=ax, label=plot.get("clabel", plot["c"]))
+    structure_tools.colorbar(ax, points, plot.get("clabel", plot["c"]))
     return xs.ravel(), y.ravel(), c.ravel()
 
 
@@ -148,7 +148,7 @@ def _heatmap(ax, result):
         mesh = ax.pcolormesh(grid[0], grid[1], grid[2].T, shading="nearest", **style)
     else:
         mesh = ax.scatter(x, y, c=c, s=12, marker="s", linewidths=0, **style)
-    ax.figure.colorbar(mesh, ax=ax, label=plot.get("clabel", plot["c"]))
+    structure_tools.colorbar(ax, mesh, plot.get("clabel", plot["c"]))
     if plot.get("equal"):
         ax.set_aspect("equal", adjustable="box")
     return x, y, c
@@ -244,9 +244,9 @@ def _scalar(ax, result):
     rows = scalar_rows(result)
     for i, (label, text) in enumerate(rows):
         yy = 0.8 - i * 0.18
-        ax.text(0.05, yy, label, fontsize=13, transform=ax.transAxes, va="center")
-        ax.text(0.95, yy, text, fontsize=18, transform=ax.transAxes, va="center", ha="right",
-                family="monospace", weight="bold")
+        ax.text(0.05, yy, label, fontsize="large", transform=ax.transAxes, va="center")
+        ax.text(0.95, yy, text, fontsize="xx-large", transform=ax.transAxes, va="center",
+                ha="right", family="monospace", weight="bold")
     return np.zeros(0), np.zeros(0), None
 
 
@@ -285,7 +285,7 @@ def _draw_difference(ax, result, label, other):
     (x, y), (_, y_other) = curves(result), curves(other)
     lines = ax.plot(x, y - y_other, color="C3", linewidth=1.2)
     lines[0].set_label(f"{result.calculation} − {label}")
-    ax.legend(fontsize=8)
+    ax.legend()
     return np.repeat(x[:, None], y.shape[1], axis=1).ravel(), (y - y_other).ravel(), None
 
 
@@ -301,7 +301,7 @@ def _draw_overlays(ax, result, overlays):
         lines[0].set_label(label)
         handles.append(lines[0])
     if handles:
-        ax.legend(handles=handles, fontsize=8)
+        ax.legend(handles=handles)
 
 
 def draw(figure, result, title="", overlays=(), theme_name=None, projection="auto"):
@@ -334,7 +334,7 @@ def _draw(figure, result, title, overlays, projection="auto"):
     elif plot["kind"] != "scalar":
         ax.set_xlabel(plot.get("xlabel", plot.get("x", "")))
         ax.set_ylabel(plot.get("ylabel", plot.get("y", "")))
-    ax.set_title(title, fontsize=10)
+    ax.set_title(title)
     if plot.get("x") == "k" and plot["kind"] in ("lines", "colored_scatter"):
         ax.set_xlim(np.min(result.arrays["k"]), np.max(result.arrays["k"]))
     if plot.get("xticks"):                  # the vertices of a k-path
@@ -381,6 +381,7 @@ class PlotView(QWidget):
         self.figure = Figure(figsize=(6, 4), dpi=100, layout="constrained")
         self.canvas = FigureCanvasQTAgg(self.figure)
         self.canvas.setObjectName(f"plotCanvas{suffix}")
+        self.centring = theme.Centring(self.canvas, lambda: self.ax)   # the axes in the middle
         self.toolbar = NavigationToolbar2QT(self.canvas, self)
         self.save_data = QToolButton()
         self.save_data.setText("Save data")
@@ -518,7 +519,7 @@ class PlotView(QWidget):
                                         projection=self.projection)
             self._marker_artists = []
             self._draw_markers()
-            self.canvas.draw()    # now: the limits and the layout are final for the readout
+            self.centring.settle()   # now: the limits and the layout are final for the readout
         except Exception as error:
             self.figure.clear()
             theme.set_figure(self.figure)
@@ -654,19 +655,22 @@ class PlotView(QWidget):
         if self.ax is None or getattr(self.ax, "name", "") == "3d":
             return
         style = {"color": theme.SELECTED, "linewidth": 1.4, "linestyle": "--", "zorder": 8}
+        # in points: a relative size would be resolved against the rc of the moment, and the
+        # markers are drawn outside theme.drawing after a result
+        small = theme.font_points("small")
         for marker in self.markers:
             kind, value, artists = marker["kind"], marker["value"], []
             if kind == "hline":
                 artists.append(self.ax.axhline(value, **style))
                 artists.append(self.ax.annotate(
                     marker.get("label", ""), (1.0, value), xycoords=("axes fraction", "data"),
-                    xytext=(-4, 3), textcoords="offset points", ha="right", fontsize=8,
+                    xytext=(-4, 3), textcoords="offset points", ha="right", fontsize=small,
                     color=theme.SELECTED, zorder=8))
             elif kind == "vline":
                 artists.append(self.ax.axvline(value, **style))
                 artists.append(self.ax.annotate(
                     marker.get("label", ""), (value, 1.0), xycoords=("data", "axes fraction"),
-                    xytext=(3, -10), textcoords="offset points", fontsize=8,
+                    xytext=(3, -10), textcoords="offset points", fontsize=small,
                     color=theme.SELECTED, zorder=8))
             elif kind == "dots" and len(value):
                 xy = np.asarray(value, dtype=float).reshape(-1, 2)

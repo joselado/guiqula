@@ -22,6 +22,7 @@ def window(qapp):
     yield window
     window.close()
     theme.apply(QApplication.instance(), "light")
+    theme.set_text_size("normal")
 
 
 def settle(qtbot, window, timeout=120_000):
@@ -203,6 +204,9 @@ def test_the_settings_of_the_interactive_window(qapp, qtbot, tmp_path, no_jobs):
         assert formula_ink(window) == theme.COLORS["dark"]["TEXT"]    # built light, then dark
         window.set_theme("light")
         assert settings.get("theme") == "light"
+        window.set_plot_text("large")
+        assert settings.get("plot_text") == "large" and theme.text_size == "large"
+        window.set_plot_text("normal")
         window.session.act("save", path=str(tmp_path / "a.guiqula"))
         window.session.act("load", path="haldane_chern")               # a preset: not listed
         window._fill_recent()
@@ -219,6 +223,9 @@ def test_the_settings_of_the_interactive_window(qapp, qtbot, tmp_path, no_jobs):
         driven.set_theme("dark")
         assert settings.get("theme") == "light"
         driven.set_theme("light")
+        driven.set_plot_text("large")
+        assert settings.get("plot_text") == "normal"
+        driven.set_plot_text("normal")
     finally:
         driven.close()
 
@@ -381,3 +388,87 @@ def test_a_large_geometry_on_the_canvas(qapp):
     assert first < 5.0
     view.show_structure("s1", build, "a region", highlight=np.arange(len(positions)) < 10)
     assert view.ax is not ax                                          # something changed
+
+
+# ---- the look (2026-09-29): plot text, check boxes, centred axes
+def margins(view):
+    """(left, right) in pixels between a view's axes box and the edges of
+    its figure."""
+    position, width = view.ax.get_position(), view.figure.bbox.width
+    return position.x0 * width, (1.0 - position.x1) * width
+
+
+def test_plot_text_is_a_setting_every_drawing_follows(window, qtbot):
+    """View > Plot text: the labels, the ticks and the titles of every
+    drawing take one of three sizes, and the axes sit in the middle of
+    their panel whatever the y label, the ticks and a colour bar take on
+    each side."""
+    session = window.session
+    session.act("load", path="honeycomb_zeeman_rashba")
+    settle(qtbot, window)
+    job = session.run_calculation("c1", wait=True, timeout=600)
+    assert job.status == "done", job.error
+    window.show_result("c1")
+    qtbot.waitUntil(lambda: window.plots["c1"].result is not None, timeout=10_000)
+    view = window.plots["c1"]
+    assert settings.CHOICES["plot_text"] == theme.TEXT_SIZES
+    assert theme.text_size == "normal" and window.text_actions["normal"].isChecked()
+    base = theme.FONT_POINTS["normal"]
+    assert view.ax.xaxis.label.get_size() == pytest.approx(1.2 * base)     # "large"
+    assert view.ax.get_xticklabels()[0].get_size() == base
+    assert view.ax.title.get_size() == base
+    left, right = margins(view)                      # a colour bar right, the y label left
+    assert abs(left - right) < 3, (left, right)
+    qtbot.waitUntil(lambda: abs(margins(window.structure)[0] - margins(window.structure)[1]) < 3,
+                    timeout=10_000)
+    assert abs(margins(window.kspace_view)[0] - margins(window.kspace_view)[1]) < 3
+    assert session.act("plot_text", name="large") == "large"
+    assert window.text_actions["large"].isChecked()
+    assert view.ax.xaxis.label.get_size() == pytest.approx(1.2 * theme.FONT_POINTS["large"])
+    assert window.structure.ax.get_xticklabels()[0].get_size() == theme.FONT_POINTS["large"]
+    left, right = margins(view)
+    assert abs(left - right) < 3, (left, right)
+    with pytest.raises(ValueError):
+        theme.set_text_size("huge")
+    session.act("plot_text", name="normal")
+    assert view.ax.xaxis.label.get_size() == pytest.approx(1.2 * base)
+    assert theme.font_points("large") == pytest.approx(1.2 * base)
+    assert QApplication.instance().font().pointSizeF() >= theme.UI_POINTS
+
+
+def box_contrast(widget, x0, x1, y):
+    """The strongest contrast between the pixels of a row of a widget (x0
+    to x1, at height y) and its background at x0: a check box's border
+    drawn there stands out, a missing one does not."""
+    image = widget.grab().toImage()
+    back = QColor(image.pixel(x0, y))
+    contrasts = [sum(abs(a - b) for a, b in zip(QColor(image.pixel(x, y)).getRgb()[:3],
+                                                back.getRgb()[:3])) for x in range(x0, x1)]
+    return max(contrasts)
+
+
+def test_check_boxes_show_a_box_in_both_themes(window, qtbot):
+    """Fusion's box is drawn with a border derived from the window colour,
+    invisible in the dark theme: theme.CheckStyle draws a bordered box, in
+    the forms and in the outliner alike."""
+    from PySide6.QtWidgets import QCheckBox
+    window.select("s1")
+    for name in ("light", "dark"):
+        window.set_theme(name)                   # rebuilds the form and the outliner
+        qtbot.wait(50)
+        box = window.properties.form.nambu       # an unchecked QCheckBox of the system form
+        assert isinstance(box, QCheckBox) and not box.isChecked()
+        assert box_contrast(box, 0, 18, box.height() // 2) > 300, name
+        item = window.outliner.item("t1")        # a checked item of the outliner
+        cell = window.outliner.visualItemRect(item)
+        view = window.outliner.viewport()
+        assert box_contrast(view, cell.x(), cell.x() + 22, cell.center().y()) > 250, name
+    window.set_theme("light")
+
+
+def test_the_forms_and_the_outliner_read_as_they_should(window):
+    assert [window.outliner.headerItem().text(i) for i in (0, 1)] == ["Entry", "Status"]
+    window.select("t1")
+    form = window.properties.form
+    assert form.rows.labelForField(form.enabled).text() == "enabled"
+    assert form.enabled.text() == ""

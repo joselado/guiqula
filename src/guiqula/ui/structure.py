@@ -269,6 +269,23 @@ def cell_outline(build):
     return np.array([corner, corner + a1, corner + a1 + a2, corner + a2])
 
 
+SHORT_LABEL = 6       # a colour bar label this short is put upright above the bar
+
+
+def colorbar(ax, mappable, label, **style):
+    """A colour bar next to an axes, its label at the size of the axis
+    labels: a short one (sz, LDOS) upright above the bar, where it reads
+    at a glance, a long one along the bar; a horizontal bar keeps its
+    label below it. Returns the bar."""
+    import matplotlib
+    bar = ax.figure.colorbar(mappable, ax=ax, **style)
+    if label and len(label) <= SHORT_LABEL and style.get("orientation") != "horizontal":
+        bar.ax.set_title(label, fontsize=matplotlib.rcParams["axes.labelsize"], pad=8)
+    else:
+        bar.set_label(label)
+    return bar
+
+
 def draw_structure(ax, build, highlight=None, selected=None, removed=None, images=True,
                    site_values=None, arrows=None, hoppings=None):
     """Draw a build summary on a matplotlib Axes. highlight: boolean mask of
@@ -287,13 +304,13 @@ def draw_structure(ax, build, highlight=None, selected=None, removed=None, image
     colors = site_colors(build)
     bars = []
 
-    def colorbar(mappable, label, horizontal=False):
+    def add_bar(mappable, label, horizontal=False):
         if horizontal:
-            ax.figure.colorbar(mappable, ax=ax, label=label, orientation="horizontal",
-                               shrink=0.6, pad=0.1, aspect=40)
+            colorbar(ax, mappable, label, orientation="horizontal", shrink=0.6, pad=0.1,
+                     aspect=40)
         else:                     # a second vertical bar goes to the left
-            ax.figure.colorbar(mappable, ax=ax, label=label, shrink=0.7, pad=0.02 if not bars
-                               else 0.08, location="right" if not bars else "left")
+            colorbar(ax, mappable, label, shrink=0.7, pad=0.02 if not bars else 0.08,
+                     location="right" if not bars else "left")
             bars.append(label)
     if site_values is not None:
         colors, mappable = value_colors(site_values["values"],
@@ -301,7 +318,7 @@ def draw_structure(ax, build, highlight=None, selected=None, removed=None, image
                                         cmap=VALUE_MAP if site_values.get("symmetric", True)
                                         else SEQUENTIAL_MAP)
         if varies(site_values["values"]):
-            colorbar(mappable, site_values.get("label", ""))
+            add_bar(mappable, site_values.get("label", ""))
     lattice = np.asarray(build["lattice"])[:, :2]
     if hoppings is not None:
         central, amplitude, phase = hopping_segments(build, hoppings)
@@ -310,7 +327,7 @@ def draw_structure(ax, build, highlight=None, selected=None, removed=None, image
         phase_map = cm.ScalarMappable(norm=mcolors.Normalize(-np.pi, np.pi), cmap=PHASE_MAP)
         bond_colors = phase_map.to_rgba(phase)
         if len(phase) and np.any(np.abs(phase) > 1e-6):
-            colorbar(phase_map, "hopping phase", horizontal=True)
+            add_bar(phase_map, "hopping phase", horizontal=True)
     else:
         central = bond_segments(build)
         widths, bond_colors = 1.2, theme.BOND
@@ -341,7 +358,7 @@ def draw_structure(ax, build, highlight=None, selected=None, removed=None, image
             dots, mappable = value_colors(vectors[:, 2])
             circles(ax, xy, 0.5 * RADIUS, 5, facecolors=dots, edgecolors=theme.ARROW,
                     linewidths=0.4)
-            colorbar(mappable, f"{arrows.get('label', '')}, z (dots)")
+            add_bar(mappable, f"{arrows.get('label', '')}, z (dots)")
         shown = finite_vectors(vectors)
         lengths = np.linalg.norm(vectors[shown, :2], axis=1)
         longest = float(lengths.max()) if len(lengths) else 0.0
@@ -372,7 +389,6 @@ def draw_structure(ax, build, highlight=None, selected=None, removed=None, image
     ax.set_aspect("equal", adjustable="datalim")
     ax.margins(0.15 if cells else 0.08)
     ax.autoscale_view()
-    ax.tick_params(labelsize=8)
     return selection
 
 
@@ -431,7 +447,7 @@ def draw_structure_3d(ax, build, highlight=None, selected=None, removed=None, im
         colors, mappable = value_colors(site_values["values"], symmetric=symmetric,
                                         cmap=VALUE_MAP if symmetric else SEQUENTIAL_MAP)
         if varies(site_values["values"]):
-            ax.figure.colorbar(mappable, ax=ax, label=site_values.get("label", ""), shrink=0.6)
+            colorbar(ax, mappable, site_values.get("label", ""), shrink=0.6)
     if hoppings is not None:
         rows = np.asarray(hoppings["hoppings"]).reshape(-1, 5)
         lattice = np.asarray(build["lattice"], dtype=float)
@@ -490,10 +506,9 @@ def draw_structure_3d(ax, build, highlight=None, selected=None, removed=None, im
         for setter, m, w in zip((ax.set_xlim, ax.set_ylim, ax.set_zlim), middle, span):
             setter(m - 0.55 * w, m + 0.55 * w)
         ax.set_box_aspect(tuple(span))
-    ax.set_xlabel("x", fontsize=8)
-    ax.set_ylabel("y", fontsize=8)
-    ax.set_zlabel("z", fontsize=8)
-    ax.tick_params(labelsize=7)
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.set_zlabel("z")
     return selection
 
 
@@ -521,9 +536,12 @@ class StructureView(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("structureView")
-        self.figure = Figure(figsize=(6, 5), dpi=100)
+        # constrained layout is redone at every draw, so the labels fit the size the canvas
+        # has; the centring balances its margins after each one
+        self.figure = Figure(figsize=(6, 5), dpi=100, layout="constrained")
         self.canvas = FigureCanvasQTAgg(self.figure)
         self.canvas.setObjectName("structureCanvas")
+        self.centring = theme.Centring(self.canvas, lambda: self.ax)
         self.toolbar = NavigationToolbar2QT(self.canvas, self)
         self.toolbar.setObjectName("structureToolbar")
         self.view_box = QComboBox()
@@ -662,7 +680,8 @@ class StructureView(QWidget):
         still there. Drawn in the active theme. When nothing drawn changed
         (an edit whose rebuild is on its way: only the caption says
         "updating…"), only the caption is updated."""
-        drawing = (system_id, id(build), self.in_3d(build), self.renderer_3d, theme.name)
+        drawing = (system_id, id(build), self.in_3d(build), self.renderer_3d, theme.name,
+                   theme.text_size)
         if (self.ax is not None or self.in_scene) and drawing == self._drawn and \
                 _same(overlays, self._overlays):
             self._caption = caption
@@ -723,7 +742,6 @@ class StructureView(QWidget):
         self.ax = self.figure.add_subplot(111)
         self._selection_artist = draw_structure(self.ax, build, selected=self.selected(),
                                                 **overlays)
-        self.figure.tight_layout()
         if limits is not None and same_sites:
             self.ax.get_xlim()               # settle the autoscaling of the new artists first
             self.ax.set_xlim(*limits[0])

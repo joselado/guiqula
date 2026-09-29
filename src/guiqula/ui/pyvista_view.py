@@ -88,7 +88,7 @@ def _sites(plotter, pv, r, name, radius, arrays=None, **style):
 
 
 def draw_scene(plotter, build, highlight=None, selected=None, removed=None, images=True,
-               site_values=None, arrows=None, hoppings=None, title=""):
+               site_values=None, arrows=None, hoppings=None, title="", pixel_ratio=1.0):
     """draw_structure_3d (ui/structure.py) with pyvista, overlay for overlay:
     the sites coloured by sublattice (or by site_values, with a colour bar
     when they vary), the bonds (or the hoppings of the Hamiltonian view,
@@ -97,7 +97,9 @@ def draw_scene(plotter, build, highlight=None, selected=None, removed=None, imag
     site, the region highlighted, the removed positions and the selected
     sites (set_selection redraws only those). Returns the bounds the camera
     fits (xmin, xmax, ymin, ymax, zmin, zmax): the sites and the unit cell,
-    as mplot3d's limits, not the faded cells around them."""
+    as mplot3d's limits, not the faded cells around them. The title and
+    the colour bar's text take the plot text size (ui/theme.py), as
+    matplotlib draws it at 100 dpi, times the screen's pixel ratio."""
     import pyvista as pv
     plotter.clear()
     plotter.set_background(theme.AXES)
@@ -106,9 +108,11 @@ def draw_scene(plotter, build, highlight=None, selected=None, removed=None, imag
     # smaller atoms under arrows, which are centred on them and would be hidden
     radius = structure_tools.RADIUS * (0.6 if arrows is not None else 1.0)
     lattice = np.asarray(build["lattice"], dtype=float).reshape(-1, 3)
-    bar = {"color": theme.TEXT, "title_font_size": 14, "label_font_size": 12,
-           "vertical": True, "position_x": 0.86, "position_y": 0.15, "height": 0.7,
-           "width": 0.06, "fmt": "%.3g"}
+    def pixels(relative):
+        return theme.font_points(relative) * pixel_ratio * 100 / 72
+    bar = {"color": theme.TEXT, "title_font_size": round(pixels("large")),
+           "label_font_size": round(pixels("medium")), "vertical": True, "position_x": 0.86,
+           "position_y": 0.15, "height": 0.7, "width": 0.06, "fmt": "%.3g"}
     if hoppings is not None:
         rows = np.asarray(hoppings["hoppings"]).reshape(-1, 5)
         shift = rows[:, 2:5] @ lattice if len(rows) else np.zeros((0, 3))
@@ -173,9 +177,11 @@ def draw_scene(plotter, build, highlight=None, selected=None, removed=None, imag
                          name="removed", color=theme.REMOVED, render_points_as_spheres=True,
                          point_size=10)
     set_selection(plotter, r[np.asarray(selected if selected is not None else [], dtype=int)])
-    if title:
-        plotter.add_text(title, position="upper_edge", font_size=9, color=theme.TEXT,
-                         name="title")
+    if title:               # a fixed size, centred at the top (a corner annotation scales)
+        text = plotter.add_text(title, position=(0.5, 0.985), viewport=True,
+                                font_size=pixels("medium") / 2, color=theme.TEXT, name="title")
+        text.prop.justification_horizontal = "center"
+        text.prop.justification_vertical = "top"
     plotter.add_axes(color=theme.TEXT, labels_off=False)
     points = np.concatenate([r, edges.reshape(-1, 3)]) if len(edges) else r
     if not len(points):
@@ -428,7 +434,8 @@ class SceneView(QWidget):
         changed); otherwise the view starts oblique, everything in sight."""
         plotter = self.canvas.ensure()
         camera = plotter.camera_position if keep and self.drawn else None
-        self.bounds = draw_scene(plotter, build, **overlays)
+        self.bounds = draw_scene(plotter, build, pixel_ratio=self.canvas.devicePixelRatioF(),
+                                 **overlays)
         self.drawn = True
         if camera is None:
             self.reset_view()
