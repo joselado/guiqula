@@ -301,6 +301,19 @@ three-dimensional lattice is drawn by the k3 = 0 cut of its zone (the plane of b
 with the high-symmetry points in that plane; a path that leaves the plane (pyqula's
 default one, or `Z` typed in the form) is drawn projected onto it.
 
+When the k-path of the bands or of the spectral function is left empty they walk pyqula's
+default path, and the k axis names the high-symmetry points that path goes through, as it
+does for a path typed in the form: Γ K' M K Γ on the honeycomb, triangular and kagome
+lattices, Γ M Γ on a square one, Γ X Γ in one dimension and Γ X M Γ R in three. Γ, K and K'
+are the points pyqula's labels give (the ones the k-space tab draws), which means that the
+first corner of the default path is K' and not the K that pyqula's own guide writes; M, X and
+Y name a point by its kind, so the three M points of a hexagonal zone are all M, and `M` typed
+in a k-path is the point (1/2, 0), which is not always the M that the default path crosses. In
+two dimensions pyqula's path leaves out its opening Γ (it stores each point after the step),
+so guiqula walks the same points with Γ put first: the bands of an empty k-path have one point
+more than a direct call of pyqula, and the exported script writes the path. A finite system
+has no k, and its axis keeps the index of the point.
+
 ## Python nodes, trust and the console
 
 A Python op, term or calculation runs its code in the worker with `g` (the geometry), `h`

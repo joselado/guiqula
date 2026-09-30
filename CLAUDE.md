@@ -50,7 +50,10 @@ the axes centred in their panels; decisions 71 to 79, same place, for the mainta
 confirm), and moving in space (2026-09-29: Blender's controls in the 3D scene, Inkscape's on
 the flat drawings, pyvista the default in the program when installed; decisions 80 to 87,
 same place, for the maintainer to confirm), and a detached plot is a window of its own, since a
-floating dock could not be moved on Wayland (decision 88, same place). Nothing is uploaded or pushed without the
+floating dock could not be moved on Wayland (decision 88, same place), and the bands and the
+spectral function on pyqula's default k-path name its high-symmetry points on the axis and walk
+pyqula's two-dimensional path with the Γ that it leaves out put first (2026-09-30: decision 89,
+same place, for the maintainer to confirm). Nothing is uploaded or pushed without the
 maintainer.
 
 ## Code map
@@ -85,7 +88,8 @@ a `Session`.
   `classical.py` for the classical models, terms and calculations, `python_nodes.py`,
   `sweeps.py`, a calculation that runs another one over parameter values, and `command`,
   the mutation that sets one number of the Document (sliders, picks); `kpaths.py`, the
-  points of a k-path; `picks.py`, the targets of picked values, computed from the
+  points of a k-path, pyqula's default one included, and the names of the points along one;
+  `picks.py`, the targets of picked values, computed from the
   parameters' `quantity` and never listed by pairs); an
   entry's `systems` names the system kinds it applies to. A
   declarative `Call("h.add_zeeman", "m")` drives both the engine and the script export; a

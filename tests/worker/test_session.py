@@ -22,8 +22,10 @@ g = g.get_supercell([2, 2, 1])
 h = g.get_hamiltonian()
 h.add_zeeman([0.0, 0.0, lambda r: 0.3*np.tanh(r[0]/4)])
 h.add_rashba(0.1)
-k, e, c = h.get_bands(nk=120, operator="sz", write=False)
-np.savez("direct.npz", e=e.reshape(120, -1), c=c.reshape(120, -1))
+ks = np.asarray(h.geometry.get_kpath(None, nk=120, write=False), dtype=float).reshape(-1, 3)
+ks = np.vstack([np.zeros((1, 3)), ks])      # pyqula's path leaves out its opening Gamma
+k, e, c = h.get_bands(nk=120, operator="sz", kpath=ks, write=False)
+np.savez("direct.npz", e=e.reshape(len(ks), -1), c=c.reshape(len(ks), -1))
 """
 
 
@@ -73,7 +75,7 @@ def test_acceptance_pipeline(session, tmp_path, repo):
     session.do("set_param", entry=op, name="n", value=[3, 2, 1])    # requirement 2
     assert session.status(c) == "stale"
     session.act("run_calculation", calculation=c, wait=True, timeout=600)
-    assert session.result(c).arrays["energies"].shape == (120, 24)
+    assert session.result(c).arrays["energies"].shape == (121, 24)
     assert session.status(c) == "done"
 
 

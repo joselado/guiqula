@@ -83,8 +83,7 @@ def kspace(g, nk=60):
     g = g.copy()
     g.update_reciprocal()
     special = kpaths.special_points(g)
-    default = np.asarray(g.get_kpath(None, nk=nk), dtype=float).reshape(-1, 3)
-    return dict(out, special=special, default_path=default)
+    return dict(out, special=special, default_path=kpaths.default_path(g, nk))
 
 
 HAMILTONIAN_LIMIT = 20000     # sites; above this the Hamiltonian view is not computed

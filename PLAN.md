@@ -2457,7 +2457,45 @@ Decisions taken while building, for the maintainer to confirm:
     the calculation shows it again, as the dock did, and Attach puts the view back
     in its tab. The other docks (outliner, properties, jobs, log, console, help)
     are still `QDockWidget`s, so floating one of them has the same limit on
-    Wayland; that is left as it is.
+    Wayland; that is left as it is;
+89. the k axis of the bands and of the spectral function names the high-symmetry
+    points of pyqula's default path when no k-path is given (asked 2026-09-29,
+    built 2026-09-30, after the maintainer saw that the bands of a preset carried
+    the index of the point, "k-path point", and no names: all nine presets use the
+    default path, so names came only with a path typed in the form). `_path` now
+    returns the points of the default path as well (`kpaths.default_path`), and
+    `kpaths.default_ticks` finds every point of `special_points`, with its images
+    along the periodic directions, on the polyline of those points, at its
+    fractional index (index / number of points for the spectral function). The
+    names are the ones of `label2k` for Γ, K and K', so the first corner of the
+    default path on the honeycomb, triangular and kagome lattices is K', where
+    pyqula's guide and `BANDLINES.OUT` call it K (the maintainer chose the
+    `label2k` naming). M is named by its kind, which the maintainer also chose:
+    the M, M1, M2 and M3 points of a hexagonal zone are all M, and elsewhere
+    (1/2, 0) is X, (0, 1/2) is Y and (1/2, 1/2) is M, giving Γ K' M K Γ, Γ M Γ
+    (square), Γ X Γ (one dimension) and Γ X M Γ R (three dimensions), the last
+    as pyqula's own labels of that path. A typed label still resolves as pyqula
+    does, so `M` typed in a k-path is (1/2, 0), which is not the M the default
+    path crosses on the honeycomb (there it is `M3`), and on a honeycomb without
+    C3 the two are different points. The axis is labelled k, as with a typed
+    path. In two dimensions pyqula's default path stores each point after the
+    step, `bm * (i + 1) / nk`, so its opening Γ is not on it. The maintainer
+    picked that the path start on Γ, which needed a change in pyqula, and then
+    asked that pyqula not be edited from here; guiqula therefore walks the path
+    itself: every point pyqula gives, unchanged, with Γ put first, so a
+    two-dimensional default path has nk + 1 points and its arrays are those of a
+    direct pyqula call given that path (`kpath=`). The one and three
+    dimensional paths, which start on Γ, are passed as pyqula makes them
+    (the same points as a bare call), and a finite system has no k, no ticks
+    and keeps the index of the point on its axis. The exported script writes the
+    path (`ks`, the Γ added when the dimensionality is 2) and passes `kpath=ks`,
+    and the k-space tab draws the same points as its dashed default path. A result
+    saved in a project before this keeps its old axis until the calculation is run
+    again (its key hashes the kind, the parameters and the system, not the code). Not changed: the names of the coordinate
+    vertices of a typed path still follow the k-space tab (on a square zone
+    (1/2, 0) reads M and the corner (1/2, 1/2) reads M3, on a one-dimensional
+    one the edge reads M), and a vertex typed as 0.333 is not K' but its
+    coordinates, since the match is to 1e-6.
 
 Maintainer's answers after building (2026-09-29, asked one by one, the
 three that change behaviour): 82, alt and the left button emulate the

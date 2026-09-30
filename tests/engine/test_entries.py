@@ -568,6 +568,16 @@ def _direct_path(h, p):
                               p["nk"])
 
 
+def _direct_default_path(h, p):
+    """pyqula's own default path, and in two dimensions the Gamma that it
+    leaves out (it stores each point after the step) put before it, written
+    out here; None where pyqula's own is what the adapter walks (0D, 1D, 3D)."""
+    if h.geometry.dimensionality != 2:
+        return None
+    ks = np.asarray(h.geometry.get_kpath(None, nk=p["nk"], write=False), dtype=float)
+    return np.vstack([np.zeros((1, 3)), ks.reshape(-1, 3)])
+
+
 def _direct_kpoints(h, p, kpath):
     """The reduced k of the path points: the one given, else what pyqula's
     get_bands and kdos_bands walk (klist.get_kpath); none in 0D."""
@@ -583,6 +593,8 @@ def _direct_bands(h, p):
     ticks = None
     if p["kpath"] is not None:
         kwargs["kpath"], ticks = _direct_path(h, p)
+    elif _direct_default_path(h, p) is not None:
+        kwargs["kpath"] = _direct_default_path(h, p)
     out = h.get_bands(write=False, **kwargs)
     nk = len(np.unique(out[0]))
     arrays = {"k": np.unique(out[0]), "energies": out[1].reshape(nk, -1),
@@ -598,6 +610,8 @@ def _direct_spectral(h, p):
     extra, ticks = {}, None
     if p["kpath"] is not None:
         extra["kpath"], ticks = _direct_path(h, p)
+    elif _direct_default_path(h, p) is not None:
+        extra["kpath"] = _direct_default_path(h, p)
     arrays = dict(zip(("k", "energies", "weight"), pq("kdos").kdos_bands(
         h, energies=_energies(p), delta=p["delta"], nk=p["nk"], mode=p["mode"], **_op(p),
         **extra)))
@@ -710,7 +724,8 @@ CALC_CASES = {
               ({"nk": 20, "kpath": ["G", "K", "M", "G"]}, "haldane",   # neighbouring K and M
                lambda a: list(a["ticks"]) == [0, 12, 18, 28]),     # |b|/sqrt3, /2sqrt3, /2
               ({"nk": 20, "kpath": [[0, 0, 0], [0.5, 0, 0], [0.5, 0.5, 0]]}, "haldane", None),
-              ({"nk": 10}, "flake", lambda a: a["kpoints"].shape == (0, 3))],   # no k in 0D
+              ({"nk": 10}, "flake", lambda a: a["kpoints"].shape == (0, 3)),   # no k in 0D
+              ({"nk": 30}, "chain", lambda a: a["kpoints"][0][0] == 0.0)],   # pyqula's own path
     "dos": [({"ne": 30, "nk": 8, "delta": 0.1}, "rashba", None),
             ({"ne": 15, "nk": 8, "delta": 0.1, "mode": "Green"}, "rashba", None),
             ({"ne": 30, "nk": 8, "delta": 0.1, "operator": "sublattice"}, "rashba", None),
@@ -802,6 +817,87 @@ def test_calculation(pyqula, kind, case):
         assert result.kspace is None
     if check is not None:
         assert check(result.arrays), result.arrays
+
+
+DEFAULT_PATHS = [    # what pyqula's default path (no k-path given) passes through, by lattice
+    ("honeycomb_lattice", ["Γ", "K'", "M", "K", "Γ"]),      # label2k's K' is the first corner
+    ("triangular_lattice", ["Γ", "K'", "M", "K", "Γ"]),
+    ("kagome_lattice", ["Γ", "K'", "M", "K", "Γ"]),
+    ("square_lattice", ["Γ", "M", "Γ"]),
+    ("chain", ["Γ", "X", "Γ"]),
+    ("honeycomb_zigzag_ribbon", ["Γ", "X", "Γ"]),
+    ("cubic_lattice", ["Γ", "X", "M", "Γ", "R"])]
+
+
+def default_path_result(lattice, kind="bands", ops=(), nk=99):
+    d, s, _ = system(lattice, ops=ops, has_spin=False)
+    c = d.do("add_calculation", system=s, kind=kind, params={"nk": nk})
+    return run_calculation(d.document, c)
+
+
+@pytest.mark.parametrize("lattice, names", DEFAULT_PATHS)
+def test_the_default_path_is_named(pyqula, lattice, names):
+    """Without a k-path pyqula chooses the points and the axis carried no
+    names, only the index of the point. The high-symmetry points it goes
+    through are named now, in the order they are met, from the first point
+    (Gamma) to the last."""
+    result = default_path_result(lattice)
+    ticks, k = result.plot["xticks"], result.arrays["k"]
+    positions = [x for x, _ in ticks]
+    assert [name for _, name in ticks] == names
+    assert positions == sorted(positions) and result.plot["xlabel"] == "k"
+    assert positions[0] == pytest.approx(k.min()) and positions[-1] == pytest.approx(k.max())
+    assert "ticks" not in result.arrays            # no vertices: pyqula chose the points
+
+
+def test_a_two_dimensional_default_path_starts_on_gamma(pyqula):
+    """pyqula's path stores each point after the step, so it never contains
+    its opening Gamma: guiqula walks the same points with Gamma before them
+    (the one and three dimensional paths start on Gamma already, and are
+    walked as pyqula makes them)."""
+    from pyqula import geometry
+    result = default_path_result("honeycomb_lattice", nk=30)
+    theirs = np.asarray(geometry.honeycomb_lattice().get_kpath(None, nk=30, write=False),
+                        dtype=float).reshape(-1, 3)
+    ours = result.arrays["kpoints"]
+    assert np.allclose(ours[0], 0.0) and len(ours) == len(theirs) + 1
+    assert np.allclose(ours[1:], theirs, atol=1e-12)
+    assert len(result.arrays["k"]) == len(ours)
+    chain = default_path_result("chain", nk=30)      # pyqula's own, as it is
+    assert np.allclose(chain.arrays["kpoints"], np.asarray(
+        geometry.chain().get_kpath(None, nk=30, write=False), dtype=float).reshape(-1, 3))
+
+
+def test_the_default_path_puts_the_dirac_points_on_k_and_kprime(pyqula):
+    """The names are where the physics is: the two Dirac points of graphene
+    sit on the ticks of K' and K, and the gap is zero nowhere else along
+    the path."""
+    result = default_path_result("honeycomb_lattice")
+    gap = np.abs(result.arrays["energies"][:, 1] - result.arrays["energies"][:, 0])
+    dirac = {name: int(round(x)) for x, name in result.plot["xticks"] if name in ("K", "K'")}
+    assert set(dirac) == {"K", "K'"}
+    assert all(gap[i] < 1e-8 for i in dirac.values())
+    assert sorted(np.flatnonzero(gap < 1e-8)) == sorted(dirac.values())
+
+
+def test_the_default_path_of_a_spectral_function_is_named_at_its_fraction(pyqula):
+    """kdos_bands puts index / number of points on its k axis, so the ticks
+    sit at the fractions of the ticks of the bands."""
+    bands = default_path_result("honeycomb_lattice")
+    kdos = default_path_result("honeycomb_lattice", kind="spectral_function")
+    n = len(bands.arrays["k"])
+    assert [name for _, name in kdos.plot["xticks"]] == [name for _, name in bands.plot["xticks"]]
+    assert np.allclose([x for x, _ in kdos.plot["xticks"]],
+                       [x / n for x, _ in bands.plot["xticks"]])
+    assert kdos.plot["xlabel"] == "k"
+
+
+def test_a_finite_system_has_no_ticks_on_its_default_path(pyqula):
+    """One point, no k: nothing to name, and the axis says what it is."""
+    for kind in ("bands", "spectral_function"):
+        result = default_path_result("honeycomb_lattice", kind, nk=10,
+                                     ops=[("island", {"n": 2.0, "nedges": 3})])
+        assert "xticks" not in result.plot and result.plot["xlabel"] == "k-path point"
 
 
 def test_the_dos_on_every_site_is_the_dos(pyqula):

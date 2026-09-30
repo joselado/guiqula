@@ -10,51 +10,54 @@ from guiqula.registry.params import (ChoiceParam, FloatParam, FloatVectorParam, 
 
 def _path(h, ctx, fraction=False):
     """{"kpath": the k-points, "ticks": vertex indices} of a calculation's
-    k-path, or {} for pyqula's default path; the names of its vertices go
-    to the plot (the note "xticks"), at the vertices' indices, which is the
-    k axis of the bands, or, with fraction, at their fraction of the path,
-    index / number of points, which is the k axis pyqula gives a spectral
-    function (kdos.write_kdos_bands)."""
+    k-path; for pyqula's default path {"kpath": its points} (kpaths.default_path:
+    pyqula chooses them, so there are no vertices), and {} in 0D, which has no
+    k. The names of the vertices, or of the high-symmetry points the default
+    path goes through, go to the plot (the note "xticks"), at their indices,
+    which is the k axis of the bands, or, with fraction, at their fraction of
+    the path, index / number of points, which is the k axis pyqula gives a
+    spectral function (kdos.write_kdos_bands)."""
     import numpy as np
-    kpath = ctx.value("kpath")
+    kpath, g = ctx.value("kpath"), h.geometry
     if kpath is None:
-        return {}
-    g = h.geometry
-    b = np.array([g.b1, g.b2, g.b3])
-    ks, ticks = kpaths.path_points(b, kpaths.vertices_of(g, kpath), ctx.value("nk"))
-    names = kpaths.tick_names(b, g.dimensionality, kpath, kpaths.special_points(g))
-    scale = 1.0 / len(ks) if fraction else 1
-    ctx.note("xticks", [[int(i) * scale, name] for i, name in zip(ticks, names)])
-    return {"kpath": ks, "ticks": ticks}
+        ks = kpaths.default_path(g, ctx.value("nk"))
+        if not len(ks):                        # a finite system
+            return {}
+    b, special = np.array([g.b1, g.b2, g.b3]), kpaths.special_points(g)
+    if kpath is None:
+        ticks, marks = None, kpaths.default_ticks(b, g.dimensionality, ks, special)
+    else:
+        ks, ticks = kpaths.path_points(b, kpaths.vertices_of(g, kpath), ctx.value("nk"))
+        marks = list(zip(ticks, kpaths.tick_names(b, g.dimensionality, kpath, special)))
+    scale = 1.0 / len(ks) if fraction else 1.0
+    if marks:
+        ctx.note("xticks", [[float(i) * scale, name] for i, name in marks])
+    return {"kpath": ks} if ticks is None else {"kpath": ks, "ticks": ticks}
 
 
-def _kpoints(h, ctx, path):
+def _kpoints(h, path):
     """The reduced k (N, 3) of every point of a calculation's path, in
     units of the reciprocal lattice vectors (what a pick on the plot takes,
-    core/picks.py): the custom path's points, or pyqula's default path as
-    get_bands and kdos_bands make it inside; (0, 3) for a finite system,
-    which has no k."""
+    core/picks.py): the points of _path; (0, 3) for a finite system, which
+    has no k."""
     import numpy as np
-    if int(h.geometry.dimensionality) == 0:
+    if int(h.geometry.dimensionality) == 0 or not path:
         return np.zeros((0, 3))
-    ks = path["kpath"] if path else h.geometry.get_kpath(None, nk=ctx.value("nk"), write=False)
-    return np.asarray(ks, dtype=float).reshape(-1, 3)
+    return np.asarray(path["kpath"], dtype=float).reshape(-1, 3)
 
 
-def _kpoints_script(ctx):
+def _kpoints_script():
     """The line of an exported script that sets kpoints as _kpoints does."""
-    ks = "ks" if ctx.value("kpath") is not None else \
-        f"h.geometry.get_kpath(None, nk={ctx.code('nk')}, write=False)"
-    return [f"kpoints = np.zeros((0, 3)) if h.geometry.dimensionality == 0 else "
-            f"np.asarray({ks}, dtype=float).reshape(-1, 3)"]
+    return ["kpoints = np.zeros((0, 3)) if h.geometry.dimensionality == 0 else "
+            "np.asarray(ks, dtype=float).reshape(-1, 3)"]
 
 
 def _bands(h, ctx):
     import numpy as np
     nk, operator = ctx.value("nk"), ctx.value("operator")
     path = _path(h, ctx)
-    kpoints = _kpoints(h, ctx, path)
-    # the points pyqula walks: one in 0D, nk + 1 on its default 3D path
+    kpoints = _kpoints(h, path)
+    # the points walked: the path's, or one in 0D
     kwargs = {"nk": nk, "write": False, "callback": ctx.progress_callback(max(len(kpoints), 1))}
     if path:
         kwargs["kpath"] = path["kpath"]
@@ -65,24 +68,34 @@ def _bands(h, ctx):
     arrays = {"k": k_index, "energies": out[1].reshape(len(k_index), -1), "kpoints": kpoints}
     if operator is not None:
         arrays["weights"] = out[2].reshape(len(k_index), -1)
-    if path:
+    if "ticks" in path:
         arrays["ticks"] = path["ticks"]
     return arrays
 
 
 def _path_script(ctx):
+    """The lines that set ks, the points of the path, as _path does (None in
+    0D, where pyqula's default path is a single point)."""
     kpath = ctx.value("kpath")
-    return [] if kpath is None else kpaths.script(kpath, ctx.value("nk"))
+    if kpath is not None:
+        return kpaths.script(kpath, ctx.value("nk"))
+    return ["if h.geometry.dimensionality == 0:",
+            "    ks = None                                  # a finite system has no k",
+            "else:",
+            f"    ks = np.asarray(h.geometry.get_kpath(None, nk={ctx.code('nk')}, write=False), "
+            "dtype=float).reshape(-1, 3)",
+            "    if h.geometry.dimensionality == 2:         # pyqula's path leaves out its "
+            "opening Gamma",
+            "        ks = np.vstack([np.zeros((1, 3)), ks])"]
 
 
 def _bands_script(ctx):
     operator = ctx.value("operator")
     op = "" if operator is None else f", operator={operator!r}"
-    path = ", kpath=ks" if ctx.value("kpath") is not None else ""
     lines = _path_script(ctx) + [
-        f"out = h.get_bands(nk={ctx.code('nk')}{op}{path}, write=False)",
+        f"out = h.get_bands(nk={ctx.code('nk')}{op}, kpath=ks, write=False)",
         "k = np.unique(out[0])",
-        "energies = out[1].reshape(len(k), -1)"] + _kpoints_script(ctx)
+        "energies = out[1].reshape(len(k), -1)"] + _kpoints_script()
     if operator is None:
         lines.append("arrays = dict(k=k, energies=energies, kpoints=kpoints)")
     else:
@@ -484,12 +497,12 @@ def _spectral_function(h, ctx):
     from pyqula import kdos
     path = _path(h, ctx, fraction=True)        # pyqula's k axis: index / number of points
     extra = {"kpath": path["kpath"]} if path else {}
+    kpoints = _kpoints(h, path)
     out = kdos.kdos_bands(h, energies=_energies(ctx), delta=ctx.value("delta"),
                           nk=ctx.value("nk"), mode=ctx.value("mode"), **_operator_kwarg(ctx),
                           **extra)
-    arrays = {"k": out[0], "energies": out[1], "weight": out[2],
-              "kpoints": _kpoints(h, ctx, path)}
-    if path:
+    arrays = {"k": out[0], "energies": out[1], "weight": out[2], "kpoints": kpoints}
+    if "ticks" in path:
         arrays["ticks"] = path["ticks"]
     return arrays
 
@@ -508,10 +521,9 @@ entry("calculation", "spectral_function", "Spectral function",
                            "operator if one is chosen.",
       modules=("kdos",), apply=_spectral_function, script=lambda ctx: _path_script(ctx) + [
           f"out = kdos.kdos_bands(h, energies={_energies_code(ctx)}, delta={ctx.code('delta')}, "
-          f"nk={ctx.code('nk')}, mode={ctx.code('mode')}{_operator_code(ctx)}"
-          + (", kpath=ks" if ctx.value("kpath") is not None else "") + ")"]
-      + _kpoints_script(ctx) + ["arrays = dict(k=out[0], energies=out[1], weight=out[2], "
-                                "kpoints=kpoints)"]
+          f"nk={ctx.code('nk')}, mode={ctx.code('mode')}{_operator_code(ctx)}, kpath=ks)"]
+      + _kpoints_script() + ["arrays = dict(k=out[0], energies=out[1], weight=out[2], "
+                             "kpoints=kpoints)"]
       + (["arrays['ticks'] = ticks"] if ctx.value("kpath") is not None else []),
       plot=lambda params, arrays: _with_ticks(
           {"kind": "heatmap", "x": "k", "y": "energies", "c": "weight",

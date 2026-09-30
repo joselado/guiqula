@@ -52,10 +52,12 @@ def pyqula_direct(tmp_path_factory):
         h = geometry.honeycomb_lattice().get_supercell([2, 2, 1]).get_hamiltonian(has_spin=True)
         h.add_zeeman([0.0, 0.0, lambda r: 0.3 * np.tanh(r[0] / 4)])
         h.add_rashba(0.1)
-        out = h.get_bands(nk=100, operator="sz", write=False)
+        ks = np.asarray(h.geometry.get_kpath(None, nk=100, write=False), dtype=float)
+        ks = np.vstack([np.zeros((1, 3)), ks.reshape(-1, 3)])   # pyqula's path leaves out its Gamma
+        out = h.get_bands(nk=100, operator="sz", kpath=ks, write=False)
     finally:
         os.chdir(cwd)
-    return out[0], out[1].reshape(100, -1), out[2].reshape(100, -1)
+    return out[0], out[1].reshape(len(ks), -1), out[2].reshape(len(ks), -1)
 
 
 def test_ready_reports_pyqula_names(manager):

@@ -88,7 +88,7 @@ def test_a_plugin_entry_is_registered_and_runs_in_the_workers(with_plugins):
     assert out["loaded"][0]["entries"] == [["term", "chiral_kekule"]]
     assert out["loaded"][0]["version"] == "0.1"
     assert out["status"] == "done", out["error"]
-    assert out["shape"] == [10, 18] and out["pyqula"] is False     # the UI side stays light
+    assert out["shape"] == [11, 18] and out["pyqula"] is False     # the UI side stays light
     assert "period-tripling" in out["help"]                         # its guide= anchor
     assert "From the plugin guiqula-example-plugin" in out["help"]
 
