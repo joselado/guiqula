@@ -814,6 +814,12 @@ class VectorFieldEditor(Editor):
     def set_value(self, value):
         for editor, v in zip(self.components, value):
             editor.set_value(v)
+        # the kind buttons as wide as the widest, so that the components' boxes line up
+        # whatever kind each one shows ("f(r)" beside "expression")
+        buttons = [editor.button for editor in self.components if editor.button is not None]
+        width = max((button.sizeHint().width() for button in buttons), default=0)
+        for button in buttons:
+            button.setMinimumWidth(width)
 
 
 class IntEditor(Editor):

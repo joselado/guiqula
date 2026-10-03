@@ -81,20 +81,32 @@ def _quiet(widget, setter, value):
 def sweep_target(session, system_id, entry_id):
     """The calculation a sweep of a parameter of entry_id runs at every
     value: the calculation itself when it is one; else one of the system's
-    (a sweep runs no sweep), the first whose result already gives numbers
-    to collect (a gap, a Chern number, an energy), or the first; "" when
+    (a sweep runs no sweep), the first that gives numbers to collect (a
+    gap, a Chern number, an energy: gives_numbers), or the first; "" when
     the system has none, and the label menu then says to add one."""
-    import numpy as np
     document = session.document
     own = [c for c in document.calculations if c.system == system_id
            and not getattr(_spec_of(c), "document_level", True)]
     if any(c.id == entry_id for c in own):
         return entry_id
-    for calc in own:
-        result = session.result(calc.id)
-        if result is not None and any(np.ndim(v) == 0 for v in result.arrays.values()):
-            return calc.id
-    return own[0].id if own else ""
+    return next((c.id for c in own if gives_numbers(session, c.id)),
+                own[0].id if own else "")
+
+
+def gives_numbers(session, calc_id):
+    """Whether a calculation is known to give numbers a sweep collects: its
+    result has numbers among its arrays, or it is declared as one that
+    draws numbers (registry/calculations.py's scalar(): a gap, a Chern
+    number). A Python calculation is known only once it has run."""
+    import numpy as np
+    result = session.result(calc_id)
+    if result is not None and any(np.ndim(v) == 0 for v in result.arrays.values()):
+        return True
+    try:
+        plot = _spec_of(session.document.calculation(calc_id)).plot
+    except (AttributeError, DocumentError, KeyError):
+        return False
+    return isinstance(plot, dict) and plot.get("kind") == "scalar"
 
 
 def _spec_of(calc):
@@ -229,14 +241,33 @@ class Form(QWidget):
         """Whether a slider or a sweep can move this parameter (a number of
         a Field, of an op, of a calculation, of the lattice, of the mean
         field or of a model; sweeps.check_target)."""
+        return not self._not_sweepable(name)
+
+    def _not_sweepable(self, name, component=None):
+        """Why a slider or a sweep cannot move this parameter, or "": it
+        holds no number (sweeps.check_target), or it is a number of a sweep,
+        which no calculation reads, so moving it would change no result."""
         from guiqula.registry import sweeps
+        if self._runs_others():
+            return (f"{name} is a number of {self.item_id}, a sweep, which no calculation "
+                    f"reads: sweep or slide a parameter of a term, an op or a calculation")
         param = self.editors[name].param
-        component = 0 if isinstance(param, VectorFieldParam) else None
+        if isinstance(param, VectorFieldParam) and component is None:
+            component = 0
         try:
             return sweeps.check_target(self.session.document, self.item_id, name,
-                                       component) is None
+                                       component) or ""
+        except Exception as error:
+            return str(error)
+
+    def _runs_others(self):
+        """Whether this form's entry is a calculation that runs others (a
+        sweep: registry document_level)."""
+        try:
+            family, *_, obj = self.session.document.find(self.item_id)
         except Exception:
             return False
+        return family == "calculation" and getattr(_spec_of(obj), "document_level", False)
 
     def _previewable(self, name):
         return self.previews and isinstance(self.editors[name].param, FieldParam)
@@ -331,17 +362,26 @@ class Form(QWidget):
             action.triggered.connect(lambda: self.attach_slider(name, component))
         else:
             target = sweep_target(self.session, self.sweep_system(), self.item_id)
-            action.setToolTip(f"a sweep calculation: {SWEEP_POINTS} values of {label} from "
-                              f"{span[0]:g} to {span[1]:g}, each running {target} and "
-                              f"collecting the numbers it gives (a gap, a Chern number, an "
-                              f"energy)" if target else self._no_calculation())
+            what = f"a sweep calculation: {SWEEP_POINTS} values of {label} from {span[0]:g} " \
+                f"to {span[1]:g}, each running {target}"
+            action.setToolTip(
+                self._no_calculation() if not target else
+                f"{what} and collecting the numbers it gives (a gap, a Chern number, an "
+                f"energy)" if gives_numbers(self.session, target) else
+                f"{what}, which has given no number to collect so far (a sweep collects a "
+                f"gap, a Chern number, an energy): if it gives none, name another in the "
+                f"calculation box of the sweep's form")
             action.setEnabled(bool(target))
             action.triggered.connect(lambda: self.sweep(name, component))
         return action
 
     def slider_range(self, name, component=None):
         """(low, high) of a slider or a sweep of a parameter, from its value
-        (sliders.range_from); ValueError when it holds no number."""
+        (sliders.range_from); ValueError when it holds no number, or when no
+        slider or sweep can move it (_not_sweepable)."""
+        why = self._not_sweepable(name, component)
+        if why:
+            raise ValueError(why)
         value = self._number_of(name, component)
         if value is None:
             raise ValueError(f"{name} holds no number to take a range from")

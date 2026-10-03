@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QComboBox, QLabel
 from guiqula.session import Session
 from guiqula.ui.app import build_main_window
 from guiqula.ui.forms import FIELD_HELP, FIELD_LINE
+from guiqula.ui.properties import sweep_target
 from guiqula.ui.sliders import range_from
 
 
@@ -260,3 +261,81 @@ def test_the_system_form_speaks_the_physics(still):
     form.tij.setText("1, x")
     form.tij.editingFinished.emit()
     assert form.error.text().startswith("hopping range:")
+
+
+def test_the_kind_buttons_of_a_vector_line_up(still, qtbot):
+    """The components' boxes line up whatever kind each button says: the
+    buttons are as wide as the widest, and narrow again with it."""
+    window, session = still
+    window.select("t1")                          # mz is an expression, mx and my numbers
+
+    def widths():
+        editor = window.properties.form.editors["m"]
+        return [c.button.width() for c in editor.components], \
+            [c.edit.width() for c in editor.components]
+
+    buttons, boxes = widths()
+    assert window.properties.form.editors["m"].components[2].button.text() == "expression"
+    assert len(set(buttons)) == 1 and len(set(boxes)) == 1, (buttons, boxes)
+    session.do("set_param", entry="t1", name="m", value=[0.0, 0.0, 0.3])
+    qtbot.waitUntil(lambda: widths()[0][2] < buttons[2])     # f(r) everywhere: narrow again
+    narrow, boxes = widths()
+    assert len(set(narrow)) == 1 and len(set(boxes)) == 1, (narrow, boxes)
+
+
+def test_the_numbers_of_a_sweep_are_neither_slid_nor_swept(still):
+    """A sweep's own range is read by no calculation, so its label menu
+    offers the lock only, and Form.sweep and attach_slider refuse."""
+    window, session = still
+    window.select("t2")
+    sweep = window.properties.form.sweep("c")
+    form = window.properties.form
+    assert form.item_id == sweep
+    menu = form.label_menu("start")
+    assert [a.objectName() for a in menu.actions()] == ["lockParam_start"]
+    menu.close()
+    assert "parameter start; right-click to lock it" in form.labels["start"].toolTip()
+    before = len(session.document.calculations)
+    assert form.sweep("start") is None and "no calculation reads" in form.error.text()
+    assert form.attach_slider("stop") is None and window.sliders == []
+    assert len(session.document.calculations) == before
+
+
+def test_a_sweep_runs_a_calculation_that_gives_numbers(qapp, no_jobs):
+    """Nothing has run yet: the sweep runs the gap, which is declared to
+    give numbers, rather than the band structure listed first; where no
+    calculation is known to give one, the tooltip says so."""
+    window = build_main_window()
+    window.resize(1200, 800)
+    window.show()
+    session = Session("graphene_basics", jobs=no_jobs)
+    window.attach(session)
+    try:
+        kinds = {c.id: c.kind for c in session.document.calculations}
+        assert kinds["c1"] == "bands" and kinds["c3"] == "gap"
+        assert sweep_target(session, "s1", "t1") == "c3"
+        window.select("t1")
+        menu = window.properties.form.label_menu("mass")
+        tip = menu.findChild(QAction, "sweepParam_mass").toolTip()
+        assert "each running c3 and collecting the numbers it gives" in tip
+        menu.close()
+        sweep = window.properties.form.sweep("mass")
+        assert session.document.calculation(sweep).params["calculation"] == "c3"
+        assert session.plan_calculation(sweep).problem is None
+    finally:
+        window.close()
+        session.close()
+
+    window = build_main_window()
+    window.show()
+    session = Session("honeycomb_zeeman_rashba", jobs=no_jobs)
+    window.attach(session)
+    try:
+        window.select("t2")                      # a band structure and a DOS: no number yet
+        menu = window.properties.form.label_menu("c")
+        tip = menu.findChild(QAction, "sweepParam_c").toolTip()
+        assert "each running c1, which has given no number to collect so far" in tip
+        menu.close()
+    finally:
+        window.close()
+        session.close()
