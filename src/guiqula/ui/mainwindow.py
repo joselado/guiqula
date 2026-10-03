@@ -57,7 +57,8 @@ from PySide6.QtGui import QAction, QActionGroup, QDesktopServices
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QComboBox, QCompleter, QDialog,
                                QDockWidget, QFileDialog, QHeaderView, QLabel, QLineEdit,
                                QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QPushButton,
-                               QTabBar, QTableWidget, QTableWidgetItem, QTabWidget, QToolBar,
+                               QStyle, QStyleOptionDockWidget, QStylePainter, QTabBar,
+                               QTableWidget, QTableWidgetItem, QTabWidget, QToolBar,
                                QToolButton, QVBoxLayout, QWidget)
 
 import guiqula
@@ -88,10 +89,11 @@ BUILD_DELAY_MS = 150
 PREVIEW_DELAY_MS = 120
 WORKSPACES = ("geometry", "hamiltonian", "calculate")
 # actions of the window itself: they change what is shown, not the Document
-WINDOW_ACTIONS = ("select", "workspace", "tool", "select_sites", "canvas_view", "preview",
-                  "auto_rerun", "projection", "overlay", "slider", "set_slider",
-                  "remove_slider", "paint", "theme", "export_bundle", "help", "pick", "pick_to",
-                  "run_at_once", "renderer_3d", "plot_text", "ui_text", "reset_layout", "log",
+WINDOW_ACTIONS = ("select", "workspace", "tool", "select_sites", "region_from_selection",
+                  "remove_selected", "canvas_view", "preview", "auto_rerun", "projection",
+                  "overlay", "slider", "set_slider", "remove_slider", "paint", "theme",
+                  "export_bundle", "help", "remote", "pick", "pick_to", "run_at_once",
+                  "renderer_3d", "view_3d", "plot_text", "ui_text", "reset_layout", "log",
                   "panel")
 STRUCTURE_TAB = 0
 KSPACE_TAB = 1
@@ -117,6 +119,30 @@ LOG_HEIGHT = 160             # pixels the bottom area takes when the Log toggle 
 # docks or the toolbars that a stored arrangement would misplace raises it, and a stored
 # one of another version gives the default arrangement
 LAYOUT_VERSION = 1
+# what each panel is, in the tooltip of its entry of View > Panels
+PANEL_TIPS = {"outlinerDock": "the systems, their geometry, terms and mean field, and the "
+                              "calculations",
+              "propertiesDock": "the form of the selected entry",
+              "helpDock": "the help of the selected entry ({help}) and the guides",
+              "slidersDock": "parameters moved by a slider",
+              "jobsDock": "the calculations running and the last ones done",
+              "logDock": "every message so far (the Log button of the status bar)",
+              "consoleDock": "Python on the current system, run in the worker"}
+
+
+class Dock(QDockWidget):
+    """A panel whose title is drawn in the panel's own font. Qt draws a
+    dock's title in the font the application had when the dock was made
+    (QDockWidgetPrivate::font), so View > Interface text would leave the
+    titles at their old size while everything else changes."""
+
+    def paintEvent(self, event):
+        if self.isFloating() or self.titleBarWidget() is not None:
+            return super().paintEvent(event)
+        painter = QStylePainter(self)
+        option = QStyleOptionDockWidget()
+        self.initStyleOption(option)
+        painter.drawControl(QStyle.ControlElement.CE_DockWidgetTitle, option)
 
 
 def _grouped(family):
@@ -333,7 +359,7 @@ class MainWindow(QMainWindow):
         """A panel: it keeps its title and its close button, and can be
         moved to another side, but never floats (a floating dock cannot be
         moved on Wayland, decision 88)."""
-        dock = QDockWidget(title, self)
+        dock = Dock(title, self)
         dock.setObjectName(name)
         dock.setWidget(widget)
         dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetClosable
@@ -757,9 +783,12 @@ class MainWindow(QMainWindow):
         view.addSeparator()
         panels = view.addMenu("&Panels")
         panels.setObjectName("panelsMenu")
+        panels.setToolTipsVisible(True)
         for name, dock in self.docks.items():
             action = dock.toggleViewAction()
             action.setObjectName(f"panel_{name}")
+            tip = PANEL_TIPS.get(name, "").format(help=shortcuts.text("help"))
+            action.setToolTip(f"show or hide {dock.windowTitle()}" + (f": {tip}" if tip else ""))
             panels.addAction(action)
         reset = self._action(view, "&Reset layout", lambda: self._window_act(
             "reset_layout", self.reset_layout), name="resetLayoutAction")

@@ -119,8 +119,11 @@ def test_a_console_command_does_not_freeze_the_window(window, qtbot):
 
 
 def test_window_actions_are_listed(window):
+    from guiqula.ui import mainwindow
     registered = set(window.session.dispatcher.actions())
     assert registered - set(ACTIONS) == set(WINDOW_ACTIONS)
+    assert set(mainwindow.WINDOW_ACTIONS) == set(WINDOW_ACTIONS)     # the window's own list
+    assert len(mainwindow.WINDOW_ACTIONS) == len(set(mainwindow.WINDOW_ACTIONS))
 
 
 def test_turning_it_off(window, qtbot):

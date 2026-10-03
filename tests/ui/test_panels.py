@@ -8,7 +8,7 @@ and the window size kept in the settings by the program's window only; View
 from types import SimpleNamespace
 
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QRect, Qt
 from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QApplication, QDockWidget, QMenu, QToolButton
 
@@ -74,6 +74,9 @@ def test_the_default_arrangement(qtbot, shot):
     menu = window.findChild(QMenu, "panelsMenu")
     assert [a.text() for a in menu.actions()] == ["Outliner", "Properties", "Help", "Sliders",
                                                   "Jobs", "Log", "Console"]
+    assert menu.toolTipsVisible()                                         # each says what it is
+    assert all(a.toolTip().startswith(f"show or hide {a.text()}: ") for a in menu.actions())
+    assert "(F1)" in window.docks["helpDock"].toggleViewAction().toolTip()
     assert window.findChild(type(window.undo_action), "resetLayoutAction") is not None
     assert "F1" in window.help_panel.browser.placeholderText()            # what to do next
     shot(window, "default")
@@ -240,6 +243,39 @@ def test_the_interface_text_setting(qtbot, config):
         driven.set_ui_text("normal")
         driven.close()
     assert app.font().pointSizeF() == normal
+
+
+def title_ink(dock):
+    """The height in pixels of the text of a dock's title (its rows that
+    carry ink), however tall the title bar is."""
+    top = dock.widget().geometry().top()
+    image = dock.grab(QRect(0, 0, 100, top)).toImage()
+    background = dock.palette().color(QPalette.ColorRole.Window).lightness()
+    rows = [y for y in range(image.height())
+            if any(abs(image.pixelColor(x, y).lightness() - background) > 60
+                   for x in range(2, image.width()))]
+    return rows[-1] - rows[0] + 1 if rows else 0
+
+
+def test_the_panel_titles_follow_the_interface_text(qtbot):
+    """Qt draws a dock's title in the font it had when it was made; the
+    panels draw it in their font, so large interface text reaches them."""
+    window = shown(build_main_window())
+    qtbot.addWidget(window)
+    settle(qtbot)
+    dock = window.docks["outlinerDock"]
+    assert isinstance(dock, mainwindow.Dock)
+    normal = title_ink(dock)
+    assert normal > 0
+    try:
+        window.set_ui_text("large")
+        settle(qtbot)
+        assert title_ink(dock) > normal
+        assert title_ink(window.docks["helpDock"]) > normal
+    finally:
+        window.set_ui_text("normal")
+    settle(qtbot)
+    assert title_ink(dock) == normal
 
 
 def test_jobs_come_forward_unless_help_shows_an_item_or_sliders_are_used(qtbot, no_jobs):
