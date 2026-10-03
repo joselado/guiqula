@@ -303,9 +303,11 @@ def test_locks_in_the_forms_and_the_outliner(window, qtbot):
     window.select("t1")                        # the modulation is free
     form = window.properties.form
     assert form.editors["s"].isEnabled() and form.enabled.isEnabled()
-    menu = form._lock_menu(form.editors["s"].param, form.labels["s"], form.labels["s"].rect()
-                           .center())
-    assert [a.text() for a in menu.actions()] == ["Lock this parameter"]
+    menu = form.label_menu("s")
+    assert [a.text() for a in menu.actions()] == ["Lock this parameter", "Attach a slider",
+                                                   "Sweep this parameter",
+                                                   "Preview on the canvas"]
+    assert menu.actions()[0].objectName() == "lockParam_s"
     menu.actions()[0].trigger()
     menu.close()
     assert "t1.s" in session.document.locks
@@ -501,5 +503,6 @@ def test_the_forms_and_the_outliner_read_as_they_should(window):
     assert [window.outliner.headerItem().text(i) for i in (0, 1)] == ["Entry", "Status"]
     window.select("t1")
     form = window.properties.form
-    assert form.rows.labelForField(form.enabled).text() == "enabled"
-    assert form.enabled.text() == ""
+    assert form.enabled.text() == "enabled"            # in the title's row, not a labelled row
+    assert form.rows.labelForField(form.enabled) is None
+    assert form.heading.indexOf(form.enabled) == form.heading.indexOf(form.title) + 1

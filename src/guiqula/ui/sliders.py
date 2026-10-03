@@ -7,12 +7,33 @@ is one undo step. The window keeps the sliders with the view state.
 
 A marker (PLAN.md phase 7, part 3) is a slider drawn on a result view (its
 "on"): its row says so, and a marker of a k-point or of sites has no range
-and no slider, only its value; it is moved on the plot."""
+and no slider, only its value; it is moved on the plot.
+
+A slider or a sweep attached from a parameter's label in the properties
+form (PLAN.md phase 8, package P6) takes its range from the value the
+parameter holds: range_from."""
+import math
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QComboBox, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
                                QPushButton, QSlider, QToolButton, QVBoxLayout, QWidget)
 
 STEPS = 200          # positions of a slider between its minimum and its maximum
+
+
+def range_from(value, minimum=None, maximum=None):
+    """(low, high) of a slider or a sweep attached from a parameter's form:
+    from 0 to twice the value, ordered, or -1 to 1 for zero; kept within
+    the parameter's declared bounds (a filling stays between 0 and 1), so
+    that every value of the range is one the entry takes, unless that
+    leaves no range."""
+    value = float(value)
+    if not math.isfinite(value):
+        raise ValueError(f"{value} is not a finite number")
+    low, high = (-1.0, 1.0) if value == 0 else tuple(sorted((0.0, 2.0 * value)))
+    clipped = (low if minimum is None else max(low, float(minimum)),
+               high if maximum is None else min(high, float(maximum)))
+    return clipped if clipped[1] > clipped[0] else (low, high)
 
 
 def fraction_of(value, minimum, maximum):
@@ -94,8 +115,8 @@ class SlidersPanel(QWidget):
         self.setObjectName("sliders")
         self.rows = []
         self.column = QVBoxLayout()
-        self.empty = QLabel("No slider yet: name a parameter below (a term's Field, an op's "
-                            "number, the mean field's U...) and its range.")
+        self.empty = QLabel("No slider yet: right-click a parameter's name in Properties and "
+                            "choose Attach a slider, or name one below with its range.")
         self.empty.setWordWrap(True)
         self.entry, self.param = QLineEdit(), QLineEdit()
         self.component = QComboBox()

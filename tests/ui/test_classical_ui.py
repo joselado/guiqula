@@ -76,7 +76,6 @@ def test_a_classical_system_in_the_window(window, qtbot, shot):
 def test_a_texture_feeds_an_exchange_field(window, qtbot, shot):
     """The Field editor reads a result of another system (from_result):
     the classical texture becomes the exchange field of the electrons."""
-    from guiqula.ui.forms import RESULT_KIND
     session = window.session
     session.act("new")
     spins = window.new_classical_system("classical_spin")
@@ -90,16 +89,17 @@ def test_a_texture_feeds_an_exchange_field(window, qtbot, shot):
     window.select(term)
     editor = window.properties.form.editors["m"].components[2]     # mz
     editor.open_panel()
-    assert editor.kind.findText(RESULT_KIND) == 2
-    editor._kind_chosen(2)                        # no result yet: nothing to read
+    assert editor.kind_actions["from_result"].objectName() == "fieldKind_m_z_from_result"
+    editor.choose_kind("from_result")             # no result yet: nothing to read
     assert session.document.find(term)[-1].params["m"][2] == 0.0
+    assert editor.no_results.isVisible() and editor.button.text() == "f(r)"
     session.run_calculation(texture, wait=True, timeout=300)
     qtbot.waitUntil(lambda: session.result(texture) is not None, timeout=10_000)
     window.select("")
     window.select(term)
     editor = window.properties.form.editors["m"].components[2]
     assert editor.result_calc.findData(texture) >= 0
-    editor._kind_chosen(2)
+    editor.choose_kind("from_result")
     value = session.document.find(term)[-1].params["m"][2]
     assert value["kind"] == "from_result" and value["calculation"] == texture
     assert value["array"] == "magnetization" and value["component"] == 0

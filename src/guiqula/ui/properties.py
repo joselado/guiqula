@@ -9,29 +9,60 @@ has the same shape (same kind, same regions to choose from) the values are
 updated in place, so an editor in use is never destroyed under the mouse;
 otherwise the form is rebuilt.
 
-Locks (core/locks.py): what a lock covers is shown disabled, its label
-saying so; right-clicking a parameter's label locks or unlocks it.
+A form reads as physics (PLAN.md phase 8, package P6): its head is the
+title with the enabled switch in its row, the group and the doc line, the
+formula, then the parameters; a term says where it acts (its region, or
+"acts everywhere" with a link to the Regions menu of its system). The
+labels speak the physics and the tooltips the engine (the parameter's
+name, has_spin, is_sparse).
 
-When the user looks at a Field (focus, typing, its f(r) panel), the panel
-emits preview(entry, parameter); the window draws that Field on the
-structure, with live_value(parameter) while it is being typed.
+Locks (core/locks.py): what a lock covers is shown disabled, its label
+saying so. Right-clicking a parameter's label opens its menu: Lock or
+Unlock, Attach a slider (the window's slider action, over a range from the
+value, sliders.range_from), Sweep this parameter (a sweep calculation of
+SWEEP_POINTS values over that range, selected) and, for a Field, Preview on
+the canvas.
+
+When the user looks at a Field (focus, typing, its panel), the panel emits
+preview(entry, parameter); the window draws that Field on the structure,
+with live_value(parameter) while it is being typed.
 """
+import math
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPalette
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QGroupBox, QHBoxLayout,
-                               QLabel, QLineEdit, QMenu, QPushButton, QScrollArea, QToolButton,
-                               QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QFrame, QGroupBox,
+                               QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QScrollArea,
+                               QToolButton, QVBoxLayout, QWidget)
 
 from guiqula.core import regions as region_tools
 from guiqula.core.document import DocumentError
 from guiqula.registry import base as registry
 from guiqula.registry import cost
-from guiqula.ui import formulas
+from guiqula.registry.params import FieldParam, VectorFieldParam
+from guiqula.ui import formulas, theme
 from guiqula.ui.forms import format_number, make_editor, result_sources
 from guiqula.ui.outliner import system_of
+from guiqula.ui.sliders import range_from
 
 EVERYWHERE = "(everywhere)"
 FAMILY = {"op": "geometry_op", "term": "term", "calculation": "calculation"}
+SWEEP_POINTS = 11
+# the interactions beyond the first neighbours, folded in the mean-field form
+FURTHER_NEIGHBOURS = ("V2", "V3", "J2", "J3")
+SPIN_TIP = ("spinful: both spin species, even without a term that needs them (has_spin). The "
+            "terms decide by themselves: a Zeeman field, a spin-orbit coupling or an exchange "
+            "field makes the Hamiltonian spinful whatever is chosen here, so spinless holds "
+            "only while no term needs the spin.")
+NAMBU_TIP = ("the Bogoliubov-de Gennes (Nambu) Hamiltonian, electrons and holes, even without "
+             "a pairing term (nambu). A pairing term makes it Nambu by itself; checking this "
+             "asks for it without one.")
+TIJ_TIP = ("the hoppings to the first, second, ... neighbours, comma separated (tij): as many "
+           "numbers as neighbour shells the hopping reaches, so 1, 0.1 is a first-neighbour "
+           "hopping 1 and a second-neighbour hopping 0.1")
+SPARSE_TIP = ("store the Hamiltonian as a sparse matrix (is_sparse), for large systems: the "
+              "calculations then use sparse solvers, with the few states near an energy "
+              "rather than the full spectrum")
 
 
 def _regions(system):
@@ -47,8 +78,35 @@ def _quiet(widget, setter, value):
         widget.blockSignals(False)
 
 
+def sweep_target(session, system_id, entry_id):
+    """The calculation a sweep of a parameter of entry_id runs at every
+    value: the calculation itself when it is one; else one of the system's
+    (a sweep runs no sweep), the first whose result already gives numbers
+    to collect (a gap, a Chern number, an energy), or the first; "" when
+    the system has none, which the sweep's form then says."""
+    import numpy as np
+    document = session.document
+    own = [c for c in document.calculations if c.system == system_id
+           and not getattr(_spec_of(c), "document_level", True)]
+    if any(c.id == entry_id for c in own):
+        return entry_id
+    for calc in own:
+        result = session.result(calc.id)
+        if result is not None and any(np.ndim(v) == 0 for v in result.arrays.values()):
+            return calc.id
+    return own[0].id if own else ""
+
+
+def _spec_of(calc):
+    try:
+        return registry.get("calculation", calc.kind)
+    except registry.RegistryError:
+        return None
+
+
 class Form(QWidget):
     lock_owner = None       # what a parameter lock names: "t1" in "t1.m", "s1" in "s1.n"
+    previews = False        # whether its Fields can be drawn on the canvas (terms, mean field)
 
     def __init__(self, panel, item_id, title, doc=""):
         super().__init__()
@@ -56,9 +114,12 @@ class Form(QWidget):
         self.item_id = item_id
         self.labels = {}
         self.guarded = []   # widgets a lock of the whole form disables (enabled, region, ...)
+        self.menu = None    # the label menu shown last
+        self.enabled = None  # the enabled switch of the title's row (add_enabled)
         layout = QVBoxLayout(self)
         self.title = QLabel(title)
         self.title.setObjectName("formTitle")
+        self.title.setWordWrap(True)
         # parented from the start: a parentless widget made visible is a window of its own,
         # which flashes on the desktop and takes the activation from the main window
         self.help_button = QToolButton(self)
@@ -77,10 +138,10 @@ class Form(QWidget):
         self.error.setObjectName("formError")
         self.error.setWordWrap(True)
         self.error.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        heading = QHBoxLayout()
-        heading.addWidget(self.title, 1)
-        heading.addWidget(self.help_button)
-        layout.addLayout(heading)
+        self.heading = QHBoxLayout()
+        self.heading.addWidget(self.title, 1)
+        self.heading.addWidget(self.help_button)
+        layout.addLayout(self.heading)
         layout.addWidget(self.doc)
         layout.addLayout(self.rows)
         layout.addWidget(self.error)
@@ -109,10 +170,12 @@ class Form(QWidget):
             self.update_values()
         return ok
 
-    def add_editors(self, params, values, send, regions=(), sources=()):
+    def add_editors(self, params, values, send, regions=(), sources=(), rows=None):
         """One editor per parameter; send(name, value) commits it. regions:
         [(id, name)] the piecewise Fields can use; sources: the results a
-        from_result Field can read (forms.result_sources)."""
+        from_result Field can read (forms.result_sources); rows: the form
+        layout they go in (the form's own rows by default)."""
+        rows = self.rows if rows is None else rows
         for param in params:
             editor = make_editor(param, getattr(self.session.jobs, "names", {}), regions,
                                  sources)
@@ -123,14 +186,204 @@ class Form(QWidget):
                                                                                p.name))
             label = QLabel(param.label)
             label.setObjectName(f"label_{param.name}")
-            label.setToolTip(param.doc)
-            if self.lock_owner is not None:
-                label.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-                label.customContextMenuRequested.connect(
-                    lambda point, p=param, w=label: self._lock_menu(p, w, point))
-            self.rows.addRow(label, editor)
+            label.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            label.customContextMenuRequested.connect(
+                lambda point, name=param.name: self.label_menu(name, point))
+            rows.addRow(label, editor)
             self.labels[param.name] = label
             self.editors[param.name] = editor
+            self._label_says(param.name, [])
+
+    def add_enabled(self, send):
+        """The enabled switch, in the title's row (check_enabled); send(bool)
+        commits it."""
+        self.enabled = QCheckBox("enabled")
+        self.enabled.setObjectName("check_enabled")
+        self.enabled.setToolTip("unchecked, the entry stays in the document and is left out "
+                                "of the builds (enabled)")
+        self.enabled.toggled.connect(send)
+        self.heading.insertWidget(1, self.enabled)
+        return self.enabled
+
+    # ---- the labels' menu: lock, slider, sweep, preview
+    def _label_says(self, name, locked_by):
+        """A label's text and tooltip: the physics on the label, and in the
+        tooltip the doc, the parameter's name in the engine, the locks and
+        what its menu offers."""
+        label, param = self.labels[name], self.editors[name].param
+        sweepable = self._sweepable(name)
+        offers = [what for what, ok in (("attach a slider", sweepable), ("sweep it", sweepable),
+                                        ("preview it on the canvas", self._previewable(name)),
+                                        ("unlock it" if locked_by else "lock it",
+                                         self.lock_owner is not None)) if ok]
+        tip = param.doc + ("\n\n" if param.doc else "") + f"parameter {param.name}"
+        if locked_by:
+            tip += f"; locked by {', '.join(locked_by)}"
+        if offers:
+            tip += "; right-click to " + ", ".join(offers[:-1]) + \
+                (" or " if len(offers) > 1 else "") + offers[-1]
+        label.setText(param.label + (" (locked)" if locked_by else ""))
+        label.setToolTip(tip)
+
+    def _sweepable(self, name):
+        """Whether a slider or a sweep can move this parameter (a number of
+        a Field, of an op, of a calculation, of the lattice, of the mean
+        field or of a model; sweeps.check_target)."""
+        from guiqula.registry import sweeps
+        param = self.editors[name].param
+        component = 0 if isinstance(param, VectorFieldParam) else None
+        try:
+            return sweeps.check_target(self.session.document, self.item_id, name,
+                                       component) is None
+        except Exception:
+            return False
+
+    def _previewable(self, name):
+        return self.previews and isinstance(self.editors[name].param, FieldParam)
+
+    def _number_of(self, name, component=None):
+        """The finite number a parameter (or a component of it) holds, or
+        None: an expression, a structured Field, an empty optional."""
+        from guiqula.registry import sweeps
+        try:
+            value = sweeps.locate(self.session.document, self.item_id)[1].get(
+                name, self.editors[name].param.default)
+            if component is not None:
+                value = value[component]
+        except Exception:
+            return None
+        if isinstance(value, bool) or not isinstance(value, (int, float)) \
+                or not math.isfinite(value):
+            return None
+        return float(value)
+
+    def label_menu(self, name, point=None):
+        """The menu of a parameter's label (paramMenu_<name>), shown at point
+        of the label (its middle when left out): Lock or Unlock, Attach a
+        slider, Sweep this parameter (one item per component of a vector)
+        and Preview on the canvas, those that apply. Returns it, or None
+        when nothing applies."""
+        label, param = self.labels[name], self.editors[name].param
+        menu = QMenu(label)
+        menu.setObjectName(f"paramMenu_{name}")
+        menu.setToolTipsVisible(True)
+        if self.lock_owner is not None:
+            target = f"{self.lock_owner}.{name}"
+            if target in self.session.document.locks:
+                action = menu.addAction("Unlock this parameter",
+                                        lambda: self.commit("unlock", target=target))
+                action.setObjectName(f"unlockParam_{name}")
+                action.setToolTip(f"let {target} be changed again")
+            else:
+                action = menu.addAction("Lock this parameter",
+                                        lambda: self.commit("lock", target=target))
+                action.setObjectName(f"lockParam_{name}")
+                action.setToolTip(f"keep {target} as it is: its editor is disabled until it is "
+                                  f"unlocked (a teaching preset's lock)")
+        if self._sweepable(name):
+            vector = isinstance(param, VectorFieldParam)
+            components = list(enumerate("xyz"[:param.length])) if vector else [(None, "")]
+            for what, verb in (("slider", "Attach a slider"), ("sweep", "Sweep this parameter")):
+                where = menu.addMenu(verb) if vector else menu
+                if vector:
+                    where.setObjectName(f"{'attachSlider' if what == 'slider' else 'sweepParam'}"
+                                        f"Menu_{name}")
+                    where.setToolTipsVisible(True)
+                for component, axis in components:
+                    self._range_action(where, what, verb, name, component, axis)
+        if self._previewable(name):
+            action = menu.addAction("Preview on the canvas", lambda: self.commit(
+                "preview", entry=self.item_id, param=name))
+            action.setObjectName(f"previewField_{name}")
+            action.setToolTip(f"draw {param.label} on the sites of the Structure tab (the "
+                              f"Field view), where it can be painted")
+        if menu.isEmpty():
+            menu.deleteLater()
+            return None
+        self.menu = menu
+        menu.popup(label.mapToGlobal(point if point is not None else label.rect().center()))
+        return menu
+
+    def _range_action(self, menu, what, verb, name, component, axis):
+        """One item of the label menu: a slider or a sweep of a parameter
+        (or of one component), over the range of its value, disabled when
+        it holds no number to take the range from (or, for a slider, when
+        it is locked)."""
+        param = self.editors[name].param
+        value = self._number_of(name, component)
+        text = (f"{axis} component" if axis else verb)
+        span = None if value is None else range_from(value, getattr(param, "minimum", None),
+                                                     getattr(param, "maximum", None))
+        action = menu.addAction(text)
+        prefix = "attachSlider" if what == "slider" else "sweepParam"
+        action.setObjectName(f"{prefix}_{name}" + (f"_{axis}" if axis else ""))
+        label = param.label + (f" {axis}" if axis else "")
+        if span is None:
+            action.setEnabled(False)
+            action.setToolTip(f"{label} holds no number to take a range from: make it a number "
+                              f"first")
+        elif what == "slider":
+            action.setToolTip(f"a slider in the Sliders panel moving {label} from {span[0]:g} "
+                              f"to {span[1]:g}; the cheap results follow it with Follow on")
+            action.setEnabled(self.editors[name].isEnabled())
+            if not action.isEnabled():
+                action.setToolTip(f"{label} is locked: unlock it to move it with a slider")
+            action.triggered.connect(lambda: self.attach_slider(name, component))
+        else:
+            target = sweep_target(self.session, self.sweep_system(), self.item_id)
+            action.setToolTip(f"a sweep calculation: {SWEEP_POINTS} values of {label} from "
+                              f"{span[0]:g} to {span[1]:g}, each running "
+                              f"{target or 'a calculation of this system'} and collecting the "
+                              f"numbers it gives (a gap, a Chern number, an energy)")
+            action.triggered.connect(lambda: self.sweep(name, component))
+        return action
+
+    def slider_range(self, name, component=None):
+        """(low, high) of a slider or a sweep of a parameter, from its value
+        (sliders.range_from); ValueError when it holds no number."""
+        value = self._number_of(name, component)
+        if value is None:
+            raise ValueError(f"{name} holds no number to take a range from")
+        param = self.editors[name].param
+        return range_from(value, getattr(param, "minimum", None), getattr(param, "maximum", None))
+
+    def attach_slider(self, name, component=None):
+        """Attach a slider to a parameter (the window's slider action) over
+        slider_range; returns its index, or None when refused."""
+        try:
+            low, high = self.slider_range(name, component)
+        except ValueError as error:
+            self.error.setText(str(error))
+            return None
+        ok, out = self.panel.run("slider", entry=self.item_id, param=name, component=component,
+                                 minimum=low, maximum=high)
+        self.error.setText("" if ok else str(out))
+        return out if ok else None
+
+    def sweep(self, name, component=None):
+        """Add a sweep of a parameter over slider_range, SWEEP_POINTS
+        values, running a calculation of the same system (sweep_target), and
+        select it; returns its id, or None when refused."""
+        try:
+            low, high = self.slider_range(name, component)
+        except ValueError as error:
+            self.error.setText(str(error))
+            return None
+        system = self.sweep_system()
+        params = {"calculation": sweep_target(self.session, system, self.item_id),
+                  "entry": self.item_id, "param": name, "component": component,
+                  "start": low, "stop": high, "steps": SWEEP_POINTS}
+        run = self.panel.run
+        ok, out = run("add_calculation", system=system, kind="sweep", params=params)
+        if not ok:
+            self.error.setText(str(out))
+            return None
+        run("select", entry=out)             # the form is replaced: nothing of it after this
+        return out
+
+    def sweep_system(self):
+        """The system a sweep of this form's parameters runs on."""
+        return self.system_id
 
     # ---- locks
     def whole_locks(self):
@@ -145,25 +398,10 @@ class Form(QWidget):
             own = f"{self.lock_owner}.{name}" if self.lock_owner else None
             by = whole + ([own] if own in locks else [])
             editor.setEnabled(not by)
-            label = self.labels.get(name)
-            if label is not None:
-                param = editor.param
-                label.setText(param.label + (" (locked)" if by else ""))
-                label.setToolTip(param.doc + (f"\n\nlocked by {', '.join(by)}; right-click "
-                                              f"to unlock" if by else ""))
+            if name in self.labels:
+                self._label_says(name, by)
         for widget in self.guarded:
             widget.setEnabled(not whole)
-
-    def _lock_menu(self, param, label, point):
-        target = f"{self.lock_owner}.{param.name}"
-        menu = QMenu(label)
-        menu.setObjectName("lockMenu")
-        if target in self.session.document.locks:
-            menu.addAction("Unlock this parameter", lambda: self.commit("unlock", target=target))
-        else:
-            menu.addAction("Lock this parameter", lambda: self.commit("lock", target=target))
-        menu.popup(label.mapToGlobal(point))
-        return menu
 
     def live_value(self, name):
         editor = self.editors.get(name)
@@ -226,24 +464,31 @@ class SystemForm(Form):
             pass
         if system.hamiltonian is not None:
             box = QGroupBox("Hamiltonian construction")
+            box.setObjectName("constructionBox")
             form = QFormLayout(box)
-            self.has_spin, self.nambu, self.sparse = QCheckBox(), QCheckBox(), QCheckBox()
+            form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+            self.has_spin, self.nambu, self.sparse = QComboBox(), QCheckBox(), QCheckBox()
+            self.has_spin.addItem("spinless", False)
+            self.has_spin.addItem("spinful", True)
             self.tij = QLineEdit()
             for widget, name in ((self.has_spin, "has_spin"), (self.nambu, "nambu"),
                                  (self.sparse, "is_sparse"), (self.tij, "tij")):
                 widget.setObjectName(f"construction_{name}")
-            self.has_spin.toggled.connect(lambda v: self.commit(
-                "set_construction", system=system_id, has_spin=v))
+            self.has_spin.activated.connect(lambda index: self._set_spin(index))
             self.nambu.toggled.connect(lambda v: self.commit(
                 "set_construction", system=system_id, nambu=v))
             self.sparse.toggled.connect(lambda v: self.commit(
                 "set_construction", system=system_id, is_sparse=v))
             self.tij.editingFinished.connect(self._set_tij)
-            self.tij.setToolTip("hoppings to first, second, ... neighbours, comma separated")
-            form.addRow("spinful (requested)", self.has_spin)
-            form.addRow("Nambu (requested)", self.nambu)
-            form.addRow("neighbour hoppings", self.tij)
-            form.addRow("sparse", self.sparse)
+            for widget, tip, text in ((self.has_spin, SPIN_TIP, "spin"),
+                                      (self.nambu, NAMBU_TIP, "superconducting (Nambu)"),
+                                      (self.tij, TIJ_TIP, "hopping range (neighbours)"),
+                                      (self.sparse, SPARSE_TIP, "sparse matrices (large systems)")):
+                widget.setToolTip(tip)
+                label = QLabel(text)
+                label.setToolTip(tip)
+                label.setObjectName(f"constructionLabel_{widget.objectName().split('_', 1)[1]}")
+                form.addRow(label, widget)
             self.layout().insertWidget(3, box)
         self.guarded = [self.name] + ([self.has_spin, self.nambu, self.sparse, self.tij]
                                       if system.hamiltonian is not None else [])
@@ -267,7 +512,8 @@ class SystemForm(Form):
             editor.set_value(system.geometry.base.params.get(name, param.default))
         if system.hamiltonian is not None:
             c = system.hamiltonian.construction
-            _quiet(self.has_spin, self.has_spin.setChecked, c.has_spin)
+            _quiet(self.has_spin, self.has_spin.setCurrentIndex,
+                   self.has_spin.findData(bool(c.has_spin)))
             _quiet(self.nambu, self.nambu.setChecked, c.nambu)
             _quiet(self.sparse, self.sparse.setChecked, c.is_sparse)
             _quiet(self.tij, self.tij.setText, ", ".join(format_number(t) for t in c.tij))
@@ -301,7 +547,8 @@ class SystemForm(Form):
             text += f"\n{plan.mode} because of {', '.join(plan.upgraded_by)}"
         if build["dimension"] > cost.DENSE_DIMENSION:
             text += (f"\nabove pyqula's dense limit ({cost.DENSE_DIMENSION}): full "
-                     f"diagonalizations will be slow; consider sparse storage")
+                     f"diagonalizations will be slow; consider sparse matrices (large "
+                     f"systems), above")
         return text + ("" if session.build_is_current(system_id) else "\n(updating…)")
 
     def _rename(self):
@@ -314,11 +561,18 @@ class SystemForm(Form):
         if kind != self.session.document.system(self.system_id).geometry.base.kind:
             self.commit("set_lattice", system=self.system_id, lattice=kind)
 
+    def _set_spin(self, index):
+        has_spin = self.has_spin.itemData(index)
+        if has_spin != self.session.document.system(self.system_id).hamiltonian.construction \
+                .has_spin:
+            self.commit("set_construction", system=self.system_id, has_spin=has_spin)
+
     def _set_tij(self):
         try:
             tij = [float(t) for t in self.tij.text().replace(";", ",").split(",") if t.strip()]
         except ValueError:
-            self.error.setText("neighbour hoppings: a comma separated list of numbers")
+            self.error.setText("hopping range: a comma separated list of numbers, one per "
+                               "neighbour shell")
             self.update_values()
             return
         if tij != self.session.document.system(self.system_id).hamiltonian.construction.tij:
@@ -343,24 +597,36 @@ class EntryForm(Form):
                 self.layout().insertWidget(2, self._formula(spec.formula))
         self.family, self.kind, self.spec = family, obj.kind, spec
         self.system_id = owner.id if owner is not None else obj.system
+        self.previews = family == "term"
         self.enabled = None
         if family in ("op", "term"):
-            self.enabled = QCheckBox()
-            self.enabled.setObjectName("check_enabled")
-            self.enabled.toggled.connect(lambda v: self.commit("set_enabled", entry=entry_id,
-                                                               enabled=v))
-            self.rows.addRow("enabled", self.enabled)
-        self.region = None
+            self.add_enabled(lambda v: self.commit("set_enabled", entry=entry_id, enabled=v))
+        self.region = self.region_link = None
         self.region_ids = ()
-        if family == "term":
+        if family == "term" and owner.regions:
             self.region = QComboBox()
             self.region.setObjectName("regionBox")
+            self.region.setToolTip("where the term acts: everywhere, or on the sites of one "
+                                   "region of the system (set_region)")
             self.region.addItem(EVERYWHERE, None)
             for region in owner.regions:
                 self.region.addItem(f"{region.id}  {region.name}", region.id)
             self.region_ids = tuple(r.id for r in owner.regions)
             self.region.activated.connect(self._set_region)
             self.rows.addRow("region", self.region)
+        elif family == "term":
+            self.region_link = QLabel(f'<span style="color: {theme.DOC}">acts everywhere · '
+                                      f'</span><a href="#regions">restrict to a region</a>')
+            self.region_link.setObjectName("regionLink")
+            self.region_link.setWordWrap(True)
+            self.region_link.setToolTip(f"{owner.id} has no region yet: the link opens the "
+                                        f"Regions menu of {owner.id} (a region by expression, "
+                                        f"or from the sites selected on the canvas); a term "
+                                        f"can then be restricted to it")
+            self.region_link.setTextInteractionFlags(
+                Qt.TextInteractionFlag.LinksAccessibleByMouse)
+            self.region_link.linkActivated.connect(lambda _: self.restrict_to_region())
+            self.rows.addRow(self.region_link)
         if family == "calculation":
             self.rows.addRow("system", QLabel(obj.system))
         if spec is not None:
@@ -369,7 +635,7 @@ class EntryForm(Form):
                              lambda name, value: self.commit("set_param", entry=entry_id,
                                                              name=name, value=value),
                              _regions(owner) if family == "term" else (), self.sources)
-        self.guarded = [w for w in (self.enabled, self.region) if w is not None]
+        self.guarded = [w for w in (self.enabled, self.region, self.region_link) if w is not None]
         self.status = QLabel()
         self.status.setObjectName("entryStatus")
         self.status.setWordWrap(True)
@@ -429,6 +695,13 @@ class EntryForm(Form):
     def _set_region(self, index):
         region = self.region.itemData(index)
         self.commit("set_region", entry=self.item_id, region=region)
+
+    def restrict_to_region(self):
+        """The region link: the Regions menu of the term's system (P2's "+"
+        menu of its Regions row), below the link."""
+        link = self.region_link
+        where = link.mapToGlobal(link.rect().bottomLeft()) if link is not None else None
+        self.panel.regions_requested.emit(self.system_id, where)
 
 
 class RegionForm(Form):
@@ -541,7 +814,13 @@ class RegionForm(Form):
 
 class MeanFieldForm(Form):
     """The mean-field block of a system (PLAN.md section 5), shown for the
-    outliner row <system>/meanfield."""
+    outliner row <system>/meanfield. The interactions beyond the first
+    neighbours (FURTHER_NEIGHBOURS) are folded under the check box "further
+    neighbours" (furtherNeighbours, over the frame of their rows,
+    furtherNeighboursRows), checked whenever one of them is not zero:
+    checking it shows them, and unchecking it sets them to zero (one undo
+    step) and folds them."""
+    previews = True
 
     def __init__(self, panel, item_id):
         self.system_id = system_of(item_id)
@@ -558,16 +837,42 @@ class MeanFieldForm(Form):
                              f"{self.system_id} · {spec.group}\n{spec.doc}")
             if spec.formula:
                 self.layout().insertWidget(2, self._formula(spec.formula))
-        self.enabled = QCheckBox()
-        self.enabled.setObjectName("check_enabled")
-        self.enabled.toggled.connect(lambda v: self.commit("set_meanfield", system=self.system_id,
-                                                           enabled=v))
-        self.rows.addRow("enabled", self.enabled)
+        self.add_enabled(lambda v: self.commit("set_meanfield", system=self.system_id,
+                                               enabled=v))
+        self.further = None
         if spec is not None:
-            self.add_editors(spec.params, spec.normalize_params({}) | block.params,
-                             lambda name, value: self.commit(
-                                 "set_meanfield", system=self.system_id, params={name: value}),
-                             _regions(system))
+            values = spec.normalize_params({}) | block.params
+
+            def send(name, value):
+                self.commit("set_meanfield", system=self.system_id, params={name: value})
+            further = [p for p in spec.params if p.name in FURTHER_NEIGHBOURS]
+            rest = [p for p in spec.params if p.name not in FURTHER_NEIGHBOURS]
+            # the first neighbours' V and J right after U, then the folded ones
+            first = [p for p in rest if p.name in ("U", "V1", "J1")] if further else []
+            self.add_editors(first or rest, values, send, _regions(system))
+            if further:
+                # a check box over a framed group of rows: a checkable QGroupBox keeps its
+                # empty frame when its rows are hidden
+                self.further = QCheckBox("further neighbours")
+                self.further.setObjectName("furtherNeighbours")
+                self.further.setToolTip("V and J between second and third neighbours "
+                                        f"({', '.join(p.name for p in further)}): checked, "
+                                        f"they are shown; unchecked, they are zero")
+                inner = QFrame()
+                inner.setObjectName("furtherNeighboursRows")
+                inner.setFrameShape(QFrame.Shape.StyledPanel)
+                rows = QFormLayout(inner)
+                rows.setContentsMargins(6, 4, 6, 4)
+                rows.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+                self.further_rows = inner
+                self.add_editors(further, values, send, _regions(system), rows=rows)
+                self.rows.addRow(self.further)
+                self.rows.addRow(inner)
+                self.further.toggled.connect(self._fold_further)
+                self.add_editors([p for p in rest if p not in first], values, send,
+                                 _regions(system))
+                self._show_further(self._further_set(block.params))
+            self.guarded = [self.further] if self.further is not None else []
         self.status = QLabel()
         self.status.setObjectName("meanfieldStatus")
         self.status.setWordWrap(True)
@@ -584,7 +889,33 @@ class MeanFieldForm(Form):
         for name, editor in self.editors.items():
             if name in block.params:
                 editor.set_value(block.params[name])
+        if self.further is not None and self._further_set(block.params):
+            self._show_further(True)          # a value is never hidden
         self.update_reports()
+
+    @staticmethod
+    def _further_set(params):
+        """Whether an interaction beyond the first neighbours is not zero."""
+        return any(params.get(name, 0.0) != 0.0 for name in FURTHER_NEIGHBOURS)
+
+    def _show_further(self, shown):
+        _quiet(self.further, self.further.setChecked, shown)
+        self._unfold(shown)
+
+    def _unfold(self, shown):
+        self.further_rows.setVisible(shown)
+
+    def _fold_further(self, shown):
+        """The group's check box: shown, the rows unfold; hidden, the further
+        neighbours are set to zero in one step (refused under a lock, when
+        the group shows them again)."""
+        block = self.session.document.system(self.system_id).hamiltonian.meanfield
+        if not shown and self._further_set(block.params):
+            zero = {p: 0.0 for p in FURTHER_NEIGHBOURS if p in self.editors}
+            if not self.commit("set_meanfield", system=self.system_id, params=zero):
+                self._show_further(True)
+                return
+        self._unfold(shown)
 
     def update_reports(self):
         self.status.setText(self._status())
@@ -645,6 +976,7 @@ class ModelForm(Form):
 class PropertiesPanel(QScrollArea):
     preview = Signal(str, str)        # entry (or <system>/meanfield), parameter name
     help_requested = Signal(str)      # the ? of a form: the item whose help to show
+    regions_requested = Signal(str, object)   # a term's region link: system, global QPoint
 
     def __init__(self, run, parent=None):
         super().__init__(parent)

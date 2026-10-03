@@ -213,6 +213,7 @@ class MainWindow(QMainWindow):
         self.properties = PropertiesPanel(self._do)
         self.properties.preview.connect(self._preview_requested)
         self.properties.help_requested.connect(lambda item: self.show_help(item))
+        self.properties.regions_requested.connect(self.open_regions_menu)
         self.help_panel = HelpPanel()
         self.structure = StructureView()
         self.structure.selection_changed.connect(self._selection_changed)

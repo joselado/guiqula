@@ -57,14 +57,17 @@ def test_field_editor_goes_piecewise_and_back(window, qtbot, shot):
     window.select("t2")
     editor = window.properties.form.editors["c"]
     assert editor.button.text() == "f(r)" and not editor.panel.isVisible()
-    editor.button.click()
-    assert editor.panel.isVisible() and editor.kind.currentIndex() == 0
-    editor.kind.setCurrentIndex(1)
-    editor.kind.activated.emit(1)                      # one value per region
+    menu = editor.button.menu()
+    editor.button.click()                              # the kind menu, opened with popup()
+    qtbot.waitUntil(menu.isVisible)
+    assert editor.kind_actions["constant"].isChecked()
+    menu.findChild(QAction, "fieldKind_c_piecewise").trigger()     # one value per region
+    menu.close()
     assert session.document.find("t2")[-1].params["c"] == {
         "kind": "piecewise", "default": 0.1, "pieces": []}
     editor = window.properties.form.editors["c"]       # updated in place
     assert editor.edit.isReadOnly() and editor.panel.isVisible()
+    assert editor.button.text() == "piecewise" and editor.kind_actions["piecewise"].isChecked()
     editor.add.click()
     assert session.document.find("t2")[-1].params["c"]["pieces"] == [
         {"region": region, "value": 0.1}]
@@ -81,9 +84,9 @@ def test_field_editor_goes_piecewise_and_back(window, qtbot, shot):
     shot(window, "piecewise")
     editor.rows[0].remove.click()
     assert session.document.find("t2")[-1].params["c"]["pieces"] == []
-    editor.kind.setCurrentIndex(0)
-    editor.kind.activated.emit(0)                      # back to a number: the default
+    editor.kind_actions["constant"].trigger()          # back to a number: the default
     assert session.document.find("t2")[-1].params["c"] == 0.05
+    assert editor.button.text() == "f(r)" and not editor.panel.isVisible()
     for _ in range(6):
         session.undo()
     assert session.document.find("t2")[-1].params["c"] == 0.1
@@ -322,14 +325,13 @@ def test_new_field_kinds_and_the_brush(window, qtbot, shot):
     """A profile Field from the f(r) panel, then painting on the Field
     preview: the brush turns the Field into a painted one, a stroke is one
     undo step, and the preview draws it."""
-    from guiqula.ui.forms import KINDS, PAINTED_KIND, PROFILE_KIND
     fresh(qtbot, window)
     session = window.session
     term = session.do("add_term", system="s1", kind="onsite", params={"mu": 0.0})
     window.select(term)
     editor = window.properties.form.editors["mu"]
     editor.open_panel()
-    editor._kind_chosen(KINDS.index(PROFILE_KIND))
+    editor.choose_kind("profile")
     value = session.document.find(term)[-1].params["mu"]
     assert value["kind"] == "profile" and value["name"] == "gaussian"
     editor = window.properties.form.editors["mu"]
@@ -338,7 +340,7 @@ def test_new_field_kinds_and_the_brush(window, qtbot, shot):
     edit.editingFinished.emit()
     assert session.document.find(term)[-1].params["mu"]["params"]["width"] == 0.8
     editor = window.properties.form.editors["mu"]
-    editor._kind_chosen(KINDS.index(PAINTED_KIND))
+    editor.choose_kind("painted")
     assert session.document.find(term)[-1].params["mu"] == {
         "kind": "painted", "sites": [], "tol": 0.1, "default": 0.0}
     session.undo()
