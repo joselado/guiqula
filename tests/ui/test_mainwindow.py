@@ -57,7 +57,8 @@ def test_workspaces_switch_palettes(qtbot):
         assert window.workspace_tabs.currentIndex() == ["geometry", "hamiltonian",
                                                         "calculate"].index(name)
         assert window.add_button.menu() is window.palette_menus[family]     # what Add lists
-        assert window.findChild(QWidget, "structureBar").isVisible()    # the selection tools
+        bar = window.findChild(QWidget, "structureBar")   # the selection tools, on the canvas
+        assert bar.isVisibleTo(window.structure)          # (behind the start page, P1)
         assert window.current_tab() == "structure"      # no calculation to show
         assert window.canvas_view == view and window.structure.view_box.currentData() == view
     window.workspace_tabs.setCurrentIndex(2)           # the tab bar drives it too
