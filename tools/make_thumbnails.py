@@ -25,7 +25,9 @@ fails until its picture exists):
     python tools/make_thumbnails.py kagome_lattice haldane_chern   # some, by name
 
 The workers run in a temporary directory (pyqula writes files to the cwd),
-which also holds the autosaves and the settings of the driven window.
+which also holds the autosaves and the settings of the driven window. The
+plugins are off ($GUIQULA_NO_PLUGINS), so that only the built-in lattices
+get a shipped picture.
 """
 import argparse
 import importlib.util
@@ -179,15 +181,26 @@ def jobs(names):
     return [job for job in every if job[1] in names]
 
 
+def environment():
+    """The tool's process set up before guiqula is imported: a scratch
+    directory as the cwd (pyqula writes files there), holding the autosaves
+    and the settings of the driven window, and the plugins off, so that a
+    plugin's lattice is never drawn into the shipped pictures. Returns the
+    scratch directory."""
+    scratch = tempfile.mkdtemp(prefix="guiqula-thumbnails-")
+    os.environ["GUIQULA_DATA_DIR"] = str(Path(scratch) / "data")
+    os.environ["GUIQULA_CONFIG_DIR"] = str(Path(scratch) / "config")
+    os.environ["GUIQULA_NO_PLUGINS"] = "1"
+    os.chdir(scratch)
+    return scratch
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("names", nargs="*", help="lattice kinds, classical kinds or presets")
     parser.add_argument("--timeout", type=float, default=900, help="seconds per picture")
     args = parser.parse_args(argv)
-    scratch = tempfile.mkdtemp(prefix="guiqula-thumbnails-")
-    os.environ["GUIQULA_DATA_DIR"] = str(Path(scratch) / "data")
-    os.environ["GUIQULA_CONFIG_DIR"] = str(Path(scratch) / "config")
-    os.chdir(scratch)
+    environment()
     drive = load_drive()
     drive.env.configure_qt(offscreen=True)
     from guiqula.ui.app import build_main_window, create_application

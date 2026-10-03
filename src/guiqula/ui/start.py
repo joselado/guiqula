@@ -443,6 +443,7 @@ class Band(QWidget):
         self.top.addWidget(self.more)
         self.empty = QLabel()
         self.empty.setObjectName(f"startEmpty_{key}")
+        self.empty_texts = ("", "")    # (the band has no card, the filter leaves none)
         self.empty.setEnabled(False)
         self.empty.setWordWrap(True)
         self.flow = QVBoxLayout() if rows else FlowLayout()
@@ -455,6 +456,12 @@ class Band(QWidget):
         layout.addLayout(self.top)
         layout.addLayout(self.flow)
         layout.addWidget(self.empty)
+
+    def set_empty(self, none, unmatched):
+        """What the band says when it has no card at all, and when the
+        filter leaves none of its cards."""
+        self.empty_texts = (none, unmatched)
+        self.empty.setText(unmatched if self.cards else none)
 
     def add_heading(self, group):
         heading = Heading(group, muted=True)
@@ -509,6 +516,7 @@ class Band(QWidget):
         self.more.setText("Show fewer" if self.expanded else f"Show all {len(matching)}")
         self.more.setToolTip("show only the first row" if self.expanded else
                              f"show the {len(matching)} {self.noun}")
+        self.empty.setText(self.empty_texts[1] if self.cards else self.empty_texts[0])
         self.empty.setVisible(not matching)
         return [card.objectName() for card in self.cards if id(card) in visible]
 
@@ -568,13 +576,13 @@ class StartPage(QWidget):
                                                f"its usual lattice, in a supercell (New "
                                                f"system > Classical systems)."),
                                   CLASSICAL_GROUP)
-        self.lattices.empty.setText("No lattice matches the filter.")
+        self.lattices.set_empty("No lattice is declared.", "No lattice matches the filter.")
         self.presets = Band("presets", "Open an example",
                             "documents shipped with guiqula, fully editable; the teaching "
                             "ones lock what their exercise keeps fixed", "examples")
         for info in presets():
             self.presets.add(preset_card(info))
-        self.presets.empty.setText("No example matches the filter.")
+        self.presets.set_empty("No example is shipped.", "No example matches the filter.")
         self.recent = Band("recent", "Recent files",
                            "the project files opened or saved last", "recent files",
                            rows=True)
@@ -585,7 +593,8 @@ class StartPage(QWidget):
                                     f"({shortcuts.text('open')})")
         self.open_button.clicked.connect(self.open_requested)
         self.recent.top.addWidget(self.open_button)
-        self.recent.empty.setText("Projects you save or open will be listed here.")
+        self.recent.set_empty("Projects you save or open will be listed here.",
+                              "No recent file matches the filter.")
         self.footer = QLabel(FOOTER.format(run=shortcuts.text("run"),
                                            help=shortcuts.text("help")))
         self.footer.setObjectName("startFooter")

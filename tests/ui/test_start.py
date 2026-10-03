@@ -63,6 +63,38 @@ def test_every_lattice_and_preset_has_a_picture():
         "a picture of something that is gone"
 
 
+TOOL = """
+import importlib.util, json, os, shutil, sys
+os.environ.pop("GUIQULA_NO_PLUGINS", None)
+spec = importlib.util.spec_from_file_location("make_thumbnails", sys.argv[1])
+tool = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(tool)
+scratch = tool.environment()
+before = "guiqula" in sys.modules
+from guiqula.registry import plugins
+print(json.dumps({"off": plugins.disabled(), "cwd": os.getcwd() == scratch,
+                  "data": os.environ["GUIQULA_DATA_DIR"].startswith(scratch),
+                  "config": os.environ["GUIQULA_CONFIG_DIR"].startswith(scratch),
+                  "guiqula_before": before}))
+os.chdir("/")
+shutil.rmtree(scratch)
+"""
+
+
+def test_the_thumbnail_tool_draws_without_plugins(run_python, repo):
+    """tools/make_thumbnails.py turns the plugins off before guiqula is
+    imported, so that a plugin's lattice never lands among the shipped
+    pictures (test_every_lattice_and_preset_has_a_picture would fail)."""
+    import json
+    tool = repo / "tools" / "make_thumbnails.py"
+    result = run_python(TOOL.replace("sys.argv[1]", repr(str(tool))),
+                        env_update={"GUIQULA_NO_PLUGINS": ""})
+    assert result.returncode == 0, result.stderr
+    out = json.loads(result.stdout.strip().splitlines()[-1])
+    assert out == {"off": True, "cwd": True, "data": True, "config": True,
+                   "guiqula_before": False}
+
+
 def test_the_first_sentence_of_every_preset():
     for info in start.presets():
         sentence = info["sentence"]
@@ -97,6 +129,9 @@ def test_the_window_without_a_session_shows_the_page(qtbot, shot):
     page.card("lattice", "honeycomb_lattice").click()   # no session: nothing happens
     page.card("preset", "haldane_chern").click()
     assert window.session is None and window.central_stack.currentWidget() is page
+    window.new_document()                               # File > New: the page, no error
+    assert window.central_stack.currentWidget() is page
+    assert window.log.toPlainText() == "" and not window.error_bar.isVisible()
     shot(window, "start_without_session")
 
 
@@ -183,7 +218,10 @@ def test_recent_files(empty, tmp_path, qtbot):
     assert page.card("recent", 0).isEnabled() and not page.card("recent", 1).isEnabled()
     assert "gone" in page.card("recent", 1).toolTip()
     assert page.filter("work") == ["startRecent_0"]
+    assert page.filter("nothing like these") == [] and page.recent.empty.isVisible()
+    assert page.recent.empty.text() == "No recent file matches the filter."   # not "will be listed"
     page.filter("")
+    assert not page.recent.empty.isVisible()
     opened = []
     page.recent_chosen.connect(opened.append)
     page.card("recent", 0).click()
@@ -191,6 +229,10 @@ def test_recent_files(empty, tmp_path, qtbot):
     page.recent_chosen.disconnect()
     page.set_recent([])
     assert page.recent.empty.isVisible() and page.findChild(QToolButton, "startOpenButton")
+    assert page.recent.empty.text() == "Projects you save or open will be listed here."
+    assert page.filter("work") == [] and \
+        page.recent.empty.text() == "Projects you save or open will be listed here."
+    page.filter("")
 
 
 def test_the_guide_link_opens_the_help(empty):

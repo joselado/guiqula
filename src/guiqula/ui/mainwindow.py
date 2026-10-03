@@ -2890,11 +2890,13 @@ class MainWindow(QMainWindow):
         return self._confirm_discard(before)
 
     def new_document(self):
-        """File > New: an empty document, so the start page shows again."""
-        if self._may_replace("starting a new document"):
-            self._act("new")
+        """File > New: an empty document, so the start page shows again
+        (without a session there is no document to replace: the page only)."""
         if self.session is None:
             self.show_start(True)
+            return
+        if self._may_replace("starting a new document"):
+            self._act("new")
 
     def show_start(self, shown=True):
         """The start page in the viewport's place (shown), or the viewport;
