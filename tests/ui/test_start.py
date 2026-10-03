@@ -229,6 +229,22 @@ def test_the_cards_follow_the_theme(empty, qtbot):
     assert dark == theme.PALETTES["dark"][QPalette.ColorRole.Base]
 
 
+def test_the_headings_follow_the_interface_text(empty):
+    band = empty.start_page.lattices
+    heights = []
+    try:
+        for size in ("large", "normal"):
+            empty.set_ui_text(size, remember=False)
+            points = band.font().pointSizeF()
+            title = band.heading.title_font()
+            assert title.pointSizeF() == points + 2 and title.bold()
+            assert band.headings["2D"].title_font().pointSizeF() == points
+            heights.append(band.heading.sizeHint().height())
+    finally:
+        empty.set_ui_text("normal", remember=False)
+    assert heights[0] > heights[1]
+
+
 def test_the_gallery_is_made_of_the_same_cards(empty, qtbot):
     gallery = empty.show_gallery()
     card = gallery.cards["haldane_chern"]

@@ -20,7 +20,7 @@ import json
 import re
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPalette, QPen, QPixmap
 from PySide6.QtWidgets import (QAbstractButton, QFrame, QHBoxLayout, QLabel, QLayout,
                                QLineEdit, QScrollArea, QSizePolicy, QToolButton, QVBoxLayout,
@@ -369,7 +369,50 @@ class FlowLayout(QLayout):
         return y + line - rect.y()
 
 
-class Heading(QLabel):
+class Title(QWidget):
+    """A bold line of text a few points above the widgets' font, painted in
+    a font derived at paint time, so that it follows the interface text
+    (a font set on a label stays at the size it had, under the style sheet)."""
+    breaks = False
+
+    def __init__(self, text, grow=0, muted=False, parent=None):
+        super().__init__(parent)
+        self._text, self.grow, self.muted = text, grow, muted
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+
+    def text(self):
+        return self._text
+
+    def title_font(self):
+        font = QFont(self.font())
+        font.setBold(True)
+        font.setPointSizeF(font.pointSizeF() + self.grow)
+        return font
+
+    def sizeHint(self):
+        metrics = QFontMetrics(self.title_font())
+        return QSize(metrics.horizontalAdvance(self._text) + 2, metrics.height() + 2)
+
+    def minimumSizeHint(self):
+        return self.sizeHint()
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() in (QEvent.Type.FontChange, QEvent.Type.ApplicationFontChange):
+            self.updateGeometry()
+
+    def paintEvent(self, event):
+        palette = self.palette()
+        text = palette.color(QPalette.ColorRole.WindowText)
+        painter = QPainter(self)
+        painter.setFont(self.title_font())
+        painter.setPen(mix(text, palette.color(QPalette.ColorRole.Window), 0.6)
+                       if self.muted else text)
+        painter.drawText(self.rect(), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                         self._text)
+
+
+class Heading(Title):
     """A group heading inside a band: a line of its own in the flow."""
     breaks = True
 
@@ -386,12 +429,8 @@ class Band(QWidget):
         self.cards, self.headings = [], {}       # group -> Heading
         self.expanded = False
         self.words = []
-        heading = QLabel(title)
+        self.heading = heading = Title(title, grow=2)
         heading.setObjectName(f"startHeading_{key}")
-        font = heading.font()
-        font.setBold(True)
-        font.setPointSizeF(font.pointSizeF() + 2)
-        heading.setFont(font)
         heading.setToolTip(tooltip)
         self.more = QToolButton()
         self.more.setObjectName(f"startMore_{key}")
@@ -418,12 +457,8 @@ class Band(QWidget):
         layout.addWidget(self.empty)
 
     def add_heading(self, group):
-        heading = Heading(group)
+        heading = Heading(group, muted=True)
         heading.setObjectName(f"startGroup_{group}")
-        font = heading.font()
-        font.setBold(True)
-        heading.setFont(font)
-        heading.setEnabled(False)             # drawn in the muted colour
         self.headings[group] = heading
         self.flow.addWidget(heading)
         return heading
