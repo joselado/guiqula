@@ -423,7 +423,8 @@ class StatusRow(QFrame):
         self.run.setText("Run again")
         self.run.setObjectName(f"plotRun{suffix}")
         self.run.setToolTip("compute this result again, with the model as it is now (the cost "
-                            "guard asks first when it takes minutes)")
+                            "guard asks first when it takes minutes; "
+                            f"{shortcuts.text('run')} runs the selected calculation)")
         self.run.clicked.connect(lambda checked=False: self.run_requested.emit())
         self.cancel = QToolButton()
         self.cancel.setText("Cancel")

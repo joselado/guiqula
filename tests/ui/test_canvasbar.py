@@ -10,7 +10,7 @@ import pytest
 from PySide6.QtWidgets import QApplication, QFrame, QToolBar, QToolButton, QWidget
 
 from guiqula.io import project
-from guiqula.ui import marks, pyvista_view, theme
+from guiqula.ui import marks, pyvista_view, shortcuts, theme
 from guiqula.ui.app import build_main_window
 from guiqula.ui.canvasbar import CanvasBar
 from guiqula.ui.mainwindow import KSPACE_TAB, STRUCTURE_TAB
@@ -67,10 +67,11 @@ def test_the_bars_wrap_and_never_overflow_at_1200_px(window, qtbot):
         ["Home", "Pan", "Zoom", "Save"]               # no Back, Forward, Subplots, Customize
     assert isinstance(structure.bar, CanvasBar) and structure.bar.objectName() == "structureBar"
     assert [n for n in structure.bar.controls() if "Button" in n or n.startswith(
-        ("structure", "tool_"))] == ["structureFit", "structurePan", "structureZoom", "tool_pick", "tool_box",
-                     "tool_lasso", "selectSitesButton", "regionFromSelectionButton",
-                     "calculateOnSelectionButton", "removeSelectedButton",
-                     "structureSaveImage"]
+        ("structure", "tool_"))] == ["structureFit", "structurePan", "structureZoom",
+                                     "tool_pick", "tool_box", "tool_lasso",
+                                     "selectSitesButton", "regionFromSelectionButton",
+                                     "calculateOnSelectionButton", "removeSelectedButton",
+                                     "structureSaveImage"]
     for name in project.presets():
         load(qtbot, window, name)
         window.viewport.setCurrentIndex(STRUCTURE_TAB)
@@ -107,8 +108,8 @@ def test_the_bars_wrap_and_never_overflow_at_1200_px(window, qtbot):
     qtbot.waitUntil(lambda: view.result is job.value, timeout=10_000)
     assert view.bar.objectName() == "plotBar_c1" and view.toolbar.isHidden()
     assert view.canvas.toolbar is view.toolbar
-    assert view.bar.controls() == ["fit_c1", "pan_c1", "zoom_c1", "pickTool_c1", "overlay_c1", "export_c1",
-                     "saveData_c1", "detach_c1", "saveImage_c1"]
+    assert view.bar.controls() == ["fit_c1", "pan_c1", "zoom_c1", "pickTool_c1", "overlay_c1",
+                                   "export_c1", "saveData_c1", "detach_c1", "saveImage_c1"]
     assert_fits(view.bar)
 
 
@@ -167,7 +168,7 @@ def test_the_status_row_says_stale_and_run_again_recomputes(window, qtbot):
                     timeout=300_000)
     qtbot.waitUntil(lambda: view.result is session.result("c1"), timeout=10_000)
     assert not row.isVisibleTo(view) and window.viewport.tabText(index) == "c1 bands"
-    session.undo()                                       # the earlier result back, stale again
+    session.undo()                       # m as it was: the earlier result back, current
     assert session.status("c1") == "done" and not row.isVisibleTo(view)
 
 
@@ -217,6 +218,18 @@ def test_a_failed_run_says_why_even_over_an_earlier_result(window, qtbot):
     assert window.viewport.tabText(index) == f"{calc} python {marks.FAILED}"
     assert window.viewport.tabBar().tabTextColor(index).name() == theme.ERROR
     assert view.result is first.value                    # the earlier result stays drawn
+    window.toggle_detached(calc)                         # its window's title says it too
+    assert window.plot_windows[calc].windowTitle() == f"Result {calc} python {marks.FAILED}"
+    window.toggle_detached(calc)                         # and the tab, back, in its colour
+    index = window.viewport.indexOf(view)
+    assert window.viewport.tabText(index) == f"{calc} python {marks.FAILED}"
+    assert window.viewport.tabBar().tabTextColor(index).name() == theme.ERROR
+    assert "no band here" in window.viewport.tabToolTip(index)
+    session.undo()                       # the code that ran: the earlier result is current
+    assert session.status(calc) == "done"
+    assert not row.isVisibleTo(view) and window.viewport.tabText(index) == f"{calc} python"
+    assert window.viewport.tabBar().tabTextColor(index).name() != theme.ERROR
+    assert window.viewport.tabToolTip(index) == ""
 
 
 def test_the_kspace_tab_is_there_only_for_a_periodic_system(window, qtbot):
@@ -232,6 +245,18 @@ def test_the_kspace_tab_is_there_only_for_a_periodic_system(window, qtbot):
     assert visible == ["Structure", "c1 dos"]
     load(qtbot, window, "honeycomb_zeeman_rashba")
     assert window.viewport.isTabVisible(KSPACE_TAB)
+    session = window.session                             # the selected system decides
+    island = session.do("add_system", lattice="honeycomb_lattice")
+    session.do("add_geometry_op", system=island, kind="island", params={"n": 2.0})
+    window.select(island)
+    settle(qtbot, window)
+    assert window.current_system() == island and not window.viewport.isTabVisible(KSPACE_TAB)
+    window.select("s1")
+    settle(qtbot, window)
+    assert window.viewport.isTabVisible(KSPACE_TAB)
+    session.act("new")                                   # no system, no Brillouin zone
+    settle(qtbot, window)
+    assert not window.viewport.isTabVisible(KSPACE_TAB)
 
 
 def test_every_bar_control_has_a_tooltip(window, qtbot):
@@ -249,4 +274,8 @@ def test_every_bar_control_has_a_tooltip(window, qtbot):
                     continue
                 if not widget.toolTip():
                     missing.append(widget.objectName())
+    row = window.plots["c1"].status                       # and the status row's
+    missing += [w.objectName() for w in (row.run, row.cancel, row.progress) if not w.toolTip()]
     assert not missing
+    assert shortcuts.text("run") in row.run.toolTip()
+    assert shortcuts.text("cancel") in row.cancel.toolTip()

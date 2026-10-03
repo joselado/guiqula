@@ -1768,6 +1768,7 @@ class MainWindow(QMainWindow):
         if system is None:
             self.structure.clear("No system yet: add one with New system, next to the "
                                  "workspace tabs.")
+            self._refresh_kspace()          # no system: no k-space tab either
             return
         build = self.builds.get(system)
         error = self.session.build_errors.get(system)
@@ -2076,6 +2077,7 @@ class MainWindow(QMainWindow):
             self.viewport.addTab(view, self._tab_text(calc))
             self.viewport.setCurrentWidget(view)
             view.set_detached(False)
+            self._show_state(calc)          # the tab's mark, colour and tooltip
             return False
         self.viewport.removeTab(self.viewport.indexOf(view))
         window = ResultWindow(calc, view, self)
@@ -2085,21 +2087,24 @@ class MainWindow(QMainWindow):
         view.show()
         view.set_detached(True)
         self.plot_windows[calc] = window
+        self._show_state(calc)              # the window's title carries the mark
         return True
 
     def _result_state(self, calc, job=None):
         """(state, progress, message) of a calculation's result, for the marks
         of its tab and the status row above its plot: queued or running while
         a job of it runs (job: the one an event is about, which the session
-        may not hold yet), failed when its last run failed (even with an
-        earlier result kept), else stale, done or none."""
+        may not hold yet), failed when its last run failed and no current
+        result is there (an earlier one may be kept, stale), else stale, done
+        or none: a current result has no row, even after a failed run of a
+        model that an undo took back."""
         if job is None or job.done:
             job = self.session.calc_jobs.get(calc)
         if job is not None and not job.done:
             return job.status, job.progress or None, job.text or ""
-        if job is not None and job.status == "failed":
-            return "failed", None, job.error or ""
         status = self.session.status(calc)
+        if job is not None and job.status == "failed" and status != "done":
+            return "failed", None, job.error or ""
         return (status if status in ("done", "stale") else "none"), None, ""
 
     def _tab_text(self, calc, state=None):
