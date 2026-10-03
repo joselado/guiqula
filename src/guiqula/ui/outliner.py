@@ -214,6 +214,29 @@ def text_width(font, text):
     return math.ceil(QFontMetricsF(font).horizontalAdvance(text)) + 1 if text else 0
 
 
+def wrapped(font, text, width):
+    """A detail row's status broken into lines of at most width pixels: at
+    the spaces, and inside a word only when the word alone is wider than the
+    line (large text in a narrow outliner), so that no word is cut at the
+    edge. The lines are joined by newlines, drawn and measured as they are."""
+    lines, line = [], ""
+    for word in text.split():
+        joined = f"{line} {word}" if line else word
+        if text_width(font, joined) <= width:
+            line = joined
+            continue
+        if line:
+            lines.append(line)
+        while len(word) > 1 and text_width(font, word) > width:
+            n = len(word) - 1
+            while n > 1 and text_width(font, word[:n]) > width:
+                n -= 1
+            lines.append(word[:n])
+            word = word[n:]
+        line = word
+    return "\n".join(lines + ([line] if line else []))
+
+
 def add_room(height):
     """The pixels the "+" of a section row takes at the right of its status
     cell: the button is as wide as the row is high, plus 4."""
@@ -283,9 +306,9 @@ class EntryDelegate(QStyledItemDelegate):
             return first, QRect(right - width, first.y(), width + 1, first.height()), True
         left = first.left() + margin
         width = max(1, right - left)
-        bound = QFontMetrics(font).boundingRect(
-            QRect(0, 0, width, 1 << 16),
-            int(Qt.AlignmentFlag.AlignLeft | Qt.TextFlag.TextWordWrap), status)
+        flags = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
+        bound = QFontMetrics(font).boundingRect(QRect(0, 0, width, 1 << 16), int(flags),
+                                                wrapped(font, status, width))
         return first, QRect(left, first.bottom() + 1, width, bound.height()), False
 
     def sizeHint(self, option, index):
@@ -320,12 +343,16 @@ class EntryDelegate(QStyledItemDelegate):
         else:
             color = brush.color() if isinstance(brush, QBrush) else \
                 opt.palette.color(group, QPalette.ColorRole.Text)
+        status = index.siblingAtColumn(1).data() or ""
         painter.save()
         painter.setFont(self.view.font())
         painter.setPen(color)
-        flags = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter if one_line \
-            else Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap
-        painter.drawText(status_rect, int(flags), index.siblingAtColumn(1).data() or "")
+        if one_line:
+            flags = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        else:
+            flags = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
+            status = wrapped(self.view.font(), status, status_rect.width())
+        painter.drawText(status_rect, int(flags), status)
         painter.restore()
 
     def editorEvent(self, event, model, option, index):
@@ -522,7 +549,8 @@ class Outliner(QTreeWidget):
                                "previous build")
         error = session.build_errors.get(system.id)
         if error:
-            status = f"{marks.FAILED} {error.splitlines()[0] if error.strip() else error}"
+            line = next((line for line in error.splitlines() if line.strip()), error)
+            status = f"{marks.mark('failed')} {line}"
             details = [f"{kind}, which cannot be built: {error}"]
         top = self._add(None, system.id, _entry_text(system.id, system.name), status, details)
         font = self.font()
@@ -536,7 +564,7 @@ class Outliner(QTreeWidget):
         try:
             plan = session.plan_system(system.id)
         except Exception as error:     # a broken document still displays
-            item = self._add(top, f"{system.id}/problem", "cannot plan", marks.INVALID,
+            item = self._add(top, f"{system.id}/problem", "cannot plan", marks.mark("invalid"),
                              [f"invalid: {error}"])
             self._paint(item, theme.ERROR)
             return
@@ -645,7 +673,7 @@ class Outliner(QTreeWidget):
             entry.id, _label(family, entry.kind), entry.name, summary,
             f"in {region}" if region else ""), movable=True)
         details = self._details[entry.id]
-        if summary:
+        if summary and _summary(entry.params, 400) != summary:     # cut in the label
             details.append(_summary(entry.params, 400))
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
         item.setCheckState(0, Qt.CheckState.Checked if entry.enabled else Qt.CheckState.Unchecked)
@@ -692,7 +720,7 @@ class Outliner(QTreeWidget):
             item = self._items.get(head)
             if item is None:
                 continue
-            text = f"{param} {marks.LOCKED}" if param else marks.LOCKED
+            text = f"{param} {marks.mark('locked')}" if param else marks.mark("locked")
             old = self._locks.get(head)
             self._locks[head] = (f"{old[0]} · {text}" if old else text,
                                  (old[1] + "\n" if old else "") + LOCK_TIP.format(lock=lock))

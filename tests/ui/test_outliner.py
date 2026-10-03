@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QApplication, QStyle, QStyleOptionViewItem
 from guiqula.io import project
 from guiqula.ui import marks, theme
 from guiqula.ui.app import build_main_window
-from guiqula.ui.outliner import ADD_ROLE, _summary, text_margin
+from guiqula.ui.outliner import ADD_ROLE, _summary, text_margin, text_width, wrapped
 
 
 @pytest.fixture(scope="module")
@@ -65,9 +65,13 @@ def cut(outliner):
             if one_line:
                 fits = QFontMetricsF(font).horizontalAdvance(text) <= status.width()
             else:
+                lines = wrapped(font, text, status.width())
                 bound = QFontMetrics(font).boundingRect(
-                    status, int(Qt.AlignmentFlag.AlignLeft | Qt.TextFlag.TextWordWrap), text)
-                fits = bound.height() <= status.height() and bound.width() <= status.width()
+                    status, int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop), lines)
+                fits = bound.height() <= status.height() and bound.width() <= status.width() \
+                    and lines.replace("\n", "").replace(" ", "") == text.replace(" ", "") \
+                    and all(QFontMetricsF(font).horizontalAdvance(line) <= status.width()
+                            for line in lines.splitlines())
             if not fits or not option.rect.contains(status) or status.right() >= view.width():
                 out.append((item_id, text, "detail"))
             continue
@@ -157,7 +161,7 @@ def test_the_rows_say_what_they_are(window, qtbot):
         item = outliner.item(item_id)
         assert item.toolTip(0) == item.toolTip(1) and item.toolTip(0).startswith(label)
     assert "the Hilbert space after it: spinful" in outliner.item("t1").toolTip(0)
-    assert "n [2, 2, 1]" in outliner.item("op1").toolTip(0)
+    assert outliner.item("op1").toolTip(0).count("n [2, 2, 1]") == 1   # once, in the label
     assert "the base lattice" in outliner.item("s1/base").toolTip(0)
     assert "not run yet" in outliner.item("c1").toolTip(0)
     assert "on s1" in outliner.item("c1").toolTip(0)
@@ -271,6 +275,26 @@ def test_the_mean_field_reads_unclipped(window, qtbot, shot):
     assert item.text(1) == "off" and not outliner.is_detail("s1/meanfield")
     assert item.foreground(0).color().name() == theme.DISABLED.lower()
     session.undo()
+    # large text in an outliner squeezed to 140 px: "calculations" is wider than the line,
+    # and only that word breaks inside, rather than being cut at the edge
+    window.set_ui_text("large")
+    try:
+        window.resizeDocks([dock], [140], Qt.Orientation.Horizontal)
+        settle(qtbot, window)
+        item = outliner.item("s1/meanfield")
+        index = outliner.indexFromItem(item, 0)
+        option = QStyleOptionViewItem()
+        outliner.initViewItemOption(option)
+        option.rect = outliner.visualRect(index)
+        _, status, one_line = outliner.itemDelegateForColumn(0).layout(option, index)
+        assert not one_line and text_width(outliner.font(), "calculations") > status.width()
+        assert cut(outliner) == []
+        lines = wrapped(outliner.font(), item.text(1), status.width()).splitlines()
+        pieces = [w for line in lines for w in line.split() if w not in item.text(1).split()]
+        assert pieces and all(piece in "calculations" for piece in pieces)   # that word only
+        shot(dock, "large_squeezed")
+    finally:
+        window.set_ui_text("normal")
     window.reset_layout()
 
 
