@@ -113,6 +113,11 @@ WINDOW_ACTIONS = {
                 "which Enter adds",
     "run_stale": "run every calculation whose result is stale (the slow ones after one "
                  "question in the cost bar); returns their ids",
+    "start": "search: the start page's filter (the page shows while the document has no "
+             "system), every band narrowed to the lattices, examples and recent files "
+             "matching every word; returns the object names of the cards in sight "
+             "(startLattice_<kind>, startClassical_<kind>, startPreset_<name>, "
+             "startRecent_<n>)",
 }
 
 

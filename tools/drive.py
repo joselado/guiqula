@@ -32,13 +32,16 @@ false hides it), reset_layout (the default arrangement of the panels),
 add_menu (section: s1/geometry, s1/regions, s1/hamiltonian, s1/model,
 calculations or systems, and search: an Add menu opened as its "+" does,
 whose widget is paletteMenu_<family> or regionsMenu), run_stale (every
-stale result); the session's undo, redo (with "steps") and history; lock
-and unlock are mutations. The driven window never reads or writes the settings file. Every
+stale result), start (search: the start page's filter, whose widget is
+startPage, shown while the document has no system; its cards are
+startLattice_<kind>, startPreset_<name>, ...); the session's undo, redo
+(with "steps") and history; lock and unlock are mutations. The driven window never reads or writes the settings file. Every
 calculation's result has its own view, plot_<calculation id>. After each command the driver
 waits for the rebuild of the geometry, so a selection sees the new sites.
 The report printed last is JSON: the document outline, the builds, job and
 result summaries, the selection, the canvas view, the tab shown and the
-open result views, the end of the log, and the screenshot.
+open result views, whether the start page shows (start_page), the end of
+the log, and the screenshot.
 """
 import argparse
 import json
@@ -202,6 +205,8 @@ def main(argv=None):
             app.processEvents()
         if args.list_widgets:
             print("\n".join(widget_tree(window)))
+        # the start page stands in the viewport's place while the document has no system
+        report["start_page"] = window.central_stack.currentWidget() is window.start_page
         if session is not None:
             report["document"] = outline(session.document)
             report["builds"] = {s: {k: b[k] for k in ("sites", "dimensionality", "mode", "dimension")}

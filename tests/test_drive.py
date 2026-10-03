@@ -24,6 +24,14 @@ def test_window_screenshot_without_session(repo, tmp_path):
     assert result.returncode == 0, result.stderr
     assert report_of(result)["window"] == [800, 600]
     assert (tmp_path / "win.png").read_bytes().startswith(PNG_MAGIC)
+    # the window without a session shows the start page (PLAN.md phase 8, package P1)
+    result = drive(repo, tmp_path, "--no-session", "--widget", "startPage", "--shot", "start.png",
+                   "--python", "print('start page', window.start_page.isVisible(), "
+                               "len(window.start_page.visible_cards()))")
+    assert result.returncode == 0, result.stderr
+    assert report_of(result)["widget"] == "startPage" and "start page True" in result.stdout
+    assert report_of(result)["start_page"] is True        # the report says so too
+    assert (tmp_path / "start.png").read_bytes().startswith(PNG_MAGIC)
 
 
 def test_list_widgets(repo, tmp_path):
@@ -51,6 +59,7 @@ def test_document_commands_run_and_shot(repo, tmp_path):
     assert report["commands"][1] == {"do": "add_term", "result": "t3"}
     assert report["results"]["c2"]["arrays"]["dos"] == [50]
     assert report["jobs"][0]["status"] == "done" and report["widget"] == "plot_c2"
+    assert report["start_page"] is False                   # a document with a system
     assert "terms 3" in result.stdout
     assert (tmp_path / "dos.png").read_bytes().startswith(PNG_MAGIC)
 
