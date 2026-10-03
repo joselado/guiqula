@@ -114,7 +114,8 @@ WINDOW_ACTIONS = {
     "run_stale": "run every calculation whose result is stale (the slow ones after one "
                  "question in the cost bar); returns their ids",
     "run": "calculation (left out: the selected one, as the Run button and F5): run it "
-           "through the cost guard; returns its job, or null when the cost bar asks first",
+           "through the cost guard; returns its job at once, or null when the cost bar asks "
+           "first (the run method skips the cost guard and waits for the result)",
 }
 
 

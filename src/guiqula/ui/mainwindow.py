@@ -2022,20 +2022,36 @@ class MainWindow(QMainWindow):
         return calc_id
 
     def _calculation_chosen(self, index, clicked=False):
-        """A tab of the viewport was shown: Run, Cancel and the status bar
-        follow it. A click on a result tab while another calculation is
-        selected in the outliner selects the tab's, so that the outliner and
-        the tab shown never name two different calculations; a term or an
-        op stays selected (its form is kept while its results are looked at)."""
+        """A tab of the viewport was shown (clicked: the user clicked it, even
+        the one already shown): Run, Cancel and the status bar follow it. A
+        result tab shown while another calculation is selected in the
+        outliner selects the tab's (a click, Ctrl+Tab, the wheel on the tab
+        bar, a pick's target, a result put back into its tab), so that the
+        outliner and the tab never name two different calculations; a term
+        or an op stays selected (its form is kept while its results are
+        looked at). The neighbour Qt shows when the tab shown goes away
+        (closed, detached, hidden) was chosen by nobody: it moves nothing."""
+        previous = getattr(self, "_tab_shown", "structure")
+        self._tab_shown = self.current_tab()
         if self.session is None:
             return
         widget = self.viewport.widget(index)
         calc = widget.calc_id if isinstance(widget, PlotView) else None
         ids = self._calculation_ids()
-        if clicked and calc in ids and self.selected in ids and self.selected != calc:
+        chosen = clicked or self._tab_present(previous)
+        if chosen and calc in ids and self.selected in ids and self.selected != calc:
             self.select(calc)
             return
         self._update_status()
+
+    def _tab_present(self, tab):
+        """Whether a tab ("structure", "kspace" or a calculation id) is still
+        in the viewport's bar and visible."""
+        if tab == "structure":
+            return True
+        widget = self.kspace_view if tab == "kspace" else self.plots.get(tab)
+        index = self.viewport.indexOf(widget) if widget is not None else -1
+        return index >= 0 and self.viewport.isTabVisible(index)
 
     def _calculation_label(self, calc):
         """A calculation's kind as the registry says it (its kind when no

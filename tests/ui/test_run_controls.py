@@ -75,6 +75,67 @@ def test_run_names_the_calculation_of_the_outliner_or_the_tab(window, qtbot):
     assert "c2: under a second" in window.status_label.text()      # the same one
 
 
+def test_the_outliner_follows_the_tab_the_user_shows(window):
+    viewport, run = window.viewport, window.run_button
+    for calc in list(window.plots):
+        window.close_result(calc)
+    window.select("c1")
+    window.result_view("c2")                                    # c1's tab, then c2's
+    assert window.current_tab() == "c1"
+    # Ctrl+Tab and Ctrl+Shift+Tab choose a result as a click does: the outliner follows
+    QTest.keyClick(viewport, Qt.Key.Key_Tab, Qt.KeyboardModifier.ControlModifier)
+    assert window.current_tab() == "c2" and window.selected == "c2"
+    assert window.outliner.current_id() == "c2" and run.text() == "Run c2 · dos"
+    QTest.keyClick(viewport, Qt.Key.Key_Tab, Qt.KeyboardModifier.ControlModifier
+                   | Qt.KeyboardModifier.ShiftModifier)
+    assert window.current_tab() == "c1" and window.selected == "c1"
+    QTest.keyClick(viewport, Qt.Key.Key_Tab, Qt.KeyboardModifier.ControlModifier
+                   | Qt.KeyboardModifier.ShiftModifier)
+    assert window.current_tab() == "kspace" and window.selected == "c1"   # not a result
+    assert run.text() == "Run c1 · bands"
+    window.show_result("c2")                     # a pick's target shows another result
+    assert window.selected == "c2" and window.properties.form.item_id == "c2"
+    # the neighbour Qt shows when the tab shown goes away was chosen by nobody
+    window.select("c1")
+    assert window.toggle_detached("c1") is True             # c2's tab is shown in its place
+    assert window.current_tab() == "c2" and window.selected == "c1"
+    assert run.text() == "Run c1 · bands"
+    click_tab(window, "c2")                     # a click on it, although it is shown, does
+    assert window.selected == "c2"
+    assert window.toggle_detached("c1") is False            # back in its tab, which is shown
+    assert window.current_tab() == "c1" and window.selected == "c1"
+    window.close_result("c1")                   # c2's tab for a moment, then the structure
+    assert window.current_tab() == "structure" and window.selected == "c1"
+    assert run.text() == "Run c1 · bands"
+
+
+def test_the_estimate_line_says_why_there_is_none(window, qtbot):
+    session = window.session
+    settle(qtbot, window)
+    calc = session.do("add_calculation", system="s1", kind="python")
+    try:
+        window.select(calc)
+        estimate = window.properties.form.findChild(QLabel, "formEstimate")
+        assert estimate.text() == "no estimate, so Run does not ask first"     # no cost
+        session.act("trust", enabled=False)
+        estimate = window.properties.form.findChild(QLabel, "formEstimate")
+        assert estimate.text().startswith("invalid: Python code") and "trusted" in estimate.text()
+    finally:
+        session.act("trust")
+        session.do("remove", entry=calc)
+    system = session.do("add_system", lattice="honeycomb_lattice")
+    calc = session.do("add_calculation", system=system, kind="bands")
+    try:
+        window.select(calc)                     # before its system is built
+        estimate = window.properties.form.findChild(QLabel, "formEstimate")
+        assert estimate.text() == f"estimate: once {system} is built"
+        settle(qtbot, window)
+        assert estimate.text() == "estimate: under a second"
+    finally:
+        session.do("remove", entry=calc)
+        session.do("remove", entry=system)
+
+
 def test_f5_and_the_run_action_run_the_selected_calculation(window, qtbot):
     session = window.session
     window.select("c1")

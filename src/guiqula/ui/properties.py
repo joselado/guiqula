@@ -476,8 +476,13 @@ class EntryForm(Form):
                                   + f" ({shortcuts.text('cancel')})")
             else:
                 cost_of = session.estimate(calc)
-                if cost_of is None:
+                problem = session.plan_calculation(calc).problem if cost_of is None else None
+                if problem:                      # untrusted code, a parameter pyqula refuses
+                    text = f"invalid: {problem}"
+                elif cost_of is None and session.builds.get(system) is None:
                     text = f"estimate: once {system} is built"
+                elif cost_of is None:            # a Python calculation declares no cost
+                    text = "no estimate, so Run does not ask first"
                 else:
                     text = "estimate: " + cost.describe(cost_of["seconds"]) + \
                         (" with the mean field" if cost_of["meanfield"] else "") + \
