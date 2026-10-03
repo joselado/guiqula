@@ -296,9 +296,10 @@ def test_pan_or_zoom_unchecks_the_selection_tools(window, qtbot):
     """While the canvas toolbar pans or zooms, no selection tool shows as
     active and the status bar says why; clicking one turns pan/zoom off."""
     structure = window.structure
-    pan = next(a for a in structure.toolbar.actions() if a.text() == "Pan")
-    pan.trigger()
+    pan = structure.bar.pan_button                  # on the canvas bar (P3)
+    pan.click()
     qtbot.waitUntil(lambda: window.tool_buttons.checkedButton() is None)
+    assert window.tool_buttons is structure.tool_buttons and pan.isChecked()
     assert "click Pick, Box or Lasso" in window.status_message.message
     window.findChild(QToolButton, "tool_box").click()
     assert str(structure.toolbar.mode) == "" and not pan.isChecked()

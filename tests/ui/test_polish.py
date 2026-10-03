@@ -275,6 +275,11 @@ def test_every_toolbar_control_and_palette_entry_has_a_tooltip(window):
             if not widget.toolTip():
                 missing.append(widget.objectName() or widget.text())
     assert not missing
+    # the canvas bars are groups of toolbars, walked above (P3); Fit names its keys
+    walked = {bar.objectName() for bar in window.findChildren(QToolBar)}
+    assert {"structureBar_navigation", "structureBar_tools", "structureBar_selection",
+            "kspaceBar_pathTools"} <= walked
+    assert shortcuts.text("fit") in window.structure.bar.fit_button.toolTip()
     tabs = window.findChild(QTabBar, "workspaceTabs")
     assert all("Ctrl+" in tabs.tabToolTip(i) for i in range(tabs.count()))
     menu = window.palette_menu("term")                  # the Hamiltonian's Add menu

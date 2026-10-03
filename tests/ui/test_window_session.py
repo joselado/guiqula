@@ -76,10 +76,10 @@ def test_undo_and_stale_marking(window, qtbot):
     window.select_calculation("c1")
     session.do("set_param", entry="t2", name="c", value=0.3)
     assert session.status("c1") == "stale"
-    assert "STALE" in window.plot.figure.axes[0].get_title()
+    assert window.plot.status.state == "stale" and window.plot.status.isVisibleTo(window.plot)
     window.undo_action.trigger()
     assert session.status("c1") == "done"
-    assert "STALE" not in window.plot.figure.axes[0].get_title()
+    assert not window.plot.status.isVisibleTo(window.plot)
 
 
 def test_invalid_entry_is_flagged_in_the_tree(window, qtbot):

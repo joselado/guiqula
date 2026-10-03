@@ -56,10 +56,10 @@ from pathlib import Path
 
 import numpy as np
 from PySide6.QtCore import QByteArray, QPoint, Qt, QTimer, QUrl
-from PySide6.QtGui import QAction, QActionGroup, QDesktopServices
-from PySide6.QtWidgets import (QApplication, QButtonGroup, QComboBox, QDialog,
+from PySide6.QtGui import QAction, QActionGroup, QColor, QDesktopServices
+from PySide6.QtWidgets import (QApplication, QComboBox, QDialog,
                                QDockWidget, QFileDialog, QHeaderView, QLabel,
-                               QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QPushButton,
+                               QMainWindow, QMenu, QMessageBox, QPlainTextEdit,
                                QStyle, QStyleOptionDockWidget, QStylePainter, QTabBar,
                                QTableWidget, QTableWidgetItem, QTabWidget, QToolBar,
                                QToolButton, QVBoxLayout, QWidget)
@@ -82,7 +82,8 @@ from guiqula.ui.sliders import SlidersPanel
 from guiqula.ui.jobpanel import JobPanel
 from guiqula.ui.outliner import Outliner, pseudo_ids, system_of
 from guiqula.ui.palette import FAMILIES as PALETTE_FAMILIES, MenuButton, PaletteMenu
-from guiqula.ui.plots import PlotView, ResultWindow, in_3d as plot_in_3d
+from guiqula.ui.marks import ERROR_STATES, mark
+from guiqula.ui.plots import ROW_STATES, PlotView, ResultWindow, in_3d as plot_in_3d
 from guiqula.ui.properties import PropertiesPanel
 from guiqula.ui import structure as structure_tools
 from guiqula.ui.structure import StructureView
@@ -132,7 +133,7 @@ LOG_HEIGHT = 160             # pixels the bottom area takes when the Log toggle 
 # the version of the window's saveState() kept in the settings (layout): a change of the
 # docks or the toolbars that a stored arrangement would misplace raises it, and a stored
 # one of another version gives the default arrangement
-LAYOUT_VERSION = 2           # 2: the first toolbar row and the selection row of package P2
+LAYOUT_VERSION = 3           # 3: the selection row went to the canvas bar (package P3)
 # what each panel is, in the tooltip of its entry of View > Panels
 PANEL_TIPS = {"outlinerDock": "the systems, their geometry, terms and mean field, and the "
                               "calculations",
@@ -409,9 +410,9 @@ class MainWindow(QMainWindow):
     def _build_toolbars(self):
         """The first row: the workspace tabs, New system and Add (the Add
         menus of ui/palette.py, which the outliner's "+" open too), then the
-        run controls; below it, until the canvas bar takes them (P3), the
-        selection tools of the canvas, in every workspace (PLAN.md phase 8,
-        package P2)."""
+        run controls (PLAN.md phase 8, package P2). The selection tools are
+        on the structure canvas's bar (package P3), and the window connects
+        them here."""
         bar = self._toolbar("Workspace", "workspaceToolbar")
         self.workspace_tabs = QTabBar()
         self.workspace_tabs.setObjectName("workspaceTabs")
@@ -516,59 +517,18 @@ class MainWindow(QMainWindow):
         self.auto_rerun_button.clicked.connect(lambda checked: self._window_act(
             "auto_rerun", self.set_auto_rerun, enabled=checked))
         run.addWidget(self.auto_rerun_button)
-        self.addToolBarBreak()              # the selection tools get a row of their own
-
-        geometry = self._toolbar("Selection", "geometryToolbar")
-        self.tool_buttons = QButtonGroup(self)
-        for tool, text, tip in (("pick", "Pick", "click an atom; shift adds, ctrl toggles"),
-                                ("box", "Box", "drag a rectangle"),
-                                ("lasso", "Lasso", "draw around the atoms")):
-            button = QToolButton()
-            button.setText(text)
-            button.setToolTip(f"select sites: {tip} ({shortcuts.text('tool_' + tool)} on "
-                              f"the canvas)")
-            button.setObjectName(f"tool_{tool}")
-            button.setCheckable(True)
-            button.setChecked(tool == "pick")
-            button.clicked.connect(lambda checked=False, t=tool: self.set_tool(t))
-            self.tool_buttons.addButton(button)
-            geometry.addWidget(button)
-        select = QToolButton()
-        select.setText("Select")
-        select.setObjectName("selectSitesButton")
-        select.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        self._tip(select, "select sites by rule (the canvas keys: Ctrl+A all, Ctrl+Shift+A "
-                          "nothing, Ctrl+I invert)")
-        menu = QMenu(select)
-        for text, name, args in (("All", "selectAll", {"all": True}),
-                                 ("Sublattice A", "selectSublatticeA", {"sublattice": 1}),
-                                 ("Sublattice B", "selectSublatticeB", {"sublattice": -1}),
-                                 ("Edge sites", "selectEdge", {"edge": True}),
-                                 ("Invert", "selectInvert", {"all": True, "mode": "toggle"}),
-                                 ("Nothing", "selectNone", {"indices": []})):
-            action = menu.addAction(text)
-            action.setObjectName(name)
-            action.triggered.connect(lambda checked=False, a=args: self._act("select_sites", **a))
-        select.setMenu(menu)
-        geometry.addWidget(select)
-        self.region_button = QPushButton("Region from selection")
-        self.region_button.setObjectName("regionFromSelectionButton")
-        self.region_button.clicked.connect(lambda: self._act("region_from_selection"))
-        self._tip(self.region_button, "a named region of the selected sites, which any term "
-                                      "can be restricted to")
-        geometry.addWidget(self.region_button)
-        self.calculate_button = QPushButton("Calculate on selection")
-        self.calculate_button.setObjectName("calculateOnSelectionButton")
-        self.calculate_button.clicked.connect(self._selection_menu)
-        self._tip(self.calculate_button, "what takes the selected sites: the density of states "
-                                         "on them, and every calculation of sites")
-        geometry.addWidget(self.calculate_button)
-        self.remove_button = QPushButton("Remove selected")
-        self.remove_button.setObjectName("removeSelectedButton")
-        self._tip(self.remove_button, "remove the selected atoms (a Remove atoms op, by "
-                                      "position; Del on the canvas)")
-        self.remove_button.clicked.connect(lambda: self._act("remove_selected"))
-        geometry.addWidget(self.remove_button)
+        # the selection tools sit on the canvas they act on, in its bar (PLAN.md phase 8,
+        # package P3); the window acts on what they ask
+        structure = self.structure
+        self.tool_buttons = structure.tool_buttons
+        self.region_button = structure.region_button
+        self.calculate_button = structure.calculate_button
+        self.remove_button = structure.remove_button
+        structure.tool_chosen.connect(self.set_tool)
+        structure.select_requested.connect(lambda args: self._act("select_sites", **args))
+        structure.region_requested.connect(lambda: self._act("region_from_selection"))
+        structure.calculate_requested.connect(self._selection_menu)
+        structure.remove_requested.connect(lambda: self._act("remove_selected"))
 
     # ---- the Add menus (PLAN.md phase 8, package P2)
     def palette_menu(self, family, system=None):
@@ -1227,9 +1187,12 @@ class MainWindow(QMainWindow):
                     self._draw_result(job.label)
                 if job.label == self.selected_calculation() and job.id not in self._auto_jobs:
                     self.show_result(job.label)      # an automatic re-run never steals the view
+            if job.kind == "run":
+                self._show_state(job.label)          # failed or cancelled: the tab and the row
             self._auto_jobs.discard(job.id)
         elif job.kind == "run":
             self.outliner.update_calculation(self.session, job.label)   # queued, progress
+            self._show_state(job.label, job)         # the session may not hold it yet
         self.jobs.update_workers(self.session.jobs.status())
 
     # ---- the Python console (decision 14.1)
@@ -1857,14 +1820,23 @@ class MainWindow(QMainWindow):
         self._refresh_kspace()
 
     def _refresh_kspace(self):
+        """Draw the zone of the current system; the k-space tab is there only
+        while that system has a periodic direction (PLAN.md phase 8, package
+        P3), and stays as it was while it is being built."""
         system = self.current_system()
         build = self.builds.get(system) if system else None
+        if system is None:
+            self._show_kspace_tab(False)
+            self.kspace_view.clear("No system yet.")
+            return
         if build is None:
-            self.kspace_view.clear(f"{system}: building…" if system else "No system yet.")
+            self.kspace_view.clear(f"{system}: building…")
             return
         if build.get("kspace") is None:
+            self._show_kspace_tab(False)
             self.kspace_view.clear(f"{system} is finite: it has no Brillouin zone.")
             return
+        self._show_kspace_tab(True)
         kspace = dict(build["kspace"], dimensionality=build["dimensionality"])
         calculations = self._kpath_calculations(system)
         ids = [c for c, _ in calculations]
@@ -1897,6 +1869,13 @@ class MainWindow(QMainWindow):
             self.kspace_view.show_kspace(kspace, calculations, calc, kpath, surface, caption)
         except Exception as error:       # a path through a label this lattice lacks
             self.kspace_view.clear(f"{system}: cannot draw the path of {calc}: {error}")
+
+    def _show_kspace_tab(self, shown):
+        """Show or hide the k-space tab; hidden while it is in front, the
+        Structure tab comes forward (not whichever tab is next to it)."""
+        if not shown and self.viewport.currentIndex() == KSPACE_TAB:
+            self.viewport.setCurrentIndex(STRUCTURE_TAB)
+        self.viewport.setTabVisible(KSPACE_TAB, shown)
 
     def _update_status(self):
         system = self.current_system()
@@ -2044,6 +2023,8 @@ class MainWindow(QMainWindow):
             view.overlay_menu_requested.connect(self._fill_overlay_menu)
             view.pick_requested.connect(self._pick_requested)
             view.marker_moved.connect(self._marker_moved)
+            view.run_requested.connect(self.run_guarded)            # the status row
+            view.cancel_requested.connect(self._cancel_result)
             self.plots[calc] = view
             self.viewport.addTab(view, calc)
             self._draw_result(calc)
@@ -2106,38 +2087,87 @@ class MainWindow(QMainWindow):
         self.plot_windows[calc] = window
         return True
 
-    def _tab_text(self, calc):
+    def _result_state(self, calc, job=None):
+        """(state, progress, message) of a calculation's result, for the marks
+        of its tab and the status row above its plot: queued or running while
+        a job of it runs (job: the one an event is about, which the session
+        may not hold yet), failed when its last run failed (even with an
+        earlier result kept), else stale, done or none."""
+        if job is None or job.done:
+            job = self.session.calc_jobs.get(calc)
+        if job is not None and not job.done:
+            return job.status, job.progress or None, job.text or ""
+        if job is not None and job.status == "failed":
+            return "failed", None, job.error or ""
+        status = self.session.status(calc)
+        return (status if status in ("done", "stale") else "none"), None, ""
+
+    def _tab_text(self, calc, state=None):
+        """A result tab's title: the calculation, its kind and the mark of its
+        state (ui/marks.py), none when it is done or not computed."""
         try:
             kind = self.session.document.calculation(calc).kind
         except Exception:
             return calc
-        return f"{calc} {kind}" + (" (stale)" if self.session.is_stale(calc) else "")
+        state, progress, _ = state or self._result_state(calc)
+        sign = "queued" if state == "queued" else \
+            mark(state, progress) if state in ("stale", "running", "failed") else ""
+        return f"{calc} {kind}" + (f" {sign}" if sign else "")
+
+    def _show_state(self, calc, job=None):
+        """The state of a result where its view is: the tab's title and its
+        colour, a detached window's title, the status row above the plot."""
+        view = self.plots.get(calc)
+        if view is None or self.session is None:
+            return
+        state = self._result_state(calc, job)
+        text = self._tab_text(calc, state)
+        index = self.viewport.indexOf(view)
+        view.set_status(*state)
+        if view.result is None:              # the empty plot says what comes next
+            view.caption.setText(f"{calc}: no result yet; " + (
+                "it is being computed." if state[0] in ("queued", "running")
+                else "press Run (F5)."))
+        if index >= 0:
+            self.viewport.setTabText(index, text)
+            self.viewport.tabBar().setTabTextColor(
+                index, QColor(theme.ERROR) if state[0] in ERROR_STATES else QColor())
+            self.viewport.setTabToolTip(index, view.status.text.full
+                                        if state[0] in ROW_STATES else "")
+        window = self.plot_windows.get(calc)
+        if window is not None:
+            window.setWindowTitle(f"Result {text}")
+
+    def _cancel_result(self, calc):
+        """The status row's Cancel: stop the job computing calc's result."""
+        job = self.session.calc_jobs.get(calc) if self.session is not None else None
+        if job is not None and not job.done:
+            self.cancel_job(job.id)
 
     def _draw_result(self, calc, force=False):
         """Draw a calculation's latest result into its view, unless the view
         already shows exactly that (a redraw would lose the zoom) and force
-        is false (a new theme)."""
+        is false (a new theme). Whether it is stale goes to the tab's mark
+        and the status row, not into the figure, so a result going stale
+        keeps its zoom."""
         view = self.plots[calc]
         result = self.session.result(calc)
         stale = self.session.is_stale(calc) if result is not None else False
-        index = self.viewport.indexOf(view)
-        if index >= 0:
-            self.viewport.setTabText(index, self._tab_text(calc))
-        window = self.plot_windows.get(calc)
-        if window is not None:
-            window.setWindowTitle(f"Result {self._tab_text(calc)}")
         if result is None:
             if view.result is not None or not view.caption.text().startswith(calc):
                 view.clear(f"{calc}: no result yet; press Run (F5).")
+            self._show_state(calc)
             return
+        self._show_state(calc)
         overlays = [(other, self.session.result(other), mode)
                     for other, mode in self.overlays.get(calc, [])
                     if self.session.result(other) is not None]
-        if not force and view.result is result and view.stale == stale and \
+        if not force and view.result is result and \
                 [(o, id(r), m) for o, r, m in overlays] == \
                 [(o, id(r), m) for o, r, m in view.overlays]:
+            view.stale = stale
             return
-        title = f"{calc} · {result.kind} · {result.mode}" + (" · STALE" if stale else "")
+        title = f"{calc} · {result.kind} · {result.mode}"
         notes = [f"{result.meta.get('seconds', 0):.2f} s"]
         if result.meta.get("build_seconds", 0) >= 0.05:
             notes[0] += f" after {result.meta['build_seconds']:.2f} s of building"
@@ -2146,8 +2176,6 @@ class MainWindow(QMainWindow):
         if result.skipped:
             notes.append("skipped: " + ", ".join(f"{r['id']} ({r['message']})"
                                                  for r in result.skipped))
-        if stale:
-            notes.append("the document changed since this result was computed; run again")
         view.markers = self._markers_of(calc, result)      # drawn with the plot
         view.show_result(result, title, " · ".join(notes), stale=stale, overlays=overlays)
 

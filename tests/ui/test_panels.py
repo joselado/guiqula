@@ -169,7 +169,7 @@ def test_the_layout_setting_round_trips(qtbot, config):
             Qt.DockWidgetArea.LeftDockWidgetArea
         assert [bar.objectName() for bar in again.findChildren(mainwindow.QToolBar)
                 if bar.parent() is again and bar.isVisible()] == \
-            ["workspaceToolbar", "runToolbar", "geometryToolbar"]
+            ["workspaceToolbar", "runToolbar"]
         again.reset_layout()
         settle(qtbot)
         assert_default(again)

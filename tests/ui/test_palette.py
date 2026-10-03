@@ -282,21 +282,22 @@ def test_the_first_row(window, qtbot):
     fresh(qtbot, window)
     bars = [bar.objectName() for bar in window.findChildren(QToolBar) if bar.isVisible()
             and bar.parent() is window]
-    assert bars == ["workspaceToolbar", "runToolbar", "geometryToolbar"]
+    assert bars == ["workspaceToolbar", "runToolbar"]       # the selection row went (P3)
     first = window.findChild(QToolBar, "workspaceToolbar")
     assert first.findChild(QToolButton, "newSystemButton") is window.new_system_button
     assert first.findChild(QToolButton, "addButton") is window.add_button
     for name in ("opSearch", "termSearch", "calculationSearch", "addOpButton",
                  "addTermButton", "addCalculationButton", "addRegionButton", "meanfieldButton",
-                 "newClassicalButton", "hamiltonianToolbar", "calculateToolbar"):
+                 "newClassicalButton", "hamiltonianToolbar", "calculateToolbar",
+                 "geometryToolbar"):
         assert window.findChild(QWidget, name) is None, name
-    selection = window.findChild(QToolBar, "geometryToolbar")
+    selection = window.findChild(QWidget, "structureBar")       # on the canvas (P3)
     assert [w.objectName() for w in selection.findChildren(QToolButton)
-            if w.objectName() and not w.objectName().startswith("qt_")] == \
+            if w.objectName().startswith(("tool_", "select"))] == \
         ["tool_pick", "tool_box", "tool_lasso", "selectSitesButton"]
     for workspace in WORKSPACES:                                # in every workspace
         window.set_workspace(workspace)
-        assert selection.isVisible()
+        assert selection.isVisibleTo(window.structure)
     window.set_workspace("geometry")
     QApplication.processEvents()
     for bar in (b for b in window.findChildren(QToolBar) if b.parent() is window):

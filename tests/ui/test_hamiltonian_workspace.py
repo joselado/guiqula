@@ -10,9 +10,10 @@ from matplotlib.collections import LineCollection
 from matplotlib.quiver import Quiver
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QLineEdit
+from PySide6.QtWidgets import QFrame, QLineEdit, QToolButton
 
 from guiqula.engine.calculations import run_calculation
+from guiqula.ui import marks
 from guiqula.ui.app import build_main_window
 from guiqula.ui.plots import PlotView
 from guiqula.ui.properties import EntryForm, MeanFieldForm
@@ -237,7 +238,9 @@ def test_result_tabs_readout_and_detach(window, qtbot, shot):
     assert view.readout.text().endswith(f"a pick takes E = {view.points[0][i]:.3g}")
     session.do("set_param", entry="t2", name="c", value=0.2)
     index = window.viewport.indexOf(view)
-    assert window.viewport.tabText(index) == "c2 dos (stale)"
+    assert window.viewport.tabText(index) == f"c2 dos {marks.STALE}"   # ui/marks.py's (P3)
+    assert view.findChild(QFrame, "plotStatus_c2").isVisibleTo(view)  # the row says so
+    assert view.findChild(QToolButton, "plotRun_c2").text() == "Run again"
     assert window.toggle_detached("c2") is True             # into a window of its own
     detached = window.plot_windows["c2"]
     assert window.viewport.indexOf(view) < 0 and view.parent() is detached

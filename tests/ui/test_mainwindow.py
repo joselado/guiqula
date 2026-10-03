@@ -1,7 +1,7 @@
 """The window without workers: its parts exist under stable objectNames
 (tools/drive.py and the tests find widgets by name)."""
-from PySide6.QtWidgets import (QComboBox, QDockWidget, QFrame, QLabel, QMenu, QPushButton,
-                               QTabBar, QTabWidget, QToolBar, QToolButton, QTreeWidget, QWidget)
+from PySide6.QtWidgets import (QComboBox, QDockWidget, QFrame, QLabel, QMenu, QTabBar,
+                               QTabWidget, QToolBar, QToolButton, QTreeWidget, QWidget)
 
 from guiqula.ui.app import build_main_window
 
@@ -21,13 +21,14 @@ def test_main_window_builds_without_workers(qtbot, shot):
                        (QToolButton, "autoRerunButton"), (QMenu, "runMenu"),
                        (QToolButton, "newSystemButton"), (QToolButton, "addButton"),
                        (QMenu, "paletteMenu_term"), (QMenu, "regionsMenu"),
-                       (QPushButton, "regionFromSelectionButton"), (QFrame, "errorBar"),
+                       (QToolButton, "regionFromSelectionButton"), (QFrame, "errorBar"),
                        (QFrame, "recoveryBar"), (QFrame, "costBar"), (QLabel, "statusLabel"),
                        (QLabel, "autosaveLabel"),
                        (QDockWidget, "outlinerDock"), (QDockWidget, "propertiesDock"),
                        (QDockWidget, "jobsDock"), (QDockWidget, "logDock"),
-                       (QToolBar, "workspaceToolbar"), (QToolBar, "geometryToolbar"),
-                       (QToolBar, "runToolbar")]:
+                       (QToolBar, "workspaceToolbar"), (QWidget, "structureBar"),
+                       (QToolBar, "structureToolbar"), (QToolBar, "runToolbar"),
+                       (QWidget, "kspaceBar")]:
         assert window.findChild(kind, name) is not None, name
     # one tab per result, opened when a calculation is shown; Structure and k-space stay
     assert [window.viewport.tabText(i) for i in range(window.viewport.count())] == \
@@ -47,7 +48,7 @@ def test_workspaces_switch_palettes(qtbot):
         assert window.workspace_tabs.currentIndex() == ["geometry", "hamiltonian",
                                                         "calculate"].index(name)
         assert window.add_button.menu() is window.palette_menus[family]     # what Add lists
-        assert window.findChild(QToolBar, "geometryToolbar").isVisible()    # the selection
+        assert window.findChild(QWidget, "structureBar").isVisible()    # the selection tools
         assert window.current_tab() == "structure"      # no calculation to show
         assert window.canvas_view == view and window.structure.view_box.currentData() == view
     window.workspace_tabs.setCurrentIndex(2)           # the tab bar drives it too
