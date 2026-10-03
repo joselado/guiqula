@@ -160,7 +160,8 @@ class PaletteMenu(QMenu):
     def add_extra(self, section, text, name, tooltip, slot, kinds=None):
         """An item after the entries, in a section of its own: kinds are the
         kinds of system it is offered for (None: every kind). It takes part
-        in the search by its text."""
+        in the search by its text and its tooltip, as an entry does by its
+        label and its description."""
         action = QAction(text, self)
         action.setObjectName(name)
         action.setToolTip(tooltip)
@@ -234,8 +235,8 @@ class PaletteMenu(QMenu):
                    if spec.kind in self.entries] if text else list(self.entries.values())
         shown = set(matches)
         extras = [action for _, items in self._extras for action, _ in items
-                  if self._extra_offered(action)
-                  and (not text or text.lower() in action.text().lower())]
+                  if self._extra_offered(action) and (
+                      not text or text.lower() in f"{action.text()} {action.toolTip()}".lower())]
         shown.update(extras)
         for section, actions in self._sections:
             for action in actions:
@@ -276,6 +277,8 @@ class PaletteMenu(QMenu):
         self.prepare()
         self.search.setText(text)
         self.popup(position)
+        # the search line is the active item, so that the first Down reaches the first entry
+        self.setActiveAction(self.search_action)
         self.search.setFocus(Qt.FocusReason.PopupFocusReason)
         return self
 

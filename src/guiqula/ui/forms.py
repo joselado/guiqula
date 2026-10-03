@@ -337,8 +337,9 @@ class FieldEditor(Editor):
         self.add = QPushButton("Add a region")
         self.add.setObjectName(f"pieceAdd_{self.name}")
         self.add.clicked.connect(self.add_piece)
-        self.no_regions = QLabel("This system has no region yet: make one on the Geometry "
-                                 "toolbar (Add region, or Region from selection).")
+        self.no_regions = QLabel("This system has no region yet: make one with the + of its "
+                                 "Regions row in the outliner (by expression, or from the "
+                                 "sites selected on the canvas).")
         self.no_regions.setWordWrap(True)
         column.addWidget(self.pieces)
         column.addWidget(self.add)

@@ -74,6 +74,8 @@ def test_the_menu_lists_by_group_and_filters(window, qtbot):
         assert section.isVisible() == any(a.isVisible() for a in actions), section.text()
     assert not all(section.isVisible() for section, _ in menu._sections)
     assert menu.filter("mean field") == ["addMeanfield"]          # its own items take part
+    assert menu.filter("hubbard") == ["addMeanfield"]             # by their tooltip too
+    assert menu.best is menu.findChild(QAction, "addMeanfield")
     assert menu.filter("") == names + ["addMeanfield"]
     assert all(a.isVisible() and not a.font().bold() for a in menu.entries.values())
     # a classical system offers its own terms, without a mean field
@@ -119,6 +121,24 @@ def test_enter_adds_the_best_match_once(window, qtbot):
     assert len(terms(window)) == count + 2 and menu.search.text() == "h"
     assert menu.best is not None and menu.best.text().lower().startswith("h")
     menu.hide()
+    # the search line is the active item, so one Down reaches the first entry shown, which
+    # Enter adds (not the best match, drawn in bold); a letter typed then goes to the search
+    window.open_add_menu(search="spin")
+    assert menu.activeAction() is menu.search_action
+    shown = [a for a in menu.entries.values() if a.isVisible()]
+    QTest.keyClick(QApplication.focusWidget(), Qt.Key.Key_Down)
+    assert menu.activeAction() is shown[0] and shown[0] is not menu.best
+    QTest.keyClick(QApplication.focusWidget(), Qt.Key.Key_Return)
+    assert len(terms(window)) == count + 3 and terms(window)[-1].kind == next(
+        kind for kind, a in menu.entries.items() if a is shown[0])
+    assert not menu.isVisible()
+    window.open_add_menu()
+    QTest.keyClick(QApplication.focusWidget(), Qt.Key.Key_Down)
+    assert menu.activeAction() is next(a for a in menu.entries.values() if a.isVisible())
+    QTest.keyClick(QApplication.focusWidget(), Qt.Key.Key_Z)
+    assert menu.search.text() == "z" and menu.search.hasFocus()
+    assert len(terms(window)) == count + 3
+    menu.hide()
     # the window action does the same, for drivers
     found = window.session.act("add_menu", section="s1/hamiltonian", search="haldane")
     assert found["best"] == "addTerm_haldane" and window.palette_menus["term"].isVisible()
@@ -143,6 +163,10 @@ def test_the_plus_of_a_section_adds_to_its_own_system(window, qtbot):
         assert button.objectName() == "outlinerAdd_" + path.replace("/", "_")
         assert button.toolTip() and button.isEnabled(), path
     assert outliner.add_button("s1/model") is None
+    # a piecewise Field of a system without regions says where they are made: the "+"
+    window.select("t2")
+    hint = window.properties.form.editors["c"].no_regions.text()
+    assert "+ of its Regions row" in hint and "toolbar" not in hint
     # the button leaves the rest of the status cell to its row, whose height it keeps
     item = outliner.item("s1/regions")
     cell = outliner.visualRect(outliner.indexFromItem(item, 1))

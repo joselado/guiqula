@@ -442,8 +442,9 @@ class MainWindow(QMainWindow):
                 lambda checked=False, k=kind: self.new_classical_system(k))
         self.palette_menus["term"].add_extra(
             "Interactions", "Mean field (interactions)", "addMeanfield",
-            "interactions solved self-consistently after the terms: turns on the mean-field "
-            "block of the system and selects its row",
+            "interactions, the Hubbard U and the V and J between neighbours, solved "
+            "self-consistently after the terms: turns on the mean-field block of the system and "
+            "selects its row",
             lambda: self.add_meanfield(self.palette_menus["term"].system), kinds=("quantum",))
         bar.addSeparator()
         self.new_system_button = self._menu_button(
