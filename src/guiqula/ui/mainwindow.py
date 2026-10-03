@@ -2963,9 +2963,13 @@ class MainWindow(QMainWindow):
     def _job_added(self, job_id):
         """A new row of the Jobs panel: Jobs comes forward, unless Help is
         in front showing an item's help (Run at once starts a job at every
-        edit of the form that help explains)."""
+        edit of the form that help explains) or Sliders is in front (a
+        slider's release, or the automatic re-run at every step of a drag,
+        starts one under the mouse that moves it)."""
         page = self.help_panel.page
         if self._in_front("helpDock") and page is not None and page[0] == "item":
+            return
+        if self._in_front("slidersDock"):
             return
         self.docks["jobsDock"].raise_()
 

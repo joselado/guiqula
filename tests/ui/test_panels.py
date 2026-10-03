@@ -242,7 +242,7 @@ def test_the_interface_text_setting(qtbot, config):
     assert app.font().pointSizeF() == normal
 
 
-def test_jobs_come_forward_unless_help_shows_an_item(qtbot, no_jobs):
+def test_jobs_come_forward_unless_help_shows_an_item_or_sliders_are_used(qtbot, no_jobs):
     from guiqula.session import Session
     window = shown(build_main_window())
     qtbot.addWidget(window)
@@ -262,9 +262,9 @@ def test_jobs_come_forward_unless_help_shows_an_item(qtbot, no_jobs):
     assert in_front(window, "helpDock") and in_front(window, "propertiesDock")
     new_job()                                                 # Run at once, at an edit of t1
     assert in_front(window, "helpDock") and not in_front(window, "jobsDock")
-    window.docks["slidersDock"].raise_()
+    window.docks["slidersDock"].raise_()                      # a slider moved: it stays
     new_job()
-    assert in_front(window, "jobsDock")
+    assert in_front(window, "slidersDock") and not in_front(window, "jobsDock")
     window.help(guide="guiqula")                              # a guide, not an item
     settle(qtbot)
     assert in_front(window, "helpDock")
