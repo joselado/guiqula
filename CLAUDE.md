@@ -53,7 +53,11 @@ same place, for the maintainer to confirm), and a detached plot is a window of i
 floating dock could not be moved on Wayland (decision 88, same place), and the bands and the
 spectral function on pyqula's default k-path name its high-symmetry points on the axis and walk
 pyqula's two-dimensional path with the Γ that it leaves out put first (2026-09-30: decision 89,
-same place, for the maintainer to confirm). Nothing is uploaded or pushed without the
+same place, for the maintainer to confirm). Phase 8, the interface (the start page, the
+palettes on the outliner, Run where the result is, the panels, the bars, the forms, the
+outliner, icons, the documentation), is planned and not started (2026-10-03: packages P1
+to P9 and decisions 90 to 106 at the end of PLAN.md's section 7, written so that a
+workflow can build it package by package). Nothing is uploaded or pushed without the
 maintainer.
 
 ## Code map
@@ -254,6 +258,62 @@ a `Session`.
 - Every term parameter is a Field (constant, expression of position, piecewise per region,
   profile, interpolated, painted, from a result; PLAN.md section 3.8), never a bare float. The
   maintainer wants any Hamiltonian parameter spatially modulable from the interface.
+
+## Good practices for the interface
+
+What the phase-8 plan (PLAN.md section 7) was made from, kept here so that any change of
+`ui/` follows it; the first five are how the interface is designed, the rest how it is
+built and checked.
+
+- Put the action where its effect appears: a "+" on the outliner section the entry will
+  join, Run on the result it computes, a slider on the parameter it moves. A control a row
+  or a dock away from what it acts on is what the user cannot find.
+- Let the window follow the selection: the workspace, the viewport tab and the help
+  follow what was selected or added, and never ask the user to find the right tab first.
+- One place to choose a thing: a calculation is chosen in the outliner or by its tab, not
+  in a third widget; a duplicate selector is a place to be out of sync.
+- The form speaks the physics and the tooltip speaks the engine: "spinful", "superconducting
+  (Nambu)", "hopping range" on the label, "add_zeeman", "requested", "sparse" in the tooltip
+  and the help.
+- An empty state says what to do next, in one line, where the thing will appear (the start
+  page when there is no system, the plot caption when nothing was run).
+- Look before designing: drive the window offscreen with `tools/drive.py` at 1200x800 (the
+  small laptop) and 1600x1000, on the shipped presets, in both themes, and read the
+  screenshots; let the layout settle first (ten rounds of `processEvents` and
+  `QTest.qWait(100)`, as `tools/readme_images.py` does), since an unsettled grab draws
+  dock tab bars twice.
+- A widget's `objectName` is an API: the tests, `drive.py --widget`, the remote
+  `screenshot` and `widgets` methods and the examples in this file name them. Keep a name
+  when the widget moves; list every rename in the report.
+- A behaviour is an action, not a click: anything the window can do is a window action in
+  `WINDOW_ACTIONS` (both lists) with a `drive.py` example, so that it can be driven and
+  tested without the mouse; a new key goes in `ui/shortcuts.py` and the tooltip names it
+  through `shortcuts.text`.
+- The palettes, the forms, the tooltips and the help are generated from the registry
+  declarations: a control that lists physics entries reads `registry.entries(family)`,
+  never a hand-written list, so a plugin's entries appear in it too.
+- The UI process stays light: pictures are PNG files made by a tool script and shipped,
+  never computed in the window; `tests/ui/test_startup.py` keeps the 2 s budget and the
+  module set.
+- Replace a look, keep the instance: the matplotlib toolbar stays, hidden, behind guiqula's
+  own buttons, since `CanvasNavigation` and the tests read its mode; the Inkscape and
+  Blender controls of the drawings are not touched by a change of bars.
+- Nothing floats: a detached thing is a plain window, since a floating dock cannot be moved
+  on Wayland (decision 88).
+- Layout is tested, not eyeballed: a test checks that no toolbar shows its extension
+  chevron at 1200 px and no outliner status is elided at the default width, on every
+  preset; every control has a tooltip (`test_every_toolbar_control_and_palette_entry_has_a_tooltip`).
+- Acceptance is a named screenshot: each change states the `drive.py` command, the preset,
+  the size and the theme that show it, so the maintainer can reproduce it and the next
+  agent can check it.
+- Work is cut by file ownership: `ui/mainwindow.py` is the shared file, so the packages
+  that rewrite parts of it go one after another and the file owners (`forms.py`,
+  `structure.py`, `outliner.py`, a new module) go in parallel in worktrees, merged in a
+  fixed order with the suite run after each merge.
+- Decisions go in PLAN.md, numbered, the recommended option first; they stand as built
+  unless the maintainer answers. The documentation (`docs/user_guide.md`, README, this
+  file's code map and examples) is the last package of any change, in the voice of
+  `~/.claude/CLAUDE.md`.
 
 ## Using the vendored pyqula
 
