@@ -1,6 +1,7 @@
 """The window without workers: its parts exist under stable objectNames
 (tools/drive.py and the tests find widgets by name)."""
-from PySide6.QtWidgets import (QComboBox, QDockWidget, QFrame, QLabel, QMenu, QPushButton,
+from PySide6.QtWidgets import (QAbstractButton, QComboBox, QDockWidget, QFrame, QLabel,
+                               QLineEdit, QMenu, QPushButton, QStackedWidget,
                                QTabBar, QTabWidget, QToolBar, QToolButton, QTreeWidget, QWidget)
 
 from guiqula.ui.app import build_main_window
@@ -27,8 +28,16 @@ def test_main_window_builds_without_workers(qtbot, shot):
                        (QDockWidget, "outlinerDock"), (QDockWidget, "propertiesDock"),
                        (QDockWidget, "jobsDock"), (QDockWidget, "logDock"),
                        (QToolBar, "workspaceToolbar"), (QToolBar, "geometryToolbar"),
-                       (QToolBar, "runToolbar")]:
+                       (QToolBar, "runToolbar"), (QStackedWidget, "centralStack"),
+                       (QWidget, "startPage"), (QLineEdit, "startSearch"),
+                       (QAbstractButton, "startLattice_honeycomb_lattice"),
+                       (QAbstractButton, "startClassical_ising"),
+                       (QAbstractButton, "startPreset_haldane_chern"),
+                       (QToolButton, "startOpenButton")]:
         assert window.findChild(kind, name) is not None, name
+    # without a session the start page stands in the viewport's place (PLAN.md phase 8, P1)
+    assert window.central_stack.currentWidget() is window.start_page
+    assert window.start_page.isVisible() and not window.viewport.isVisible()
     # one tab per result, opened when a calculation is shown; Structure and k-space stay
     assert [window.viewport.tabText(i) for i in range(window.viewport.count())] == \
         ["Structure", "k-space"]

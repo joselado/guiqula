@@ -83,6 +83,11 @@ def test_wheel_ships_vendored_pyqula(repo, tmp_path, run_python):
     assert "guiqula/docs/user_guide.md" in names
     assert {"guiqula/resources/guiqula.png", "guiqula/resources/guiqula.svg",
             "guiqula/resources/guiqula.ico", "guiqula/resources/guiqula.icns"} <= names
+    # the start page's pictures (PLAN.md phase 8, package P1), every one of them
+    thumbnails = {p.relative_to(repo / "src").as_posix()
+                  for p in (repo / "src" / "guiqula" / "resources" / "thumbnails").rglob("*.png")}
+    assert thumbnails and thumbnails <= names
+    assert "guiqula/resources/thumbnails/presets/haldane_chern.png" in names
     metadata = zipfile.ZipFile(wheel).read(next(n for n in names if n.endswith("METADATA")))
     assert b"License-Expression: GPL-3.0-or-later" in metadata
     assert b"Description-Content-Type: text/markdown" in metadata and b"# guiqula" in metadata

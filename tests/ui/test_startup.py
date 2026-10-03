@@ -12,7 +12,10 @@ LATER = {"pyvista", "vtkmodules", "vtk"}
 # imports matplotlib and numpy for its plot tab; 0.68 s for the phase-2
 # shell (outliner, properties, structure canvas). Importing pyqula alone
 # costs 0.7 s. The budget leaves room for a cold cache; the module check is
-# the sharp part. Workers start after the window is shown (ui/app.py).
+# the sharp part. Workers start after the window is shown (ui/app.py). The
+# empty program shows the start page (PLAN.md phase 8, package P1): its 52
+# cards cost about 30 ms to build and their pictures are read after the
+# first paint (measured on 2026-10-03).
 BUDGET_SECONDS = 2.0
 
 PROBE = """
@@ -26,7 +29,7 @@ window = build_main_window()
 window.show()
 app.processEvents()
 seconds = time.perf_counter() - t0
-print(json.dumps({"seconds": seconds,
+print(json.dumps({"seconds": seconds, "start_page": window.start_page.isVisible(),
                   "loaded": sorted({m.split(".")[0] for m in sys.modules})}))
 """
 
@@ -39,4 +42,5 @@ def test_startup(run_python):
     out = json.loads(result.stdout.strip().splitlines()[-1])
     assert HEAVY.isdisjoint(out["loaded"]), sorted(HEAVY & set(out["loaded"]))
     assert LATER.isdisjoint(out["loaded"]), sorted(LATER & set(out["loaded"]))
+    assert out["start_page"]                    # the empty program shows it, within the budget
     assert out["seconds"] < BUDGET_SECONDS, f"startup took {out['seconds']:.2f} s"

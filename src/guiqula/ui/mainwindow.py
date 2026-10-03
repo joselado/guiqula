@@ -60,8 +60,8 @@ from PySide6.QtGui import QAction, QActionGroup, QDesktopServices
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QComboBox, QDialog,
                                QDockWidget, QFileDialog, QHeaderView, QLabel,
                                QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QPushButton,
-                               QStyle, QStyleOptionDockWidget, QStylePainter, QTabBar,
-                               QTableWidget, QTableWidgetItem, QTabWidget, QToolBar,
+                               QStackedWidget, QStyle, QStyleOptionDockWidget, QStylePainter,
+                               QTabBar, QTableWidget, QTableWidgetItem, QTabWidget, QToolBar,
                                QToolButton, QVBoxLayout, QWidget)
 
 import guiqula
@@ -84,6 +84,7 @@ from guiqula.ui.outliner import Outliner, pseudo_ids, system_of
 from guiqula.ui.palette import FAMILIES as PALETTE_FAMILIES, MenuButton, PaletteMenu
 from guiqula.ui.plots import PlotView, ResultWindow, in_3d as plot_in_3d
 from guiqula.ui.properties import PropertiesPanel
+from guiqula.ui.start import StartPage
 from guiqula.ui import structure as structure_tools
 from guiqula.ui.structure import StructureView
 from guiqula.ui import pyvista_view, shortcuts, theme
@@ -98,7 +99,7 @@ WINDOW_ACTIONS = ("select", "workspace", "tool", "select_sites", "region_from_se
                   "overlay", "slider", "set_slider", "remove_slider", "paint", "theme",
                   "export_bundle", "help", "remote", "pick", "pick_to", "run_at_once",
                   "renderer_3d", "view_3d", "plot_text", "ui_text", "reset_layout", "log",
-                  "panel", "add_menu", "run_stale")
+                  "panel", "add_menu", "run_stale", "start")
 STRUCTURE_TAB = 0
 KSPACE_TAB = 1
 # a new classical system: its lattice, and a supercell the usual orders fit in
@@ -240,6 +241,27 @@ class MainWindow(QMainWindow):
         self.recovery_bar = MessageBar("recoveryBar")
         self.cost_bar = MessageBar("costBar")
         self.trust_bar = MessageBar("trustBar")
+        # the start page in the viewport's place while the document has no system (PLAN.md
+        # phase 8, package P1), below the bars, so that the recovery bar shows over it
+        self.start_page = StartPage({kind: label
+                                     for kind, (_, _, label) in CLASSICAL_STARTS.items()})
+        self.start_page.lattice_chosen.connect(
+            lambda kind: self.new_system(kind) if self.session is not None else None)
+        self.start_page.classical_chosen.connect(
+            lambda kind: self.new_classical_system(kind) if self.session is not None else None)
+        self.start_page.preset_chosen.connect(
+            lambda name: self.open_document(name) if self.session is not None else None)
+        self.start_page.recent_chosen.connect(
+            lambda path: self.open_document(path) if self.session is not None else None)
+        self.start_page.open_requested.connect(
+            lambda: self.open_dialog() if self.session is not None else None)
+        self.start_page.guide_requested.connect(
+            lambda: self._window_act("help", self.help, guide="guiqula"))
+        self.start_page.set_recent(settings.load()["recent"] if use_settings else [])
+        self.central_stack = QStackedWidget()
+        self.central_stack.setObjectName("centralStack")
+        self.central_stack.addWidget(self.start_page)
+        self.central_stack.addWidget(self.viewport)
         central = QWidget()
         central.setObjectName("central")
         column = QVBoxLayout(central)
@@ -249,7 +271,7 @@ class MainWindow(QMainWindow):
         column.addWidget(self.trust_bar)
         column.addWidget(self.error_bar)
         column.addWidget(self.cost_bar)
-        column.addWidget(self.viewport, 1)
+        column.addWidget(self.central_stack, 1)
         self.setCentralWidget(central)
 
         self.jobs = JobPanel()
@@ -1029,6 +1051,7 @@ class MainWindow(QMainWindow):
         dispatcher.register_action("view_3d", self.set_view_3d)
         dispatcher.register_action("add_menu", self.open_add_menu)
         dispatcher.register_action("run_stale", self.run_stale)
+        dispatcher.register_action("start", self.start)
         self.help_panel.session = session
         session.view_state = self.view_state
         self.timer.start(POLL_MS)
@@ -1104,6 +1127,8 @@ class MainWindow(QMainWindow):
         if event is not None and event["type"] == "action" and self.use_settings \
                 and event.get("name") in ("load", "save") and event.get("result"):
             self._remember_file(event["result"])
+            if self.central_stack.currentWidget() is self.start_page:   # saved while empty
+                self.start_page.set_recent(settings.load()["recent"])
         if event is not None and self.remote is not None and event["type"] in ("action", "reset") \
                 and event.get("name") in ("load", "save", "new", "recover", "reset"):
             self.remote.update(document=str(self.session.path) if self.session.path else None)
@@ -1118,6 +1143,7 @@ class MainWindow(QMainWindow):
             return
         if self.selected and not self._exists(self.selected):
             self.selected = ""
+        self.show_start(not self.session.document.systems)   # before the canvas draws
         try:
             self._refresh_calculations()
             self.outliner.refresh(self.session)
@@ -2864,8 +2890,28 @@ class MainWindow(QMainWindow):
         return self._confirm_discard(before)
 
     def new_document(self):
+        """File > New: an empty document, so the start page shows again."""
         if self._may_replace("starting a new document"):
             self._act("new")
+        if self.session is None:
+            self.show_start(True)
+
+    def show_start(self, shown=True):
+        """The start page in the viewport's place (shown), or the viewport;
+        the window shows the page while the document has no system. The
+        recent files are read again when the page comes back."""
+        page = self.start_page
+        if shown and self.central_stack.currentWidget() is not page:
+            recent = settings.load()["recent"] if self.use_settings else []
+            page.set_recent(recent)
+        self.central_stack.setCurrentWidget(page if shown else self.viewport)
+        return shown
+
+    def start(self, search=""):
+        """The start page's filter (the start action): every band narrowed
+        to the cards matching the text; returns the object names of the
+        cards in sight (the page shows while the document has no system)."""
+        return self.start_page.filter(search)
 
     def open_document(self, path_or_name):
         if self._may_replace(f"opening {Path(str(path_or_name)).name}"):

@@ -459,19 +459,29 @@ def test_new_open_and_recover_ask_about_unsaved_changes(qtbot, monkeypatch, no_j
 
 
 def test_presets_gallery(window, qtbot, shot):
+    """The gallery is made of the start page's preset cards (PLAN.md phase 8,
+    package P1): the teaching group first, a click selects a card and shows
+    its whole description, Open or a double click opens it."""
     from guiqula.io import project
     from guiqula.ui.gallery import GROUPS
+    from guiqula.ui.start import Card
     gallery = window.show_gallery()
-    assert gallery.list.count() == len(project.presets()) + len(GROUPS)   # and the headings
-    rows = [gallery.list.item(i) for i in range(gallery.list.count())]
-    names = [gallery._name(item) for item in rows]
-    assert names[0] is None and rows[0].text().startswith("Teaching")
-    teaching = names[1:names.index(None, 1)]
+    names = gallery.names()
+    assert sorted(names) == project.presets()                 # one card each
+    assert all(isinstance(gallery.cards[n], Card) and gallery.cards[n].picture is not None
+               for n in names)                                # with its picture
+    teaching = [n for n in names if gallery.notes[n][2] == "teaching"]
+    assert names[:len(teaching)] == teaching                  # the teaching group first
     assert {"ssh_chain", "graphene_basics"} <= set(teaching)
     assert all(project.load(name).locks for name in teaching)
+    for group, heading in GROUPS:
+        assert gallery.findChild(QLabel, f"galleryGroup_{group}").text() == heading
+    assert gallery.current() == names[0]
     gallery.select("ssh_chain")
     assert "locked for the exercise" in gallery.description.text()
-    gallery.select("majorana_wire")
+    gallery.cards["majorana_wire"].click()                    # a click selects
+    assert gallery.current() == "majorana_wire" and gallery.cards["majorana_wire"].isChecked()
+    assert not gallery.cards["ssh_chain"].isChecked()
     assert "Majorana" in gallery.description.text()
     assert "locked" not in gallery.description.text()
     shot(gallery, "gallery")
