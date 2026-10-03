@@ -4,5 +4,7 @@
 include README.md LICENSE environment.yml setup.py MANIFEST.in
 include vendor/VENDOR.md vendor/pyqula_user_guide.md
 recursive-include plugin_template *.py *.toml *.md
+# the icons of the controls with their licence (also package data, pyproject.toml)
+graft src/guiqula/resources/icons
 prune tests
 global-exclude __pycache__ *.py[cod] *.nbi *.nbc

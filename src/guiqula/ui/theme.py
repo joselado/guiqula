@@ -281,8 +281,9 @@ class CheckStyle(QProxyStyle):
 def apply(app, choice="light"):
     """Give the application the Fusion style (with the check boxes of
     CheckStyle), a theme's palette and the font of the interface text size
-    (apply_text), and make the theme's colours the active ones; returns the
-    theme applied."""
+    (apply_text), and make the theme's colours the active ones, the icons'
+    included (icons.theme_changed: the cache emptied, the window's callback
+    setting its icons again); returns the theme applied."""
     global name
     name = resolve(choice)
     globals().update(COLORS[name])
@@ -290,6 +291,8 @@ def apply(app, choice="light"):
     app.setPalette(palette(name))
     apply_text(app)
     app.setProperty("guiqula_theme", name)
+    from guiqula.ui import icons      # here: icons reads this module's colours
+    icons.theme_changed()             # the icons of the new theme, set again by the window
     return name
 
 
