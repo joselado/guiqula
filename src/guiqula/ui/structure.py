@@ -586,7 +586,8 @@ class StructureView(QWidget):
         self.paint_widgets = (self.paint, QLabel("value"), self.brush_value, QLabel("radius"),
                               self.brush_radius, self.brush_component)
         self._painting = False
-        self.caption = QLabel("No system yet: add one from the Geometry toolbar.")
+        self.caption = QLabel("No system yet: add one with New system, next to the "
+                              "workspace tabs.")
         self.caption.setObjectName("structureCaption")
         self.caption.setWordWrap(True)
         self.caption.setMinimumHeight(3 * self.caption.fontMetrics().lineSpacing())

@@ -9,7 +9,8 @@ from matplotlib.backend_bases import MouseEvent
 from matplotlib.collections import LineCollection
 from matplotlib.quiver import Quiver
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QLineEdit, QPushButton
+from PySide6.QtGui import QAction
+from PySide6.QtWidgets import QLineEdit
 
 from guiqula.engine.calculations import run_calculation
 from guiqula.ui.app import build_main_window
@@ -145,16 +146,16 @@ def test_hamiltonian_view(window, qtbot, shot):
 def test_term_search(window, qtbot):
     fresh(qtbot, window)
     window.set_workspace("hamiltonian")
-    search = window.findChild(QLineEdit, "termSearch")
+    menu = window.palette_menu("term")                    # the Add menu of the workspace
+    search = menu.findChild(QLineEdit, "paletteSearch")
     search.setText("kane")
     search.returnPressed.emit()
     assert window.session.document.find(window.selected)[-1].kind == "kane_mele"
     assert isinstance(window.properties.form, EntryForm)
-    qtbot.waitUntil(lambda: search.text() == "", timeout=2000)
+    assert search.text() == ""                            # the menu closed and cleared it
     search.setText("superconduct")                        # a word of a label
     search.returnPressed.emit()
     assert window.session.document.find(window.selected)[-1].kind == "pairing"
-    qtbot.waitUntil(lambda: search.text() == "", timeout=2000)
     search.setText("topology")                            # the group matches too
     search.returnPressed.emit()
     assert window.session.document.find(window.selected)[-1].kind == "haldane"
@@ -163,17 +164,25 @@ def test_term_search(window, qtbot):
     search.returnPressed.emit()
     assert len(window.session.document.system("s1").hamiltonian.terms) == count
     assert "no term matches" in window.log.toPlainText()
+    search.clear()
 
 
 def test_meanfield_block(window, qtbot, shot):
     fresh(qtbot, window)
     session = window.session
-    window.set_workspace("hamiltonian")
-    window.findChild(QPushButton, "meanfieldButton").click()
+    window.select("s1/meanfield")                          # its row: off
     form = window.properties.form
-    assert window.selected == "s1/meanfield" and isinstance(form, MeanFieldForm)
+    assert window.workspace == "hamiltonian" and isinstance(form, MeanFieldForm)
     assert window.outliner.item("s1/meanfield").text(1) == "off"
     form.enabled.setChecked(True)
+    assert session.document.system("s1").hamiltonian.meanfield.enabled
+    form = window.properties.form
+    form.enabled.setChecked(False)
+    assert not session.document.system("s1").hamiltonian.meanfield.enabled
+    window.select("t1")                     # the last item of the terms' Add menu turns it on
+    window.palette_menu("term").findChild(QAction, "addMeanfield").trigger()
+    form = window.properties.form
+    assert window.selected == "s1/meanfield" and isinstance(form, MeanFieldForm)
     assert session.document.system("s1").hamiltonian.meanfield.enabled
     form = window.properties.form
     form.editors["U"].edit.setText("2.5")

@@ -154,12 +154,13 @@ def test_the_brush_paints_only_the_system_it_is_drawn_on(window, qtbot):
     settle(qtbot, window)
     window.preview_field("t2", "c")                 # a Field of s1
     assert window.structure.paint.isEnabled()
-    window.select(s2)
+    window.select(s2)                               # the Geometry workspace: its view
     assert not window.structure.paint.isEnabled()
     before = window.session.document.to_json()
     window._paint_stroke([0], True)                 # sites of s2
     assert window.session.document.to_json() == before
     window.select("t2")
+    window.set_canvas_view("field")                 # the Field previewed, on its system
     assert window.structure.paint.isEnabled()
     window.set_canvas_view("structure")
 

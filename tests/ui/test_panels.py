@@ -167,7 +167,9 @@ def test_the_layout_setting_round_trips(qtbot, config):
         assert again.log_toggle.isChecked()
         assert again.dockWidgetArea(again.docks["jobsDock"]) == \
             Qt.DockWidgetArea.LeftDockWidgetArea
-        assert [n for n, bar in again.palettes.items() if bar.isVisible()] == ["geometry"]
+        assert [bar.objectName() for bar in again.findChildren(mainwindow.QToolBar)
+                if bar.parent() is again and bar.isVisible()] == \
+            ["workspaceToolbar", "runToolbar", "geometryToolbar"]
         again.reset_layout()
         settle(qtbot)
         assert_default(again)

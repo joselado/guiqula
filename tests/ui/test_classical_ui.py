@@ -3,7 +3,7 @@ toolbar, a Model branch in the outliner with a form for its set-up, the
 palettes offering the terms and calculations of the kind of the current
 system, and a result drawn on the structure."""
 import pytest
-from PySide6.QtWidgets import QToolButton
+from PySide6.QtGui import QAction
 
 from guiqula.ui.app import build_main_window
 from guiqula.ui.properties import ModelForm
@@ -25,27 +25,27 @@ def settle(qtbot, window, timeout=120_000):
         for s in session.document.systems), timeout=timeout)
 
 
-def menu_kinds(window, name, prefix):
-    menu = window.findChild(QToolButton, name).menu()
-    return {a.objectName()[len(prefix) + 1:] for a in menu.actions() if a.objectName()}
+def menu_kinds(window, family, prefix):
+    menu = window.palette_menu(family)
+    return {a.objectName()[len(prefix) + 1:] for a in menu.actions()
+            if a.objectName().startswith(prefix + "_") and a.isVisible()}
 
 
 def test_a_classical_system_in_the_window(window, qtbot, shot):
     session = window.session
     settle(qtbot, window)
-    assert "zeeman" in menu_kinds(window, "addTermButton", "addTerm")
-    menu = window.findChild(QToolButton, "newClassicalButton").menu()
+    assert "zeeman" in menu_kinds(window, "term", "addTerm")
+    menu = window.palette_menu("lattice")                  # New system, its last section
     next(a for a in menu.actions() if a.objectName() == "newClassical_ising").trigger()
     system = window.selected
     assert session.document.system(system).kind == "ising"
     assert window.workspace_tabs.tabText(1) == "Model"
-    terms = menu_kinds(window, "addTermButton", "addTerm")
+    terms = menu_kinds(window, "term", "addTerm")
     assert terms == {"ising_interaction", "ising_field", "python"}
-    assert menu_kinds(window, "addCalculationButton", "addCalc") == {"anneal_ising", "python",
-                                                                     "sweep"}
-    assert not window.meanfield_button.isEnabled()
-    window.term_search.setText("interaction")
-    window.term_search.returnPressed.emit()
+    assert menu_kinds(window, "calculation", "addCalc") == {"anneal_ising", "python", "sweep"}
+    assert not window.palette_menu("term").findChild(QAction, "addMeanfield").isVisible()
+    window.palette_menu("term").search.setText("interaction")
+    window.palette_menu("term").search.returnPressed.emit()
     term = window.selected
     assert session.document.find(term)[-1].kind == "ising_interaction"
     window.select(f"{system}/model")
@@ -64,13 +64,13 @@ def test_a_classical_system_in_the_window(window, qtbot, shot):
     qtbot.waitUntil(lambda: window.plots[calc].result is not None, timeout=10_000)
     assert window.plots[calc].result.plot["kind"] == "structure_scalar"
     shot(window, "ising")
+    window.select(system)                                  # the Geometry workspace
     window.set_canvas_view("hamiltonian")
-    window.select(system)
     assert "classical system has no Hamiltonian" in window.structure.caption.text()
     window.set_canvas_view("structure")
     window.select("s1")                                    # back to the quantum system
     assert window.workspace_tabs.tabText(1) == "Hamiltonian"
-    assert "zeeman" in menu_kinds(window, "addTermButton", "addTerm")
+    assert "zeeman" in menu_kinds(window, "term", "addTerm")
 
 
 def test_a_texture_feeds_an_exchange_field(window, qtbot, shot):

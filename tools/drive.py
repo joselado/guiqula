@@ -28,9 +28,12 @@ selected, reset; calculation: a result's scene instead of the canvas's),
 plot_text (small, normal, large), ui_text (normal, large: the text of the
 menus, panels and forms), log (enabled: the bottom area, Log and Console,
 hidden by default), panel (name: a dock, helpDock or Help, ...; shown:
-false hides it), reset_layout (the default arrangement of the panels); the
-session's undo, redo (with "steps") and history; lock and unlock are
-mutations. The driven window never reads or writes the settings file. Every
+false hides it), reset_layout (the default arrangement of the panels),
+add_menu (section: s1/geometry, s1/regions, s1/hamiltonian, s1/model,
+calculations or systems, and search: an Add menu opened as its "+" does,
+whose widget is paletteMenu_<family> or regionsMenu), run_stale (every
+stale result); the session's undo, redo (with "steps") and history; lock
+and unlock are mutations. The driven window never reads or writes the settings file. Every
 calculation's result has its own view, plot_<calculation id>. After each command the driver
 waits for the rebuild of the geometry, so a selection sees the new sites.
 The report printed last is JSON: the document outline, the builds, job and

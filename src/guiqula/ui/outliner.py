@@ -17,11 +17,20 @@ or ``<system>/base``, ``<system>/geometry``, ``<system>/regions``,
 ``<system>/model`` for a classical system) for the rows of a system that
 are not entries (pseudo_ids), and ``calculations``. The mean-field row
 closes the Hamiltonian's list, with its own checkbox (set_meanfield).
+
+The section rows (a system's Geometry, Regions, Hamiltonian or Model, and
+Calculations) carry a "+" at the right of their status cell (PLAN.md phase
+8, package P2): add_requested says which section, and the window opens the
+Add menu of that family for that system there (add_button(path) gives the
+button; outlinerAdd_<system>_geometry, _regions, _hamiltonian, _model and
+outlinerAdd_calculations). The rest of the cell is left to the row, so a
+click there selects it as before.
 """
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QBrush, QColor
-from PySide6.QtWidgets import (QAbstractItemView, QInputDialog, QMenu, QTreeWidget,
-                               QTreeWidgetItem)
+from PySide6.QtGui import QAction, QBrush, QColor, QRegion
+from PySide6.QtWidgets import (QAbstractItemView, QHeaderView, QInputDialog, QMenu,
+                               QStyledItemDelegate, QToolButton, QTreeWidget, QTreeWidgetItem,
+                               QWidget)
 
 from guiqula.core import regions as region_tools
 from guiqula.registry import base as registry
@@ -29,8 +38,23 @@ from guiqula.ui import shortcuts, theme
 from guiqula.ui.plots import scalar_rows
 
 ID_ROLE = Qt.ItemDataRole.UserRole
+ADD_ROLE = Qt.ItemDataRole.UserRole + 1      # the path of a section row's "+", in its status
 INVALID = "✗ "
 MOVABLE = ("op", "term", "region", "calculation")
+# the rows of a system that carry a "+", and the name of their section in a path
+ADD_SECTIONS = {"geometry": "geometry", "regions": "regions", "hamiltonian": "hamiltonian",
+                "model_stack": "model"}
+ADD_TIPS = {"geometry": "add a geometry op to {system} (a supercell, a ribbon, an island, "
+                        "cuts, strain...), applied after the others",
+            "regions": "add a region to {system}: the sites where an expression of the "
+                       "position holds, or the sites selected on the canvas",
+            "hamiltonian": "add a term to the Hamiltonian of {system}, applied after the "
+                           "others, or turn on its mean field",
+            "model": "add a term to the model of {system}, applied after the others",
+            "calculations": "add a calculation on the current system ({run} runs the selected "
+                            "one)"}
+ADD_ROOM = 26                # pixels of the status cell left to the "+"
+STATUS_WIDTH = 84            # pixels of the Status column, the Entry column taking the rest
 
 
 def drop_index(old, target, below):
@@ -100,15 +124,48 @@ def _selection_text(select):
     return str(select.get("kind"))
 
 
+class AddCell(QWidget):
+    """The status cell of a section row: its "+" at the right, and a mask
+    that leaves the rest of the cell's clicks to the row."""
+
+    def __init__(self, button):
+        super().__init__()
+        self.button = button
+        button.setParent(self)
+
+    def resizeEvent(self, event):
+        side = max(self.height(), 1)
+        self.button.setGeometry(self.width() - side - 4, 0, side + 4, side)
+        self.setMask(QRegion(self.button.geometry()))
+        super().resizeEvent(event)
+
+
+class StatusDelegate(QStyledItemDelegate):
+    """The status column: the text of a row with a "+" stops short of it."""
+
+    def initStyleOption(self, option, index):
+        super().initStyleOption(option, index)
+        if index.data(ADD_ROLE):
+            option.text = option.fontMetrics.elidedText(
+                option.text, Qt.TextElideMode.ElideRight, max(0, option.rect.width() - ADD_ROOM))
+
+
 class Outliner(QTreeWidget):
     selected = Signal(str)              # item id ("" for none)
     command = Signal(str, object)       # mutation or action name, args dict
+    add_requested = Signal(str, object)  # a section's "+": its path (s1/regions...), the button
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("outliner")
         self.setHeaderLabels(["Entry", "Status"])
-        self.setColumnWidth(0, 230)
+        # the Entry column takes what the Status column leaves, so that nothing, the "+" of
+        # the sections least, is out of sight to the right (package P7 sizes Status)
+        header = self.header()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        self.setColumnWidth(1, STATUS_WIDTH)
         self.setUniformRowHeights(True)
         self.setDragEnabled(True)
         self.setAcceptDrops(True)
@@ -120,7 +177,10 @@ class Outliner(QTreeWidget):
         self.itemChanged.connect(self._item_changed)
         self._session = None
         self._items = {}
+        self._add_buttons = {}          # section path -> its "+" (rebuilt with the tree)
         self._refreshing = False
+        self._status_delegate = StatusDelegate(self)
+        self.setItemDelegateForColumn(1, self._status_delegate)
         for text, shortcut, slot in (("Delete", "delete", self.delete_current),
                                      ("Rename", "rename", self.rename_current),
                                      ("Duplicate", "duplicate", self.duplicate_current),
@@ -137,6 +197,30 @@ class Outliner(QTreeWidget):
 
     def item(self, item_id):
         return self._items.get(item_id)
+
+    def add_button(self, path):
+        """The "+" of a section row: path is <system>/geometry,
+        <system>/regions, <system>/hamiltonian, <system>/model or
+        calculations; None when the tree has no such row."""
+        return self._add_buttons.get(path)
+
+    def _add_plus(self, item, path, tooltip, enabled=True):
+        """Put a "+" at the right of a section row's status cell."""
+        button = QToolButton()
+        button.setText("+")
+        button.setObjectName("outlinerAdd_" + path.replace("/", "_"))
+        font = button.font()
+        font.setBold(True)
+        button.setFont(font)
+        button.setAutoRaise(True)
+        button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        button.setToolTip(tooltip)
+        button.setEnabled(enabled)
+        button.clicked.connect(lambda checked=False: self.add_requested.emit(path, button))
+        item.setData(1, ADD_ROLE, path)
+        self.setItemWidget(item, 1, AddCell(button))
+        self._add_buttons[path] = button
+        return button
 
     def set_current(self, item_id):
         """Select a row without emitting selected (the window drives this)."""
@@ -172,6 +256,7 @@ class Outliner(QTreeWidget):
         try:
             self.clear()
             self._items = {}
+            self._add_buttons = {}
             document = session.document
             for system in document.systems:
                 self._add_system(session, system)
@@ -179,6 +264,7 @@ class Outliner(QTreeWidget):
             for calc in document.calculations:
                 self._add_calculation(session, calcs, calc)
             self._mark_locks(document)
+            self._add_pluses(document)
             self.expandAll()
             for item_id in collapsed & set(self._items):
                 self._items[item_id].setExpanded(False)
@@ -308,6 +394,18 @@ class Outliner(QTreeWidget):
         elif message:
             self._mark_invalid(item, message)
         return item
+
+    def _add_pluses(self, document):
+        """The "+" of every section row of the tree."""
+        for system in document.systems:
+            for row, section in ADD_SECTIONS.items():
+                item = self._items.get(f"{system.id}/{row}")
+                if item is not None:
+                    self._add_plus(item, f"{system.id}/{section}",
+                                   ADD_TIPS[section].format(system=system.id))
+        self._add_plus(self._items["calculations"], "calculations",
+                       ADD_TIPS["calculations"].format(run=shortcuts.text("run")),
+                       enabled=bool(document.systems))
 
     def _mark_locks(self, document):
         """"locked" (or "m locked") in the status of what a lock covers; a

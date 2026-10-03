@@ -1,6 +1,9 @@
 """The main window (PLAN.md section 4): one document, three workspaces
-(Geometry, Hamiltonian, Calculate) that change the palette toolbar and
-the emphasis, not the data; the outliner on the left, the viewport (the
+(Geometry, Hamiltonian, Calculate) that follow the selection and change
+what Add lists and the emphasis, not the data; an entry is added from
+where it will appear, the "+" of its outliner section or the first row's
+Add, both one searchable menu (ui/palette.py, PLAN.md phase 8, package
+P2); the outliner on the left, the viewport (the
 Structure tab and one closable tab per calculation's result, which can be
 detached into windows of their own) in the centre, the properties form on
 the right with Help, Sliders and Jobs tabbed below it, so that the help never
@@ -52,10 +55,10 @@ import traceback
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QByteArray, Qt, QTimer, QUrl
+from PySide6.QtCore import QByteArray, QPoint, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QActionGroup, QDesktopServices
-from PySide6.QtWidgets import (QApplication, QButtonGroup, QComboBox, QCompleter, QDialog,
-                               QDockWidget, QFileDialog, QHeaderView, QLabel, QLineEdit,
+from PySide6.QtWidgets import (QApplication, QButtonGroup, QComboBox, QDialog,
+                               QDockWidget, QFileDialog, QHeaderView, QLabel,
                                QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QPushButton,
                                QStyle, QStyleOptionDockWidget, QStylePainter, QTabBar,
                                QTableWidget, QTableWidgetItem, QTabWidget, QToolBar,
@@ -78,11 +81,12 @@ from guiqula.ui.kspace import KSpaceView
 from guiqula.ui.sliders import SlidersPanel
 from guiqula.ui.jobpanel import JobPanel
 from guiqula.ui.outliner import Outliner, pseudo_ids, system_of
+from guiqula.ui.palette import FAMILIES as PALETTE_FAMILIES, MenuButton, PaletteMenu
 from guiqula.ui.plots import PlotView, ResultWindow, in_3d as plot_in_3d
 from guiqula.ui.properties import PropertiesPanel
 from guiqula.ui import structure as structure_tools
 from guiqula.ui.structure import StructureView
-from guiqula.ui import formulas, pyvista_view, shortcuts, theme
+from guiqula.ui import pyvista_view, shortcuts, theme
 
 POLL_MS = 30
 BUILD_DELAY_MS = 150
@@ -94,7 +98,7 @@ WINDOW_ACTIONS = ("select", "workspace", "tool", "select_sites", "region_from_se
                   "overlay", "slider", "set_slider", "remove_slider", "paint", "theme",
                   "export_bundle", "help", "remote", "pick", "pick_to", "run_at_once",
                   "renderer_3d", "view_3d", "plot_text", "ui_text", "reset_layout", "log",
-                  "panel")
+                  "panel", "add_menu", "run_stale")
 STRUCTURE_TAB = 0
 KSPACE_TAB = 1
 # a new classical system: its lattice, and a supercell the usual orders fit in
@@ -104,6 +108,16 @@ CLASSICAL_STARTS = {"classical_spin": ("triangular_lattice", 3, "Classical spins
 REGION_TOLERANCE = 0.05      # positions regions made from a canvas selection
 AUTO_RERUN_SECONDS = 3.0     # stale results re-run automatically when cheaper than this
 CANVAS_VIEW_OF = {"geometry": "structure", "hamiltonian": "hamiltonian"}
+# what the toolbar's Add lists in each workspace (PLAN.md phase 8, package P2), and says
+WORKSPACE_FAMILIES = {"geometry": "geometry_op", "hamiltonian": "term",
+                      "calculate": "calculation"}
+ADD_TIPS = {"geometry": "add a geometry op to the current system (a supercell, a ribbon, an "
+                        "island, cuts, strain...): type to search, Enter adds the best match",
+            "hamiltonian": "add a term to the current system's Hamiltonian (or model), applied "
+                           "after the others, or turn on its mean field: type to search, Enter "
+                           "adds the best match",
+            "calculate": "add a calculation on the current system, which Run computes: type "
+                         "to search, Enter adds the best match"}
 # the panels' sides (PLAN.md phase 8, package P5); the bottom ones are hidden by default
 DOCK_AREAS = {"outlinerDock": Qt.DockWidgetArea.LeftDockWidgetArea,
               "propertiesDock": Qt.DockWidgetArea.RightDockWidgetArea,
@@ -118,7 +132,7 @@ LOG_HEIGHT = 160             # pixels the bottom area takes when the Log toggle 
 # the version of the window's saveState() kept in the settings (layout): a change of the
 # docks or the toolbars that a stored arrangement would misplace raises it, and a stored
 # one of another version gives the default arrangement
-LAYOUT_VERSION = 1
+LAYOUT_VERSION = 2           # 2: the first toolbar row and the selection row of package P2
 # what each panel is, in the tooltip of its entry of View > Panels
 PANEL_TIPS = {"outlinerDock": "the systems, their geometry, terms and mean field, and the "
                               "calculations",
@@ -145,36 +159,18 @@ class Dock(QDockWidget):
         painter.drawControl(QStyle.ControlElement.CE_DockWidgetTitle, option)
 
 
-def _grouped(family):
-    """Registry entries sorted by group, then label."""
-    return sorted(registry.entries(family), key=lambda s: (s.group, s.label))
-
-
-def _search_rank(spec, text):
-    """How well an entry matches a search (lower is better), or None."""
-    label = spec.label.lower()
-    if text in (label, f"{spec.label} ({spec.group})".lower(), spec.kind):
-        return 0
-    if label.startswith(text):
-        return 1
-    if any(word.startswith(text) for word in label.replace("-", " ").replace("/", " ").split()):
-        return 2
-    for rank, where in enumerate((label, spec.kind, spec.group.lower(), spec.doc.lower()), 3):
-        if text in where:
-            return rank
-    return None
-
-
-def search_entries(family, text):
-    """Registry entries matching the text (case-insensitive), best first:
-    the exact label (or "label (group)", or the kind), a label starting
-    with it, a word of the label starting with it, then the text anywhere
-    in the label, the kind, the group or the doc; ties in palette order."""
-    text = text.strip().lower()
-    if not text:
-        return []
-    found = [(_search_rank(spec, text), i, spec) for i, spec in enumerate(_grouped(family))]
-    return [spec for rank, _, spec in sorted(f for f in found if f[0] is not None)]
+def workspace_of(entry, family=None):
+    """The workspace an outliner item belongs to (family: what
+    Document.find says of an entry id), or None for nothing selected."""
+    if not entry:
+        return None
+    if entry == "calculations" or family == "calculation":
+        return "calculate"
+    if family is not None:
+        return "hamiltonian" if family == "term" else "geometry"
+    row = entry.split("/", 1)[1] if "/" in entry else ""
+    return "hamiltonian" if row in ("hamiltonian", "meanfield", "model_stack", "model") \
+        else "geometry"
 
 
 class MainWindow(QMainWindow):
@@ -209,12 +205,11 @@ class MainWindow(QMainWindow):
         self._pick_menu = None         # the pick menu shown last (kept alive while it is open)
         self._auto_keys = {}           # calculation id -> key it was last re-run for
         self._auto_jobs = set()        # ids of the jobs the auto re-run started
-        self._searched = (None, 0.0)   # (text, time) of the last palette search
-        self._palette_menus = {}       # menu button -> (entries, handler, prefix) it lists
 
         self.outliner = Outliner()
         self.outliner.selected.connect(self.select)
         self.outliner.command.connect(self._outliner_command)
+        self.outliner.add_requested.connect(self._section_add)
         self.properties = PropertiesPanel(self._do)
         self.properties.preview.connect(self._preview_requested)
         self.properties.help_requested.connect(lambda item: self.show_help(item))
@@ -389,36 +384,14 @@ class MainWindow(QMainWindow):
                          [int(100 * PROPERTIES_SHARE), int(100 * (1 - PROPERTIES_SHARE))],
                          Qt.Orientation.Vertical)
 
-    def _menu_button(self, bar, text, name, entries, handler, prefix):
-        """A tool button whose menu lists registry entries by group."""
-        button = QToolButton()
-        button.setText(text)
+    def _menu_button(self, bar, text, name, menu, tooltip, shortcut=None):
+        """A tool button with a menu, which a click opens with popup() (the
+        caller connects clicked, ui/palette.py's MenuButton)."""
+        button = MenuButton(text, menu)
         button.setObjectName(name)
-        button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        self._fill_menu(button, entries, handler, prefix)
+        self._tip(button, tooltip, shortcut)
         bar.addWidget(button)
         return button
-
-    def _fill_menu(self, button, entries, handler, prefix):
-        """(Re)fill a menu button with registry entries by group; their
-        tooltips' formulas are drawn in the theme's colours, so set_theme
-        fills them again."""
-        self._palette_menus[button] = (entries, handler, prefix)
-        old = button.menu()
-        menu = QMenu(button)
-        group = None
-        for spec in entries:
-            if spec.group != group:
-                group = spec.group
-                menu.addSection(group or "other")
-            action = menu.addAction(spec.label)
-            action.setObjectName(f"{prefix}_{spec.kind}")
-            action.setToolTip(formulas.entry_tooltip(spec))
-            action.triggered.connect(lambda checked=False, k=spec.kind: handler(k))
-        menu.setToolTipsVisible(True)
-        button.setMenu(menu)
-        if old is not None:
-            old.deleteLater()
 
     @staticmethod
     def _tip(widget, text, shortcut=None):
@@ -434,6 +407,11 @@ class MainWindow(QMainWindow):
         return bar
 
     def _build_toolbars(self):
+        """The first row: the workspace tabs, New system and Add (the Add
+        menus of ui/palette.py, which the outliner's "+" open too), then the
+        run controls; below it, until the canvas bar takes them (P3), the
+        selection tools of the canvas, in every workspace (PLAN.md phase 8,
+        package P2)."""
         bar = self._toolbar("Workspace", "workspaceToolbar")
         self.workspace_tabs = QTabBar()
         self.workspace_tabs.setObjectName("workspaceTabs")
@@ -443,9 +421,55 @@ class MainWindow(QMainWindow):
                 "geometry": "the lattice, the geometry ops, regions and the site selection",
                 "hamiltonian": "the terms (or a classical model) and the mean field",
                 "calculate": "the calculations and their results"}[name]
-                + f" ({shortcuts.text('workspace_' + name)})")
+                + f"; selecting an entry shows its workspace "
+                  f"({shortcuts.text('workspace_' + name)})")
         self.workspace_tabs.currentChanged.connect(lambda i: self.set_workspace(WORKSPACES[i]))
         bar.addWidget(self.workspace_tabs)
+        self.palette_menus = {}
+        self._opening = None           # the Add menu open_add_menu is showing
+        for family in PALETTE_FAMILIES:
+            menu = PaletteMenu(family, self)
+            menu.aboutToShow.connect(lambda m=menu: self._palette_shown(m))
+            menu.chosen.connect(lambda kind, m=menu: self._palette_chosen(m, kind))
+            menu.not_found.connect(lambda text, f=family: self.message(
+                f"no {f.replace('_', ' ')} matches {text!r}", error=True))
+            self.palette_menus[family] = menu
+        for kind, (lattice, n, label) in CLASSICAL_STARTS.items():
+            self.palette_menus["lattice"].add_extra(
+                "Classical systems", label, f"newClassical_{kind}",
+                f"{label.lower()} on a {n}x{n} supercell of the "
+                f"{registry.get('lattice', lattice).label.lower()} (decision 13.5)",
+                lambda checked=False, k=kind: self.new_classical_system(k))
+        self.palette_menus["term"].add_extra(
+            "Interactions", "Mean field (interactions)", "addMeanfield",
+            "interactions solved self-consistently after the terms: turns on the mean-field "
+            "block of the system and selects its row",
+            lambda: self.add_meanfield(self.palette_menus["term"].system), kinds=("quantum",))
+        bar.addSeparator()
+        self.new_system_button = self._menu_button(
+            bar, "New system", "newSystemButton", self.palette_menus["lattice"],
+            "a new system: a quantum one on a lattice, or classical spins, a lattice gas or an "
+            "Ising model (a document can hold several)")
+        self.new_system_button.clicked.connect(lambda: self.open_add_menu("systems"))
+        self.add_button = self._menu_button(bar, "Add", "addButton",
+                                            self.palette_menus["geometry_op"],
+                                            ADD_TIPS["geometry"], "find")
+        self.add_button.clicked.connect(lambda: self.open_add_menu())
+        self.regions_menu = QMenu(self)
+        self.regions_menu.setObjectName("regionsMenu")
+        self.regions_menu.setToolTipsVisible(True)
+        self.regions_system = None     # the system the Regions menu adds to
+        action = self.regions_menu.addAction("Region by expression")
+        action.setObjectName("addRegion_expression")
+        action.setToolTip("the sites where an expression of the position holds (x > 0 to "
+                          "begin with, edited in its form)")
+        action.triggered.connect(lambda: self.add_region(system=self.regions_system))
+        self.region_selection_action = self.regions_menu.addAction("Region from selection")
+        self.region_selection_action.setObjectName("addRegion_selection")
+        self.region_selection_action.setToolTip("a region of the sites selected on the canvas")
+        self.region_selection_action.triggered.connect(
+            lambda: self._act("region_from_selection"))
+
         run = self._toolbar("Run", "runToolbar")
         run.addWidget(QLabel(" Calculation "))
         self.calc_box = QComboBox()
@@ -455,47 +479,45 @@ class MainWindow(QMainWindow):
                                  "and cost the window shows")
         self.calc_box.currentIndexChanged.connect(self._calculation_chosen)
         run.addWidget(self.calc_box)
-        self.run_button = QPushButton("Run")
+        self.run_menu = QMenu(self)
+        self.run_menu.setObjectName("runMenu")
+        self.run_menu.setToolTipsVisible(True)
+        self.run_menu.aboutToShow.connect(self._fill_run_menu)
+        self.run_stale_action = QAction("Run every stale result", self)
+        self.run_stale_action.setObjectName("runStaleAction")
+        self.run_stale_action.setToolTip("run again every result the model has changed under "
+                                         "since it was computed (a slow one after a question)")
+        self.run_stale_action.triggered.connect(lambda: self._window_act("run_stale",
+                                                                         self.run_stale))
+        self.run_button = QToolButton()
+        self.run_button.setText("Run")
         self.run_button.setObjectName("runButton")
+        self.run_button.setMenu(self.run_menu)
+        self.run_button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
         self.run_button.clicked.connect(self.run_selected)
-        self._tip(self.run_button, "run the chosen calculation in a worker", "run")
+        self._tip(self.run_button, "run the chosen calculation in a worker; the arrow runs "
+                                   "another one, or every stale result", "run")
         run.addWidget(self.run_button)
-        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button = QToolButton()
+        self.cancel_button.setText("Cancel")
         self.cancel_button.setObjectName("cancelButton")
         self.cancel_button.clicked.connect(self.cancel_selected)
         self._tip(self.cancel_button, "stop its job (the worker is restarted)", "cancel")
         run.addWidget(self.cancel_button)
-        self.addToolBarBreak()              # the palettes get a row of their own
+        self.auto_rerun_button = QToolButton()
+        self.auto_rerun_button.setText("Follow")
+        self.auto_rerun_button.setObjectName("autoRerunButton")
+        self.auto_rerun_button.setCheckable(True)
+        self.auto_rerun_button.setToolTip(
+            f"cheap results are computed again as the model changes: a stale result that "
+            f"takes less than {AUTO_RERUN_SECONDS:g} s runs again by itself (Run > Re-run "
+            f"cheap results automatically)")
+        self.auto_rerun_button.clicked.connect(lambda checked: self._window_act(
+            "auto_rerun", self.set_auto_rerun, enabled=checked))
+        run.addWidget(self.auto_rerun_button)
+        self.addToolBarBreak()              # the selection tools get a row of their own
 
-        self.palettes = {}
-        geometry = self._toolbar("Geometry", "geometryToolbar")
-        self._tip(self._menu_button(geometry, "New system", "newSystemButton",
-                                    _grouped("lattice"), self.new_system, "newSystem"),
-                  "a new quantum system on a lattice (a document can hold several)")
-        classical = QToolButton()
-        classical.setText("New classical system")
-        classical.setObjectName("newClassicalButton")
-        classical.setToolTip("classical spins, a lattice gas or an Ising model on a lattice "
-                             "(decision 13.5)")
-        classical.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        menu = QMenu(classical)
-        for kind, (_, _, label) in CLASSICAL_STARTS.items():
-            action = menu.addAction(label)
-            action.setObjectName(f"newClassical_{kind}")
-            action.triggered.connect(lambda checked=False, k=kind: self.new_classical_system(k))
-        classical.setMenu(menu)
-        geometry.addWidget(classical)
-        self._tip(self._menu_button(geometry, "Add op", "addOpButton", _grouped("geometry_op"),
-                                    self.add_op, "addOp"),
-                  "a geometry op after the others of the current system (supercell, ribbon, "
-                  "island, cuts, strain...)")
-        self._search_box(geometry, "geometry_op", self.add_op, "opSearch", "find an op")
-        self.add_region_button = QPushButton("Add region")
-        self.add_region_button.setObjectName("addRegionButton")
-        self.add_region_button.setToolTip("a region of the current system, by expression")
-        self.add_region_button.clicked.connect(self.add_region)
-        geometry.addWidget(self.add_region_button)
-        geometry.addSeparator()
+        geometry = self._toolbar("Selection", "geometryToolbar")
         self.tool_buttons = QButtonGroup(self)
         for tool, text, tip in (("pick", "Pick", "click an atom; shift adds, ctrl toggles"),
                                 ("box", "Box", "drag a rectangle"),
@@ -546,92 +568,195 @@ class MainWindow(QMainWindow):
                                       "position; Del on the canvas)")
         self.remove_button.clicked.connect(lambda: self._act("remove_selected"))
         geometry.addWidget(self.remove_button)
-        self.palettes["geometry"] = geometry
 
-        hamiltonian = self._toolbar("Hamiltonian", "hamiltonianToolbar")
-        self._palette_kind = "quantum"      # the system kind the palettes offer entries for
-        self.term_button = self._menu_button(hamiltonian, "Add term", "addTermButton",
-                                             self._offered("term"), self.add_term, "addTerm")
-        self._tip(self.term_button, "a term of the current system's Hamiltonian (or model), "
-                                    "applied after the others")
-        self.term_search = self._search_box(hamiltonian, "term", self.add_term, "termSearch",
-                                            "find a term")
-        hamiltonian.addSeparator()
-        self.meanfield_button = QPushButton("Mean field")
-        self.meanfield_button.setObjectName("meanfieldButton")
-        self.meanfield_button.setToolTip("interactions solved self-consistently after the "
-                                         "terms (the mean-field block of the current system)")
-        self.meanfield_button.clicked.connect(self.show_meanfield)
-        hamiltonian.addWidget(self.meanfield_button)
-        self.palettes["hamiltonian"] = hamiltonian
+    # ---- the Add menus (PLAN.md phase 8, package P2)
+    def palette_menu(self, family, system=None):
+        """The Add menu of a family (lattice, geometry_op, term,
+        calculation) with its entries made for the kind of a system (the
+        current one when left out), which an entry chosen in it is added
+        to (the current one at that moment when left out)."""
+        menu = self.palette_menus[family]
+        menu.system = system
+        target = system or self.current_system()
+        kind = "quantum"                   # New system offers the lattices of quantum systems
+        if family != "lattice" and target is not None and self.session is not None:
+            kind = self.session.document.system(target).kind
+        return menu.prepare(kind)
 
-        calculate = self._toolbar("Calculate", "calculateToolbar")
-        self.calc_button = self._menu_button(calculate, "Add calculation", "addCalculationButton",
-                                             self._offered("calculation"), self.add_calculation,
-                                             "addCalc")
-        self._tip(self.calc_button, "a calculation on the current system; F5 runs it")
-        self.calc_search = self._search_box(calculate, "calculation", self.add_calculation,
-                                            "calculationSearch", "find a calculation")
-        self.palettes["calculate"] = calculate
+    def _palette_shown(self, menu):
+        """A menu shown by Qt rather than by open_add_menu (a press held on
+        its button): it lists for the current system, and adds to it."""
+        if self._opening is not menu:
+            self.palette_menu(menu.family)
 
-    def _search_box(self, bar, family, handler, name, placeholder):
-        """A line with completion over a family's entries; Enter (or a
-        completion) adds the best match with handler(kind)."""
-        edit = QLineEdit()
-        edit.setObjectName(name)
-        edit.setPlaceholderText(placeholder)
-        edit.setClearButtonEnabled(True)
-        edit.setMaximumWidth(220)
-        self._tip(edit, f"{placeholder}: type part of a name, Enter adds the best match",
-                  "find")
-        completer = QCompleter([f"{spec.label} ({spec.group})" for spec in self._offered(family)],
-                               edit)
-        completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        completer.setFilterMode(Qt.MatchFlag.MatchContains)
-        edit.setCompleter(completer)
-        completer.activated.connect(lambda text: self.add_searched(edit, family, handler, text))
-        edit.returnPressed.connect(lambda: self.add_searched(edit, family, handler, edit.text()))
-        bar.addWidget(edit)
-        return edit
-
-    def add_searched(self, edit, family, handler, text):
-        """Add the best match of a palette search; returns its kind or None."""
-        now = time.monotonic()
-        if not text.strip() or (self._searched[0] == text and now - self._searched[1] < 0.5):
-            return None                  # Enter and the completion both fire for one choice
-        self._searched = (text, now)
-        matches = [spec for spec in search_entries(family, text)
-                   if self._palette_kind in spec.systems]
-        if not matches:
-            self.message(f"no {family.replace('_', ' ')} matches {text.strip()!r}", error=True)
+    def _palette_chosen(self, menu, kind):
+        """An entry chosen in an Add menu: added to the menu's system (the
+        current one when it names none, or no longer exists) and selected."""
+        if menu.family == "lattice":
+            return self.new_system(kind)
+        system = menu.system if menu.system and self._exists(menu.system) \
+            else self._target_system()
+        if system is None:
             return None
-        handler(matches[0].kind)
-        QTimer.singleShot(0, edit.clear)
-        return matches[0].kind
+        command = {"geometry_op": "add_geometry_op", "term": "add_term",
+                   "calculation": "add_calculation"}[menu.family]
+        return self._do_and_select(command, system=system, kind=kind)
 
-    def _offered(self, family):
-        """The entries of a family the palettes offer for the current kind
-        of system (a classical system has its own terms and calculations)."""
-        kind = getattr(self, "_palette_kind", "quantum")
-        return [spec for spec in _grouped(family) if kind in spec.systems]
+    def _add_target(self, section):
+        """(menu, system) of an Add menu (open_add_menu's section)."""
+        if not section:
+            system = self.current_system()
+            if system is None:
+                return self.palette_menu("lattice"), None
+            return self.palette_menu(WORKSPACE_FAMILIES[self.workspace], system), system
+        if section == "systems":
+            return self.palette_menu("lattice"), None
+        if section == "calculations":
+            system = self.current_system()
+            if system is None:
+                raise ValueError("add a system first (New system)")
+            return self.palette_menu("calculation", system), system
+        system, _, part = section.partition("/")
+        if self.session is None or not any(s.id == system for s in
+                                           self.session.document.systems):
+            raise ValueError(f"no system {system!r} in the document")
+        kind = self.session.document.system(system).kind
+        if part == "geometry":
+            return self.palette_menu("geometry_op", system), system
+        if part == "regions":
+            return self.regions_menu, system
+        if part in ("hamiltonian", "model"):
+            if (part == "model") == (kind == "quantum"):
+                where = "model" if kind != "quantum" else "hamiltonian"
+                raise ValueError(f"{system} is a {kind.replace('_', ' ')} system: its terms "
+                                 f"are under {system}/{where}")
+            return self.palette_menu("term", system), system
+        raise ValueError(f"unknown section {section!r}; sections: <system>/geometry, "
+                         f"<system>/regions, <system>/hamiltonian, <system>/model, "
+                         f"calculations, systems")
+
+    def open_add_menu(self, section=None, search="", position=None, anchor=None):
+        """Open an Add menu with its search line focused (popup: it returns
+        at once): the "+" of an outliner section, the toolbar's Add and New
+        system, Ctrl+F. section: <system>/geometry, <system>/regions,
+        <system>/hamiltonian, <system>/model, calculations, or systems (New
+        system); left out, the family of the workspace on the current system,
+        or New system while the document has none. search is typed into it.
+        It opens below the anchor (the button clicked; the section's "+" or
+        the toolbar button when left out) or at a global position [x, y].
+        Returns what it lists: the menu, the system it adds to, the
+        objectNames of its entries (best first after a search) and the best
+        match, which Enter adds."""
+        menu, system = self._add_target(section)
+        if anchor is None:
+            anchor = self.outliner.add_button(section) if section else None
+            if anchor is None or not anchor.isVisible():
+                anchor = self.new_system_button if menu is self.palette_menus["lattice"] \
+                    else self.add_button
+        if position is None:
+            position = anchor.mapToGlobal(anchor.rect().bottomLeft())
+        elif not isinstance(position, QPoint):
+            position = QPoint(int(position[0]), int(position[1]))
+        if menu is self.regions_menu:
+            self.regions_system = system
+            by_selection = self.region_selection_action
+            selected = self.structure.system_id == system and len(self.structure.selected()) > 0
+            by_selection.setEnabled(selected)
+            by_selection.setToolTip(
+                "a region of the sites selected on the canvas" if selected else
+                f"select sites of {system} on the canvas first (Pick, Box, Lasso or Select)")
+            menu.popup(position)
+            return {"menu": menu.objectName(), "system": system, "best": None,
+                    "entries": [a.objectName() for a in menu.actions() if a.isEnabled()]}
+        self._opening = menu
+        try:
+            menu.show_at(position, search)
+        finally:
+            self._opening = None
+        listed = menu.filter()
+        return {"menu": menu.objectName(), "system": system, "entries": listed,
+                "best": menu.best.objectName() if menu.best is not None else None}
+
+    def open_regions_menu(self, system, position=None):
+        """The Regions menu of a system (its "+" in the outliner, and the
+        region link of a term's form): Region by expression, and Region from
+        selection while sites of that system are selected. position: global,
+        else below the "+"."""
+        return self.open_add_menu(f"{system}/regions", position=position)
+
+    def _section_add(self, path, button):
+        """A "+" of the outliner was clicked."""
+        try:
+            self.open_add_menu(path, anchor=button)
+        except ValueError as error:
+            self.message(str(error), error=True)
 
     def _update_palettes(self):
-        """Follow the kind of the current system: the term and calculation
-        palettes, their search boxes, the Hamiltonian tab (Model for a
-        classical system) and the mean-field button."""
+        """Follow the current system: the Hamiltonian tab reads Model for a
+        classical one, and Add waits for a first system."""
         system = self.current_system()
         kind = self.session.document.system(system).kind if system else "quantum"
         self.workspace_tabs.setTabText(1, "Hamiltonian" if kind == "quantum" else "Model")
-        self.meanfield_button.setEnabled(kind == "quantum" and system is not None)
-        if kind == self._palette_kind:
-            return
-        self._palette_kind = kind
-        self._fill_menu(self.term_button, self._offered("term"), self.add_term, "addTerm")
-        self._fill_menu(self.calc_button, self._offered("calculation"), self.add_calculation,
-                        "addCalc")
-        for edit, family in ((self.term_search, "term"), (self.calc_search, "calculation")):
-            edit.completer().model().setStringList(
-                [f"{spec.label} ({spec.group})" for spec in self._offered(family)])
+        self.add_button.setEnabled(system is not None)
+
+    # ---- the run controls of the first row (their behaviour is package P4's)
+    def _stale_results(self):
+        """The calculations whose result is stale, in the outliner's order."""
+        if self.session is None:
+            return []
+        return [c.id for c in self.session.document.calculations
+                if c.id in self.session.results and self.session.is_stale(c.id)]
+
+    def _fill_run_menu(self):
+        """The Run button's menu: the other calculations, then every stale
+        result."""
+        menu = self.run_menu
+        menu.clear()
+        chosen = self.selected_calculation()
+        calculations = self.session.document.calculations if self.session is not None else []
+        for calc in calculations:
+            if calc.id == chosen:
+                continue
+            action = menu.addAction(f"Run {calc.id} · {calc.kind}")
+            action.setObjectName(f"runCalc_{calc.id}")
+            try:
+                label = registry.get("calculation", calc.kind).label
+            except registry.RegistryError:
+                label = calc.kind
+            action.setToolTip(f"{label} on {calc.system}, through the cost guard")
+            action.triggered.connect(lambda checked=False, c=calc.id: self.run_guarded(c))
+        if menu.actions():
+            menu.addSeparator()
+        self.run_stale_action.setEnabled(bool(self._stale_results()))
+        menu.addAction(self.run_stale_action)
+        return [a.objectName() for a in menu.actions() if a.objectName()]
+
+    def run_stale(self):
+        """Run every calculation whose result is stale (the Run button's
+        menu): the cheap ones at once, and those the cost guard would ask
+        about after one question for all of them, in the cost bar. Returns
+        the ids it ran or asked about."""
+        if self.session is None:
+            return []
+        stale = self._stale_results()
+        slow = []
+        for calc in stale:
+            estimate = self.session.estimate(calc)
+            if estimate is not None and estimate["seconds"] > cost.SLOW:
+                slow.append((calc, estimate["seconds"]))
+            else:
+                self._act("run_calculation", calculation=calc)
+        if len(slow) == 1:
+            self.run_guarded(slow[0][0])
+        elif slow:
+            names = [calc for calc, _ in slow]
+            self.cost_bar.show_message(
+                f"{', '.join(names[:-1])} and {names[-1]} will take "
+                f"{cost.describe(sum(s for _, s in slow))} in all. Run them anyway?",
+                [("Run anyway", lambda: [self.run_guarded(c, confirmed=True) for c in names],
+                  "runAnywayButton"),
+                 ("Cancel", self.cost_bar.dismiss, "costCancelButton")])
+        return stale
 
     def _action(self, menu, text, slot, shortcut=None, name=None):
         """A menu entry; shortcut: an id of the shortcut table (ui/shortcuts.py)."""
@@ -901,6 +1026,8 @@ class MainWindow(QMainWindow):
         dispatcher.register_action("log", lambda enabled=True: self.set_log(enabled))
         dispatcher.register_action("panel", self.show_panel)
         dispatcher.register_action("view_3d", self.set_view_3d)
+        dispatcher.register_action("add_menu", self.open_add_menu)
+        dispatcher.register_action("run_stale", self.run_stale)
         self.help_panel.session = session
         session.view_state = self.view_state
         self.timer.start(POLL_MS)
@@ -1141,7 +1268,10 @@ class MainWindow(QMainWindow):
     def select(self, entry=""):
         """Select an outliner item (an entry id, a system's pseudo id such
         as s1/base, or "" for nothing): properties, canvas overlays and the
-        viewport tab follow."""
+        viewport tab follow, and so does the workspace: Geometry for a
+        system, its lattice, an op or a region, Hamiltonian for a term, the
+        mean field or a model, Calculate for a calculation (PLAN.md phase 8,
+        package P2). Adding an entry selects it, so an add switches too."""
         entry = entry or ""
         if self.session is None:
             return ""
@@ -1154,7 +1284,11 @@ class MainWindow(QMainWindow):
         if entry and "/" not in entry and entry != "calculations":
             family = self.session.document.find(entry)[0]
         if family == "calculation":
-            self.select_calculation(entry)
+            self.select_calculation(entry)        # before the workspace, which shows it
+        workspace = workspace_of(entry, family)
+        if workspace is not None and workspace != self.workspace:
+            self.set_workspace(workspace)         # only a change: a Field previewed stays
+        if family == "calculation":
             self.show_result(entry)
         elif entry and entry != "calculations":
             self.viewport.setCurrentIndex(STRUCTURE_TAB)
@@ -1173,8 +1307,8 @@ class MainWindow(QMainWindow):
             self.workspace_tabs.blockSignals(True)
             self.workspace_tabs.setCurrentIndex(index)
             self.workspace_tabs.blockSignals(False)
-        for key, bar in self.palettes.items():
-            bar.setVisible(key == name)
+        self.add_button.setMenu(self.palette_menus[WORKSPACE_FAMILIES[name]])
+        self._tip(self.add_button, ADD_TIPS[name], "find")
         if name in CANVAS_VIEW_OF and self.canvas_view != CANVAS_VIEW_OF[name]:
             self.set_canvas_view(CANVAS_VIEW_OF[name])
         calc = self.selected_calculation()
@@ -1470,10 +1604,6 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
         self.set_auto_rerun(ui.get("auto_rerun") is True)
-        if ui.get("workspace") in WORKSPACES:
-            self.set_workspace(ui["workspace"])
-        if ui.get("canvas_view") in structure_tools.VIEWS:
-            self.set_canvas_view(ui["canvas_view"])
         if ui.get("tool") in structure_tools.TOOLS:
             self.set_tool(ui["tool"])
         self.set_projection(ui.get("projection") if ui.get("projection") in
@@ -1485,6 +1615,12 @@ class MainWindow(QMainWindow):
             self.select(selected if isinstance(selected, str) and self._exists(selected) else "")
         except Exception:
             self.select("")
+        # after the selection, which sets a workspace of its own, and the canvas view after
+        # the workspace, which sets one too
+        if ui.get("workspace") in WORKSPACES:
+            self.set_workspace(ui["workspace"])
+        if ui.get("canvas_view") in structure_tools.VIEWS:
+            self.set_canvas_view(ui["canvas_view"])
         self.sliders = []
         for spec in ui.get("sliders", []) if isinstance(ui.get("sliders"), list) else []:
             try:
@@ -1666,7 +1802,8 @@ class MainWindow(QMainWindow):
     def _refresh_structure(self):
         system = self.current_system()
         if system is None:
-            self.structure.clear("No system yet: add one with New system (Geometry toolbar).")
+            self.structure.clear("No system yet: add one with New system, next to the "
+                                 "workspace tabs.")
             return
         build = self.builds.get(system)
         error = self.session.build_errors.get(system)
@@ -1830,8 +1967,10 @@ class MainWindow(QMainWindow):
         system = self._target_system()
         return self._do_and_select("add_calculation", system=system, kind=kind) if system else None
 
-    def add_region(self, select=None, name=""):
-        system = self._target_system()
+    def add_region(self, select=None, name="", system=None):
+        """A region of a system (the current one), by expression (x > 0
+        unless select says otherwise), selected."""
+        system = system if system and self._exists(system) else self._target_system()
         if system is None:
             return None
         select = select or {"kind": "expression", "expr": "x > 0"}
@@ -2418,6 +2557,7 @@ class MainWindow(QMainWindow):
         """Re-run stale results automatically when they are cheap (opt-in)."""
         self.auto_rerun = bool(enabled)
         self.auto_rerun_action.setChecked(self.auto_rerun)
+        self.auto_rerun_button.setChecked(self.auto_rerun)        # Follow, in the first row
         if self.auto_rerun and self.session is not None:
             self._rerun_stale()
         return self.auto_rerun
@@ -2690,14 +2830,19 @@ class MainWindow(QMainWindow):
         return self._popup_pick(button.mapToGlobal(button.rect().bottomLeft()), system=system,
                                 values={"sites": positions}, leave=("select_sites", "region"))
 
-    def show_meanfield(self):
-        system = self._target_system()
+    def add_meanfield(self, system=None):
+        """Mean field (interactions), the last item of the terms' Add menu:
+        turn on the mean-field block of a system (the current one) and
+        select its row. Returns the row's id, or None."""
+        system = system if system and self._exists(system) else self._target_system()
         if system is None:
-            return
+            return None
         if self.session.document.system(system).kind != "quantum":
             self.message(f"{system} is a classical system: it has no mean field", error=True)
-            return
-        self.select(f"{system}/meanfield")
+            return None
+        if not self.session.document.system(system).hamiltonian.meanfield.enabled:
+            self._do("set_meanfield", system=system, enabled=True)     # refused when locked
+        return self.select(f"{system}/meanfield")
 
     def cancel_selected(self):
         calc = self.selected_calculation()
@@ -2885,8 +3030,6 @@ class MainWindow(QMainWindow):
         self.theme_actions[name].setChecked(True)
         if self.use_settings:
             settings.put("theme", name)
-        for button, (entries, handler, prefix) in list(self._palette_menus.items()):
-            self._fill_menu(button, entries, handler, prefix)    # the formulas of the tooltips
         if self.session is not None:
             self.outliner.refresh(self.session)
             self.properties.show_item(self.session, self.selected)   # its formula images
@@ -3103,13 +3246,10 @@ class MainWindow(QMainWindow):
             self.recent_menu.addAction("no recent files").setEnabled(False)
 
     def focus_search(self):
-        """Ctrl+F: the search box of the workspace's palette."""
-        edit = {"geometry": "opSearch", "hamiltonian": "termSearch",
-                "calculate": "calculationSearch"}[self.workspace]
-        box = self.findChild(QLineEdit, edit)
-        box.setFocus()
-        box.selectAll()
-        return edit
+        """Ctrl+F: the Add menu of the workspace with its search line
+        focused, or New system while the document has no system. Returns
+        the family it lists."""
+        return self.open_add_menu()["menu"].removeprefix("paletteMenu_")
 
     def close_current_result(self):
         tab = self.current_tab()
@@ -3151,11 +3291,10 @@ class MainWindow(QMainWindow):
         self.redo_action.setText(f"&Redo {redo}" if redo else "&Redo")
         self.unlock_action.setEnabled(has and bool(self.session.document.locks))
         self.run_button.setEnabled(has and self.calc_box.count() > 0)
-        self.add_region_button.setEnabled(has and bool(self.session.document.systems))
         if has:
             self._update_palettes()
         else:
-            self.meanfield_button.setEnabled(False)
+            self.add_button.setEnabled(False)
         self._selection_changed(len(self.structure.selected()))
 
     # ---- commands and messages

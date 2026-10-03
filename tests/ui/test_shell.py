@@ -43,8 +43,8 @@ def fresh(qtbot, window):
     settle(qtbot, window)
 
 
-def menu_action(window, button, name):
-    menu = window.findChild(QToolButton, button).menu()
+def menu_action(window, family, name):
+    menu = window.palette_menu(family)
     return next(a for a in menu.actions() if a.objectName() == name)
 
 
@@ -143,6 +143,8 @@ def test_select_action_drives_properties_and_viewport(window, qtbot):
     assert window.properties.form.lattice.currentData() == "honeycomb_lattice"
     assert "8 sites" in window.properties.form.info.text()
     assert not window.session.dispatcher.can_undo()          # selection is not undoable
+    settle(qtbot, window)              # t2 showed the Hamiltonian view, which builds it
+    window.session.act("select", entry="op1")
     assert not window.build_timer.isActive()                 # nor a reason to rebuild
     with pytest.raises(ValueError, match="nothing called"):
         window.session.act("select", entry="t99")
@@ -174,18 +176,18 @@ def test_property_edit_commits_and_refusal_reverts(window, qtbot):
 
 def test_palettes_add_and_select(window, qtbot):
     fresh(qtbot, window)
-    menu_action(window, "addOpButton", "addOp_island").trigger()
+    menu_action(window, "geometry_op", "addOp_island").trigger()
     op = window.selected
     assert window.session.document.find(op)[-1].kind == "island"
     assert isinstance(window.properties.form, EntryForm)
     settle(qtbot, window)
     assert window.builds["s1"]["dimensionality"] == 0
     assert "0D" in window.structure.caption.text()
-    menu_action(window, "addTermButton", "addTerm_haldane").trigger()
+    menu_action(window, "term", "addTerm_haldane").trigger()
     assert window.session.document.find(window.selected)[-1].kind == "haldane"
-    menu_action(window, "addCalculationButton", "addCalc_dos").trigger()
+    menu_action(window, "calculation", "addCalc_dos").trigger()
     assert window.selected == "c3" and window.current_tab() == "c3"
-    menu_action(window, "newSystemButton", "newSystem_kagome_lattice").trigger()
+    menu_action(window, "lattice", "newSystem_kagome_lattice").trigger()
     assert window.selected == "s2" and isinstance(window.properties.form, SystemForm)
     form = window.properties.form
     form.lattice.setCurrentIndex(form.lattice.findData("lieb_lattice"))
@@ -266,10 +268,10 @@ def test_project_remembers_the_view(window, qtbot, tmp_path):
     fresh(qtbot, window)
     session = window.session
     session.act("select_sites", sublattice=-1)
-    session.act("workspace", name="hamiltonian")
     session.act("tool", name="lasso")
-    session.act("select", entry="t2")
+    session.act("select", entry="t2")                 # the Hamiltonian workspace
     window.select_calculation("c2")
+    session.act("workspace", name="calculate")        # saved, and not the selection's
     window.set_log(True)                              # the panels are a setting, not the view
     assert not session.modified                       # none of that is an unsaved change
     assert not {"layout", "docks", "panels"} & set(window.view_state())
@@ -278,7 +280,7 @@ def test_project_remembers_the_view(window, qtbot, tmp_path):
     fresh(qtbot, window)                              # the preset has no view state
     assert window.selected == "" and window.structure.selected().tolist() == []
     session.act("load", path=str(path))
-    assert window.workspace == "hamiltonian" and window.selected == "t2"
+    assert window.workspace == "calculate" and window.selected == "t2"
     assert window.structure.tool == "lasso" and window.tool_buttons.checkedButton().objectName() \
         == "tool_lasso" and window.selected_calculation() == "c2"
     settle(qtbot, window)

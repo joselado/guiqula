@@ -80,9 +80,11 @@ def test_canvas_keys_and_the_shortcuts_dialog(window, qtbot):
     assert len(window.structure.selected()) == 0
     QTest.keyClick(canvas, Qt.Key.Key_P)
     assert window.structure.tool == "pick"
-    assert window.focus_search() == "opSearch"
+    assert window.focus_search() == "geometry_op"         # the Add menu of the workspace
+    window.palette_menus["geometry_op"].hide()
     window.set_workspace("hamiltonian")
-    assert window.focus_search() == "termSearch"
+    assert window.focus_search() == "term"
+    window.palette_menus["term"].hide()
     window.set_workspace("geometry")
     dialog = window.show_shortcuts()
     rows = shortcuts.rows()
@@ -180,7 +182,7 @@ def formula_ink(window, entry="addTerm_zeeman"):
     import re
     from collections import Counter
     from PySide6.QtGui import QImage
-    tooltip = next(a for a in window.term_button.menu().actions()
+    tooltip = next(a for a in window.palette_menu("term").actions()
                    if a.objectName() == entry).toolTip()
     image = QImage.fromData(base64.b64decode(re.search(r'base64,([^"]+)"', tooltip).group(1)),
                             "PNG")
@@ -275,8 +277,8 @@ def test_every_toolbar_control_and_palette_entry_has_a_tooltip(window):
     assert not missing
     tabs = window.findChild(QTabBar, "workspaceTabs")
     assert all("Ctrl+" in tabs.tabToolTip(i) for i in range(tabs.count()))
-    menu = window.term_button.menu()
-    assert menu.toolTipsVisible()
+    menu = window.palette_menu("term")                  # the Hamiltonian's Add menu
+    assert menu.toolTipsVisible() and menu.search.toolTip()
     zeeman = next(a for a in menu.actions() if a.objectName() == "addTerm_zeeman")
     assert zeeman.toolTip().startswith("<b>Zeeman") and "data:image/png;base64" in \
         zeeman.toolTip() and "spinful" in zeeman.toolTip()

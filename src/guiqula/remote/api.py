@@ -106,6 +106,13 @@ WINDOW_ACTIONS = {
     "panel": "name (outlinerDock, propertiesDock, helpDock, slidersDock, jobsDock, logDock, "
              "consoleDock, or the panel's title), shown=true|false: show and raise a panel, "
              "or hide it",
+    "add_menu": "section (<system>/geometry, <system>/regions, <system>/hamiltonian, "
+                "<system>/model, calculations or systems; left out: the workspace's family on "
+                "the current system), search: open an Add menu as its \"+\" does, the text "
+                "typed in its search line; returns the entries it lists and the best match, "
+                "which Enter adds",
+    "run_stale": "run every calculation whose result is stale (the slow ones after one "
+                 "question in the cost bar); returns their ids",
 }
 
 
