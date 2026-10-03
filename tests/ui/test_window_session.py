@@ -26,7 +26,8 @@ def test_preset_is_shown_and_built(window, qtbot):
     assert window.builds["s1"]["mode"] == "spinful" and window.builds["s1"]["sites"] == 8
     texts = [window.outliner.item(t).text(0) for t in ("t1", "t2")]
     assert texts == ["t1  Zeeman / exchange field", "t2  Rashba spin-orbit coupling"]
-    assert window.outliner.item("t1").text(1) == "→ spinful"
+    assert window.outliner.item("t1").text(1) == "spinful"      # the Hilbert space after it
+    assert window.outliner.item("s1").text(1) == "2D · 8 sites · spinful"
     assert "8 sites" in window.status_label.text()
 
 
@@ -74,11 +75,12 @@ def test_cancel_running_job_keeps_window_usable(window, qtbot, shot):
 def test_undo_and_stale_marking(window, qtbot):
     session = window.session
     window.select_calculation("c1")
+    assert window.outliner.item("c1").text(1) == "✓"
     session.do("set_param", entry="t2", name="c", value=0.3)
-    assert session.status("c1") == "stale"
+    assert session.status("c1") == "stale" and window.outliner.item("c1").text(1) == "↻"
     assert "STALE" in window.plot.figure.axes[0].get_title()
     window.undo_action.trigger()
-    assert session.status("c1") == "done"
+    assert session.status("c1") == "done" and window.outliner.item("c1").text(1) == "✓"
     assert "STALE" not in window.plot.figure.axes[0].get_title()
 
 
@@ -89,7 +91,8 @@ def test_invalid_entry_is_flagged_in_the_tree(window, qtbot):
 
     def flagged():
         item = window.outliner.item(t)
-        return item.text(0).startswith(f"✗ {t}") and "sublattice" in item.text(1)
+        return item.text(0).startswith(t) and item.text(1) == "✗" and \
+            "sublattice" in item.toolTip(1)
     wait_for(qtbot, flagged, 120_000)
 
 

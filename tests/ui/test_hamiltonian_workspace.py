@@ -201,7 +201,8 @@ def test_meanfield_block(window, qtbot, shot):
     assert {"newton", "linear_mixing"} <= {solvers.itemText(i) for i in range(solvers.count())}
     form = window.properties.form
     assert "runs with every calculation" in form.status.text()
-    assert window.outliner.item("s1/meanfield").text(1) == "runs with the calculations"
+    assert window.outliner.item("s1/meanfield").text(1) == \
+        "U = 2.5, runs with the calculations"
     settle(qtbot, window)
     assert window.builds["s1"]["reports"][-1]["status"] == "deferred"   # not while editing
     window.select_calculation("c1")
@@ -209,8 +210,8 @@ def test_meanfield_block(window, qtbot, shot):
     qtbot.waitUntil(lambda: job.done, timeout=300_000)
     assert job.status == "done", job.error
     assert job.value.meanfield["total_energy"] < 0
-    qtbot.waitUntil(lambda: window.outliner.item("s1/meanfield").text(1).startswith("E = "),
-                    timeout=10_000)
+    qtbot.waitUntil(lambda: window.outliner.item("s1/meanfield").text(1).startswith(
+        "U = 2.5, E = "), timeout=10_000)
     shot(window, "meanfield")
     item = window.outliner.item("s1/meanfield")          # its checkbox turns it off
     item.setCheckState(0, item.checkState(0).__class__.Unchecked)

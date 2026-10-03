@@ -59,7 +59,7 @@ def test_plot_kinds(window, qtbot, shot, kind, params, plot):
         texts = [t.get_text() for t in view.ax.texts]
         assert "Chern number" in texts
         window.outliner.refresh(window.session)            # the number is in the outliner too
-        assert window.outliner.item(calc).text(1) == rows[0][1]
+        assert window.outliner.item(calc).text(1) == f"✓ {rows[0][1]}"
     else:
         assert len(view.points[0]) > 0
         i = 0

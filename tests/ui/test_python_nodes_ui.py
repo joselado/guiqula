@@ -77,7 +77,7 @@ def test_code_editor_commits_and_refuses(window, qtbot):
     editor.apply.click()
     assert session.document.find(t)[-1].params["code"] == "h.add_onsite(0.1)\n"
     assert "syntax error" in window.log.toPlainText()
-    assert window.outliner.item(t).toolTip(0) == "h.add_onsite(0.1)"
+    assert "\nh.add_onsite(0.1)" in window.outliner.item(t).toolTip(0)   # after its label
     settle(qtbot, window)
     assert status_of(window, t) == "ok"
 
