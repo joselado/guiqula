@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QApplication, QStyle, QStyleOptionViewItem
 from guiqula.io import project
 from guiqula.ui import marks, theme
 from guiqula.ui.app import build_main_window
-from guiqula.ui.outliner import ADD_ROLE, text_margin
+from guiqula.ui.outliner import ADD_ROLE, _summary, text_margin
 
 
 @pytest.fixture(scope="module")
@@ -272,3 +272,13 @@ def test_the_mean_field_reads_unclipped(window, qtbot, shot):
     assert item.foreground(0).color().name() == theme.DISABLED.lower()
     session.undo()
     window.reset_layout()
+
+
+def test_parameters_read_short():
+    """An op's or a model's parameters in a label: numbers as %g, so that a
+    filling of a third does not take the whole row."""
+    assert _summary({"filling": 1 / 3, "seed": 1}) == "filling 0.333333, seed 1"
+    assert _summary({"n": 4.0, "nedges": 6, "rot": 0.0, "clean": True}) == \
+        "n 4, nedges 6, rot 0, clean"
+    assert _summary({"n": [2, 2, 1]}) == "n [2, 2, 1]"
+    assert _summary({"m": [0.0, 0.0, 0.1]}) == "m [0, 0, 0.1]"

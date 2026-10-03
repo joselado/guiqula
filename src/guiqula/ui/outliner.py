@@ -137,6 +137,16 @@ def _short(text, limit):
     return text if len(text) <= limit else text[:limit - 1] + "…"
 
 
+def _number(value):
+    """A parameter's value as the tree prints it: 0.333333, not 0.3333333333333333."""
+    if isinstance(value, float):
+        return f"{value:g}"
+    if isinstance(value, list) and all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                                       for v in value):
+        return "[" + ", ".join(_number(v) for v in value) + "]"
+    return str(value)
+
+
 def _summary(params, limit=40):
     parts = []
     for name, value in params.items():
@@ -147,7 +157,7 @@ def _summary(params, limit=40):
         elif isinstance(value, bool):
             parts.append(name if value else f"no {name}")
         else:
-            parts.append(f"{name} {value}")
+            parts.append(f"{name} {_number(value)}")
     return _short(", ".join(parts), limit)
 
 
