@@ -270,7 +270,7 @@ def test_project_remembers_the_view(window, qtbot, tmp_path):
     session.act("select_sites", sublattice=-1)
     session.act("tool", name="lasso")
     session.act("select", entry="t2")                 # the Hamiltonian workspace
-    window.select_calculation("c2")
+    window.show_result("c2")                          # Run acts on the tab shown (P4)
     session.act("workspace", name="calculate")        # saved, and not the selection's
     window.set_log(True)                              # the panels are a setting, not the view
     assert not session.modified                       # none of that is an unsaved change

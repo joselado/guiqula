@@ -21,7 +21,8 @@ def wait_for(qtbot, condition, timeout=300_000):
 
 
 def test_preset_is_shown_and_built(window, qtbot):
-    assert window.calc_box.count() == 2
+    # nothing selected and the structure shown: Run acts on the first calculation
+    assert window.selected_calculation() == "c1" and window.run_button.text() == "Run c1 · bands"
     wait_for(qtbot, lambda: "s1" in window.builds, 120_000)
     assert window.builds["s1"]["mode"] == "spinful" and window.builds["s1"]["sites"] == 8
     texts = [window.outliner.item(t).text(0) for t in ("t1", "t2")]
@@ -31,7 +32,9 @@ def test_preset_is_shown_and_built(window, qtbot):
 
 
 def test_run_button_draws_the_result(window, qtbot, shot):
-    window.select_calculation("c1")
+    window.select_calculation("c1")                     # selected in the outliner
+    assert window.selected == "c1" and window.outliner.current_id() == "c1"
+    assert window.run_button.text() == "Run c1 · bands"
     window.run_button.click()
     job = window.session.calc_jobs["c1"]
     wait_for(qtbot, lambda: job.done)
@@ -50,8 +53,10 @@ def test_cancel_running_job_keeps_window_usable(window, qtbot, shot):
     batch = session.jobs.workers["batch"][0]
     starts, old_pid = batch.starts, batch.process.pid
     window.select_calculation(big)
+    assert window.run_button.text() == f"Run {big} · bands"
     window.run_button.click()
     job = session.calc_jobs[big]
+    assert window.cancel_button.isEnabled()                # a job of the selected one runs
     wait_for(qtbot, lambda: job.status == "running", 120_000)
     button = window.jobs.findChild(QToolButton, f"cancel_{job.id}")
     assert button is not None and button.isEnabled()
@@ -59,7 +64,7 @@ def test_cancel_running_job_keeps_window_usable(window, qtbot, shot):
     wait_for(qtbot, lambda: job.status == "cancelled", 10_000)
     assert batch.starts == starts + 1 and batch.process.pid != old_pid
     assert "restarted 1x" in window.jobs.workers.text() or "restarted" in window.jobs.workers.text()
-    assert not button.isEnabled()
+    assert not button.isEnabled() and not window.cancel_button.isEnabled()
     # the window is still usable: the next calculation runs on the new worker
     window.select_calculation("c2")
     window.run_button.click()

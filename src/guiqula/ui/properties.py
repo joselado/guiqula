@@ -374,6 +374,7 @@ class EntryForm(Form):
         self.status.setObjectName("entryStatus")
         self.status.setWordWrap(True)
         self.layout().insertWidget(self.layout().count() - 2, self.status)
+        self._add_run_row()
         self.update_values()
 
     def whole_locks(self):
@@ -429,6 +430,70 @@ class EntryForm(Form):
     def _set_region(self, index):
         region = self.region.itemData(index)
         self.commit("set_region", entry=self.item_id, region=region)
+
+    def _add_run_row(self):
+        """A calculation's form ends with its estimate and a button, formRun,
+        which reads Run, Run again when the result is stale and Cancel while
+        it runs (PLAN.md phase 8, package P4). Run is the window's run
+        action, through the cost guard, and Cancel the session's cancel; the
+        window calls update_run() as the Document, the builds and the jobs
+        change."""
+        if self.family != "calculation":
+            return
+        from guiqula.ui import marks, shortcuts
+        row = QWidget(self)
+        row.setObjectName("formRunRow")
+        line = QHBoxLayout(row)
+        line.setContentsMargins(0, 0, 0, 0)
+        estimate = QLabel(row)
+        estimate.setObjectName("formEstimate")
+        estimate.setWordWrap(True)
+        button = QPushButton(row)
+        button.setObjectName("formRun")
+        line.addWidget(estimate, 1)
+        line.addWidget(button)
+        self.layout().insertWidget(self.layout().count() - 2, row)
+        self.run_button, self.run_estimate = button, estimate
+
+        def running():
+            return self.session.status(self.item_id) in ("queued", "running")
+
+        def update():
+            session, calc = self.session, self.item_id
+            try:
+                system = session.document.calculation(calc).system
+            except (DocumentError, KeyError):    # removed: the form goes with the refresh
+                return
+            self.update_reports()                # its result line: queued, running, done
+            state = session.status(calc)
+            if state in ("queued", "running"):
+                job = session.calc_jobs.get(calc)
+                text = "queued, waiting for a worker" if state == "queued" else \
+                    f"running, {marks.mark('running', job.progress if job else None)}"
+                button.setText("Cancel")
+                button.setToolTip(("take this job out of the queue" if state == "queued" else
+                                   "stop this job; its worker is restarted")
+                                  + f" ({shortcuts.text('cancel')})")
+            else:
+                cost_of = session.estimate(calc)
+                if cost_of is None:
+                    text = f"estimate: once {system} is built"
+                else:
+                    text = "estimate: " + cost.describe(cost_of["seconds"]) + \
+                        (" with the mean field" if cost_of["meanfield"] else "") + \
+                        (", so Run asks first" if cost_of["seconds"] > cost.SLOW else "")
+                button.setText("Run again" if state == "stale" else "Run")
+                button.setToolTip(
+                    ("the model changed since this was computed: compute it again"
+                     if state == "stale" else "compute it in a worker")
+                    + f"; one that takes longer than {cost.SLOW:g} s asks first "
+                      f"({shortcuts.text('run')})")
+            estimate.setText(text)
+
+        button.clicked.connect(lambda: self.commit("cancel", target=self.item_id)
+                               if running() else self.commit("run", calculation=self.item_id))
+        self.update_run = update
+        update()
 
 
 class RegionForm(Form):
