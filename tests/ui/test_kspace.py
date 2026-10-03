@@ -77,6 +77,7 @@ def test_the_path_on_the_zone(window, qtbot, shot):
     window.viewport.setCurrentIndex(1)
     assert window.current_tab() == "kspace"
     view = window.kspace_view
+    assert view.bar.objectName() == "kspaceBar" and view.canvas.toolbar is view.toolbar
     assert view.calc == "c1" and view.kpath is None             # the bands, default path
     assert {"G", "K", "M"} <= set(view.kspace["special"])
     special = tools.special_images(view.kspace)
@@ -135,10 +136,11 @@ def test_a_click_on_a_vertex_passes_through_it_again(window, qtbot):
         MouseEvent("button_release_event", view.canvas, x + jitter, y, button=1)._process()
 
     view.add.setChecked(True)
-    next(a for a in view.toolbar.actions() if a.text() == "Pan").trigger()
+    view.bar.pan_button.click()                          # the bar's Pan (P3)
     qtbot.waitUntil(lambda: not view.add.isChecked())    # pan takes the clicks: Add shows off
+    assert view.bar.pan_button.isChecked()
     view.add.setChecked(True)                            # and turns pan off again
-    assert str(view.toolbar.mode) == ""
+    assert str(view.toolbar.mode) == "" and not view.bar.pan_button.isChecked()
     click(special["K"])                                  # a new path starts at Γ
     click(special["M"])
     click((0.0, 0.0), jitter=2)                          # on the Γ vertex, a click: again

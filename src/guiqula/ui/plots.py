@@ -20,15 +20,17 @@ Kinds (the ``kind`` of a Result's plot spec, which also names the arrays):
   [array, label] pairs.
 
 Every calculation gets its own PlotView (a tab of the viewport, which can
-be detached into a window of its own): the navigation toolbar (pan, zoom, save
-the figure), Save data (the arrays and the metadata, io/results.py),
-Detach, Overlay, and a readout of the data point under the mouse, which
-also says what a pick there would take.
+be detached into a window of its own): its bar (ui/canvasbar.py, PLAN.md
+phase 8, package P3: Fit, Pan, Zoom; Pick, Box, Lasso; Overlay, Export,
+Save data, Detach and Save image), a status row above the canvas when the
+result is not simply current (stale, with Run again; its job's progress
+and Cancel while it runs; failed, and why), and a readout of the data
+point under the mouse, which also says what a pick there would take.
 
 A result drawn flat on the atoms moves as Inkscape's canvas does (the
 wheel scrolls, ctrl and the wheel zooms, the middle button or Space and
 the left button drag it; ui/canvas_navigation.py); the other plots keep
-matplotlib's toolbar and its pan and zoom modes.
+matplotlib's pan and zoom modes, which the bar's Pan and Zoom turn on.
 
 Picks (PLAN.md phase 7): a right click on the plot, in any mode, or a
 left click with the Pick toggle on, asks the window for the menu of what
@@ -52,8 +54,9 @@ undo changes it.
 (the window hands over its projection: auto, 3D when the geometry is not
 flat; xy; 3d, so that a magnetization on a flat lattice can be turned
 too), by matplotlib's mplot3d or, when View > 3D drawing says pyvista, by
-pyvista (ui/pyvista_view.py), which takes the place of the figure and of
-the navigation actions of the toolbar; a result drawn in 3D has no readout,
+pyvista (ui/pyvista_view.py), which takes the place of the figure, its
+Reset view, View and Save image the place of the bar's Fit, Pan, Zoom and
+Save image; a result drawn in 3D has no readout,
 picks or markers. The exported figure (io/bundle.py) is matplotlib's,
 drawn with the same projection.
 
@@ -65,18 +68,22 @@ for lines and coloured scatter plots. The window keeps which, and
 lists what can be overlaid in the Overlay menu.
 """
 import numpy as np
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from matplotlib.widgets import LassoSelector, RectangleSelector
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QCursor
-from PySide6.QtWidgets import QLabel, QMenu, QStackedWidget, QToolButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QMenu, QProgressBar, QSizePolicy,
+                               QStackedWidget, QToolButton, QVBoxLayout, QWidget)
 
 from guiqula.core import picks as pick_tools
 from guiqula.core.results import PLOT_KINDS as KINDS  # noqa: F401 (the kinds drawn here)
+from guiqula.ui import shortcuts
 from guiqula.ui import structure as structure_tools
 from guiqula.ui import theme
 from guiqula.ui.canvas_navigation import CanvasNavigation, bind_keys
+from guiqula.ui.canvasbar import CanvasBar
+from guiqula.ui.marks import ERROR_STATES, mark
 from guiqula.ui.pyvista_view import SceneView
 
 READOUT_PIXELS = 12      # the readout names a data point this close to the mouse
@@ -85,6 +92,9 @@ GRAB_PIXELS = 6          # a press this close to a marker drags it
 MARKER_KINDS = ("hline", "vline", "dots", "rings")
 CURVES = ("lines", "colored_scatter")       # plot kinds that overlay
 OVERLAY_MODES = ("overlay", "difference")
+# what the status row above a plot says (StatusRow); a result that is current, or that
+# was never computed (the caption says so), has no row
+ROW_STATES = ("stale", "queued", "running", "failed")
 
 
 def _lines(ax, result):
@@ -364,6 +374,121 @@ def _same_sites(a, b):
                                                      atol=structure_tools.SAME_SITE))
 
 
+class _Elided(QLabel):
+    """One line of text, ending in an ellipsis when it does not fit (a long
+    error never widens the view), the whole text in its tooltip."""
+
+    def __init__(self):
+        super().__init__()
+        self.full = ""
+        self.setMinimumWidth(0)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+
+    def set_full(self, text):
+        self.full = text
+        self.setToolTip(text)
+        self._elide()
+
+    def _elide(self):
+        line = self.full.splitlines()[0] if self.full else ""
+        self.setText(self.fontMetrics().elidedText(line, Qt.TextElideMode.ElideRight,
+                                                   max(self.contentsRect().width(), 0)))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._elide()
+
+
+class StatusRow(QFrame):
+    """The row above a plot's canvas that says what its result is when it
+    is not simply current (PLAN.md phase 8, package P3), with the marks of
+    ui/marks.py: stale, with Run again; queued or running, with the job's
+    progress and Cancel; failed, with the message and Run again. Hidden
+    otherwise (done, or never computed: the caption says so)."""
+
+    run_requested = Signal()
+    cancel_requested = Signal()
+
+    def __init__(self, suffix="", parent=None):
+        super().__init__(parent)
+        self.setObjectName(f"plotStatus{suffix}")
+        self.text = _Elided()
+        self.text.setObjectName(f"plotStatusText{suffix}")
+        self.progress = QProgressBar()
+        self.progress.setObjectName(f"plotProgress{suffix}")
+        self.progress.setRange(0, 100)
+        self.progress.setMaximumWidth(140)
+        self.progress.setToolTip("how far the job computing this result is")
+        self.run = QToolButton()
+        self.run.setText("Run again")
+        self.run.setObjectName(f"plotRun{suffix}")
+        self.run.setToolTip("compute this result again, with the model as it is now (the cost "
+                            "guard asks first when it takes minutes; "
+                            f"{shortcuts.text('run')} runs the selected calculation)")
+        self.run.clicked.connect(lambda checked=False: self.run_requested.emit())
+        self.cancel = QToolButton()
+        self.cancel.setText("Cancel")
+        self.cancel.setObjectName(f"plotCancel{suffix}")
+        self.cancel.setToolTip("stop the job computing this result (its worker is restarted; "
+                               f"{shortcuts.text('cancel')} stops the selected calculation's)")
+        self.cancel.clicked.connect(lambda checked=False: self.cancel_requested.emit())
+        row = QHBoxLayout(self)
+        row.setContentsMargins(8, 2, 4, 2)
+        row.addWidget(self.text, 1)
+        row.addWidget(self.progress)
+        row.addWidget(self.run)
+        row.addWidget(self.cancel)
+        self.state = "done"
+        self.hide()
+
+    def show_state(self, state, progress=None, message=""):
+        """Show a state of the result (ROW_STATES; any other hides the row):
+        progress, a fraction from 0 to 1 while it runs (None or 0: not
+        reported yet); message, a failure's or the job's own words."""
+        self.state = state
+        if state not in ROW_STATES:
+            self.hide()
+            return
+        if state == "stale":
+            text = f"{mark('stale')} stale: the model changed since this was computed"
+        elif state == "queued":
+            text = "queued: waiting for a worker"
+        elif state == "running":
+            text = mark("running") + (f": {message}" if message else "")
+        else:
+            text = f"{mark('failed')} failed: {message or 'no message'}"
+        self.text.set_full(text)
+        running = state in ("queued", "running")
+        if running and progress:
+            self.progress.setRange(0, 100)
+            self.progress.setValue(round(100 * progress))
+        elif running:                       # nothing reported yet: a busy bar
+            self.progress.setRange(0, 0 if state == "running" else 100)
+            self.progress.setValue(0)
+        self.progress.setVisible(running)
+        self.cancel.setVisible(running)
+        self.run.setVisible(not running)
+        self._style(state)
+        self.show()
+
+    def _style(self, state):
+        """The colours of the active theme: a notice for a stale result, an
+        error for a failed one (set again at every state, so a change of
+        theme follows at the next one, which the window draws)."""
+        name, text = self.objectName(), self.text.objectName()
+        if state in ERROR_STATES:
+            self.setStyleSheet(
+                f"QFrame#{name} {{ background: {theme.ERROR_BACKGROUND}; "
+                f"border-bottom: 1px solid {theme.ERROR}; }} "
+                f"QLabel#{text} {{ color: {theme.ERROR}; }}")
+        elif state == "stale":
+            self.setStyleSheet(
+                f"QFrame#{name} {{ background: {theme.NOTICE_BACKGROUND}; "
+                f"border-bottom: 1px solid {theme.NOTICE_BORDER}; }}")
+        else:
+            self.setStyleSheet("")
+
+
 class ResultWindow(QWidget):
     """A detached PlotView, in a top-level window of its own. It is a plain
     window and not a floating QDockWidget on purpose: a floating dock draws
@@ -387,8 +512,8 @@ class ResultWindow(QWidget):
 
 
 class PlotView(QWidget):
-    """A matplotlib canvas with its navigation toolbar, for the results of
-    one calculation (calc_id)."""
+    """A matplotlib canvas with its bar (ui/canvasbar.py) and its status
+    row, for the results of one calculation (calc_id)."""
 
     save_requested = Signal(str)          # calculation id
     export_requested = Signal(str)        # figure, data and script (io/bundle.py)
@@ -398,6 +523,8 @@ class PlotView(QWidget):
     # global position of the menu: the window shows what can be done there
     pick_requested = Signal(str, object, object)
     marker_moved = Signal(int, float, float, bool)     # slider index, x, y, still dragging
+    run_requested = Signal(str)           # calculation id: the status row's Run again
+    cancel_requested = Signal(str)        # calculation id: the status row's Cancel
 
     def __init__(self, calc_id="", parent=None):
         super().__init__(parent)
@@ -410,41 +537,19 @@ class PlotView(QWidget):
         self.canvas = FigureCanvasQTAgg(self.figure)
         self.canvas.setObjectName(f"plotCanvas{suffix}")
         self.centring = theme.Centring(self.canvas, lambda: self.ax)   # the axes in the middle
-        self.toolbar = NavigationToolbar2QT(self.canvas, self)
-        self.save_data = QToolButton()
-        self.save_data.setText("Save data")
-        self.save_data.setObjectName(f"saveData{suffix}")
-        self.save_data.setToolTip("save the arrays (.npz) and what produced them (.json)")
-        self.save_data.clicked.connect(lambda: self.save_requested.emit(self.calc_id))
-        self.detach = QToolButton()
-        self.detach.setText("Detach")
-        self.detach.setObjectName(f"detach{suffix}")
-        self.detach.setToolTip("show this result in a window of its own, to compare it with "
-                               "another; Attach puts it back")
-        self.detach.clicked.connect(lambda: self.detach_requested.emit(self.calc_id))
-        self.export = QToolButton()
-        self.export.setText("Export")
-        self.export.setObjectName(f"export{suffix}")
-        self.export.setToolTip("the figure (PNG and PDF, on white), the data (.npz, .csv) and "
-                               "the pyqula script reproducing them, in one folder "
-                               "(Ctrl+Shift+E)")
-        self.export.clicked.connect(lambda: self.export_requested.emit(self.calc_id))
-        self.toolbar.addSeparator()
+        # the bar (PLAN.md phase 8, package P3): Fit, Pan, Zoom; the pick tools; what is done
+        # with the result; Save image. matplotlib's toolbar, hidden, gives the modes
+        self.bar = CanvasBar(self.canvas, f"plotBar{suffix}", f"plotToolbar{suffix}",
+                             "{key}" + suffix, fit=self.fit,
+                             fit_tip=f"show the whole plot again, as it was drawn "
+                                     f"({shortcuts.text('fit')} and "
+                                     f"{shortcuts.text('zoom_drawing')} on a result drawn on "
+                                     f"the atoms)")
+        self.toolbar = self.bar.toolbar
+        self.bar.group("picks")
+        self.bar.group("result")
         # a widget on a toolbar is shown and hidden by its action (Qt ignores its setVisible)
-        self._shown_by = {}
-        for widget in (self.export, self.save_data, self.detach):
-            self._shown_by[widget] = self.toolbar.addWidget(widget)
-        self.overlay = QToolButton()
-        self.overlay.setText("Overlay")
-        self.overlay.setObjectName(f"overlay{suffix}")
-        self.overlay.setToolTip("draw another result on the same axes, or the difference of "
-                                "the two")
-        self.overlay.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        self.overlay.setMenu(QMenu(self.overlay))
-        self.overlay.menu().aboutToShow.connect(
-            lambda: self.overlay_menu_requested.emit(self.calc_id))
-        self._shown_by[self.overlay] = self.toolbar.addWidget(self.overlay)
-        self.toolbar.addSeparator()
+        self._shown_by = self.bar.actions_of
         self.pick_tools = {}
         for tool, text, tip in (
                 ("pick", "Pick", "a click picks what the point stands for (an energy, a "
@@ -458,8 +563,40 @@ class PlotView(QWidget):
             button.setObjectName(f"{tool}Tool{suffix}")
             button.setToolTip(tip)
             button.toggled.connect(lambda on, t=tool: self._tool_toggled(t, on))
-            self._shown_by[button] = self.toolbar.addWidget(button)
+            self.bar.add("picks", button)
             self.pick_tools[tool] = button
+        self.overlay = QToolButton()
+        self.overlay.setText("Overlay")
+        self.overlay.setObjectName(f"overlay{suffix}")
+        self.overlay.setToolTip("draw another result on the same axes, or the difference of "
+                                "the two")
+        self.overlay.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.overlay.setMenu(QMenu(self.overlay))
+        self.overlay.menu().aboutToShow.connect(
+            lambda: self.overlay_menu_requested.emit(self.calc_id))
+        self.export = QToolButton()
+        self.export.setText("Export")
+        self.export.setObjectName(f"export{suffix}")
+        self.export.setToolTip("the figure (PNG and PDF, on white), the data (.npz, .csv) and "
+                               "the pyqula script reproducing them, in one folder "
+                               f"({shortcuts.text('export_bundle')})")
+        self.export.clicked.connect(lambda: self.export_requested.emit(self.calc_id))
+        self.save_data = QToolButton()
+        self.save_data.setText("Save data")
+        self.save_data.setObjectName(f"saveData{suffix}")
+        self.save_data.setToolTip("save the arrays (.npz) and what produced them (.json)")
+        self.save_data.clicked.connect(lambda: self.save_requested.emit(self.calc_id))
+        self.detach = QToolButton()
+        self.detach.setText("Detach")
+        self.detach.setObjectName(f"detach{suffix}")
+        self.detach.setToolTip("show this result in a window of its own, to compare it with "
+                               "another; Attach puts it back")
+        self.detach.clicked.connect(lambda: self.detach_requested.emit(self.calc_id))
+        for widget in (self.overlay, self.export, self.save_data, self.detach):
+            self.bar.add("result", widget)
+        self.status = StatusRow(suffix)
+        self.status.run_requested.connect(lambda: self.run_requested.emit(self.calc_id))
+        self.status.cancel_requested.connect(lambda: self.cancel_requested.emit(self.calc_id))
         self.readout = QLabel("")
         self.readout.setObjectName(f"readout{suffix}")
         self.caption = QLabel("No result yet: choose a calculation and press Run (F5).")
@@ -467,15 +604,14 @@ class PlotView(QWidget):
         self.caption.setWordWrap(True)
         self.caption.setMinimumHeight(2 * self.caption.fontMetrics().lineSpacing())
         self.scene = SceneView(f"plotScene{suffix}")        # pyvista loads at its first drawing
+        self.bar.adopt_scene(self.scene)      # its Reset view, View and Save image, in the bar
         self.stack = QStackedWidget()
         self.stack.addWidget(self.canvas)
         self.stack.addWidget(self.scene)
-        # the toolbar's own actions (home, pan, zoom, save the figure), which the scene replaces
-        navigation = {text for text, *_ in NavigationToolbar2QT.toolitems if text}
-        self._navigation = [a for a in self.toolbar.actions() if a.text() in navigation]
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
-        layout.addWidget(self.toolbar)
+        layout.addWidget(self.bar)
+        layout.addWidget(self.status)
         layout.addWidget(self.stack, 1)
         layout.addWidget(self.readout)
         layout.addWidget(self.caption)
@@ -493,6 +629,7 @@ class PlotView(QWidget):
         self._marker_artists = []          # [(marker, [artists])]
         self._dragging = None              # the marker being dragged
         self._update_buttons()
+        self.bar.navigation_changed.connect(self._navigation_changed)
         self.canvas.mpl_connect("motion_notify_event", self._on_motion)
         self.canvas.mpl_connect("button_press_event", self._on_press)
         self.canvas.mpl_connect("button_release_event", self._on_release)
@@ -501,6 +638,31 @@ class PlotView(QWidget):
             on_hand=self._hand_changed)
         bind_keys(self.canvas, self.navigation.key_handlers())
         bind_keys(self.scene.canvas, self.scene.key_handlers())
+
+    def set_status(self, state, progress=None, message=""):
+        """What the status row says of the result (StatusRow.show_state)."""
+        self.status.show_state(state, progress, message)
+
+    def fit(self):
+        """The whole drawing again (the bar's Fit): the scene's, the atoms'
+        (as Home on the canvas), else the view matplotlib remembered first."""
+        if self.in_scene:
+            self.scene.fit()
+        elif self._on_the_atoms():
+            self.navigation.zoom_drawing()
+        elif self.ax is not None and getattr(self.ax, "name", "") == "3d":
+            self.ax.autoscale_view()
+            self.canvas.draw_idle()
+        else:
+            self.toolbar.home()
+
+    def _navigation_changed(self, navigating):
+        """Pan or Zoom takes the clicks: the pick tools show off meanwhile
+        (checking one turns pan or zoom off, _tool_toggled)."""
+        if navigating:
+            for button in self.pick_tools.values():
+                if button.isChecked():
+                    button.setChecked(False)
 
     def _on_the_atoms(self):
         """Whether Inkscape's controls apply: a result drawn flat on the
@@ -543,6 +705,7 @@ class PlotView(QWidget):
         was_scene = self.in_scene and self.result is not None and \
             _same_sites(self.result, result)
         self.navigation.history.clear()            # drawn again: the earlier zooms are gone
+        self.bar.reset_history()                   # and matplotlib's, on the old axes
         self.result = result
         self.stale = stale
         self.overlays = list(overlays)
@@ -584,21 +747,16 @@ class PlotView(QWidget):
         self._install_selector()
 
     def _show_canvas(self, canvas):
-        """The matplotlib figure and the toolbar's navigation, or pyvista's
-        scene."""
+        """The matplotlib figure and the bar's Fit, Pan, Zoom and Save image,
+        or pyvista's scene and its Reset view, View and Save image (the scene
+        takes the mouse, so pan or zoom stops)."""
         self.in_scene = not canvas
         self.stack.setCurrentWidget(self.canvas if canvas else self.scene)
-        if not canvas:
-            mode = str(getattr(self.toolbar, "mode", ""))     # the scene takes the mouse now
-            if mode == "pan/zoom":
-                self.toolbar.pan()
-            elif mode == "zoom rect":
-                self.toolbar.zoom()
-        for action in self._navigation:
-            action.setVisible(canvas)
+        self.bar.show_scene(not canvas)
 
     def clear(self, caption=""):
         self.navigation.history.clear()
+        self.bar.reset_history()
         self.scene.forget()
         self._show_canvas(True)
         self._marker_artists = []
@@ -778,11 +936,7 @@ class PlotView(QWidget):
             for other, button in self.pick_tools.items():
                 if other != tool and button.isChecked():
                     button.setChecked(False)
-            mode = str(getattr(self.toolbar, "mode", ""))   # pan and zoom would take the clicks
-            if mode == "pan/zoom":
-                self.toolbar.pan()
-            elif mode == "zoom rect":
-                self.toolbar.zoom()
+            self.bar.stop_navigating()      # pan and zoom would take the clicks
         self._install_selector()
 
     def tool(self):
@@ -805,7 +959,7 @@ class PlotView(QWidget):
                                            props={"color": theme.SELECTED, "linewidth": 1.5})
 
     def _navigating(self):
-        return bool(getattr(self.toolbar, "mode", ""))
+        return self.bar.navigating()
 
     @staticmethod
     def _global(event):

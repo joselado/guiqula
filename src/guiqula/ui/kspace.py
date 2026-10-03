@@ -17,20 +17,23 @@ two-dimensional systems (a 3D
 zone is shown by its k3 = 0 cut: the plane of b1 and b2, clipped by every
 reciprocal lattice vector, with the high-symmetry points in that plane; a
 path that leaves it, pyqula's default one for instance, is drawn projected
-onto it)."""
+onto it). Its bar (ui/canvasbar.py, PLAN.md phase 8, package P3) holds Fit,
+Pan, Zoom, the calculation whose path is edited, Add points, Remove last,
+Default path and Save image; the window hides the tab while the current
+system has no periodic direction."""
 import itertools
 
 import numpy as np
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from matplotlib.patches import Polygon
-from PySide6.QtCore import QTimer, Signal
+from PySide6.QtCore import Signal
 from PySide6.QtGui import QCursor
-from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QPushButton, QToolButton,
-                               QVBoxLayout, QWidget)
+from PySide6.QtWidgets import QComboBox, QLabel, QToolButton, QVBoxLayout, QWidget
 
 from guiqula.registry import kpaths
 from guiqula.ui import theme
+from guiqula.ui.canvasbar import CanvasBar
 
 SNAP = 0.08          # a vertex this close (in |b1|) to a high-symmetry point takes its label
 GRAB_PIXELS = 10     # a press this close to a vertex drags it
@@ -178,7 +181,13 @@ class KSpaceView(QWidget):
         self.canvas = FigureCanvasQTAgg(self.figure)
         self.canvas.setObjectName("kspaceCanvas")
         self.centring = theme.Centring(self.canvas, lambda: self.ax)   # the zone in the middle
-        self.toolbar = NavigationToolbar2QT(self.canvas, self)
+        # the bar (PLAN.md phase 8, package P3): Fit, Pan, Zoom, then the path's tools, over
+        # matplotlib's toolbar, hidden, whose modes Pan and Zoom turn on
+        self.bar = CanvasBar(self.canvas, "kspaceBar", "kspaceToolbar", "kspace{Key}",
+                             fit_tip="show the whole zone again, as it was drawn")
+        self.toolbar = self.bar.toolbar
+        self.bar.group("path")
+        self.bar.group("pathTools", joined=True)
         self.calc_box = QComboBox()
         self.calc_box.setObjectName("kpathCalculation")
         self.calc_box.setToolTip("the calculation whose k-path is drawn and edited")
@@ -192,26 +201,27 @@ class KSpaceView(QWidget):
                             "to a high-symmetry point nearby); click a vertex to pass through "
                             "it again; drag a vertex to move it")
         self.add.toggled.connect(lambda on: self.stop_navigating() if on else None)
-        self.remove_last = QPushButton("Remove last")
+        self.remove_last = QToolButton()
+        self.remove_last.setText("Remove last")
         self.remove_last.setObjectName("kpathRemoveLast")
+        self.remove_last.setToolTip("take the last vertex off the path (with fewer than two "
+                                    "left, the path is pyqula's default again)")
         self.remove_last.clicked.connect(self._remove_last)
-        self.default = QPushButton("Default path")
+        self.default = QToolButton()
+        self.default.setText("Default path")
         self.default.setObjectName("kpathDefault")
         self.default.setToolTip("pyqula's own path for this geometry")
         self.default.clicked.connect(lambda: self._edited(None))
+        self.bar.add("path", QLabel("path of"))
+        self.bar.add("path", self.calc_box)
+        for widget in (self.add, self.remove_last, self.default):
+            self.bar.add("pathTools", widget)
         self.caption = QLabel("")
         self.caption.setObjectName("kspaceCaption")
         self.caption.setWordWrap(True)
-        top = QHBoxLayout()
-        top.addWidget(self.toolbar, 1)
-        top.addWidget(QLabel("path of"))
-        top.addWidget(self.calc_box)
-        top.addWidget(self.add)
-        top.addWidget(self.remove_last)
-        top.addWidget(self.default)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
-        layout.addLayout(top)
+        layout.addWidget(self.bar)
         layout.addWidget(self.canvas, 1)
         layout.addWidget(self.caption)
         self.kspace = self.kpath = self.ax = self._line = None
@@ -221,9 +231,9 @@ class KSpaceView(QWidget):
         self._press = None         # where a press on a vertex started, until it moves
         self._click = None         # (x, y, button) of any press, for a pick on its release
         # pan or zoom takes the clicks: Add points shows off meanwhile (checking it again
-        # turns them off), once the toolbar's own slot has switched the mode
-        self.toolbar.actionTriggered.connect(lambda action: QTimer.singleShot(
-            0, lambda: self.add.setChecked(False) if self.toolbar.mode else None))
+        # turns them off)
+        self.bar.navigation_changed.connect(
+            lambda navigating: self.add.setChecked(False) if navigating else None)
         self.canvas.mpl_connect("button_press_event", self._on_press)
         self.canvas.mpl_connect("motion_notify_event", self._on_motion)
         self.canvas.mpl_connect("button_release_event", self._on_release)
@@ -249,6 +259,7 @@ class KSpaceView(QWidget):
         for widget in (self.add, self.remove_last, self.default):
             widget.setEnabled(editable)
         self.figure.clear()
+        self.bar.reset_history()            # Fit goes back to the zone as drawn now
         ax = self.ax = self.figure.add_subplot(111)
         b, dimensionality = kspace["reciprocal"], kspace.get("dimensionality", 2)
         if surface is not None:
@@ -293,6 +304,7 @@ class KSpaceView(QWidget):
     def clear(self, caption=""):
         self.kspace = self.ax = self._line = None
         self.figure.clear()
+        self.bar.reset_history()
         theme.set_figure(self.figure)
         self.caption.setText(caption)
         self.canvas.draw_idle()
@@ -324,11 +336,7 @@ class KSpaceView(QWidget):
 
     def stop_navigating(self):
         """Turn off the toolbar's pan or zoom mode, which takes the clicks."""
-        mode = str(getattr(self.toolbar, "mode", ""))
-        if mode == "pan/zoom":
-            self.toolbar.pan()
-        elif mode == "zoom rect":
-            self.toolbar.zoom()
+        self.bar.stop_navigating()
 
     def _pixel_near(self, event):
         if not len(self.vertices):

@@ -56,7 +56,7 @@ UI_TEXT_SIZES = ("normal", "large")
 UI_POINTS = {"normal": 10, "large": 12}
 DESKTOP_POINTS = "guiqula_desktop_points"     # the application's property: the desktop's size
 CENTRE_PIXELS = 1.5     # a shift of the axes smaller than this is not worth another drawing
-MOVES = 3               # drawings a centring may add after one (the labels changed width)
+MOVES = 5               # drawings a centring may add after one (the labels changed width)
 
 COLORS = {
     "light": {
@@ -359,13 +359,20 @@ def drawing(figure, theme_name=None):
             globals().update(COLORS[name])
 
 
-def centre(figure, ax):
+def centre(figure, ax, floor=None):
     """Balance the horizontal margins of a figure drawn with constrained
     layout, so that its axes box sits in the middle: the y label and the
     tick labels on the left, a colour bar on the right, push it aside
     otherwise. Measured on the last drawing (the position the layout gave
     the axes), so it is called after a draw; returns True when the layout
-    was changed, meaning that the figure must be drawn again."""
+    was changed, meaning that the figure must be drawn again.
+
+    floor: a dict kept over the drawings of one round (Centring), in which
+    the padding given to each side never shrinks. The decorations depend on
+    the room: an equal aspect widens the limits of a narrower axes, and its
+    tick labels with them ("-10" for "-8"), while a colour bar narrows with
+    it; balancing for the last measure alone could then swing between two
+    layouts for ever, and only narrowing within a round settles it."""
     engine = figure.get_layout_engine()
     if engine is None or ax is None or ax.figure is not figure or "rect" not in engine.get():
         return False
@@ -378,11 +385,15 @@ def centre(figure, ax):
     # what the decorations take on each side of the axes box, in pixels
     on_left = (position.x0 - left) * width
     on_right = (left + span - position.x1) * width
-    slack = on_left - on_right              # positive: the axes sits right of the middle
-    room = max(1.0 - abs(slack) / width, 0.2)
-    target = (0.0, bottom, room, height) if slack > 0 else (1.0 - room, bottom, room, height)
+    floor = {} if floor is None else floor
+    # the padding of each side, at least what this round gave it before
+    base = max(on_left + floor.get("left", 0.0), on_right + floor.get("right", 0.0))
+    pad_left, pad_right = base - on_left, base - on_right
+    room = max(1.0 - (pad_left + pad_right) / width, 0.2)
+    target = (min(pad_left / width, 1.0 - room), bottom, room, height)
     if all(abs(a - b) * width < CENTRE_PIXELS for a, b in zip(target, rect)):
         return False
+    floor["left"], floor["right"] = pad_left, pad_right
     engine.set(rect=target)
     return True
 
@@ -398,26 +409,30 @@ class Centring:
         self.canvas, self.axes_of = canvas, axes_of
         self._settling = False
         self._moves = 0
+        self._floor = {}         # the paddings of this round (centre)
         canvas.mpl_connect("draw_event", self._on_draw)
 
     def _on_draw(self, event):
         if self._settling:
             return
         ax = self.axes_of()
-        if ax is not None and self._moves < MOVES and centre(self.canvas.figure, ax):
+        if ax is not None and self._moves < MOVES and centre(self.canvas.figure, ax,
+                                                               self._floor):
             self._moves += 1
             self.canvas.draw_idle()
         else:
             self._moves = 0
+            self._floor = {}
 
     def settle(self):
         """Draw now, and again when centring moved the axes."""
         self._settling = True
+        floor = {}
         try:
             self.canvas.draw()
             for _ in range(MOVES):
                 ax = self.axes_of()
-                if ax is None or not centre(self.canvas.figure, ax):
+                if ax is None or not centre(self.canvas.figure, ax, floor):
                     break
                 self.canvas.draw()
         finally:

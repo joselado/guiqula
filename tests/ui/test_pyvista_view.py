@@ -211,8 +211,13 @@ def test_the_window_draws_in_3d_with_pyvista(window, qtbot, shot):
     settle(qtbot, window)
     assert structure.in_scene and structure.ax is None
     assert structure.stack.currentWidget() is structure.scene
-    assert not structure.toolbar.isVisibleTo(structure) and \
-        structure.scene.bar.isVisibleTo(structure)
+    bar = structure.bar                 # the scene's Reset view, View and Save image take the
+    assert not bar.shown(bar.fit_button) and not bar.shown(bar.save_button)   # bar's places
+    assert all(bar.shown(w) for w in (structure.scene.reset, structure.scene.view_button,
+                                      structure.scene.save))
+    assert structure.scene.reset.parent() is bar.groups["scene"] and bar.overflows() == []
+    assert structure.scene.bar.isVisibleTo(structure)      # its line of hints, over the scene
+    assert structure.toolbar.isHidden()
     assert drawn(structure.scene.canvas) > 500
     shot(structure, "diamond_pyvista")
     window.select_sites(all=True)                         # the selection shows in the scene
@@ -226,7 +231,8 @@ def test_the_window_draws_in_3d_with_pyvista(window, qtbot, shot):
     session.act("theme", name="light")
     session.act("renderer_3d", name="matplotlib")
     assert not structure.in_scene and isinstance(structure.ax, Axes3D)
-    assert structure.toolbar.isVisibleTo(structure)
+    assert bar.shown(bar.fit_button) and bar.shown(bar.pan_button) and \
+        not bar.shown(structure.scene.reset)
     session.act("renderer_3d", name="pyvista")
     session.do("set_lattice", system="s1", lattice="honeycomb_lattice")
     settle(qtbot, window)
@@ -243,11 +249,15 @@ def test_the_window_draws_in_3d_with_pyvista(window, qtbot, shot):
     assert structure.in_scene and view.in_scene and view.ax is None
     assert "arrows" in view.scene.canvas.plotter.actors    # the Neel state, as arrows
     assert not any(view._shown_by[b].isVisible() for b in view.pick_tools.values())
-    assert not any(a.isVisible() for a in view._navigation)   # the scene has its own bar
+    assert not any(view.bar.shown(b) for b in (view.bar.fit_button, view.bar.pan_button,
+                                               view.bar.zoom_button, view.bar.save_button))
+    assert view.bar.shown(view.scene.reset) and view.bar.shown(view.scene.save)  # the scene's
     shot(view, "magnetization_pyvista")
     session.act("renderer_3d", name="matplotlib")          # mplot3d, the same projection
     assert isinstance(view.ax, Axes3D) and not view.in_scene
-    assert all(a.isVisible() for a in view._navigation)
+    assert all(view.bar.shown(b) for b in (view.bar.fit_button, view.bar.pan_button,
+                                           view.bar.zoom_button, view.bar.save_button))
+    assert not view.bar.shown(view.scene.reset)
     session.act("renderer_3d", name="pyvista")
     session.act("projection", name="auto")
     assert not view.in_scene and not structure.in_scene

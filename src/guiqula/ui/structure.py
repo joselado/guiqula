@@ -5,7 +5,7 @@ cell and the neighbouring cells faded, and overlays for what the selected
 entry touches (a region's sites, the positions a removal op deletes).
 Drawn in the xy plane.
 
-Three views (VIEWS), chosen with the box on the canvas toolbar: the sites
+Three views (VIEWS), chosen with the box on the canvas bar: the sites
 and bonds; the Hamiltonian (13.8: atoms coloured by onsite energy, every
 hopping drawn with a width following its amplitude and a colour following
 its phase, exchange fields as arrows for the in-plane part and dots inside
@@ -19,8 +19,11 @@ click (a click on nothing clears), the box and lasso tools select what
 they enclose; with all three, shift adds and ctrl toggles. The drawing
 moves as Inkscape's canvas does (ui/canvas_navigation.py): the wheel
 scrolls, ctrl and the wheel zooms, the middle button or Space and the left
-button drag it; the toolbar still pans and zooms (while it does, the tools
-are off).
+button drag it; the bar's Pan and Zoom still pan and zoom (while they do,
+the tools are off). The bar (ui/canvasbar.py, PLAN.md phase 8, package P3)
+holds Fit, Pan, Zoom, the selection tools and what acts on the selection,
+what the canvas shows, the brush and Save image, over matplotlib's toolbar,
+which is kept hidden for its modes.
 The selection is kept as positions, so it survives a rebuild of the same
 geometry. The window turns it into a region or a removal op; the pure
 functions below do the geometry, so tests and drivers use them without a
@@ -32,7 +35,8 @@ between that and the xy projection, where the selection tools work (they
 act on x and y only). The 3D drawing is matplotlib's mplot3d (drag to turn
 it) or, when View > 3D drawing says so, pyvista's (ui/pyvista_view.py:
 moved in space as Blender's viewport is), which takes the place of the
-matplotlib canvas and its toolbar; a pyvista that cannot draw leaves the
+matplotlib canvas (its Reset view, View and Save image take the bar's Fit,
+Pan, Zoom and Save image); a pyvista that cannot draw leaves the
 drawing to mplot3d and the caption says why.
 pyqtgraph's OpenGL view was the plan (PLAN.md section 2), but Qt refuses
 OpenGL widgets on the offscreen platform the tests and tools/drive.py use,
@@ -41,7 +45,7 @@ and PyOpenGL is not a dependency.
 import itertools
 
 import numpy as np
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.collections import EllipseCollection, LineCollection
 from matplotlib.figure import Figure
 from matplotlib.patches import Polygon
@@ -49,13 +53,14 @@ from matplotlib.path import Path
 from matplotlib.widgets import LassoSelector, RectangleSelector
 from matplotlib import cm, colors as mcolors
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
-from PySide6.QtCore import QTimer, Signal
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit,
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QLabel, QLineEdit, QMenu,
                                QStackedWidget, QToolButton, QVBoxLayout, QWidget)
 
 from guiqula.core.nearest import nearest_indices
-from guiqula.ui import theme
+from guiqula.ui import shortcuts, theme
 from guiqula.ui.canvas_navigation import CanvasNavigation, bind_keys
+from guiqula.ui.canvasbar import CanvasBar
 
 IMAGE_LIMIT = 3000       # above this many sites the neighbouring cells are not drawn
 RADIUS = 0.22            # of an atom, in pyqula's length unit (first neighbours at 1)
@@ -528,14 +533,21 @@ def _same(a, b):
 
 
 class StructureView(QWidget):
-    """A matplotlib canvas with its navigation toolbar (pan, zoom, save)
-    and the site-selection tools."""
+    """A matplotlib canvas with its bar (ui/canvasbar.py: Fit, Pan, Zoom,
+    the site-selection tools, what the canvas shows, Save image)."""
 
     selection_changed = Signal(int)          # number of selected sites
     paint_stroke = Signal(object, bool)      # indices under the brush, the stroke is over
     view_chosen = Signal(str)                # a key of VIEWS, chosen by the user
     projection_chosen = Signal(str)          # "xy" or "3d", chosen with the 3D box
     navigation_changed = Signal(bool)        # the toolbar's pan or zoom mode went on or off
+    # the bar's selection controls; the window acts on them (its actions tool,
+    # select_sites, region_from_selection, remove_selected, Calculate on selection's menu)
+    tool_chosen = Signal(str)                # a key of TOOLS
+    select_requested = Signal(object)        # the arguments of select_sites
+    region_requested = Signal()
+    calculate_requested = Signal()
+    remove_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -546,8 +558,61 @@ class StructureView(QWidget):
         self.canvas = FigureCanvasQTAgg(self.figure)
         self.canvas.setObjectName("structureCanvas")
         self.centring = theme.Centring(self.canvas, lambda: self.ax)
-        self.toolbar = NavigationToolbar2QT(self.canvas, self)
-        self.toolbar.setObjectName("structureToolbar")
+        # the bar (PLAN.md phase 8, package P3), over matplotlib's toolbar, hidden, whose
+        # modes its Pan and Zoom turn on
+        self.bar = CanvasBar(self.canvas, "structureBar", "structureToolbar", "structure{Key}",
+                             fit=self.fit)
+        self.toolbar = self.bar.toolbar
+        for name, joined in (("tools", False), ("selection", True), ("view", False),
+                             ("paint", True)):
+            self.bar.group(name, joined=joined)
+        self.tool_buttons = QButtonGroup(self)
+        for tool, text, tip in (("pick", "Pick", "click an atom; shift adds, ctrl toggles"),
+                                ("box", "Box", "drag a rectangle"),
+                                ("lasso", "Lasso", "draw around the atoms")):
+            button = QToolButton()
+            button.setText(text)
+            button.setToolTip(f"select sites: {tip} ({shortcuts.text('tool_' + tool)} on "
+                              f"the canvas)")
+            button.setObjectName(f"tool_{tool}")
+            button.setCheckable(True)
+            button.setChecked(tool == "pick")
+            button.clicked.connect(lambda checked=False, t=tool: self.tool_chosen.emit(t))
+            self.tool_buttons.addButton(button)
+            self.bar.add("tools", button)
+        self.select_button = QToolButton()
+        self.select_button.setText("Select")
+        self.select_button.setObjectName("selectSitesButton")
+        self.select_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.select_button.setToolTip(
+            f"select sites by rule (on the canvas: {shortcuts.text('select_all')} all, "
+            f"{shortcuts.text('select_none')} nothing, {shortcuts.text('select_invert')} "
+            f"invert)")
+        menu = QMenu(self.select_button)
+        for text, name, args in (("All", "selectAll", {"all": True}),
+                                 ("Sublattice A", "selectSublatticeA", {"sublattice": 1}),
+                                 ("Sublattice B", "selectSublatticeB", {"sublattice": -1}),
+                                 ("Edge sites", "selectEdge", {"edge": True}),
+                                 ("Invert", "selectInvert", {"all": True, "mode": "toggle"}),
+                                 ("Nothing", "selectNone", {"indices": []})):
+            action = menu.addAction(text)
+            action.setObjectName(name)
+            action.triggered.connect(
+                lambda checked=False, a=args: self.select_requested.emit(dict(a)))
+        self.select_button.setMenu(menu)
+        self.bar.add("tools", self.select_button)
+        self.region_button = self._selection_button(
+            "Region from selection", "regionFromSelectionButton",
+            "a named region of the selected sites, which any term can be restricted to",
+            self.region_requested)
+        self.calculate_button = self._selection_button(
+            "Calculate on selection", "calculateOnSelectionButton",
+            "what takes the selected sites: the density of states on them, and every "
+            "calculation of sites", self.calculate_requested)
+        self.remove_button = self._selection_button(
+            "Remove selected", "removeSelectedButton",
+            f"remove the selected atoms (a Remove atoms op, by position; "
+            f"{shortcuts.text('remove_selected')} on the canvas)", self.remove_requested)
         self.view_box = QComboBox()
         self.view_box.setObjectName("canvasView")
         self.view_box.setToolTip("what the canvas shows: the geometry, what the Hamiltonian "
@@ -585,30 +650,26 @@ class StructureView(QWidget):
             widget.setMaximumWidth(60)
         self.paint_widgets = (self.paint, QLabel("value"), self.brush_value, QLabel("radius"),
                               self.brush_radius, self.brush_component)
+        for widget in (QLabel("Show"), self.view_box, self.box_3d):
+            self.bar.add("view", widget)
+        for widget in self.paint_widgets:
+            self.bar.add("paint", widget)
+        self.bar.groups["paint"].hide()          # the brush belongs to the Field preview
         self._painting = False
         self.caption = QLabel("No system yet: add one with New system, next to the "
                               "workspace tabs.")
         self.caption.setObjectName("structureCaption")
         self.caption.setWordWrap(True)
         self.caption.setMinimumHeight(3 * self.caption.fontMetrics().lineSpacing())
-        top = QHBoxLayout()
-        top.addWidget(self.toolbar, 1)
-        top.addWidget(QLabel("Show"))
-        top.addWidget(self.view_box)
-        top.addWidget(self.box_3d)
-        for widget in self.paint_widgets:
-            top.addWidget(widget)
-            widget.hide()
         from guiqula.ui.pyvista_view import SceneView     # it imports this module
         self.scene = SceneView("structureScene")          # pyvista loads at its first drawing
-        top.insertWidget(0, self.scene.bar, 1)            # in the toolbar's place
-        self.scene.bar.hide()
+        self.bar.adopt_scene(self.scene)      # its Reset view, View and Save image, in the bar
         self.stack = QStackedWidget()
         self.stack.addWidget(self.canvas)
         self.stack.addWidget(self.scene)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
-        layout.addLayout(top)
+        layout.addWidget(self.bar)
         layout.addWidget(self.stack, 1)
         layout.addWidget(self.caption)
         self.system_id = None
@@ -625,9 +686,8 @@ class StructureView(QWidget):
         self._caption = ""
         self._drawn = self._overlays = None     # what the figure shows (show_structure)
         self._was_navigating = False
-        # after the toolbar's own slot has switched the mode (pan, zoom, or off again)
-        self.toolbar.actionTriggered.connect(
-            lambda action: QTimer.singleShot(0, self._check_navigation))
+        # after the toolbar's mode changed (pan, zoom, or off again)
+        self.bar.navigation_changed.connect(lambda navigating: self._check_navigation())
         self.canvas.mpl_connect("button_press_event", self._on_press)
         self.canvas.mpl_connect("motion_notify_event", self._on_paint_motion)
         self.canvas.mpl_connect("button_release_event", self._on_paint_release)
@@ -638,12 +698,23 @@ class StructureView(QWidget):
         bind_keys(self.canvas, self.navigation.key_handlers())
         bind_keys(self.scene.canvas, self.scene.key_handlers())    # Blender's, in the scene
 
+    def _selection_button(self, text, name, tooltip, signal):
+        """A control of the bar acting on the selected sites, enabled while
+        some are selected (the window's _selection_changed)."""
+        button = QToolButton()
+        button.setText(text)
+        button.setObjectName(name)
+        button.setToolTip(tooltip)
+        button.setEnabled(False)
+        button.clicked.connect(lambda checked=False: signal.emit())
+        self.bar.add("selection", button)
+        return button
+
     # ---- drawing
     def set_view(self, view):
         """Show which view is drawn (the window decides and redraws); the
         brush belongs to the Field preview."""
-        for widget in self.paint_widgets:
-            widget.setVisible(view == "field")
+        self.bar.groups["paint"].setVisible(view == "field")
         if view != "field":
             self.paint.setChecked(False)
         index = self.view_box.findData(view)
@@ -724,6 +795,7 @@ class StructureView(QWidget):
         self.system_id, self.build = system_id, build
         self.box_3d.setChecked(three_d)
         self.figure.clear()
+        self.bar.reset_history()             # matplotlib's remembered views had the old axes
         note = ""
         if three_d and self.renderer_3d == "pyvista":
             try:
@@ -765,11 +837,11 @@ class StructureView(QWidget):
         self._update_selection()
 
     def _show_canvas(self, canvas):
-        """The matplotlib canvas and its toolbar, or pyvista's scene."""
+        """The matplotlib canvas and its Fit, Pan, Zoom and Save image, or
+        pyvista's scene and its Reset view, View and Save image."""
         self.in_scene = not canvas
         self.stack.setCurrentWidget(self.canvas if canvas else self.scene)
-        self.toolbar.setVisible(canvas)
-        self.scene.bar.setVisible(not canvas)
+        self.bar.show_scene(not canvas)
         if not canvas:
             self.stop_navigating()
 
@@ -782,6 +854,7 @@ class StructureView(QWidget):
         self._selector = self._selection_artist = None
         self.selected_positions = np.zeros((0, 3))
         self.figure.clear()
+        self.bar.reset_history()
         theme.set_figure(self.figure)
         self._caption = caption
         self.caption.setText(caption)
@@ -830,22 +903,29 @@ class StructureView(QWidget):
         self.stop_navigating()
         self.tool = tool
         self._install_tool()
+        self._show_tool()
         return tool
+
+    def _show_tool(self):
+        """The tool in use checked on the bar; none while Pan or Zoom takes
+        the clicks."""
+        navigating = self._navigating()
+        self.tool_buttons.setExclusive(False)
+        for button in self.tool_buttons.buttons():
+            button.setChecked(not navigating and button.objectName() == f"tool_{self.tool}")
+        self.tool_buttons.setExclusive(True)
 
     def stop_navigating(self):
         """Turn off the toolbar's pan or zoom mode: matplotlib keeps it on
         until its button is clicked again, and meanwhile no click selects."""
-        mode = str(getattr(self.toolbar, "mode", ""))
-        if mode == "pan/zoom":
-            self.toolbar.pan()
-        elif mode == "zoom rect":
-            self.toolbar.zoom()
+        self.bar.stop_navigating()
         self._check_navigation()
 
     def _check_navigation(self):
         navigating = self._navigating()
         if navigating != self._was_navigating:
             self._was_navigating = navigating
+            self._show_tool()
             self.navigation_changed.emit(navigating)
 
     def _install_tool(self):
@@ -870,7 +950,7 @@ class StructureView(QWidget):
         return self.in_scene or getattr(self.ax, "name", "") == "3d"
 
     def _navigating(self):
-        return bool(getattr(self.toolbar, "mode", ""))
+        return self.bar.navigating()
 
     @staticmethod
     def _mode(key):

@@ -556,7 +556,10 @@ class _Hint(QLabel):
 class SceneView(QWidget):
     """The pyvista canvas with its bar: Reset view (the first viewing
     angle, everything in sight), the View menu (Blender's numpad views, the
-    projection, framing), Save image, and what the mouse does."""
+    projection, framing), Save image, and what the mouse does. The structure
+    canvas and a result view take the first three into their own bar
+    (ui/canvasbar.py, CanvasBar.adopt_scene), and the scene's bar keeps the
+    line saying what the mouse does."""
 
     def __init__(self, name, parent=None):
         super().__init__(parent)
