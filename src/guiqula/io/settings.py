@@ -23,6 +23,14 @@ tools/drive.py unless asked) never depend on what a user chose.
   ticks, the titles of the plots, the canvas and the k-space tab, and of
   the exported figures): "small", "normal" or "large" (ui/theme.py's
   sizes). normal unless the user chooses another.
+- ``ui_text``: the size of the widgets' text, "normal" or "large" (for a
+  projector; ui/theme.py's UI_POINTS). normal unless the user chooses
+  large.
+- ``layout``: the arrangement of the window's panels and its size, as the
+  window left them when it was closed: {"state": QMainWindow.saveState(),
+  "geometry": QMainWindow.saveGeometry()}, both in base64. Empty until the
+  program's window is first closed; View > Reset layout gives the default
+  arrangement back. The Document's ui block never holds it.
 
 A missing, unreadable or malformed file gives the defaults (a broken
 settings file must not stop the program); unknown keys are kept, so an
@@ -39,10 +47,12 @@ from guiqula import env
 FILE = "settings.json"
 RECENT_LIMIT = 10
 DEFAULTS = {"theme": "system", "always_trust": False, "recent": [], "remote": False,
-            "run_at_once": True, "renderer_3d": "pyvista", "plot_text": "normal"}
+            "run_at_once": True, "renderer_3d": "pyvista", "plot_text": "normal",
+            "ui_text": "normal", "layout": {}}
 SWITCHES = ("always_trust", "remote", "run_at_once")       # true or false
 CHOICES = {"theme": ("system", "light", "dark"), "renderer_3d": ("matplotlib", "pyvista"),
-           "plot_text": ("small", "normal", "large")}
+           "plot_text": ("small", "normal", "large"), "ui_text": ("normal", "large")}
+LAYOUT_KEYS = ("state", "geometry")                         # base64 text, both
 
 
 class SettingsError(ValueError):
@@ -74,7 +84,15 @@ def load():
             values[name] = DEFAULTS[name]
     recent = values["recent"] if isinstance(values["recent"], list) else []
     values["recent"] = [p for p in recent if isinstance(p, str)][:RECENT_LIMIT]
+    if not _is_layout(values["layout"]):
+        values["layout"] = {}
     return values
+
+
+def _is_layout(value):
+    """A layout as the window writes it, or the empty one."""
+    return isinstance(value, dict) and (value == {} or (
+        set(value) == set(LAYOUT_KEYS) and all(isinstance(value[k], str) for k in LAYOUT_KEYS)))
 
 
 def save(values):
@@ -104,6 +122,8 @@ def put(name, value):
         raise SettingsError(f"{name} must be one of {CHOICES[name]}, not {value!r}")
     if name in SWITCHES and not isinstance(value, bool):
         raise SettingsError(f"{name} must be true or false")
+    if name == "layout" and not _is_layout(value):
+        raise SettingsError(f"layout must be {{}} or a dict of {LAYOUT_KEYS} as text")
     stored = _stored()              # only what was set is written, so that `chosen` can tell
     stored[name] = value
     save(stored)

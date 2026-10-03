@@ -24,7 +24,11 @@ script in one folder), help (entry, or guide and anchor: the Help dock),
 projection (auto, xy, 3d), renderer_3d (matplotlib, pyvista: the 3D drawing,
 whose widgets are structureScene and plotScene_<calculation id>), view_3d (name:
 front, back, right, left, top, bottom, perspective, orthographic, flip, all,
-selected, reset; calculation: a result's scene instead of the canvas's); the
+selected, reset; calculation: a result's scene instead of the canvas's),
+plot_text (small, normal, large), ui_text (normal, large: the text of the
+menus, panels and forms), log (enabled: the bottom area, Log and Console,
+hidden by default), panel (name: a dock, helpDock or Help, ...; shown:
+false hides it), reset_layout (the default arrangement of the panels); the
 session's undo, redo (with "steps") and history; lock and unlock are
 mutations. The driven window never reads or writes the settings file. Every
 calculation's result has its own view, plot_<calculation id>. After each command the driver

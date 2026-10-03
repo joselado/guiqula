@@ -214,13 +214,19 @@ def test_the_jobs_panel_keeps_the_newest_finished_rows(qapp, monkeypatch):
     from guiqula.ui import jobpanel
     monkeypatch.setattr(jobpanel, "ROWS_KEPT", 3)
     panel = jobpanel.JobPanel()
+    added = []
+    panel.job_added.connect(added.append)
     running = SimpleNamespace(id="j1", kind="run", label="c1", status="running", error=None,
                               traceback=None, progress=0.5, done=False)
     panel.update_job(running)
+    panel.update_job(running)
+    panel.update_job(SimpleNamespace(**dict(vars(running), id="b1", kind="build")))
+    assert added == ["j1"]                                 # a new row, once; no builds
     for n in range(2, 7):
         panel.update_job(SimpleNamespace(id=f"j{n}", kind="run", label="c1", status="done",
                                          error=None, traceback=None, progress=1.0, done=True))
     assert list(panel.rows) == ["j1", "j5", "j6"]          # the running one stays
+    assert added == ["j1", "j2", "j3", "j4", "j5", "j6"]
     assert [panel.table.item(r, 0).text() for r in range(3)] == ["j1", "j5", "j6"]
     panel.update_job(SimpleNamespace(**dict(vars(running), status="done", done=True)))
     assert panel.table.item(panel.rows["j1"], 2).text() == "done"

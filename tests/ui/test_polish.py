@@ -148,6 +148,10 @@ def test_dark_theme_and_back(window, qtbot, shot):
     view = window.plots["c1"]
     assert to_hex(view.figure.get_facecolor()) == theme.COLORS["dark"]["FIGURE"]
     assert to_hex(view.ax.title.get_color()) == theme.COLORS["dark"]["TEXT"]
+    window.message("an error, in the status bar", error=True)
+    message = window.status_message
+    assert message.palette().color(QPalette.ColorRole.WindowText).name() == \
+        theme.COLORS["dark"]["ERROR"]
     window.viewport.setCurrentIndex(0)
     image = window.structure.canvas.grab().toImage()
     assert colour_at(image, 3, 3) == theme.COLORS["dark"]["FIGURE"]
@@ -155,6 +159,11 @@ def test_dark_theme_and_back(window, qtbot, shot):
     window.viewport.setCurrentWidget(view)
     shot(view, "dark_bands")
     window.set_theme("light")
+    assert message.palette().color(QPalette.ColorRole.WindowText).name() == \
+        theme.COLORS["light"]["ERROR"]
+    window.message("a message")
+    assert message.palette().color(QPalette.ColorRole.WindowText).name() == \
+        theme.COLORS["light"]["TEXT"]
     assert app.palette().color(QPalette.ColorRole.Window).name() == "#efefef"
     assert to_hex(window.structure.figure.get_facecolor()) == "#ffffff"
     assert to_hex(view.figure.get_facecolor()) == "#ffffff"
@@ -207,6 +216,10 @@ def test_the_settings_of_the_interactive_window(qapp, qtbot, tmp_path, no_jobs):
         window.set_plot_text("large")
         assert settings.get("plot_text") == "large" and theme.text_size == "large"
         window.set_plot_text("normal")
+        window.set_ui_text("large")
+        assert settings.get("ui_text") == "large" and theme.ui_text == "large"
+        window.set_ui_text("normal")
+        assert settings.get("ui_text") == "normal"
         window.session.act("save", path=str(tmp_path / "a.guiqula"))
         window.session.act("load", path="haldane_chern")               # a preset: not listed
         window._fill_recent()
@@ -215,9 +228,13 @@ def test_the_settings_of_the_interactive_window(qapp, qtbot, tmp_path, no_jobs):
         window.set_always_trust(True)
         assert settings.get("always_trust") and window.session.always_trust
         window.set_always_trust(False)
+        window.show()
+        window.set_log(True)
     finally:
-        window.close()
+        window.close()                               # shown: its arrangement is kept
         window.session.close()
+    layout = settings.get("layout")
+    assert set(layout) == {"state", "geometry"}
     driven = build_main_window()
     try:
         driven.set_theme("dark")
@@ -226,8 +243,20 @@ def test_the_settings_of_the_interactive_window(qapp, qtbot, tmp_path, no_jobs):
         driven.set_plot_text("large")
         assert settings.get("plot_text") == "normal"
         driven.set_plot_text("normal")
+        driven.set_ui_text("large")
+        assert settings.get("ui_text") == "normal"
+        driven.set_ui_text("normal")
+        assert driven.docks["logDock"].isHidden()     # the stored arrangement is not read
+        driven.show()
     finally:
         driven.close()
+    assert settings.get("layout") == layout          # nor written
+    again = build_main_window(use_settings=True)
+    try:
+        assert not again.docks["logDock"].isHidden() and again.log_toggle.isChecked()
+    finally:
+        again.close()
+    settings.put("layout", {})
 
 
 def test_every_toolbar_control_and_palette_entry_has_a_tooltip(window):
@@ -433,7 +462,7 @@ def test_plot_text_is_a_setting_every_drawing_follows(window, qtbot):
     session.act("plot_text", name="normal")
     assert view.ax.xaxis.label.get_size() == pytest.approx(1.2 * base)
     assert theme.font_points("large") == pytest.approx(1.2 * base)
-    assert QApplication.instance().font().pointSizeF() >= theme.UI_POINTS
+    assert QApplication.instance().font().pointSizeF() >= theme.UI_POINTS["normal"]
 
 
 def box_contrast(widget, x0, x1, y):

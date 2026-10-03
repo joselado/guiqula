@@ -2,8 +2,14 @@
 (Geometry, Hamiltonian, Calculate) that change the palette toolbar and
 the emphasis, not the data; the outliner on the left, the viewport (the
 Structure tab and one closable tab per calculation's result, which can be
-detached into windows of their own) in the centre, the properties form and the
-jobs on the right, the log at the bottom, and the status bar.
+detached into windows of their own) in the centre, the properties form on
+the right with Help, Sliders and Jobs tabbed below it, so that the help never
+hides the form it explains, the Log and the Console at the bottom, hidden
+until the status bar's Log toggle shows them, and the status bar, which
+shows the last message (PLAN.md phase 8, package P5). The panels never
+float (decision 88); the program's window keeps their arrangement and its
+size in the settings (layout), and View > Reset layout gives the default
+back.
 
 The structure canvas has three views: the sites and bonds (the Geometry
 workspace), the Hamiltonian (13.8, the Hamiltonian workspace), and the
@@ -46,7 +52,7 @@ import traceback
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import Qt, QTimer, QUrl
+from PySide6.QtCore import QByteArray, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QActionGroup, QDesktopServices
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QComboBox, QCompleter, QDialog,
                                QDockWidget, QFileDialog, QHeaderView, QLabel, QLineEdit,
@@ -64,7 +70,7 @@ from guiqula.registry import base as registry
 from guiqula.registry import cost, pipeline
 from guiqula.registry import picks as pick_targets
 from guiqula.registry.params import VectorFieldParam
-from guiqula.ui.bars import MessageBar
+from guiqula.ui.bars import MessageBar, StatusMessage
 from guiqula.ui.console import ConsoleWidget
 from guiqula.ui.help import HelpPanel
 from guiqula.ui.kspace import KSpaceView
@@ -85,7 +91,8 @@ WORKSPACES = ("geometry", "hamiltonian", "calculate")
 WINDOW_ACTIONS = ("select", "workspace", "tool", "select_sites", "canvas_view", "preview",
                   "auto_rerun", "projection", "overlay", "slider", "set_slider",
                   "remove_slider", "paint", "theme", "export_bundle", "help", "pick", "pick_to",
-                  "run_at_once", "renderer_3d", "plot_text")
+                  "run_at_once", "renderer_3d", "plot_text", "ui_text", "reset_layout", "log",
+                  "panel")
 STRUCTURE_TAB = 0
 KSPACE_TAB = 1
 # a new classical system: its lattice, and a supercell the usual orders fit in
@@ -95,6 +102,21 @@ CLASSICAL_STARTS = {"classical_spin": ("triangular_lattice", 3, "Classical spins
 REGION_TOLERANCE = 0.05      # positions regions made from a canvas selection
 AUTO_RERUN_SECONDS = 3.0     # stale results re-run automatically when cheaper than this
 CANVAS_VIEW_OF = {"geometry": "structure", "hamiltonian": "hamiltonian"}
+# the panels' sides (PLAN.md phase 8, package P5); the bottom ones are hidden by default
+DOCK_AREAS = {"outlinerDock": Qt.DockWidgetArea.LeftDockWidgetArea,
+              "propertiesDock": Qt.DockWidgetArea.RightDockWidgetArea,
+              "helpDock": Qt.DockWidgetArea.RightDockWidgetArea,
+              "slidersDock": Qt.DockWidgetArea.RightDockWidgetArea,
+              "jobsDock": Qt.DockWidgetArea.RightDockWidgetArea,
+              "logDock": Qt.DockWidgetArea.BottomDockWidgetArea,
+              "consoleDock": Qt.DockWidgetArea.BottomDockWidgetArea}
+BOTTOM_DOCKS = ("logDock", "consoleDock")
+PROPERTIES_SHARE = 0.6       # of the right column's height, the rest to Help, Sliders, Jobs
+LOG_HEIGHT = 160             # pixels the bottom area takes when the Log toggle first shows it
+# the version of the window's saveState() kept in the settings (layout): a change of the
+# docks or the toolbars that a stored arrangement would misplace raises it, and a stored
+# one of another version gives the default arrangement
+LAYOUT_VERSION = 1
 
 
 def _grouped(family):
@@ -228,31 +250,22 @@ class MainWindow(QMainWindow):
         self.sliders_panel.moved.connect(self._slider_moved)
         self.sliders_panel.removed.connect(lambda index: self._act("remove_slider",
                                                                    index=index))
-        outliner_dock = self._dock("Outliner", self.outliner, "outlinerDock",
-                                   Qt.DockWidgetArea.LeftDockWidgetArea)
-        properties_dock = self._dock("Properties", self.properties, "propertiesDock",
-                                     Qt.DockWidgetArea.RightDockWidgetArea)
-        jobs_dock = self._dock("Jobs", self.jobs, "jobsDock", Qt.DockWidgetArea.RightDockWidgetArea)
-        self.splitDockWidget(properties_dock, jobs_dock, Qt.Orientation.Vertical)
-        sliders_dock = self._dock("Sliders", self.sliders_panel, "slidersDock",
-                                  Qt.DockWidgetArea.RightDockWidgetArea)
-        self.tabifyDockWidget(jobs_dock, sliders_dock)
-        jobs_dock.raise_()
-        help_dock = self._dock("Help", self.help_panel, "helpDock",
-                               Qt.DockWidgetArea.RightDockWidgetArea)
-        self.tabifyDockWidget(properties_dock, help_dock)
-        properties_dock.raise_()
-        log_dock = self._dock("Log", self.log, "logDock", Qt.DockWidgetArea.BottomDockWidgetArea)
-        console_dock = self._dock("Console", self.console, "consoleDock",
-                                  Qt.DockWidgetArea.BottomDockWidgetArea)
-        self.tabifyDockWidget(log_dock, console_dock)
-        log_dock.raise_()
-        self.resizeDocks([outliner_dock, properties_dock], [320, 340], Qt.Orientation.Horizontal)
-        self.resizeDocks([properties_dock, jobs_dock], [480, 180], Qt.Orientation.Vertical)
-        self.resizeDocks([log_dock], [130], Qt.Orientation.Vertical)
-        self.docks = {d.objectName(): d for d in (outliner_dock, properties_dock, help_dock,
-                                                  jobs_dock, log_dock, console_dock,
-                                                  sliders_dock)}
+        # the panels (PLAN.md phase 8, package P5): the outliner on the left; on the right
+        # Properties alone at the top and, below it, Help, Sliders and Jobs tabbed, so that
+        # the help never hides the form it explains; Log and Console at the bottom, hidden
+        # until the status bar's Log toggle (or View > Panels) shows them
+        self.help_panel.browser.setPlaceholderText("Select an entry and press F1 for its help.")
+        self.jobs.job_added.connect(self._job_added)
+        self.docks = {}
+        for title, widget, name in (("Outliner", self.outliner, "outlinerDock"),
+                                    ("Properties", self.properties, "propertiesDock"),
+                                    ("Help", self.help_panel, "helpDock"),
+                                    ("Sliders", self.sliders_panel, "slidersDock"),
+                                    ("Jobs", self.jobs, "jobsDock"),
+                                    ("Log", self.log, "logDock"),
+                                    ("Console", self.console, "consoleDock")):
+            self.docks[name] = self._dock(title, widget, name, DOCK_AREAS[name])
+        self._arrange_docks()
 
         self._build_toolbars()
         self._build_menus()
@@ -262,11 +275,26 @@ class MainWindow(QMainWindow):
         self.status_label.setToolTip(vendoring.describe())
         self.autosave_label = QLabel("")
         self.autosave_label.setObjectName("autosaveLabel")
-        self.statusBar().addWidget(self.status_label, 1)
+        self.statusBar().addWidget(self.status_label)
+        # the last message, after the summary (the Log is hidden by default), and at the
+        # right the toggle of the bottom area (PLAN.md phase 8, package P5)
+        self.status_message = StatusMessage("statusMessage")
+        self.statusBar().addWidget(self.status_message, 1)
         self.remote_label = QLabel("")
         self.remote_label.setObjectName("remoteLabel")
         self.statusBar().addPermanentWidget(self.remote_label)
         self.statusBar().addPermanentWidget(self.autosave_label)
+        self.log_toggle = QToolButton()
+        self.log_toggle.setObjectName("logToggle")
+        self.log_toggle.setText("Log")
+        self.log_toggle.setCheckable(True)
+        self.log_toggle.setToolTip("show or hide the bottom area: the Log, every message so "
+                                   "far, and the Python console (View > Panels)")
+        self.log_toggle.clicked.connect(lambda checked: self._window_act("log", self.set_log,
+                                                                         enabled=checked))
+        self.statusBar().addPermanentWidget(self.log_toggle)
+        for name in BOTTOM_DOCKS:
+            self.docks[name].toggleViewAction().toggled.connect(self._sync_log_toggle)
 
         self.timer = QTimer(self)
         self.timer.setObjectName("pollTimer")
@@ -281,8 +309,11 @@ class MainWindow(QMainWindow):
         self._update_actions()
         self.theme_actions[self.theme_choice].setChecked(True)
         self.text_actions[theme.text_size].setChecked(True)
+        self.ui_text_actions[theme.ui_text].setChecked(True)
         if use_settings:
             stored = settings.load()
+            self.set_ui_text(stored["ui_text"], remember=False)
+            self._restore_layout(stored["layout"])
             self.set_theme(stored["theme"])
             self.set_plot_text(stored["plot_text"], remember=False)
             self.always_trust_action.setChecked(stored["always_trust"])
@@ -299,11 +330,38 @@ class MainWindow(QMainWindow):
 
     # ---- construction helpers
     def _dock(self, title, widget, name, area):
+        """A panel: it keeps its title and its close button, and can be
+        moved to another side, but never floats (a floating dock cannot be
+        moved on Wayland, decision 88)."""
         dock = QDockWidget(title, self)
         dock.setObjectName(name)
         dock.setWidget(widget)
+        dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetClosable
+                         | QDockWidget.DockWidgetFeature.DockWidgetMovable)
         self.addDockWidget(area, dock)
         return dock
+
+    def _arrange_docks(self):
+        """The default arrangement of the panels: every dock put back on its
+        side, Properties above the Help, Sliders and Jobs tabs (Help in
+        front) at 60 and 40 percent of the column, the bottom area hidden.
+        The window's size is left as it is."""
+        docks = self.docks
+        for name, dock in docks.items():
+            self.addDockWidget(DOCK_AREAS[name], dock)        # takes it back from elsewhere
+        self.splitDockWidget(docks["propertiesDock"], docks["helpDock"], Qt.Orientation.Vertical)
+        self.tabifyDockWidget(docks["helpDock"], docks["slidersDock"])
+        self.tabifyDockWidget(docks["slidersDock"], docks["jobsDock"])
+        self.tabifyDockWidget(docks["logDock"], docks["consoleDock"])
+        for name, dock in docks.items():
+            dock.setVisible(name not in BOTTOM_DOCKS)
+        docks["helpDock"].raise_()
+        docks["logDock"].raise_()
+        self.resizeDocks([docks["outlinerDock"], docks["propertiesDock"]], [320, 340],
+                         Qt.Orientation.Horizontal)
+        self.resizeDocks([docks["propertiesDock"], docks["helpDock"]],
+                         [int(100 * PROPERTIES_SHARE), int(100 * (1 - PROPERTIES_SHARE))],
+                         Qt.Orientation.Vertical)
 
     def _menu_button(self, bar, text, name, entries, handler, prefix):
         """A tool button whose menu lists registry entries by group."""
@@ -657,6 +715,25 @@ class MainWindow(QMainWindow):
                               f"larger)")
             group.addAction(action)
             self.text_actions[choice] = action
+        interface = view.addMenu("&Interface text")
+        interface.setObjectName("uiTextMenu")
+        interface.setToolTipsVisible(True)
+        group = QActionGroup(self)
+        self.ui_text_actions = {}
+        normal, large = theme.UI_POINTS["normal"], theme.UI_POINTS["large"]
+        for choice, text, tip in (
+                ("normal", "&Normal", f"the menus, the panels and the forms at the desktop's "
+                                      f"size, at least {normal} points"),
+                ("large", "&Large", f"the menus, the panels and the forms {large - normal} "
+                                    f"points larger, for a projector ({large} points on Qt's "
+                                    f"default font)")):
+            action = self._action(interface, text, lambda checked=False, c=choice:
+                                  self._window_act("ui_text", self.set_ui_text, name=c),
+                                  name=f"ui_text_{choice}")
+            action.setCheckable(True)
+            action.setToolTip(tip)
+            group.addAction(action)
+            self.ui_text_actions[choice] = action
         drawing = view.addMenu("3D &drawing")
         drawing.setObjectName("renderer3dMenu")
         group = QActionGroup(self)
@@ -678,8 +755,17 @@ class MainWindow(QMainWindow):
             self.renderer_actions["pyvista"].setToolTip(pyvista_view.unavailable_reason())
         drawing.setToolTipsVisible(True)
         view.addSeparator()
-        for dock in self.docks.values():
-            view.addAction(dock.toggleViewAction())
+        panels = view.addMenu("&Panels")
+        panels.setObjectName("panelsMenu")
+        for name, dock in self.docks.items():
+            action = dock.toggleViewAction()
+            action.setObjectName(f"panel_{name}")
+            panels.addAction(action)
+        reset = self._action(view, "&Reset layout", lambda: self._window_act(
+            "reset_layout", self.reset_layout), name="resetLayoutAction")
+        reset.setToolTip("the panels back where they start: Properties above Help, Sliders "
+                         "and Jobs, the Log and the Console hidden (the window keeps its size)")
+        view.setToolTipsVisible(True)
         run = self.menuBar().addMenu("&Run")
         self._action(run, "&Run calculation", self.run_selected, "run", "runAction")
         self._action(run, "&Cancel", self.cancel_selected, "cancel", "cancelAction")
@@ -781,6 +867,10 @@ class MainWindow(QMainWindow):
         dispatcher.register_action("renderer_3d", lambda name="matplotlib":
                                    self.set_renderer_3d(name))
         dispatcher.register_action("plot_text", lambda name="normal": self.set_plot_text(name))
+        dispatcher.register_action("ui_text", lambda name="normal": self.set_ui_text(name))
+        dispatcher.register_action("reset_layout", self.reset_layout)
+        dispatcher.register_action("log", lambda enabled=True: self.set_log(enabled))
+        dispatcher.register_action("panel", self.show_panel)
         dispatcher.register_action("view_3d", self.set_view_3d)
         self.help_panel.session = session
         session.view_state = self.view_state
@@ -797,6 +887,8 @@ class MainWindow(QMainWindow):
             if not self._confirm_discard():
                 event.ignore()
                 return
+        if self.use_settings and self.isVisible():
+            self._save_layout()           # the arrangement and the size, for the next start
         self.timer.stop()
         self.build_timer.stop()
         self._stop_remote()
@@ -2795,6 +2887,120 @@ class MainWindow(QMainWindow):
                 self._draw_result(calc, force=True)
         return name
 
+    def set_ui_text(self, name="normal", remember=True):
+        """The size of the text of the menus, the panels and the forms
+        (ui/theme.py: normal or large, for a projector); the outliner and
+        the form are built again in it. The interactive program keeps the
+        choice in the settings file. Returns the size."""
+        theme.set_ui_text(name)
+        theme.apply_text(QApplication.instance())
+        self.ui_text_actions[name].setChecked(True)
+        if remember and self.use_settings:
+            settings.put("ui_text", name)
+        if self.session is not None:
+            self.outliner.refresh(self.session)
+            self.properties.show_item(self.session, self.selected)
+        return name
+
+    # ---- the panels (PLAN.md phase 8, package P5)
+    def _window_act(self, command, method, /, **args):
+        """A control of the window: through the dispatcher when there is a
+        session (journaled, as a driver's would be), else the method."""
+        return self._act(command, **args) if self.session is not None else method(**args)
+
+    def reset_layout(self):
+        """View > Reset layout: the panels in their default arrangement
+        (_arrange_docks); the window keeps its size. Returns the panels shown."""
+        self._arrange_docks()
+        return [name for name, dock in self.docks.items() if not dock.isHidden()]
+
+    def set_log(self, enabled=True):
+        """The status bar's Log toggle: show the bottom area, the Log (raised)
+        and the Console, or hide it. Returns whether it is shown."""
+        log, console = (self.docks[name] for name in BOTTOM_DOCKS)
+        if enabled:
+            first = log.isHidden() and console.isHidden()
+            log.show()
+            console.show()
+            log.raise_()
+            if first and self.dockWidgetArea(log) == Qt.DockWidgetArea.BottomDockWidgetArea:
+                self.resizeDocks([log], [LOG_HEIGHT], Qt.Orientation.Vertical)
+        else:
+            log.hide()
+            console.hide()
+        self._sync_log_toggle()
+        return self.log_toggle.isChecked()
+
+    def _sync_log_toggle(self, *args):
+        """The Log toggle shows whether the bottom area is, however it was
+        shown or closed (the toggle, View > Panels, a dock's close button)."""
+        shown = not all(self.docks[name].isHidden() for name in BOTTOM_DOCKS)
+        if self.log_toggle.isChecked() != shown:
+            self.log_toggle.setChecked(shown)
+
+    def show_panel(self, name, shown=True):
+        """Show and raise a panel, or hide it (shown false): its objectName
+        (helpDock) or its title (Help). Returns the objectName."""
+        dock = self.docks.get(name) or next(
+            (d for d in self.docks.values() if d.windowTitle().lower() == str(name).lower()),
+            None)
+        if dock is None:
+            raise ValueError(f"unknown panel {name!r}; panels: "
+                             f"{[d.windowTitle() for d in self.docks.values()]}")
+        if shown:
+            dock.show()
+            dock.raise_()
+        else:
+            dock.hide()
+        self._sync_log_toggle()
+        return dock.objectName()
+
+    def _in_front(self, name):
+        """Whether a panel is shown and in front of the tabs it shares."""
+        dock = self.docks[name]
+        return not dock.isHidden() and not dock.visibleRegion().isEmpty()
+
+    def _job_added(self, job_id):
+        """A new row of the Jobs panel: Jobs comes forward, unless Help is
+        in front showing an item's help (Run at once starts a job at every
+        edit of the form that help explains)."""
+        page = self.help_panel.page
+        if self._in_front("helpDock") and page is not None and page[0] == "item":
+            return
+        self.docks["jobsDock"].raise_()
+
+    def _restore_layout(self, layout):
+        """The arrangement and the size the window had when it was last
+        closed (the setting layout); the default when there is none or it is
+        of another LAYOUT_VERSION. Returns whether it was restored."""
+        if not layout:
+            return False
+        try:
+            geometry = QByteArray.fromBase64(layout["geometry"].encode("ascii"))
+            state = QByteArray.fromBase64(layout["state"].encode("ascii"))
+        except (KeyError, AttributeError, UnicodeEncodeError):
+            return False
+        self.restoreGeometry(geometry)
+        if not self.restoreState(state, LAYOUT_VERSION):
+            self._arrange_docks()
+            return False
+        for name, dock in self.docks.items():         # floating ones from elsewhere come back
+            if dock.isFloating():
+                dock.setFloating(False)
+        self.set_workspace(self.workspace)           # the palette rows follow the workspace
+        self._sync_log_toggle()
+        return True
+
+    def _save_layout(self):
+        """Keep the arrangement and the size in the settings (closeEvent)."""
+        layout = {"state": bytes(self.saveState(LAYOUT_VERSION).toBase64()).decode("ascii"),
+                  "geometry": bytes(self.saveGeometry().toBase64()).decode("ascii")}
+        try:
+            settings.put("layout", layout)
+        except OSError as error:
+            self.message(f"could not write the settings: {error}", error=True)
+        return layout
+
     def set_always_trust(self, enabled):
         """Open every file with its Python nodes allowed to run (13.7's
         global switch, kept in the settings file)."""
@@ -2937,8 +3143,11 @@ class MainWindow(QMainWindow):
         return out if ok else None
 
     def message(self, text, error=False):
+        """A message: in the Log, and its first line in the status bar after
+        the system summary (the error colour for an error), where it stays
+        until the next one."""
         self.log.appendPlainText(("ERROR: " if error else "") + text)
-        self.statusBar().showMessage(text.splitlines()[0], 8000)
+        self.status_message.show_message(text, error)
 
     def report_exception(self, kind, value, tb):
         """An exception nobody caught (ui/errors.py): log it, write a crash

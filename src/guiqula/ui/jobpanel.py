@@ -12,6 +12,7 @@ ROWS_KEPT = 100
 
 class JobPanel(QWidget):
     cancel_requested = Signal(str)          # job id
+    job_added = Signal(str)                 # job id: a job got its row (the window raises the dock)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -58,6 +59,9 @@ class JobPanel(QWidget):
             button.clicked.connect(lambda checked=False, j=job.id: self.cancel_requested.emit(j))
             self.table.setCellWidget(row, 4, button)
             self.table.scrollToBottom()
+            added = True
+        else:
+            added = False
         status = job.status if not job.error else f"{job.status}: {job.error}"
         self.table.item(row, 2).setText(status)
         self.table.item(row, 2).setToolTip(job.traceback or status)
@@ -65,6 +69,8 @@ class JobPanel(QWidget):
         self.table.cellWidget(row, 4).setEnabled(not job.done)
         if job.done and self.table.rowCount() > ROWS_KEPT:
             self._prune()
+        if added:
+            self.job_added.emit(job.id)
 
     def _prune(self):
         """Drop the oldest finished rows beyond ROWS_KEPT."""

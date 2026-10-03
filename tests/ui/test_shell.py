@@ -270,7 +270,9 @@ def test_project_remembers_the_view(window, qtbot, tmp_path):
     session.act("tool", name="lasso")
     session.act("select", entry="t2")
     window.select_calculation("c2")
+    window.set_log(True)                              # the panels are a setting, not the view
     assert not session.modified                       # none of that is an unsaved change
+    assert not {"layout", "docks", "panels"} & set(window.view_state())
     path = tmp_path / "view.guiqula"
     session.act("save", path=str(path))
     fresh(qtbot, window)                              # the preset has no view state
@@ -282,6 +284,8 @@ def test_project_remembers_the_view(window, qtbot, tmp_path):
     settle(qtbot, window)
     qtbot.waitUntil(lambda: len(window.structure.selected()) == 4, timeout=10_000)
     assert not session.modified and window.windowTitle() == "guiqula — view.guiqula"
+    assert not window.docks["logDock"].isHidden()     # loading a project leaves the panels
+    window.set_log(False)
     window.set_tool("pick")
     window.set_workspace("geometry")
 
@@ -293,7 +297,7 @@ def test_pan_or_zoom_unchecks_the_selection_tools(window, qtbot):
     pan = next(a for a in structure.toolbar.actions() if a.text() == "Pan")
     pan.trigger()
     qtbot.waitUntil(lambda: window.tool_buttons.checkedButton() is None)
-    assert "click Pick, Box or Lasso" in window.statusBar().currentMessage()
+    assert "click Pick, Box or Lasso" in window.status_message.message
     window.findChild(QToolButton, "tool_box").click()
     assert str(structure.toolbar.mode) == "" and not pan.isChecked()
     assert structure.tool == "box"

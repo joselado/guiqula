@@ -96,3 +96,5 @@ def test_invalid_entry_is_flagged_in_the_tree(window, qtbot):
 def test_errors_are_logged_not_raised(window):
     window._act("run_calculation", calculation="no_such_calc")
     assert "ERROR: run_calculation" in window.log.toPlainText()
+    assert window.status_message.message.startswith("run_calculation") and \
+        window.status_message.error and window.docks["logDock"].isHidden()

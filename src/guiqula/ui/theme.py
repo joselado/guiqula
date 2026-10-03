@@ -28,6 +28,14 @@ check boxes, the item views (the outliner) and the checkable menu entries
 itself: a bordered box (CHECK_BORDER), filled with the highlight colour
 when checked, with a white mark.
 
+Interface text (PLAN.md phase 8, package P5): the widgets' font, "normal"
+or "large" (View > Interface text; io/settings.py keeps it, ui_text), for a
+projector. UI_POINTS gives the sizes on Qt's default font: normal is the
+desktop's font, at least UI_POINTS["normal"] points, and large is that plus
+the difference of the two, so that large is larger on any desktop; the
+desktop's own size is remembered at the first apply(), so that going back
+to normal is exact.
+
 Centring (the same request): matplotlib puts the y label and its ticks
 left of the axes and a colour bar right of it, so the axes box sits off
 the middle of its panel; centre() balances the margins of a figure drawn
@@ -43,7 +51,10 @@ from PySide6.QtWidgets import QProxyStyle, QStyle
 CHOICES = ("system", "light", "dark")
 TEXT_SIZES = ("small", "normal", "large")
 FONT_POINTS = {"small": 9, "normal": 11, "large": 14}   # matplotlib's font.size, in points
-UI_POINTS = 10          # the widgets' font is at least this size (Qt's default is 9)
+UI_TEXT_SIZES = ("normal", "large")
+# the widgets' font (Qt's default is 9 points): normal is at least 10, large 2 points more
+UI_POINTS = {"normal": 10, "large": 12}
+DESKTOP_POINTS = "guiqula_desktop_points"     # the application's property: the desktop's size
 CENTRE_PIXELS = 1.5     # a shift of the axes smaller than this is not worth another drawing
 MOVES = 3               # drawings a centring may add after one (the labels changed width)
 
@@ -112,6 +123,7 @@ PALETTES = {
 
 name = "light"             # the active theme ("light" or "dark")
 text_size = "normal"       # the active plot text size (TEXT_SIZES)
+ui_text = "normal"         # the active interface text size (UI_TEXT_SIZES)
 globals().update(COLORS[name])
 
 
@@ -138,6 +150,40 @@ def set_text_size(size="normal"):
     return size
 
 
+def set_ui_text(size="normal"):
+    """Make an interface text size the active one (what apply and
+    apply_text give the widgets from now on); returns it."""
+    global ui_text
+    if size not in UI_TEXT_SIZES:
+        raise ValueError(f"unknown interface text size {size!r}; choose one of {UI_TEXT_SIZES}")
+    ui_text = size
+    return size
+
+
+def ui_points(app):
+    """The point size of the widgets' font at the active interface text
+    size, or None when the desktop's font is given in pixels (left alone)."""
+    desktop = app.property(DESKTOP_POINTS)
+    if desktop is None:
+        desktop = app.font().pointSizeF()
+        app.setProperty(DESKTOP_POINTS, desktop)
+    if not desktop or desktop <= 0:
+        return None
+    return max(float(desktop), UI_POINTS["normal"]) + UI_POINTS[ui_text] - UI_POINTS["normal"]
+
+
+def apply_text(app):
+    """Give the widgets the font of the active interface text size (and the
+    style sheet, whose titles follow it); returns its points."""
+    points = ui_points(app)
+    if points is not None and app.font().pointSizeF() != points:
+        font = app.font()
+        font.setPointSizeF(points)
+        app.setFont(font)
+    app.setStyleSheet(stylesheet(points))
+    return points
+
+
 def font_points(relative="medium", size=None):
     """Points of a relative matplotlib size ("small", "medium", "large",
     ...) at a plot text size (the active one by default): what a drawing
@@ -146,15 +192,18 @@ def font_points(relative="medium", size=None):
     return FONT_POINTS[size or text_size] * font_scalings[relative]
 
 
-def stylesheet():
+def stylesheet(points=None):
     # a menu button (New system, Add op, Overlay...) gets room for its arrow, drawn at the
-    # right and centred instead of Fusion's small one in the corner under the text
+    # right and centred instead of Fusion's small one in the corner under the text; a
+    # form's title is 2 points above the widgets' font (points)
+    title = (points or UI_POINTS["normal"]) + 2
     return f"""
 QFrame#errorBar {{ background: {ERROR_BACKGROUND}; border-bottom: 1px solid {ERROR}; }}
 QFrame#recoveryBar, QFrame#trustBar, QFrame#costBar {{
     background: {NOTICE_BACKGROUND}; border-bottom: 1px solid {NOTICE_BORDER}; }}
 QLabel#formError {{ color: {ERROR}; }}
-QLabel#formTitle {{ font-weight: bold; font-size: 12pt; }}
+QLabel#statusMessage[error="true"] {{ color: {ERROR}; }}
+QLabel#formTitle {{ font-weight: bold; font-size: {title:g}pt; }}
 QLabel#formDoc {{ color: {DOC}; }}
 QToolButton[popupMode="2"] {{ padding-right: 14px; }}
 QToolButton::menu-indicator {{ subcontrol-origin: padding; subcontrol-position: right center;
@@ -231,18 +280,15 @@ class CheckStyle(QProxyStyle):
 
 def apply(app, choice="light"):
     """Give the application the Fusion style (with the check boxes of
-    CheckStyle), a theme's palette and a readable font, and make the
-    theme's colours the active ones; returns the theme applied."""
+    CheckStyle), a theme's palette and the font of the interface text size
+    (apply_text), and make the theme's colours the active ones; returns the
+    theme applied."""
     global name
     name = resolve(choice)
     globals().update(COLORS[name])
     app.setStyle(CheckStyle())           # the application owns it and drops the previous one
     app.setPalette(palette(name))
-    app.setStyleSheet(stylesheet())
-    font = app.font()
-    if 0 < font.pointSizeF() < UI_POINTS:
-        font.setPointSizeF(UI_POINTS)
-        app.setFont(font)
+    apply_text(app)
     app.setProperty("guiqula_theme", name)
     return name
 

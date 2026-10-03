@@ -99,6 +99,13 @@ WINDOW_ACTIONS = {
                "flip, all, selected or reset, and calculation (a result view; the canvas "
                "when left out): move the pyvista view",
     "plot_text": "name: small, normal or large, the size of the text of every drawing",
+    "ui_text": "name: normal or large, the size of the text of the menus, the panels and "
+               "the forms",
+    "reset_layout": "the panels back in their default arrangement",
+    "log": "enabled: show or hide the bottom area (the Log and the Console)",
+    "panel": "name (outlinerDock, propertiesDock, helpDock, slidersDock, jobsDock, logDock, "
+             "consoleDock, or the panel's title), shown=true|false: show and raise a panel, "
+             "or hide it",
 }
 
 

@@ -27,12 +27,20 @@ def images(browser):
     return re.findall(r'<img src="formula:\d+"', browser.document().toHtml())
 
 
+def in_front(window, name):
+    """Shown, and in front of the tabs it shares."""
+    dock = window.docks[name]
+    return not dock.isHidden() and not dock.visibleRegion().isEmpty()
+
+
 def test_f1_shows_the_help_of_the_selected_entry(window, qtbot, shot):
     panel, dock = window.help_panel, window.docks["helpDock"]
     window.select("t1")
     action = window.findChild(type(window.undo_action), "helpAction")
     action.trigger()
     assert dock.isVisible() and panel.title.text() == "Zeeman / exchange field"
+    assert in_front(window, "helpDock") and in_front(window, "propertiesDock")
+    assert window.properties.form.isVisible()                       # the form it explains
     text = panel.browser.toPlainText()
     assert "Adds zeeman to the matrix" in text                     # pyqula's docstring
     assert "Including an external Zeeman field" in text           # pyqula's guide
@@ -61,8 +69,11 @@ def test_the_guides_and_the_question_mark(window, qtbot):
         window.help(guide="nope")
     window.select("c1")
     form = window.properties.form
+    window.docks["jobsDock"].raise_()
     form.help_button.click()
     assert panel.title.text() == "Band structure" and "h.get_bands" in panel.browser.toPlainText()
+    assert in_front(window, "helpDock") and in_front(window, "propertiesDock")
+    assert window.properties.form is form and form.isVisible()
     window.select("s1/regions")
     assert window.help() == "Selections and regions"
     window.select("s1")
