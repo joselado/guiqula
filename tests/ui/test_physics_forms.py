@@ -144,6 +144,24 @@ def test_the_label_menu_attaches_a_slider_and_adds_a_sweep(still):
     assert window.canvas_view == "field" and window.field_preview == ("t2", "c")
 
 
+def test_a_sweep_needs_a_calculation_to_run(still):
+    """A system without a calculation: Sweep this parameter is disabled and
+    says what to do, and nothing is added; the slider is still offered."""
+    window, session = still
+    s2 = session.do("add_system", lattice="square_lattice")
+    term = session.do("add_term", system=s2, kind="onsite", params={"mu": 0.2})
+    window.select(term)
+    form = window.properties.form
+    menu = form.label_menu("mu")
+    sweep = menu.findChild(QAction, "sweepParam_mu")
+    assert not sweep.isEnabled() and "add one first" in sweep.toolTip()
+    assert menu.findChild(QAction, "attachSlider_mu").isEnabled()
+    menu.close()
+    before = len(session.document.calculations)
+    assert form.sweep("mu") is None and "has no calculation" in form.error.text()
+    assert len(session.document.calculations) == before
+
+
 def test_the_mean_field_slides_and_sweeps_within_its_bounds(qapp, no_jobs):
     """The filling, bounded by 0 and 1, takes 0 to 1 (not 0 to twice
     0.5... which is the same) and U takes 0 to twice its value; the sweep of

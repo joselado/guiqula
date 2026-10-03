@@ -83,7 +83,7 @@ def sweep_target(session, system_id, entry_id):
     value: the calculation itself when it is one; else one of the system's
     (a sweep runs no sweep), the first whose result already gives numbers
     to collect (a gap, a Chern number, an energy), or the first; "" when
-    the system has none, which the sweep's form then says."""
+    the system has none, and the label menu then says to add one."""
     import numpy as np
     document = session.document
     own = [c for c in document.calculations if c.system == system_id
@@ -332,9 +332,10 @@ class Form(QWidget):
         else:
             target = sweep_target(self.session, self.sweep_system(), self.item_id)
             action.setToolTip(f"a sweep calculation: {SWEEP_POINTS} values of {label} from "
-                              f"{span[0]:g} to {span[1]:g}, each running "
-                              f"{target or 'a calculation of this system'} and collecting the "
-                              f"numbers it gives (a gap, a Chern number, an energy)")
+                              f"{span[0]:g} to {span[1]:g}, each running {target} and "
+                              f"collecting the numbers it gives (a gap, a Chern number, an "
+                              f"energy)" if target else self._no_calculation())
+            action.setEnabled(bool(target))
             action.triggered.connect(lambda: self.sweep(name, component))
         return action
 
@@ -370,9 +371,12 @@ class Form(QWidget):
             self.error.setText(str(error))
             return None
         system = self.sweep_system()
-        params = {"calculation": sweep_target(self.session, system, self.item_id),
-                  "entry": self.item_id, "param": name, "component": component,
-                  "start": low, "stop": high, "steps": SWEEP_POINTS}
+        target = sweep_target(self.session, system, self.item_id)
+        if not target:
+            self.error.setText(self._no_calculation())
+            return None
+        params = {"calculation": target, "entry": self.item_id, "param": name,
+                  "component": component, "start": low, "stop": high, "steps": SWEEP_POINTS}
         run = self.panel.run
         ok, out = run("add_calculation", system=system, kind="sweep", params=params)
         if not ok:
@@ -384,6 +388,10 @@ class Form(QWidget):
     def sweep_system(self):
         """The system a sweep of this form's parameters runs on."""
         return self.system_id
+
+    def _no_calculation(self):
+        return (f"{self.sweep_system()} has no calculation for a sweep to run at every value: "
+                f"add one first (the + of the Calculations row)")
 
     # ---- locks
     def whole_locks(self):
