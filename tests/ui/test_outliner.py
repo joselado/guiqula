@@ -202,8 +202,12 @@ def test_the_marks_of_a_row(window, qtbot):
     # a calculation: running with its progress, done, stale, failed
     session.calc_jobs["c2"] = SimpleNamespace(status="running", progress=0.7, done=False,
                                               error=None)
+    sent = []
+    outliner.command.connect(lambda name, args: sent.append(name))
     try:
         outliner.update_calculation(session, "c2")
+        qtbot.wait(10)                      # a toggle is sent from a zero-delay timer
+        assert sent == []                   # its tooltip changed, no check box was toggled
         assert outliner.item("c2").text(1) == "70%"
         assert "running, 70%" in outliner.item("c2").toolTip(0)
         session.calc_jobs["c2"] = SimpleNamespace(status="failed", progress=0.7, done=True,

@@ -858,7 +858,12 @@ class Outliner(QTreeWidget):
         self.selected.emit(current.data(0, ID_ROLE) if current is not None else "")
 
     def _item_changed(self, item, column):
-        if self._refreshing or column != 0 or not item.flags() & Qt.ItemFlag.ItemIsUserCheckable:
+        """A row's check box was toggled. Every QTreeWidgetItem is user
+        checkable by default, so a change of column 0 on a row without a box
+        (the tooltip of a calculation, rewritten at each progress report) is
+        not a toggle."""
+        if self._refreshing or column != 0 or not item.flags() & Qt.ItemFlag.ItemIsUserCheckable \
+                or item.data(0, Qt.ItemDataRole.CheckStateRole) is None:
             return
         item_id = item.data(0, ID_ROLE)
         enabled = item.checkState(0) == Qt.CheckState.Checked
