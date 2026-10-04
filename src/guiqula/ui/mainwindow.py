@@ -82,7 +82,7 @@ from guiqula.ui.sliders import SlidersPanel
 from guiqula.ui.jobpanel import JobPanel
 from guiqula.ui.outliner import Outliner, pseudo_ids, system_of
 from guiqula.ui.palette import FAMILIES as PALETTE_FAMILIES, MenuButton, PaletteMenu
-from guiqula.ui.marks import ERROR_STATES, mark
+from guiqula.ui.marks import ERROR_STATES, calculation_state, mark
 from guiqula.ui.plots import ROW_STATES, PlotView, ResultWindow, in_3d as plot_in_3d
 from guiqula.ui.properties import PropertiesPanel
 from guiqula.ui.start import StartPage
@@ -1213,7 +1213,7 @@ class MainWindow(QMainWindow):
                 self._show_state(job.label)          # failed or cancelled: the tab and the row
             self._auto_jobs.discard(job.id)
         elif job.kind == "run":
-            self.outliner.update_calculation(self.session, job.label)   # queued, progress
+            self.outliner.update_calculation(self.session, job.label, job)   # queued, progress
             self._show_state(job.label, job)         # the session may not hold it yet
         self.jobs.update_workers(self.session.jobs.status())
         self._update_run_controls()          # Cancel and the form's Run follow the job (P4)
@@ -2201,14 +2201,14 @@ class MainWindow(QMainWindow):
         result is there (an earlier one may be kept, stale), else stale, done
         or none: a current result has no row, even after a failed run of a
         model that an undo took back."""
+        state, progress = calculation_state(self.session, calc, job)
         if job is None or job.done:
             job = self.session.calc_jobs.get(calc)
-        if job is not None and not job.done:
-            return job.status, job.progress or None, job.text or ""
-        status = self.session.status(calc)
-        if job is not None and job.status == "failed" and status != "done":
-            return "failed", None, job.error or ""
-        return (status if status in ("done", "stale") else "none"), None, ""
+        if state in ("queued", "running"):
+            return state, progress, job.text or ""
+        if state == "failed":
+            return state, None, (job.error or "") if job is not None else ""
+        return (state if state in ("done", "stale") else "none"), None, ""
 
     def _tab_text(self, calc, state=None):
         """A result tab's title: the calculation, its kind and the mark of its
@@ -2218,8 +2218,7 @@ class MainWindow(QMainWindow):
         except Exception:
             return calc
         state, progress, _ = state or self._result_state(calc)
-        sign = "queued" if state == "queued" else \
-            mark(state, progress) if state in ("stale", "running", "failed") else ""
+        sign = mark(state, progress) if state in ROW_STATES else ""
         return f"{calc} {kind}" + (f" {sign}" if sign else "")
 
     def _show_state(self, calc, job=None):

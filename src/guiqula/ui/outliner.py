@@ -732,11 +732,13 @@ class Outliner(QTreeWidget):
         self._paint(item, theme.ERROR)
 
     @staticmethod
-    def _calculation_status(session, calc_id):
+    def _calculation_status(session, calc_id, job=None):
         """(status, colour or None, its state and messages in words) of a
-        calculation's row."""
-        state, progress = marks.calculation_state(session, calc_id)
-        job = session.calc_jobs.get(calc_id)
+        calculation's row; job: the one an event is about, which the session
+        may not hold yet."""
+        state, progress = marks.calculation_state(session, calc_id, job)
+        if job is None or job.done:
+            job = session.calc_jobs.get(calc_id)
         details = []
         if state not in ("queued", "running"):
             try:
@@ -771,12 +773,13 @@ class Outliner(QTreeWidget):
         if color is not None:
             self._paint(item, color, (1,))
 
-    def update_calculation(self, session, calc_id):
-        """Only the status of one calculation (progress arrives often)."""
+    def update_calculation(self, session, calc_id, job=None):
+        """Only the status of one calculation (progress arrives often); job:
+        the one the event is about."""
         item = self._items.get(calc_id)
         if item is None:
             return
-        status, color, details = self._calculation_status(session, calc_id)
+        status, color, details = self._calculation_status(session, calc_id, job)
         lock = self._locks.get(calc_id)
         if lock is not None:
             status = f"{status} · {lock[0]}" if status else lock[0]

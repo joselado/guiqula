@@ -42,12 +42,21 @@ def mark(state, progress=None):
     return MARKS.get(state, "")
 
 
-def calculation_state(session, calculation):
-    """(state, progress) of a calculation in a Session: the state is
+def calculation_state(session, calculation, job=None):
+    """(state, progress) of a calculation in a Session, so that
+    mark(*calculation_state(session, c)) reads the same in the outliner, the
+    result tab and the status row above the plot. The state is
     Session.status's (none, queued, running, done, stale, failed or
-    cancelled), the progress a running job's fraction, else None; so that
-    mark(*calculation_state(session, c)) reads the same in every place."""
+    cancelled) with two exceptions: a job still queued or running gives its
+    own state (job: the one an event is about, which the session may not
+    hold yet), and a last run that failed reads failed while no current
+    result is there, even with an earlier result kept, stale. The progress
+    is a running job's fraction once it has reported one, else None."""
+    if job is None or job.done:
+        job = session.calc_jobs.get(calculation)
+    if job is not None and not job.done:
+        return job.status, (job.progress or None) if job.status == "running" else None
     state = session.status(calculation)
-    job = session.calc_jobs.get(calculation)
-    progress = job.progress if state == "running" and job is not None else None
-    return state, progress
+    if job is not None and job.status == "failed" and state != "done":
+        state = "failed"
+    return state, None
