@@ -505,7 +505,11 @@ def test_check_boxes_show_a_box_in_both_themes(window, qtbot):
 
 
 def test_the_forms_and_the_outliner_read_as_they_should(window):
-    assert [window.outliner.headerItem().text(i) for i in (0, 1)] == ["Entry", "Status"]
+    outliner = window.outliner
+    assert [outliner.headerItem().text(i) for i in (0, 1)] == ["Entry", "Status"]
+    # the Status column as wide as its longest text, the Entry column the rest (P7)
+    assert outliner.columnWidth(1) == outliner.status_width()
+    assert outliner.columnWidth(0) + outliner.columnWidth(1) == outliner.viewport().width()
     window.select("t1")
     form = window.properties.form
     assert form.enabled.text() == "enabled"            # in the title's row, not a labelled row

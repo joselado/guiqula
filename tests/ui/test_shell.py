@@ -12,7 +12,7 @@ from PySide6.QtWidgets import QLabel, QMessageBox, QToolButton
 
 from guiqula.io import autosave, project
 from guiqula.session import Session
-from guiqula.ui import errors
+from guiqula.ui import errors, marks
 from guiqula.ui.app import build_main_window
 from guiqula.ui.properties import EntryForm, RegionForm, SystemForm
 
@@ -58,7 +58,8 @@ def test_outliner_checkbox_toggles_and_undo(window, qtbot):
     assert item.checkState(0).name == "Checked"
     item.setCheckState(0, item.checkState(0).__class__.Unchecked)
     qtbot.waitUntil(lambda: not window.session.document.find("t2")[-1].enabled, timeout=5000)
-    assert window.outliner.item("t2").text(1) == "disabled"
+    assert window.outliner.item("t2").text(1) == marks.DISABLED        # the mark, dimmed
+    assert "disabled" in window.outliner.item("t2").toolTip(1)
     window.undo_action.trigger()
     assert window.session.document.find("t2")[-1].enabled
     assert window.outliner.item("t2").checkState(0).name == "Checked"

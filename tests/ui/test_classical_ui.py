@@ -118,7 +118,8 @@ def test_a_texture_feeds_an_exchange_field(window, qtbot, shot):
     shot(window, "bridge")
     session.do("set_param", entry=texture, name="tries", value=3)   # the texture goes stale
     window.outliner.refresh(session)
-    assert "stale result" in window.outliner.item(term).text(1)
+    item = window.outliner.item(term)
+    assert item.text(1).startswith("⚠") and "stale result" in item.toolTip(1)
 
 
 def test_a_from_result_field_opens_before_its_result_exists(window, qtbot):
