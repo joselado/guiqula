@@ -24,7 +24,8 @@ Methods (parameters as keywords; every reply is JSON):
 - ``result``: a result's summary, its arrays' shapes and ranges, and the
   values of the arrays asked for (at most ``max_values`` numbers each:
   longer arrays are thinned along their first axis);
-- ``plot``: the figure of a result as a PNG (base64);
+- ``plot``: the figure of a result as a PNG (base64), its title marking a
+  result that is not current as the window's tab does, and its state;
 - ``screenshot``: the window or one of its widgets as a PNG (base64);
   ``widgets``: the names a screenshot accepts (both need the window);
 - ``help``: an item's, an entry's or a guide section's help, as Markdown;
@@ -122,6 +123,23 @@ WINDOW_ACTIONS = {
            "through the cost guard; returns its job at once, or null when the cost bar asks "
            "first (the run method skips the cost guard and waits for the result)",
 }
+
+
+def plot_title(session, calculation, result):
+    """(title, state) of a result's figure sent alone: the title the result
+    view draws ("c1 · bands · spinful"), followed by the mark of its state
+    when the window would show it in the tab and the status row above the
+    plot (ui/plots.py's ROW_STATES: stale, queued, running, failed, marked
+    as ui/marks.py marks them everywhere), since a figure sent to a client
+    has neither; the state is marks.calculation_state's, which the window
+    reads too. Imported here, as plot() imports ui/plots.py: the rest of
+    this module stays free of Qt."""
+    from guiqula.ui.marks import calculation_state, mark
+    from guiqula.ui.plots import ROW_STATES
+    state, progress = calculation_state(session, calculation)
+    title = f"{calculation} · {result.kind} · {result.mode}"
+    sign = mark(state, progress) if state in ROW_STATES else ""
+    return title + (f" {sign}" if sign else ""), state
 
 
 def jsonable(value):
@@ -490,20 +508,22 @@ class RemoteAPI:
         return jsonable(out)
 
     def plot(self, calculation, theme="light", width=7.0, height=4.5, dpi=100):
-        """The figure of a result as the result view draws it (PNG, base64)."""
+        """The figure of a result as the result view draws it (PNG, base64),
+        with its title carrying the mark of a state that is not simply
+        current (plot_title), and that state."""
         result = self._result(calculation)
         from matplotlib.backends.backend_agg import FigureCanvasAgg
         from matplotlib.figure import Figure
         from guiqula.ui import plots
         figure = Figure(figsize=(float(width), float(height)), dpi=int(dpi))
         FigureCanvasAgg(figure)
-        title = f"{calculation}: {result.kind}" + \
-            (" (stale)" if self.session.is_stale(calculation) else "")
+        title, state = plot_title(self.session, calculation, result)
         projection = self.window.projection() if self.window is not None else "auto"
         plots.draw(figure, result, title, theme_name=theme, projection=projection)
         buffer = io.BytesIO()
         figure.savefig(buffer, format="png")
-        return {"png": base64.b64encode(buffer.getvalue()).decode(), "calculation": calculation}
+        return {"png": base64.b64encode(buffer.getvalue()).decode(), "calculation": calculation,
+                "state": state}
 
     def script(self, calculation):
         return self.session.act("export_script", calculation=calculation)

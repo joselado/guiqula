@@ -166,7 +166,8 @@ def tools():
                                     "anyOf": [{"type": "array", "items": {"type": "string"}},
                                               {"type": "string", "enum": ["all"]}]},
                       max_values={"type": "integer", "minimum": 1}), ("calculation",)), True),
-        ("plot", "The figure of a result, as the result view draws it.",
+        ("plot", "The figure of a result, as the result view draws it; a stale, running or "
+                 "failed one says so in its title and in the text beside it.",
          _schema(CALC, ("calculation",)), True),
         ("screenshot", "A screenshot of the window, or of one of its widgets by name "
                        "(structureView: the canvas; plot_c1: a result view; outliner; "
@@ -356,7 +357,9 @@ class Bridge:
 
     def tool_plot(self, calculation):
         value = self._call("plot", calculation=calculation)
-        return [_image(value["png"]), _text(f"figure of {calculation}")]
+        state = PLOT_STATES.get(value.get("state"), "")
+        return [_image(value["png"]), _text(f"figure of {calculation}"
+                                            + (f", {state}" if state else ""))]
 
     def tool_screenshot(self, widget=None):
         value = self._call("screenshot", widget=widget)
@@ -444,6 +447,13 @@ class Bridge:
 
 def _json(value):
     return json.dumps(value, indent=1, ensure_ascii=False)
+
+
+# what the text beside a plot's image says of a result that is not simply current
+# (its title carries the mark too, remote/api.py's plot_title)
+PLOT_STATES = {"stale": "stale: the model changed since it was computed",
+               "failed": "its last run failed: the figure is of the result before it",
+               "queued": "a new run of it is queued", "running": "a new run of it is running"}
 
 
 def _text(text):

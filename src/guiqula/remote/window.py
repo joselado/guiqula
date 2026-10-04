@@ -51,9 +51,16 @@ class WindowHooks:
         return widget_tree(self.window)
 
     def state(self):
+        """What the window shows: the selection, the workspace, the canvas
+        view, the tab shown (which names the hidden viewport's while the
+        start page stands in its place, start_page), the result views, the
+        calculation Run, F5 and Cancel act on (selected_calculation), the
+        theme, the selected sites and the 3D drawing."""
         window = self.window
         return {"selected": window.selected, "workspace": window.workspace,
                 "canvas_view": window.canvas_view, "tab": window.current_tab(),
+                "start_page": window.central_stack.currentWidget() is window.start_page,
+                "selected_calculation": window.selected_calculation(),
                 "result_views": list(window.plots), "theme": window.theme_choice,
                 "selected_sites": int(len(window.structure.selected())),
                 "projection": window.structure.projection,

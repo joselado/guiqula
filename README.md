@@ -83,8 +83,15 @@ cached.
   exchange in a field (energy minimization), Ising models and lattice gases (annealing).
 
 **Working with it**
-- Every plot is interactive; sliders change a parameter while cheap results re-run on
-  their own; overlays compare results; the k-path is edited on the Brillouin zone.
+- One window, in the manner of Blender and Inkscape. It opens on a page of lattices and
+  examples drawn as pictures; an op, a term or a calculation is added with the "+" of its
+  section in the outliner, from a menu with a search line; the workspace follows what is
+  selected; Run names the calculation it computes, and a result that no longer matches
+  the model says so above its plot, with Run again beside it.
+- Every plot is interactive; a slider or a sweep is attached from the menu of a
+  parameter's name, and with the automatic re-run on (Follow) cheap results are computed
+  again as a slider moves; overlays compare results; the k-path is edited on the
+  Brillouin zone.
 - Every result exports its figure, its data and the pyqula script that reproduces it. A
   Python console sees the live Hamiltonian.
 - Projects keep their results; autosave, crash recovery, and undo for everything.
@@ -97,9 +104,10 @@ cached.
 
 ## Examples
 
-Each example is a document that comes with guiqula: open it with `guiqula <name>` or from
-File > Presets gallery, press Run (F5) on a calculation, then change the model and run
-again.
+Each example is a document that comes with guiqula: open it with `guiqula <name>`, from the
+start page the program opens on, or from File > Presets gallery; select a calculation in
+the outliner and press Run (F5), which names the calculation it computes, then change the
+model and run again.
 
 ### Dirac points and flat bands: the kagome lattice
 
@@ -245,8 +253,9 @@ window, the MCP server runs a session of its own.
 ## Plugins
 
 A plugin package adds lattices, operations, terms or calculations of your own, which then
-appear in the palettes and forms like the built-in ones: see `plugin_template/`. A single
-Python file in the user's plugins folder works too (Help > Plugins).
+appear in the Add menus, the start page and the forms like the built-in ones: see
+`plugin_template/`. A single Python file in the user's plugins folder works too (Help >
+Plugins).
 
 ## Development
 

@@ -160,6 +160,25 @@ def test_old_revisions_get_no_annotations(version):
     assert all("annotations" not in t for t in listed)
 
 
+def test_the_text_beside_a_plot_names_its_state():
+    """A stale, failed, queued or running result's figure is sent with a line
+    saying so (its title carries the mark too, test_api)."""
+    bridge = Bridge("headless")
+    replies = {}
+
+    def call(method, **params):
+        assert method == "plot"
+        return {"png": "", "calculation": params["calculation"], "state": replies["state"]}
+    bridge._call = call
+    replies["state"] = "stale"
+    assert bridge.tool_plot("c1")[1]["text"] == \
+        "figure of c1, stale: the model changed since it was computed"
+    replies["state"] = "failed"
+    assert "last run failed" in bridge.tool_plot("c1")[1]["text"]
+    replies["state"] = "done"
+    assert bridge.tool_plot("c1")[1]["text"] == "figure of c1"
+
+
 def test_mcp_with_its_own_session():
     mcp = McpProcess("--headless", "--document", "honeycomb_zeeman_rashba")
     try:
@@ -188,6 +207,7 @@ def test_mcp_with_its_own_session():
         image = plot["content"][0]
         assert image["type"] == "image" and image["mimeType"] == "image/png"
         assert base64.b64decode(image["data"])[:4] == b"\x89PNG"
+        assert text_of(plot) == "figure of c1"             # current: nothing more to say
         shot = mcp.tool("screenshot")
         assert shot["isError"] and "window" in text_of(shot)
         assert "add_haldane" in text_of(mcp.tool("help", kind="haldane"))
