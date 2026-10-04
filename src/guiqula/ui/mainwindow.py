@@ -57,7 +57,7 @@ from pathlib import Path
 import numpy as np
 from PySide6.QtCore import QByteArray, QPoint, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QActionGroup, QColor, QDesktopServices
-from PySide6.QtWidgets import (QApplication, QComboBox, QDialog,
+from PySide6.QtWidgets import (QApplication, QDialog,
                                QDockWidget, QFileDialog, QHeaderView, QLabel,
                                QMainWindow, QMenu, QMessageBox, QPlainTextEdit,
                                QStackedWidget, QStyle, QStyleOptionDockWidget, QStylePainter,
@@ -100,7 +100,7 @@ WINDOW_ACTIONS = ("select", "workspace", "tool", "select_sites", "region_from_se
                   "overlay", "slider", "set_slider", "remove_slider", "paint", "theme",
                   "export_bundle", "help", "remote", "pick", "pick_to", "run_at_once",
                   "renderer_3d", "view_3d", "plot_text", "ui_text", "reset_layout", "log",
-                  "panel", "add_menu", "run_stale", "start")
+                  "panel", "add_menu", "run_stale", "start", "run")
 STRUCTURE_TAB = 0
 KSPACE_TAB = 1
 # a new classical system: its lattice, and a supercell the usual orders fit in
@@ -494,15 +494,12 @@ class MainWindow(QMainWindow):
         self.region_selection_action.triggered.connect(
             lambda: self._act("region_from_selection"))
 
+        # Run acts on the calculation selected in the outliner, else the one whose tab is
+        # shown, else the first: no third place to choose one (PLAN.md phase 8, package P4)
         run = self._toolbar("Run", "runToolbar")
-        run.addWidget(QLabel(" Calculation "))
-        self.calc_box = QComboBox()
-        self.calc_box.setObjectName("calculationBox")
-        self.calc_box.setMinimumWidth(240)
-        self._tip(self.calc_box, "the calculation Run and Cancel act on, and whose result "
-                                 "and cost the window shows")
-        self.calc_box.currentIndexChanged.connect(self._calculation_chosen)
-        run.addWidget(self.calc_box)
+        self.viewport.currentChanged.connect(self._calculation_chosen)
+        self.viewport.tabBar().tabBarClicked.connect(
+            lambda index: self._calculation_chosen(index, clicked=True))
         self.run_menu = QMenu(self)
         self.run_menu.setObjectName("runMenu")
         self.run_menu.setToolTipsVisible(True)
@@ -519,8 +516,8 @@ class MainWindow(QMainWindow):
         self.run_button.setMenu(self.run_menu)
         self.run_button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
         self.run_button.clicked.connect(self.run_selected)
-        self._tip(self.run_button, "run the chosen calculation in a worker; the arrow runs "
-                                   "another one, or every stale result", "run")
+        self._tip(self.run_button, "run the selected calculation in a worker; the arrow "
+                                   "runs another one, or every stale result", "run")
         run.addWidget(self.run_button)
         self.cancel_button = QToolButton()
         self.cancel_button.setText("Cancel")
@@ -702,11 +699,8 @@ class MainWindow(QMainWindow):
                 continue
             action = menu.addAction(f"Run {calc.id} · {calc.kind}")
             action.setObjectName(f"runCalc_{calc.id}")
-            try:
-                label = registry.get("calculation", calc.kind).label
-            except registry.RegistryError:
-                label = calc.kind
-            action.setToolTip(f"{label} on {calc.system}, through the cost guard")
+            action.setToolTip(f"{self._calculation_label(calc.id)} on {calc.system}, through "
+                              f"the cost guard")
             action.triggered.connect(lambda checked=False, c=calc.id: self.run_guarded(c))
         if menu.actions():
             menu.addSeparator()
@@ -1012,6 +1006,7 @@ class MainWindow(QMainWindow):
         dispatcher.register_action("add_menu", self.open_add_menu)
         dispatcher.register_action("run_stale", self.run_stale)
         dispatcher.register_action("start", self.start)
+        dispatcher.register_action("run", self.run)
         self.help_panel.session = session
         session.view_state = self.view_state
         self.timer.start(POLL_MS)
@@ -1220,6 +1215,7 @@ class MainWindow(QMainWindow):
             self.outliner.update_calculation(self.session, job.label)   # queued, progress
             self._show_state(job.label, job)         # the session may not hold it yet
         self.jobs.update_workers(self.session.jobs.status())
+        self._update_run_controls()          # Cancel and the form's Run follow the job (P4)
 
     # ---- the Python console (decision 14.1)
     def run_console(self, code):
@@ -1598,8 +1594,7 @@ class MainWindow(QMainWindow):
             self.set_tool(ui["tool"])
         self.set_projection(ui.get("projection") if ui.get("projection") in
                             structure_tools.PROJECTIONS else "auto")    # the result views too
-        if isinstance(ui.get("calculation"), str) and self.calc_box.findData(ui["calculation"]) >= 0:
-            self.select_calculation(ui["calculation"])
+        calculations = self._calculation_ids()    # what Run acts on follows from the rest
         selected = ui.get("selected", "")
         try:
             self.select(selected if isinstance(selected, str) and self._exists(selected) else "")
@@ -1630,21 +1625,21 @@ class MainWindow(QMainWindow):
         overlays = ui.get("overlays") if isinstance(ui.get("overlays"), dict) else {}
         for calc, chosen in overlays.items():
             present = [tuple(o) for o in chosen if isinstance(o, list) and len(o) == 2
-                       and self.calc_box.findData(o[0]) >= 0 and o[1] in ("overlay",
-                                                                           "difference")]
-            if self.calc_box.findData(calc) >= 0 and present:
+                       and o[0] in calculations and o[1] in ("overlay",
+                                                             "difference")]
+            if calc in calculations and present:
                 self.overlays[calc] = present
         for calc in ui.get("results", []) if isinstance(ui.get("results"), list) else []:
-            if isinstance(calc, str) and self.calc_box.findData(calc) >= 0:
+            if isinstance(calc, str) and calc in calculations:
                 self.result_view(calc)
         tab = ui.get("tab")
         if tab == "result" and self.selected_calculation():           # before phase 3
-            tab = self.selected_calculation()
+            tab = ui.get("calculation") or self.selected_calculation()
         if tab == "structure":
             self.viewport.setCurrentIndex(STRUCTURE_TAB)
         elif tab == "kspace":
             self.viewport.setCurrentIndex(KSPACE_TAB)
-        elif isinstance(tab, str) and self.calc_box.findData(tab) >= 0:
+        elif isinstance(tab, str) and tab in calculations:
             self.show_result(tab)
         sites = ui.get("sites")
         if isinstance(sites, dict) and isinstance(sites.get("positions"), list):
@@ -1905,6 +1900,11 @@ class MainWindow(QMainWindow):
         self.viewport.setTabVisible(KSPACE_TAB, shown)
 
     def _update_status(self):
+        """The status bar's summary of the current system, with the estimate
+        of the calculation Run acts on, and the run controls, which name it."""
+        if self.session is None:
+            return
+        self._update_run_controls()
         system = self.current_system()
         if system is None:
             self.status_label.setText("empty document")
@@ -1997,30 +1997,105 @@ class MainWindow(QMainWindow):
 
     # ---- calculations and results
     def _refresh_calculations(self):
-        current = self.selected_calculation()
-        self.calc_box.blockSignals(True)
-        self.calc_box.clear()
-        for calc in self.session.document.calculations:
-            self.calc_box.addItem(f"{calc.id} · {calc.kind} on {calc.system}", calc.id)
-        index = self.calc_box.findData(current)
-        self.calc_box.setCurrentIndex(index if index >= 0 else 0)
-        self.calc_box.blockSignals(False)
+        """The calculations changed (added, removed, renamed): Run names the
+        one it acts on now (the menu of its arrow is filled when shown)."""
+        self._update_run_controls()
+
+    def _calculation_ids(self):
+        return [c.id for c in self.session.document.calculations] \
+            if self.session is not None else []
 
     def selected_calculation(self):
-        return self.calc_box.currentData()
+        """The calculation Run, F5 and Cancel act on: the one selected in
+        the outliner, else the one whose result tab is shown, else the
+        first; None without any (PLAN.md phase 8, package P4)."""
+        ids = self._calculation_ids()
+        if self.selected in ids:
+            return self.selected
+        tab = self.current_tab()
+        if tab in ids:
+            return tab
+        return ids[0] if ids else None
 
     def select_calculation(self, calc_id):
-        index = self.calc_box.findData(calc_id)
-        if index < 0:
+        """Select a calculation in the outliner (tools/drive.py --run, the
+        picks that add one): its form, its tab and Run follow it. A KeyError
+        for an id that is not a calculation."""
+        if calc_id not in self._calculation_ids():
             raise KeyError(calc_id)
-        self.calc_box.setCurrentIndex(index)
+        if self.selected != calc_id:          # select() calls this for a calculation
+            self.select(calc_id)
+        return calc_id
 
-    def _calculation_chosen(self, index):
-        """The calculation box changed: follow it when a result is shown."""
-        calc = self.selected_calculation()
-        if calc is not None and self.current_tab() != "structure":
-            self.show_result(calc)
+    def _calculation_chosen(self, index, clicked=False):
+        """A tab of the viewport was shown (clicked: the user clicked it, even
+        the one already shown): Run, Cancel and the status bar follow it. A
+        result tab shown while another calculation is selected in the
+        outliner selects the tab's (a click, Ctrl+Tab, the wheel on the tab
+        bar, a pick's target, a result put back into its tab), so that the
+        outliner and the tab never name two different calculations; a term
+        or an op stays selected (its form is kept while its results are
+        looked at). The neighbour Qt shows when the tab shown goes away
+        (closed, detached, hidden) was chosen by nobody: it moves nothing."""
+        previous = getattr(self, "_tab_shown", "structure")
+        self._tab_shown = self.current_tab()
+        if self.session is None:
+            return
+        widget = self.viewport.widget(index)
+        calc = widget.calc_id if isinstance(widget, PlotView) else None
+        ids = self._calculation_ids()
+        chosen = clicked or self._tab_present(previous)
+        if chosen and calc in ids and self.selected in ids and self.selected != calc:
+            self.select(calc)
+            return
         self._update_status()
+
+    def _tab_present(self, tab):
+        """Whether a tab ("structure", "kspace" or a calculation id) is still
+        in the viewport's bar and visible."""
+        if tab == "structure":
+            return True
+        widget = self.kspace_view if tab == "kspace" else self.plots.get(tab)
+        index = self.viewport.indexOf(widget) if widget is not None else -1
+        return index >= 0 and self.viewport.isTabVisible(index)
+
+    def _calculation_label(self, calc):
+        """A calculation's kind as the registry says it (its kind when no
+        entry declares it, a plugin left out)."""
+        kind = self.session.document.calculation(calc).kind
+        try:
+            return registry.get("calculation", kind).label
+        except registry.RegistryError:
+            return kind
+
+    def _update_run_controls(self):
+        """Run reads "Run c1 · bands", the calculation it acts on; Cancel is
+        enabled while a job of that calculation is queued or running; the
+        form of a calculation (its estimate and formRun) says the same
+        (PLAN.md phase 8, package P4). Called after every change of the
+        Document, the selection, the tab shown and a job."""
+        calc = self.selected_calculation()
+        job = self.session.calc_jobs.get(calc) if calc is not None else None
+        running = job is not None and not job.done
+        if calc is None:
+            self.run_button.setText("Run")
+            self._tip(self.run_button, "nothing to run yet: add a calculation with the + of "
+                                       "the Calculations row of the outliner", "run")
+        else:
+            obj = self.session.document.calculation(calc)
+            self.run_button.setText(f"Run {calc} · {obj.kind}")
+            self._tip(self.run_button, f"run {calc}, {self._calculation_label(calc).lower()} "
+                                       f"on {obj.system}, in a worker (a slow one asks first); "
+                                       f"the arrow runs another one, or every stale result",
+                      "run")
+        self.run_button.setEnabled(calc is not None)
+        self.cancel_button.setEnabled(running)
+        self._tip(self.cancel_button, f"stop the job of {calc} (its worker is restarted)"
+                  if running else "stop the job of the selected calculation, while it runs",
+                  "cancel")
+        update = getattr(self.properties.form, "update_run", None)
+        if update is not None:
+            update()
 
     # ---- result views: one tab (or window) per calculation
     @property
@@ -2590,12 +2665,26 @@ class MainWindow(QMainWindow):
             self._act("save_result", calculation=calc, path=path)
 
     def run_selected(self):
-        """Run the selected calculation (the Run button, F5)."""
+        """Run the selected calculation (the Run button, F5): the one
+        selected in the outliner, else the one whose tab is shown, else the
+        first (selected_calculation)."""
         calc = self.selected_calculation()
         if calc is None:
-            self.message("no calculation to run", error=True)
+            self.message("no calculation to run: add one with the + of the Calculations row",
+                         error=True)
             return None
         return self.run_guarded(calc)
+
+    def run(self, calculation=None):
+        """The run action: a calculation (the selected one when left out)
+        run as Run and the form's Run run it, through the cost guard;
+        returns its job's summary, or None when the cost bar asks first."""
+        if calculation is None:
+            return self.run_selected()
+        if calculation not in self._calculation_ids():
+            raise ValueError(f"no calculation {calculation!r}; calculations: "
+                             f"{self._calculation_ids()}")
+        return self.run_guarded(calculation)
 
     def run_guarded(self, calc, confirmed=False):
         """Run a calculation; one that would take longer than cost.SLOW
@@ -3372,7 +3461,7 @@ class MainWindow(QMainWindow):
         self.undo_action.setText(f"&Undo {undo}" if undo else "&Undo")
         self.redo_action.setText(f"&Redo {redo}" if redo else "&Redo")
         self.unlock_action.setEnabled(has and bool(self.session.document.locks))
-        self.run_button.setEnabled(has and self.calc_box.count() > 0)
+        self._update_run_controls()
         if has:
             self._update_palettes()
         else:

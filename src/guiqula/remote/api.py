@@ -118,6 +118,9 @@ WINDOW_ACTIONS = {
              "matching every word; returns the object names of the cards in sight "
              "(startLattice_<kind>, startClassical_<kind>, startPreset_<name>, "
              "startRecent_<n>)",
+    "run": "calculation (left out: the selected one, as the Run button and F5): run it "
+           "through the cost guard; returns its job at once, or null when the cost bar asks "
+           "first (the run method skips the cost guard and waits for the result)",
 }
 
 

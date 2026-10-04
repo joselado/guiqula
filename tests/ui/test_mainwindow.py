@@ -17,7 +17,7 @@ def test_main_window_builds_without_workers(qtbot, shot):
     for kind, name in [(QTreeWidget, "outliner"), (QTabWidget, "viewport"),
                        (QWidget, "properties"), (QWidget, "structureView"),
                        (QWidget, "structureCanvas"), (QComboBox, "canvasView"),
-                       (QTabBar, "workspaceTabs"), (QComboBox, "calculationBox"),
+                       (QTabBar, "workspaceTabs"),
                        (QToolButton, "runButton"), (QToolButton, "cancelButton"),
                        (QToolButton, "autoRerunButton"), (QMenu, "runMenu"),
                        (QToolButton, "newSystemButton"), (QToolButton, "addButton"),
@@ -39,6 +39,12 @@ def test_main_window_builds_without_workers(qtbot, shot):
     # without a session the start page stands in the viewport's place (PLAN.md phase 8, P1)
     assert window.central_stack.currentWidget() is window.start_page
     assert window.start_page.isVisible() and not window.viewport.isVisible()
+    # one place to choose a calculation, the outliner or its tab: no Calculation combo, and
+    # nothing to run or cancel without a document (PLAN.md phase 8, package P4)
+    assert window.findChild(QComboBox, "calculationBox") is None
+    assert window.selected_calculation() is None
+    assert window.run_button.text() == "Run" and not window.run_button.isEnabled()
+    assert not window.cancel_button.isEnabled()
     # one tab per result, opened when a calculation is shown; Structure and k-space stay
     assert [window.viewport.tabText(i) for i in range(window.viewport.count())] == \
         ["Structure", "k-space"]

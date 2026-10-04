@@ -34,8 +34,10 @@ calculations or systems, and search: an Add menu opened as its "+" does,
 whose widget is paletteMenu_<family> or regionsMenu), run_stale (every
 stale result), start (search: the start page's filter, whose widget is
 startPage, shown while the document has no system; its cards are
-startLattice_<kind>, startPreset_<name>, ...); the session's undo, redo
-(with "steps") and history; lock and unlock are mutations. The driven window never reads or writes the settings file. Every
+startLattice_<kind>, startPreset_<name>, ...), run (calculation, or the
+selected one: as the Run button does, through the cost guard); the session's
+undo, redo (with "steps") and history; lock and unlock are mutations. The
+driven window never reads or writes the settings file. Every
 calculation's result has its own view, plot_<calculation id>. After each command the driver
 waits for the rebuild of the geometry, so a selection sees the new sites.
 The report printed last is JSON: the document outline, the builds, job and
