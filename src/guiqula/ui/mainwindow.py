@@ -1398,8 +1398,8 @@ class MainWindow(QMainWindow):
         (done ends it). Returns the number of sites painted."""
         if entry is None or param is None:
             if self.field_preview is None:
-                raise ValueError("preview a Field first (its f(r) panel), or name entry and "
-                                 "param")
+                raise ValueError("preview a Field first (Preview on the canvas, in the menu of "
+                                 "its name in the form), or name entry and param")
             entry, param = self.field_preview
         system, spec, params, _ = self._field_entry(entry, param)
         declared = spec.param_map[param]
@@ -1483,7 +1483,8 @@ class MainWindow(QMainWindow):
     def _field_overlay(self, system_id, build):
         """(overlays, caption) of the field view."""
         if self.field_preview is None:
-            return {}, "click into a Field of a term (its f(r) panel) to preview it here"
+            return {}, ("click into a Field of a term, or right-click its name in the form "
+                        "and choose Preview on the canvas, to preview it here")
         entry, name = self.field_preview
         try:
             system, spec, params, region = self._field_entry(entry, name)
