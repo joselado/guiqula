@@ -60,6 +60,7 @@ def test_document_commands_run_and_shot(repo, tmp_path):
     assert report["results"]["c2"]["arrays"]["dos"] == [50]
     assert report["jobs"][0]["status"] == "done" and report["widget"] == "plot_c2"
     assert report["start_page"] is False                   # a document with a system
+    assert report["selected_calculation"] == "c2"          # --run selected it, Run names it
     assert "terms 3" in result.stdout
     assert (tmp_path / "dos.png").read_bytes().startswith(PNG_MAGIC)
 
@@ -137,6 +138,21 @@ def test_kill_and_recover(repo, tmp_path):
     assert report["selected"] == "t2" and report["workspace"] == "hamiltonian"   # the view too
     assert (tmp_path / "recovered.png").read_bytes().startswith(PNG_MAGIC)
     assert list(autosaves.glob("*.json")) == []    # the recovering session closed cleanly
+
+
+def test_the_help_names_every_window_action(repo):
+    """drive.py's help is where a driver learns the window's actions: each
+    one the window registers (remote/api.py lists them all, and
+    tests/ui/test_remote_window.py checks that list against the window's)
+    is named in it, as a word."""
+    import importlib.util
+    import re
+    from guiqula.remote.api import WINDOW_ACTIONS
+    spec = importlib.util.spec_from_file_location("drive", repo / "tools" / "drive.py")
+    drive_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(drive_module)
+    words = set(re.findall(r"[A-Za-z_0-9]+", drive_module.__doc__))
+    assert [name for name in WINDOW_ACTIONS if name not in words] == []
 
 
 def test_the_outline_lists_a_classical_model_and_its_terms(repo):

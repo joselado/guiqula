@@ -54,11 +54,14 @@ floating dock could not be moved on Wayland (decision 88, same place), and the b
 spectral function on pyqula's default k-path name its high-symmetry points on the axis and walk
 pyqula's two-dimensional path with the Γ that it leaves out put first (2026-09-30: decision 89,
 same place, for the maintainer to confirm). Phase 8, the interface (the start page, the
-palettes on the outliner, Run where the result is, the panels, the bars, the forms, the
-outliner, icons, the documentation), is planned and not started (2026-10-03: packages P1
-to P9 and decisions 90 to 106 at the end of PLAN.md's section 7, written so that a
-workflow can build it package by package). Nothing is uploaded or pushed without the
-maintainer.
+Add menus on the outliner, Run where the result is, the panels, the bars, the forms, the
+outliner, icons, the documentation), was planned on 2026-10-03 (packages P1 to P9 and
+decisions 90 to 106 at the end of PLAN.md's section 7; the maintainer answered 93, the
+workspace tabs stay and follow the selection) and built on 2026-10-03 and 2026-10-04 on
+branch phase8 by a workflow, package by package; its report, with decisions 107 to 135 for
+the maintainer to confirm, closes PLAN.md's section 7, whose P8 paragraph (the icons) is
+completed when that package is merged, and section 4 draws the window as built. Nothing
+is uploaded or pushed without the maintainer.
 
 ## Code map
 
@@ -155,12 +158,17 @@ a `Session`.
   `client.py` (`connect()`), `mcp.py` (`guiqula mcp`: the MCP protocol written by hand,
   the handshake of 2024-11-05 to 2025-11-25; attaches to the newest running server or runs
   a Session of its own; fd 1 points at stderr so nothing but protocol reaches stdout),
-  `window.py` (the window's hooks: screenshots, widget names, its state).
+  `window.py` (the window's hooks: screenshots, widget names, its state, which says
+  whether the start page shows, `start_page`, and the calculation Run acts on,
+  `selected_calculation`); `api.py`'s `plot` titles a figure as the window does, with the
+  mark of a state that is not current (`plot_title`), and replies with the state.
 - `io/`: project files (a `.guiqula` zip keeps the results too), presets
   (`src/guiqula/presets/*.json`, loadable by name, described by the Document's `notes`),
   script export (a sweep exports a loop), result files, `autosave.py` (autosave and
   recovery), `crashreport.py`, `bundle.py` (Export figure, data and script: one folder
-  per result, the figure drawn by the window in the light theme), `settings.py` (the user's theme, plot text size, recent files, always
+  per result, the figure drawn by the window in the light theme), `settings.py` (the user's theme, plot text size, interface
+  text size (`ui_text`), the arrangement of the panels and the window's size (`layout`),
+  recent files, always
   trust, remote control, run at once, 3D drawing (pyvista unless matplotlib was chosen or pyvista is missing); the file holds
   only what was set, `settings.chosen`; `$GUIQULA_CONFIG_DIR`; only the interactive program's window,
   `use_settings=True`, reads or writes it, so tests and drivers run with Run at once off unless they turn it on).
@@ -168,48 +176,92 @@ a `Session`.
   current user: freedesktop files on Linux, a Start menu shortcut and registry keys on
   Windows, `~/Applications/guiqula.app` on macOS; from a checkout it carries `src/`);
   `env.launcher()` is the command that starts guiqula again. `resources/`: the icon (SVG;
-  PNG, ICO, ICNS made by `tools/make_icons.py`).
+  PNG, ICO, ICNS made by `tools/make_icons.py`), `thumbnails/` (the pictures of the start
+  page and the gallery, `lattices/`, `classical/`, `presets/`, PNG files made by
+  `tools/make_thumbnails.py` and shipped as package data; `tests/ui/test_start.py` fails
+  for a lattice, a classical system or a preset without one), and `icons/` (phase 8, P8:
+  the Tabler Icons of the controls, SVG with `currentColor`, their MIT licence and a
+  README of the names).
 - `packaging/README.md`: what each distribution is (pip only: sdist and wheel, the conda
   file, `guiqula desktop`), what was verified, the release checklist (built and uploaded by
   hand; there is no CI).
-- `ui/`: `mainwindow.py` (workspaces, palettes with search boxes from the registry, docks,
-  bars, one result view per calculation, the cost guard, auto re-run; the window's own
+- `ui/`: `mainwindow.py` (the window as PLAN.md section 4 draws it since phase 8: the first
+  toolbar row of the workspace tabs, which follow the selection (`workspace_of`), New
+  system and Add (`PaletteMenu`s, which the outliner's "+" open too, `open_add_menu`) and
+  the run controls (`runButton` names `selected_calculation()`, the outliner's
+  calculation, else the tab's, else the first; its `runMenu`, `cancelButton`, Follow);
+  `centralStack`, the start page in the viewport's place while the document has no system
+  (`show_start`); the panels, `Dock`s without a float button, Properties over Help,
+  Sliders and Jobs, the Log and the Console hidden behind the status bar's `logToggle`,
+  View > Panels, Reset layout and Interface text, the arrangement kept in the settings
+  (`layout`, `LAYOUT_VERSION`); one result view per calculation, whose tab, status row and
+  outliner row read one state (`_result_state`, `marks.calculation_state`); the cost
+  guard, auto re-run; the window's own
   dispatcher actions `select`, `workspace`, `tool`, `select_sites`, `region_from_selection`,
   `remove_selected`, `canvas_view`, `preview`, `auto_rerun`, `projection`, `overlay`,
   `slider`, `set_slider`, `remove_slider`, `paint`, `theme`, `export_bundle`, `help`,
-  `remote`, `pick`, `pick_to`, `run_at_once`, `renderer_3d`, `view_3d`, `plot_text`; a new one joins `remote/api.py`'s
-  `WINDOW_ACTIONS`; File > Allow remote control starts the server, polled from the window's
+  `remote`, `pick`, `pick_to`, `run_at_once`, `renderer_3d`, `view_3d`, `plot_text`,
+  `ui_text`, `reset_layout`, `log`, `panel`, `add_menu`, `run_stale`, `start`, `run`; a new
+  one joins `remote/api.py`'s `WINDOW_ACTIONS` and `tools/drive.py`'s help (tests check
+  both); File > Allow remote control starts the server, polled from the window's
   timer; a pick emits ordinary commands, and the pick menu is built by `pick_menu` and
   shown with `popup()`, never `exec()`; `pick` and `pick_to` take a calculation and a
   point, or `system` and `values`: the k-space tab's click, Calculate on selection),
-  `help.py` (the Help dock: F1, a form's ?, the guides; Markdown in a QTextBrowser, whose
+  `start.py` (the start page, `startPage`: the lattices, the examples and the recent files
+  as cards with the pictures of `resources/thumbnails/`, read when a card comes into sight,
+  a filter, Show all; `preset_card` makes the gallery's cards too), `palette.py`
+  (`PaletteMenu`, the Add menu of one family: a search line, the entries by group,
+  `search_entries`, Enter adding the best match; `MenuButton`, which opens its menu with
+  `popup()`), `canvasbar.py` (`CanvasBar`, the bar of a drawing: Fit, Pan, Zoom, the
+  drawing's tools and Save image, in groups that wrap onto further lines, over a hidden
+  `NavigationToolbar2QT` kept as `canvas.toolbar`, `HiddenToolbar`, whose mode
+  `CanvasNavigation` and the tests read), `marks.py` (the marks of a state, one set for the
+  outliner, the result tabs and the status row: `mark`, `calculation_state`; no Qt),
+  `icons.py` (phase 8, P8: `icon(name)`, an SVG of `resources/icons/` tinted with the
+  theme's colour, cached per theme, `on_theme_change`),
+  `help.py` (the Help panel, below Properties: F1, a form's ?, the guides; Markdown in a QTextBrowser, whose
   `loadResource` serves the equations), `shortcuts.py` (the one
   table of keyboard shortcuts: menus, the canvas and outliner keys, the dialog; a test
-  refuses ambiguous keys), `outliner.py`, `gallery.py`
-  (presets), `sliders.py` (the Sliders dock), `kspace.py` (the Brillouin-zone canvas),
-  `properties.py` + `forms.py` (forms from the parameter declarations; the `f(r)` Field
-  editor), `formulas.py` (mathtext images; rich tooltips of the palettes), `structure.py`
-  (canvas, its three views,
+  refuses ambiguous keys), `outliner.py` (the tree: a "+" on each section row,
+  `outlinerAdd_<system>_<section>` and `outlinerAdd_calculations`, `add_requested`; a label
+  that says what the row is, a Status column that holds the state only and is as wide as
+  its longest text, `status_width`; the system and the mean field as detail rows across
+  both columns), `gallery.py`
+  (presets, the start page's cards), `sliders.py` (the Sliders panel; `range_from`, the
+  range a label's menu gives a slider or a sweep), `kspace.py` (the Brillouin-zone canvas,
+  its tab hidden for a system without a periodic direction),
+  `properties.py` + `forms.py` (forms from the parameter declarations, in the words of the
+  physics: the label's menu `paramMenu_<p>` (Lock, Attach a slider, Sweep this parameter,
+  Preview on the canvas), the region link, a calculation's estimate and `formRun`, the
+  system form's spin, Nambu, hopping range and sparse; the Field editor, whose button
+  shows the kind and opens the kind menu `fieldKindMenu_<p>`), `formulas.py` (mathtext
+  images; rich tooltips of the Add menus), `structure.py`
+  (canvas, its three views, its bar `structureBar` with the
   selection tools, and the mplot3d drawing of geometries that are not flat), `pyvista_view.py`
   (the 3D drawing with pyvista, View > 3D drawing, the `renderer_3d` action and setting:
   rendered off-screen and painted as an image, moved as Blender's viewport is, the widget
   applying the mouse and the numpad to a `navigation.Turntable` and setting the camera,
   `SceneCanvas.send`/`drag` without a mouse, `SceneView.set_view` and the `view_3d` action;
   pyvista imported at the first drawing, never at startup; the canvas and each `PlotView`
-  swap their matplotlib canvas for its `SceneView`, and a result on the atoms follows the
+  swap their matplotlib canvas for its `SceneView`, whose Reset view, View and Save image
+  go into the drawing's bar, and a result on the atoms follows the
   canvas's projection), `navigation.py` (the arithmetic of moving, without Qt, VTK or
   matplotlib: `Turntable`, the limits of a flat view, `ZoomHistory`), `canvas_navigation.py`
   (Inkscape's controls on a matplotlib canvas, `CanvasNavigation`, on the structure canvas
   and the results drawn flat on the atoms; `bind_keys` makes the QShortcuts of the table's
   "2D canvas" context; the "3D canvas" keys are the scene's own `keyPressEvent`), `plots.py`
-  (`PlotView` per calculation, `plot_<id>`, and `ResultWindow`, the plain window of a detached one, never a floating dock, which Wayland cannot move; lines, colored_scatter, heatmap,
+  (`PlotView` per calculation, `plot_<id>`, with its bar `plotBar_<id>` and its status row
+  `plotStatus_<id>` (stale with Run again, queued or running with the progress and Cancel,
+  failed; `ROW_STATES`), and `ResultWindow`, the plain window of a detached one, never a floating dock, which Wayland cannot move; lines, colored_scatter, heatmap,
   structure_scalar, structure_vector, scalar; the right click, the Pick, Box and Lasso
   toggles, `pick_requested`; the markers, sliders with `on` drawn by `set_markers` and
   dragged through `marker_moved`), `jobpanel.py`,
-  `console.py` (the console dock), `bars.py` (recovery, error, cost and trust bars),
+  `console.py` (the console panel), `bars.py` (recovery, error, cost and trust bars;
+  `StatusMessage`, the last message in the status bar),
   `errors.py` (exception hook), `theme.py` (light and dark: the colour names are the active
   theme's, rebound by `apply`; every figure is drawn inside `theme.drawing(figure)`, whose
-  rc carries the plot text size, `text_size`, View > Plot text; `CheckStyle`, the proxy
+  rc carries the plot text size, `text_size`, View > Plot text; the interface text,
+  `UI_POINTS` and `set_ui_text`, View > Interface text; `CheckStyle`, the proxy
   style drawing the check boxes; `centre` and `Centring`, the axes box kept in the middle
   of its figure after every draw). The
   window saves its view state as the Document's `ui` block (not a
@@ -289,8 +341,8 @@ built and checked.
   `WINDOW_ACTIONS` (both lists) with a `drive.py` example, so that it can be driven and
   tested without the mouse; a new key goes in `ui/shortcuts.py` and the tooltip names it
   through `shortcuts.text`.
-- The palettes, the forms, the tooltips and the help are generated from the registry
-  declarations: a control that lists physics entries reads `registry.entries(family)`,
+- The Add menus, the start page's lattices, the forms, the tooltips and the help are
+  generated from the registry declarations: a control that lists physics entries reads `registry.entries(family)`,
   never a hand-written list, so a plugin's entries appear in it too.
 - The UI process stays light: pictures are PNG files made by a tool script and shipped,
   never computed in the window; `tests/ui/test_startup.py` keeps the 2 s budget and the
@@ -374,7 +426,8 @@ what `env.launcher()` starts, and its `__main__` guard is what keeps the spawned
 from running `main()` again). Keep this section in sync with what exists.
 
 ```bash
-python -m pytest                       # everything (offscreen Qt, worker processes; 5-6 min)
+python -m pytest                       # everything (offscreen Qt, worker processes; about
+                                       # 30 min on this machine since phase 8)
 python -m pytest -m "not slow"         # skip the wheel build
 python -m pytest tests/core            # pure Python, under a second
 python -m pytest tests/engine -k zeeman  # one area / one test
@@ -390,6 +443,18 @@ python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "select_sites", "box"
     --do '{"do": "remove_selected"}' --widget structureView --shot sculpted.png
 python tools/drive.py --recover --shot recovered.png   # unsaved work of a killed session
                                                    # (--hold SECONDS keeps the window running)
+python tools/drive.py --no-session --widget startPage --shot start.png   # the start page
+python tools/drive.py --no-warm --do '{"do": "start", "search": "kagome"}' --shot kagome.png
+                                                   # its filter, on an empty document
+python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "add_menu", "section": "s1/hamiltonian",
+    "search": "spin"}' --widget paletteMenu_term --shot terms.png   # the "+" of a section
+python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "select", "entry": "c2"}' \
+    --widget runButton --shot run.png              # Run names what it runs ("Run c2 · dos")
+python tools/drive.py honeycomb_zeeman_rashba --run c1 --python "session.do('set_param', \
+    entry='t1', name='m', value=[0, 0, 0.3])" --widget plotStatus_c1 --shot stale.png
+                                                   # the status row of a stale result
+python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "log"}' --do '{"do": "ui_text",
+    "name": "large"}' --shot large_text.png        # the Log toggle, the interface text
 python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "canvas_view", "name": "hamiltonian"}' \
     --widget structureView --shot hview.png        # the Hamiltonian view (13.8)
 python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "preview", "entry": "t1", "param": "m"}' \
@@ -428,13 +493,15 @@ claude mcp add guiqula -e PYTHONPATH=$PWD/src -- python -m guiqula mcp  # regist
 PYTHONPATH=src python -m guiqula desktop [--remove]   # menu entry, icon, file type (this user)
 python -m build && twine check --strict dist/*   # sdist and wheel (packaging/README.md)
 python tools/make_icons.py             # the PNG, ICO and ICNS from resources/guiqula.svg
+python tools/make_thumbnails.py [name ...]   # the start page's pictures (resources/thumbnails),
+                                             # after a new lattice, classical system or preset
 python tools/readme_images.py [name ...]   # the README's screenshots (docs/images), by drive.py
 tools/update_vendor.sh /path/to/pyqula  # refresh vendor/ from upstream pyqula ($PYQULA_SRC)
 ```
 
 `drive.py` prints a JSON report last (document outline, builds, jobs, result summaries,
-canvas view, tab shown, open result views, selection, undo steps, log tail, screenshot
-path); a `--do`
+canvas view, tab shown, open result views, the calculation Run acts on, whether the start
+page shows, selection, undo steps, log tail, screenshot path); a `--do`
 object names a mutation or an action with `"do"`, and the driver waits for the rebuild after
 each one. Autosaves and crash reports go to the user data directory, or to
 `$GUIQULA_DATA_DIR` (the test suite sets it); the settings file to the user config

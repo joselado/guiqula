@@ -26,9 +26,12 @@ drawings (structures, magnetization) to be done optionally by pyvista,
 turned and zoomed with the mouse as in a pyvista window; built on
 2026-09-29 (section 7, after the phase-7 answers; decisions 63 to 70). The
 maintainer then asked for the controls of Blender in the 3D scene and of
-Inkscape on the flat drawings (section 7, after the look; decisions 80 to 87). Phase 8, the interface, was planned on 2026-10-03 and is not
-started: nine packages, P1 to P9, and decisions 90 to 106, at the end of
-section 7, for the maintainer to confirm.
+Inkscape on the flat drawings (section 7, after the look; decisions 80 to 87). Phase 8, the interface, was planned on 2026-10-03 (nine
+packages, P1 to P9, and decisions 90 to 106, at the end of section 7; the
+maintainer answered 93, and the others stand as recommended) and built on
+2026-10-03 and 2026-10-04 on branch phase8; its report closes section 7,
+with decisions 107 to 135 for the maintainer to confirm, and section 4
+draws the window as built.
 
 ## 1. Requirements (as stated by the maintainer)
 
@@ -536,64 +539,99 @@ still shows its values at the sites (phase 2, left for later).
 ## 4. The user interface
 
 One window, one document, three workspaces switched by tabs in the header
-(Blender-style), sharing the same outliner, viewport and properties panel:
+(Blender-style), sharing the same outliner, viewport and properties panel.
+The window as phase 8 built it (2026-10-04), at 1200x800 on
+`honeycomb_zeeman_rashba` with c1 run and then made stale by a change of
+t1 (`python tools/drive.py honeycomb_zeeman_rashba --run c1 --python
+"session.do('set_param', entry='t1', name='m', value=[0, 0, 0.3])"`):
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ File Edit View Run Help      [ Geometry ] [ Hamiltonian ] [ Calculate ]     │
-├───────────────┬───────────────────────────────────────────┬─────────────────┤
-│ OUTLINER      │ VIEWPORT                                   │ PROPERTIES      │
-│ ▾ Geometry    │ ┌ Structure ┐┌ Bands ┐┌ DOS ┐┌ LDOS E=0 ┐   │ Zeeman field    │
-│   ● honeycomb │ │  · · · · · · · · · ·                  │   │ group Magnetism │
-│   ● supercell │ │ · · · ·[· · ·]· · ·   (pan/zoom/pick) │   │ mx  [0.0     ]  │
-│   ○ ribbon    │ │  · · · · · · · · · ·                  │   │ my  [0.0     ]  │
-│   ● remove 3  │ │ · · · · · · · · · · ·                 │   │ mz  [0.3*tanh(x/4)] f(r)│
-│ ▾ Hamiltonian │ │        cell, bonds, sublattice colours │   │                 │
-│   spinful     │ └───────────────────────────────────────┘   │ Σ m(r)·σ  (formula)│
-│   ● zeeman  ▲ │                                             │ breaks TRS ...  │
-│   ● rashba    │                                             │ [Apply] [Reset] │
-│   ✗ haldane   │                                             ├─────────────────┤
-│   ○ python    │                                             │ JOBS            │
-│ ▾ Calculate   │                                             │ bands   ██░ 70% │
-│   bands ✓     │                                             │ chern   queued  │
-│   dos  stale  │                                             │                 │
-├───────────────┴───────────────────────────────────────────┴─────────────────┤
-│ LOG / CONSOLE   >>> h.get_gap()   0.412                                     │
-├─────────────────────────────────────────────────────────────────────────────┤
-│ 2D · 18 atoms · spinful · 36 orbitals · worker idle · autosaved 12:04        │
-└─────────────────────────────────────────────────────────────────────────────┘
++-------------------------------------------------------------------------------------------------+
+| File  Edit  View  Run  Help                                                                     |
+| [Geometry][Hamiltonian][Calculate] | New system v  Add v  Run c1 · bands |v  Cancel  Follow     |
++-------------------------------+----------------------------------------+------------------------+
+| Outliner                   x  | Structure | k-space | c1 bands ↻  x    | Properties           x |
+| Entry                 Status  | Fit  Pan  Zoom  |  Pick                | Band structure       ? |
+| v s1  graphene with exchan…   | Overlay v  Export  Save data  Detach   | c1 · Spectral          |
+|     2D · 8 sites · spinful    |                          Save image    | Bands along a path     |
+|   v Geometry               +  | ↻ stale: the model changed since       | through the zone...    |
+|       Honeycomb lattice       |   this was computed      [Run again]   | system     s1          |
+|     [x] op1 Supercell · n [2… |         c1 · bands · spinful           | k-points   [100    ]   |
+|       Regions              +  |    3 +--------------------+  sz        | operator   [sz    v]   |
+|   v Hamiltonian            +  |      | \/  \/  \/  \/  \/ |  [#]       | k-path     [default]   |
+|     [x] t1 Zeeman /… spinful  |    0 | /\  /\  /\  /\  /\ |  [#]       | result: stale          |
+|     [x] t2 Rashba s… spinful  |      | \/  \/  \/  \/  \/ |  [#]       | estimate: under a      |
+|     [ ] Mean field       off  |   -3 +--------------------+            | second    [Run again]  |
+|   v Calculations           +  |      Γ      K'   M   K       Γ         | ---------------------- |
+|       c1 Band structure    ↻  |                  k                     | Jobs                 x |
+|       c2 Density of states    |                                        | j2  run c1  done  100% |
+|                               | 0.17 s after 3.73 s of building        |                        |
+|                               |                                        | Help | Sliders | Jobs  |
++-------------------------------+----------------------------------------+------------------------+
+| s1 · 2D · 8 sites · spinful · dimension 16 · c1: under a second      j2 c1 done   [Log]         |
++-------------------------------------------------------------------------------------------------+
 ```
+
+When the document has no system the centre shows the start page in the
+viewport's place (`ui/start.py`): a filter box, then the lattices (the
+classical systems last) and the examples as cards with pictures, and the
+recent files, each band folded to its first row (three for the files) until
+Show all, and a line pointing at the guide. From P8 on, the buttons of the bars are icons
+(Tabler Icons, tinted by the theme) whose tooltips name them, the text
+staying beside Run, Add and New system; the drawing above writes their
+names.
 
 - **Outliner** (left): the whole pipeline as one tree, with one top-level
   node per system (the mockup shows a document with a single system; a
   classical system shows a *Model* stack in place of *Hamiltonian*, and the
-  middle workspace tab reads *Model* while it is selected). Icons: ● enabled, ○
-  disabled, ✗ invalid (with message on hover), ✓ result up to date, *stale*
-  result. Drag to reorder, right-click for duplicate/delete/convert-to-python.
-  Selecting an item shows it in Properties and highlights what it affects on
-  the canvas (e.g. the atoms a removal op deletes, the bonds a hopping term
-  touches).
-- **Workspace tabs** change what the toolbar offers and what the viewport
-  emphasises, not the data: Geometry shows lattice picker and sculpting tools
-  (pick atoms, box/lasso, circle/polygon cut, supercell, ribbon, film, stack
-  layers, twist); Hamiltonian shows the term palette grouped by physics
+  middle workspace tab reads *Model* while it is selected). Each section row
+  has a "+" that opens the Add menu of its family for its system. A row's
+  label says what it is and its Status column in what state, with one set
+  of marks shared by the result tabs and the status row of a plot
+  (`ui/marks.py`): ✓ current, ↻ stale, the percentage while running, ✗
+  failed or invalid in the error colour (the message on hover), ○
+  disabled, locked; the system's row reads its summary (2D · 8 sites ·
+  spinful) and the mean field its interactions. Drag to reorder,
+  right-click to enable, run, rename, lock, duplicate, move or delete.
+  Selecting an item shows it in Properties, brings its workspace forward,
+  and marks what it affects on the canvas (e.g. the atoms a removal op
+  deletes, the bonds a hopping term touches).
+- **Workspace tabs** follow the selection (decision 93) and change what Add
+  lists and what the Structure tab draws (the sites and bonds, or the
+  Hamiltonian view), not the data. Entries are added from the "+" of their
+  outliner section or from Add, one menu per family with a search line
+  (Blender's Add menu, Inkscape's search): the lattices with the classical
+  systems last (New system), the geometry ops, the terms grouped by physics
   (hopping, onsite, magnetism, spin-orbit, superconductivity, fields,
-  disorder, interactions) with a search box; Calculate shows the calculation
-  palette (spectral, real space, topology, response, transport, mean-field
-  diagnostics, sweeps) and the results table.
+  disorder) with the mean field last, the calculations by group. **Run**
+  names the calculation it acts on (selected in the outliner, else the tab
+  shown, else the first); its arrow lists the others and every stale
+  result, and Cancel and Follow (the automatic re-run of cheap results) sit
+  beside it.
 - **Viewport** (centre): a Structure tab always present (2D canvas with
   pan/zoom, atom picking, colour by sublattice/onsite/magnetization/LDOS,
-  unit cell and neighbour cells, 3D view for 3D lattices), plus one closable
-  tab per result. A tab can be detached into a window of its own to compare plots
-  side by side.
-- **Properties** (right): the form for the selected entry, generated from its
-  schema. Each numeric field has an `f(r)` toggle to switch to an expression.
-  Live preview: changing a geometry or term parameter updates the structure
-  canvas immediately (cheap) and marks results stale; results re-run on
-  demand (Run button, F5) or on an opt-in "auto re-run" for cheap
-  calculations.
+  unit cell and neighbour cells, 3D view for 3D lattices), a k-space tab
+  for a system with a periodic direction, plus one closable tab per result.
+  A tab can be detached into a window of its own to compare plots side by
+  side. Each drawing has a bar of its own (Fit, Pan, Zoom, the tools of that
+  drawing, Save image) over a hidden matplotlib toolbar, wrapping onto
+  further lines on a narrow window; a result that is not current has a
+  status row above its plot (stale with Run again, running with its
+  progress and Cancel, failed with the message).
+- **Properties** (right): the form for the selected entry, generated from
+  its schema, in the words of the physics. The button of each number shows
+  the kind of its Field (`f(r)` for a plain number) and its menu changes the
+  kind; the menu of a parameter's name locks it, attaches a slider, adds a
+  sweep or previews the Field on the canvas. Live preview: changing a
+  geometry or term parameter updates the structure canvas immediately
+  (cheap) and marks results stale; results re-run on demand (Run button,
+  F5, or the form's own Run) or on an opt-in "auto re-run" for cheap
+  calculations. Below Properties, Help, Sliders and Jobs are tabbed
+  (decision 95).
 - **Log / console** (bottom): job output, errors with tracebacks folded, and a
-  Python console (Blender's console). It is a *remote* REPL (decision 14.1):
+  Python console (Blender's console), hidden until the Log toggle of the
+  status bar shows them (decision 96), the status bar showing the last
+  message meanwhile. The console is a *remote* REPL (decision 14.1):
   the code runs in the worker process, where `g`, `h`, `np` and `pyqula`
   live, and its text output (and arrays on request) streams back, so pyqula
   stays out of the UI process (13.15) and a crash in the console cannot take
@@ -601,9 +639,10 @@ One window, one document, three workspaces switched by tabs in the header
   those go through the same dispatcher, so they are undoable and journaled.
 - **Presets**: quantum-lattice's seventeen modes become a gallery of presets
   (documents) so the old workflows are one click away, while remaining fully
-  editable. Tooltips are the registry's one-line docs and formula images;
-  the longer help is pyqula's own documentation (13.13), in a Help dock
-  tabbed with Properties (F1 shows the help of the selected entry).
+  editable; they are cards on the start page and in File > Presets gallery.
+  Tooltips are the registry's one-line docs and formula images;
+  the longer help is pyqula's own documentation (13.13), in the Help panel
+  below Properties (F1 shows the help of the selected entry).
 
 ## 5. What the user can change (initial registry scope)
 
@@ -2508,7 +2547,8 @@ canvas and the results drawn on the atoms, not on the k-space, bands or
 density of states tabs. 80, 81, 83, 85, 86 and 87 were not asked and stand
 as built.
 
-**Phase 8, the interface (planned 2026-10-03; not started).** The
+**Phase 8, the interface (planned 2026-10-03; built 2026-10-03 and
+2026-10-04 on branch phase8, reported at the end of this section).** The
 maintainer asked for a more user friendly interface, substantial
 redesigns being acceptable, and for a plan rather than the work, to be
 executed later, possibly by a workflow of several agents. This plan was
@@ -2522,7 +2562,8 @@ which it adds, how it is accepted, and what it depends on. The window
 looks as PLAN.md section 4 drew it, and the redesign keeps that frame (one
 window, three workspaces, outliner, viewport, properties) and changes what
 sits in it; section 4's mockup is replaced by the one below when the last
-package lands.
+package lands (it was: section 4 now draws the window as built, and the
+drawing below stays as the plan made it).
 
 *What the screenshots show.* The problems, each with the condition that
 shows it, so that the maintainer can reproduce it and the agent can see
@@ -2632,8 +2673,8 @@ thumbnail script, and the documentation).
 - Nothing is committed or pushed without the maintainer; the packages
   land on branches, merged in the order below.
 
-*The window after the redesign* (1200x800; the mockup section 4 will
-carry):
+*The window after the redesign* (1200x800; the plan's drawing, kept as
+planned, while section 4 carries the window as built):
 
 ```
 +------------------------------------------------------------------------------------------+
@@ -3096,6 +3137,479 @@ option of each is the one the plan recommends and builds unless answered:
 Maintainer's answer (2026-10-03, before building): 93, the workspace tabs
 stay and follow the selection, as recommended; the other decisions stand
 as recommended unless answered.
+
+**Phase 8 as built (2026-10-03 and 2026-10-04, branch phase8).** The phase
+was built as its "Order" says (decision 106): P5 and then P2 in a serial
+lane on branch phase8, each built by one agent and reviewed by another,
+which fixed what it found before the commit; then P1, P3, P4, P6 and P7 in
+parallel, each in a worktree of its own from the head of the lane (cc7629a,
+which also gave `ui/marks.py`, the one set of marks the parallel packages
+were to share), merged in that order with the fast suite after each merge,
+the last merge ending on 48138a7; then P8, the icons, whose foundation was
+built beside the parallel packages and which is merged after them; and P9
+last, the documentation and this record. Each package took its acceptance
+screenshots at 1200x800 and 1600x1000 in both themes with the layout
+settled, and the merge took them all again on the merged tree (104 shots,
+`ui_dump/phase8/merged/`, which is not tracked). Verified offscreen, with
+the shots read; not verified: a real desktop session (the panels dragged on
+Wayland, the menus, cards and bars used with a mouse, a screen taller than
+the offscreen one, whose 800 px made every Add menu scroll at 1600x1000
+too). What each package built and left, then where they met, the start
+budget, what is still open, and the decisions:
+
+*P5, the help beside the form, and the panels.* The right column is
+Properties at 60 percent of its height over Help, Sliders and Jobs, tabbed
+in that order, so F1 or a form's ? raises Help and the form stays in sight:
+at 1200x800 the three components of the Zeeman field show without a scroll,
+the help below them. Help says "Select an entry and press F1 for its help."
+until the first help is asked. A new job raises Jobs, except while Help
+shows an entry's help or Sliders is in front, and never reopens a Jobs
+panel that was closed. The Log and the Console start hidden; the status bar
+shows the last message (`statusMessage`, in the error colour for an error)
+and at its right the Log toggle (`logToggle`). The panels lost their float
+button (decision 97) and are `Dock`, a `QDockWidget` subclass painting its
+title in its own font, since Qt keeps the font a dock was made with and
+View > Interface text would leave the titles behind. View gains Panels
+(`panelsMenu`, one `panel_<dockName>` action per panel, its tooltip saying
+what the panel holds), Reset layout (`resetLayoutAction`) and Interface text
+(`uiTextMenu`). The settings gain `ui_text` and `layout`, written on close and
+read at start by the program's window only, and `LAYOUT_VERSION` (now 3)
+discards an arrangement stored before a change of the bars. Window actions
+`ui_text`, `reset_layout`, `log` and `panel`; the window's `WINDOW_ACTIONS`
+tuple became complete, and a test compares it with `remote/api.py`'s. Left:
+the console's and the code editor's fixed fonts and the formula images do
+not grow with the interface text, and the help browser keeps the horizontal
+scroll bar it had before.
+
+*P2, adding things where they appear, and workspaces that follow.*
+`ui/palette.py` holds `PaletteMenu`, one menu per family: a search line
+(`paletteSearch`, the active item when the menu opens, so one Down reaches
+the first entry shown) over the entries by group, with their formulas in
+the tooltips (the actions keep `addOp_`, `addTerm_`, `addCalc_` and
+`newSystem_<kind>`). Typing filters with `search_entries`, the best match is
+drawn in bold and Enter adds it once; the menu's own items (the mean field,
+the classical systems) match on their text and tooltip, so "hubbard" finds
+Mean field (interactions). Each section row of the outliner has a "+"
+(`outlinerAdd_<system>_geometry`, `_regions`, `_hamiltonian`, `_model`, and
+`outlinerAdd_calculations`), an item widget at the right of the status cell,
+which opens that menu for that system with `popup()`, since `exec()` from a
+click never returns offscreen; the Regions menu (`regionsMenu`) offers
+Region by expression and Region from selection, and the terms of a quantum
+system end with Mean field (interactions) (`addMeanfield`). The first
+toolbar row became the workspace tabs, New system (`newSystemButton`, the
+lattices with the classical systems last), Add (`addButton`, the menu of the
+workspace's family, opened by Ctrl+F) and the run controls, and the second
+rows with their search boxes went. `select()` brings forward the workspace
+of what is selected, so an add switches it too, and a saved workspace is
+applied after the saved selection. Window actions `add_menu` and
+`run_stale`. Left to the packages after it, and done there: Run naming its
+calculation (P4), the selection row (P3), the widths of the outliner (P7).
+
+*P1, the start page.* The empty program opens on `StartPage` (`ui/start.py`,
+`startPage`), which stands with the viewport in a `QStackedWidget`
+(`centralStack`) below the recovery, trust, error and cost bars, so that a
+recovery offered at start shows over it. It has a filter box
+(`startSearch`) and three bands: the lattices in the order of New system's
+menu (`startLattice_<kind>`) and the three classical systems
+(`startClassical_<kind>`); the presets (`startPreset_<name>`), the two
+teaching ones first, marked "teaching, some parameters locked", each with
+the first sentence of its notes; the recent files (`startRecent_<n>`) with
+Open a project... (`startOpenButton`); then a footer whose link opens
+guiqula's guide in the Help panel. Each band shows its first row until its
+Show all (`startMore_<band>`) or a text in the filter (decision 107), and
+has one line for a band without cards and one for a filter that leaves
+none. `_document_changed` shows the page whenever the document has no
+system, so an add, an undo back to nothing, File > New and an open all land
+on the right side, and the window without a session shows it too. The 52
+pictures (1 to 9 kB each, about 200 kB) are PNG files in
+`resources/thumbnails/{lattices,classical,presets}/`, drawn by
+`tools/make_thumbnails.py` in one offscreen window in the light theme with
+the plugins off, and read when a card first comes into sight; the titles
+and first sentences come from the presets' JSON files (4 ms for the
+sixteen), so no index was needed. The gallery (Ctrl+Shift+O) is made of the
+same cards (`galleryPreset_<name>`): a click selects, a double click or Open
+opens. Window action `start` (search), and `drive.py`'s report says whether
+the page shows (`start_page`). Left: three 3D pictures (buckled honeycomb,
+cubic, diamond) show one dot in their cell and texture_exchange's a thin
+ladder, faithful grabs of what the canvas draws; the gallery's headings do
+not follow a change of the interface text while it is open; at large text
+on 1200x800 the footer drops below the fold.
+
+*P3, the canvas and plot bars.* `ui/canvasbar.py` holds `CanvasBar`, built
+over a `NavigationToolbar2QT` cut down to Home, Pan, Zoom and Save, hidden
+and kept as `canvas.toolbar` (`HiddenToolbar`), so that `CanvasNavigation`
+and the tests read matplotlib's own mode; its Fit, Pan and Zoom drive the
+hidden toolbar and show which mode is on (decision 98, 84's Pan and Zoom
+kept as our buttons). The viewport is about 480 px wide at 1200x800 and the
+structure bar's controls take about 1000 px of text, so a bar is a widget
+whose groups, each a small toolbar, flow onto further lines rather than
+behind a chevron (decision 119). The structure bar (`structureBar`) holds
+Fit, Pan and Zoom, the selection tools that were the second toolbar row
+(`geometryToolbar` is gone, its widgets keep their names), Show, 3D, the
+brush in the field view and Save image; a result's bar (`plotBar_<calc>`)
+Fit, Pan, Zoom, Pick, Box, Lasso, Overlay, Export, Save data, Detach and
+Save image; the k-space bar (`kspaceBar`) its path tools; in the pyvista
+scene Reset view, View and Save image take the place of Fit, Pan, Zoom and
+Save image in the same bar. Fit is the drawing's own fit, and Pan or Zoom on
+a plot unchecks its pick tools. Above a plot, the status row
+(`plotStatus_<calc>`) says stale with Run again (`plotRun_<calc>`), queued or
+running with its progress (`plotProgress_<calc>`) and Cancel
+(`plotCancel_<calc>`), or failed with the first line of the message and Run
+again, and is hidden for a current result (decision 120); the tab and a
+detached window's title carry the mark. The k-space tab is hidden while the
+selected system has no periodic direction, and without a system (decision
+99). No window action was needed. Left: in the pyvista scene the structure
+bar takes four lines at 1200 px, since the View button is as wide as its
+longest text; the failure line begins with the engine's exception chain, so
+at 1200 px the useful part is in the tooltip; `theme.centre` may take five
+drawings to settle (three before), which the taller bar needed.
+
+*P4, Run where the result is.* The Calculation combo (`calculationBox`) is
+gone (decision 94). `selected_calculation()` returns the calculation
+selected in the outliner, else the one whose tab is shown, else the first;
+`runButton` reads "Run c1 · bands", its tooltip naming the system and F5,
+and is disabled with a line saying how to add a calculation when there is
+none; its arrow (`runMenu`) lists the other calculations and Run every stale
+result (`runStaleAction`); `cancelButton` is enabled while a job of that
+calculation is queued or running; Follow (`autoRerunButton`) mirrors Run >
+Re-run cheap results automatically. Showing a result's tab while another
+calculation is selected selects the tab's calculation, by a click, Ctrl+Tab,
+the keys or the wheel on the tab bar, a pick that shows another result, or a
+result put back in its tab (decision 122). `select_calculation` keeps its
+name for `drive.py --run` and the remote API, and now selects in the
+outliner. A calculation's form ends with its estimate (`formEstimate`) and a
+button (`formRun`, decision 124). Window action `run`. Left: at 1200x800 the
+run row of the eight-parameter density of states is below the fold of
+Properties and the surface spectral function's is cut at its edge, and the
+form's "result: running" above "running, 0%" says the same thing twice.
+
+*P6, forms that read as physics.* A form's head is the title with its
+enabled switch (`check_enabled`, now in the title's row) and ?, the group and
+doc line, then the formula. A term of a system without regions reads "acts
+everywhere · restrict to a region" (`regionLink`), whose link opens P2's
+Regions menu below it; with a region the form has its region box. The f(r)
+button (`fieldButton_<p>`) is a menu button reading f(r) for a number and the
+kind otherwise; its menu (`fieldKindMenu_<p>`) lists the seven kinds
+(`fieldKind_<p>_<kind>`, replacing the combo `fieldKindBox_<p>`), and choosing
+one makes a Field of that kind and opens the panel of that kind only
+(decisions 102 and 128); the expression's help is one line, the long text
+its tooltip, and the kind buttons of a vector Field take one width so that
+its boxes line up. A parameter's label has a menu (`paramMenu_<p>`, which
+was `lockMenu`): Lock or Unlock, Attach a slider, Sweep this parameter, and
+for a Field of a term or of the mean field Preview on the canvas, with a
+submenu per component for a vector (decisions 101, 125 to 127). The system
+form says spin (a combo, spinless or spinful), superconducting (Nambu),
+hopping range (neighbours) and sparse matrices (large systems), with the
+engine's names and what "(requested)" meant in the tooltips (decision 105),
+and the mean field folds V2, V3, J2 and J3 under further neighbours
+(`furtherNeighbours`, decision 129). The Sliders panel's empty line points at
+the label's menu. After the merge, the field view's caption and the paint
+action's refusal name both ways into a preview (a click into a Field, or
+Preview on the canvas), where they named "its f(r) panel". Left: a sweep
+from the label of a system whose calculations give no number runs the first
+one and fails when it is run; the kind buttons of different scalar rows do
+not line up.
+
+*P7, the outliner.* The Status column holds the state only and is exactly
+as wide as its longest text (`Outliner.status_width`, applied after every
+refresh, progress report and change of font), the Entry column taking the
+rest, so nothing scrolls sideways and every "+" stays in sight; the label
+says what the row is (id, kind, name, an op's parameters printed as %g, a
+region's selection, the region of a term) and is elided from its tail
+(decision 131). The marks are `ui/marks.py`'s, through `mark()`: done ✓,
+stale ↻ (dimmed), running "70%", failed and invalid ✗ in the error colour,
+disabled ○ with the row dimmed, locked, a warning ⚠, and the words queued
+and cancelled; a term reads the Hilbert space after it, a region its sites,
+a scalar result its value after the mark ("✓ 1"), a calculation never run
+nothing (decision 133). The system's row and the mean field while it is on
+are detail rows across both columns (`DETAIL_ROLE`, decision 132): the
+system's name in bold with "2D · 8 sites · spinful", the mean field's "U =
+3, runs with the calculations" and, after a run, "U = 3, E = -1.68089",
+broken by `wrapped()` at the spaces, and inside a word only when the word
+alone is wider than the line, so that nothing is cut, also with large text
+in a squeezed outliner. Every row's tooltip is the same on both columns:
+the full label, then the state in words and the messages. `ui/marks.py`
+gains `WARNING`, `QUEUED`, `CANCELLED`, `DIM_STATES` and `calculation_state`.
+Left: the labels are elided at 1200x800, where the dock is 279 to 320 px,
+with the whole text in the tooltip.
+
+*P8, icons and the look (P8: to be completed by the finish step).* Its
+foundation was built on branch phase8-p8a (aefb014, on cc7629a) beside the
+parallel packages. `ui/icons.py` gives `icon(name, color="TEXT")`, a `QIcon`
+drawn from `resources/icons/<name>.svg` with `currentColor` replaced by the
+theme's colour, cached per theme, name and colour, its disabled state in the
+theme's DISABLED grey and its selected state in the highlighted text's
+colour; `theme.apply()` ends with `icons.theme_changed()`, which clears the
+cache, and `on_theme_change(callback)` tells a widget to set its icons
+again. The 50 files are Tabler Icons 3.35.0 (outline; MIT, the licence in
+`resources/icons/LICENSE` and the names in its README): the 38 the package
+lists, and remove, run_stale, kspace, structure, settings, theme, 3d, show,
+slider, invalid, disabled and running for the marks and the outliner. The
+pixmaps are drawn at six sizes, since a Python `QIconEngine` subclass
+crashes PySide6 6.11 when the icon is detached. `tests/ui/test_icons.py`
+renders every name in both themes, and the wheel test checks the files. P8
+merges this foundation and puts the icons on the controls (the toolbar row,
+the canvas bars, the outliner's rows and marks, the status row of a plot,
+the start page's buttons), the text staying beside Run, Add and New system
+and becoming the tooltip elsewhere; about 35 icons set at build cost about
+70 ms of the start, unless they are set after the window is shown. What P8
+built, left and decided replaces this paragraph when its branch is merged.
+
+*P9, the documentation and the record.* guiqula's guide: "Getting started"
+and "The window" rewritten for the start page, the "+" menus and Add, the
+workspaces that follow, Run and its menu, the outliner, the bars and the
+status row, the panels and the forms, and the sections on selections, terms,
+Fields, the mean field, results, sweeps and sliders, locks and settings
+brought to the window as built; its shortcut table, checked against
+`ui/shortcuts.py`, needed no change, since no key was added. README's words
+on the window, section 4 of this file, CLAUDE.md's status, code map, window
+actions and examples. Of the merge's open list, the items that document the
+interface for its drivers: `tools/drive.py`'s help names every window action
+(nine were missing since before phase 8, and
+`test_the_help_names_every_window_action` reads `remote/api.py`'s list), and
+its report gains `selected_calculation`; the remote `plot` titles a figure as
+the window does, with the mark of its state in place of " (stale)", and
+replies with the state (decision 134); `remote/window.py`'s `state()` gains
+`start_page` and `selected_calculation`. Left: words that live in `ui/`,
+which P8 owned while this was written: the start page's footer still says
+to add terms "in the Hamiltonian workspace", and View > Find in palette and
+the `find` shortcut ("search the palette of the workspace") still name the
+palette, which is the Add menu now (the shortcut's words are copied in the
+guide's table, which its test keeps equal); the README's screenshots are
+redrawn after P8, by the step that merges this branch. The fast suite on
+P9's tree: 1175 passed, 1 skipped, and `test_startup` failed at 2.28 s at a
+load average of about 7.5 (alone, once under the budget, then 2.21 and
+2.36 s); P9 changes nothing the window imports at start.
+
+*Renames.* The objectNames renamed or removed, which the tests,
+`tools/drive.py --widget`, the remote `screenshot` and `widgets` methods and
+CLAUDE.md's examples follow (each package kept every name it could, and the
+new ones are in its paragraph above):
+
+- removed by P2: `newClassicalButton` (its `newClassical_<kind>` actions are
+  the last section of New system's menu), `addOpButton`, `addTermButton` and
+  `addCalculationButton` (Add, and the outliner's "+"), `addRegionButton`
+  (`regionsMenu`), `meanfieldButton` (`addMeanfield`), `opSearch`,
+  `termSearch` and `calculationSearch` (`paletteSearch` in each
+  `paletteMenu_<family>`), `hamiltonianToolbar` and `calculateToolbar`;
+- removed by P3: `geometryToolbar`, whose widgets keep their names on
+  `structureBar`; `structureToolbar` names the hidden matplotlib toolbar now,
+  and the plots' and the k-space tab's are `plotToolbar_<calc>` and
+  `kspaceToolbar`, hidden under `plotBar_<calc>` and `kspaceBar`;
+- removed by P4: `calculationBox`;
+- removed or renamed by P6: `fieldKindBox_<p>` (the actions
+  `fieldKind_<p>_<kind>` of `fieldKindMenu_<p>`), `lockMenu` (`paramMenu_<p>`);
+- the same name on another class: `runButton`, `cancelButton`,
+  `regionFromSelectionButton`, `calculateOnSelectionButton`,
+  `removeSelectedButton`, `kpathRemoveLast` and `kpathDefault`
+  (`QToolButton`), `fieldButton_<p>` (a menu button), `construction_has_spin`
+  (a combo), `presetList` (a scroll area of cards), the seven docks (`Dock`).
+
+Python names went with them (`window.calc_box`, `window.palettes`,
+`term_button`, `show_meanfield` for `add_meanfield`, `PlotView._navigation`,
+`Gallery.list.count()`), and the tests that read them were adapted.
+
+*Where the packages met.* P1 merged without a conflict. P3 met P1 in the
+imports of `ui/mainwindow.py` and in the widget list of
+`test_main_window_builds_without_workers`, which now checks the names of
+both, and a test of P3 asked whether `structureBar` was visible in a window
+without a session, where P1's page hides the viewport (it asks
+`isVisibleTo` now). P4 met P1 in `WINDOW_ACTIONS` (`start` and `run`, in both
+lists and in `drive.py`'s help) and P3 in the imports and at the end of
+`_job_changed`, where P4's update of the run controls follows P3's
+`_show_state`, so that a job event updates the tab, the status row and Run
+together. P6 met P4 at the end of `EntryForm`, keeping P6's
+`restrict_to_region` and P4's `_add_run_row`. P7 met P3 in
+`test_undo_and_stale_marking`, which checks P3's row and P7's marks. Three
+fixes of the integration followed: the field view's captions of P6 above;
+after a run that failed over an earlier result the tab and the row said
+failed while the tree said stale, since the tree read `Session.status` alone,
+so `marks.calculation_state(session, calc, job)` now holds the rule the three
+read (decision 121), and the tree reads running, not 0%, before a job's first
+report; and a progress report rewrote the tooltip of the row's first column,
+which `Outliner._item_changed` took for a toggle of the check box, putting
+"set_enabled: only ops and terms can be disabled" in red in the status bar
+at every report, so a change of the first column is a toggle now only on a
+row that has a check box. The window actions the phase added are `ui_text`,
+`reset_layout`, `log` and `panel` (P5), `add_menu` and `run_stale` (P2),
+`start` (P1) and `run` (P4), in both lists and in `drive.py`'s help. The fast
+suite passed after each merge but for the start budget, and the whole
+suite, with the wheel, on 48138a7: 1173 passed, 1 skipped, in 29 minutes.
+
+*The start budget.* `tests/ui/test_startup.py` keeps its 2.0 s, and it is the
+one test that failed in some of the suites of the phase: on this machine,
+under the load of several suites at once, the base of the parallel packages
+was over the budget too. Run alternately on three trees, ten rounds at a
+load average of about 8, the probe took a median of 2.09 s on cc7629a, 2.13
+s with P1 and 2.17 s on the merged tree, with 191 modules in each and
+nothing heavy loaded; at a load of 3.5 the medians were 1.96 s and 2.06 s.
+Phase 8 thus adds about 80 ms to the start, the start page's cards about 45
+to 60 ms of it, after P2 took about 0.76 s out of the start by filling the
+Add menus at their first showing (decision 110); P8's icons add about 70 ms
+if they are set before the window is shown. The budget was not raised
+(decision 135).
+
+*Still open* (by the file that would change; none blocks a use of the
+program):
+
+- `ui/properties.py`: the form's "result:" line reads `Session.status`, so
+  after a failed run over an earlier result it says stale where the row,
+  the tab and the tree say failed, and before a job's first report the run
+  row says "running, 0%" where they say running; the run row is below the
+  fold of the longest forms at 1200x800;
+- `ui/pyvista_view.py` and `ui/plots.py`: the scene's bar on four lines at
+  1200 px; the failure line beginning with the exception chain;
+- `ui/start.py`, `ui/gallery.py`: the footer's "in the Hamiltonian
+  workspace"; the gallery's headings and the interface text; closed
+  galleries kept alive with their pictures; Ctrl+F opening New system while
+  the page shows (decision 113); the three weak 3D pictures;
+- `ui/mainwindow.py`, `ui/shortcuts.py`: View > Find in palette and the words
+  of the `find` shortcut;
+- `ui/console.py`, `ui/forms.py`, `ui/formulas.py`, `ui/help.py`: the fixed
+  fonts and the formula images under large interface text; the help
+  browser's horizontal scroll bar;
+- `tests/ui/test_startup.py`: the budget under load (decision 135).
+
+Decisions taken while building, for the maintainer to confirm; the first
+option of each is the one built:
+
+107. the start page's bands fold to their first row (the recent files to
+     three) until their Show all or a text in the filter, so that the three
+     bands and the footer are in sight at 1200x800 (where the folded
+     lattices are Dimer and Bipartite chain, a 2D lattice one click away),
+     and the filter and Show all survive File > New; or the full grid of
+     every card (about 2900 px of lattices at two cards a row, the examples
+     below the fold), cleared at each return;
+108. one set of pictures, drawn in the light theme and kept on its light
+     background in the dark one, the classical systems with pictures of
+     their own; or a second set drawn in the dark theme;
+109. a selection that changes the workspace changes the canvas view as the
+     tab would, so a Field preview ends when another workspace comes forward
+     (it stays while moving between terms); or the field view kept across
+     workspaces;
+110. the Add menus are filled at their first showing, which took about 0.76
+     s out of the start and costs it at the first opening of the terms'
+     menu; or filled at start;
+111. a menu taller than the screen scrolls (on an 800 px screen Mean field
+     (interactions) sits behind the scroll arrow, and the search reaches
+     it), and a menu that shrinks while typing stays where it opened, so the
+     search line does not move under the cursor; or columns, a more compact
+     menu, or the menu moved back below its button;
+112. the "+" of a locked section stays enabled, and the lock's refusal is the
+     answer; or disabled, with a tooltip naming the lock;
+113. the "+" of a system's section adds to that system, while Add and the
+     "+" of Calculations add to the system of the selected entry; without a
+     system Add and that "+" are disabled and Ctrl+F opens New system, also
+     over the start page, whose filter has the focus when the page first
+     shows; or Ctrl+F focusing the start page's filter while it shows;
+114. Run every stale result runs the cheap ones at once and asks about the
+     slow ones together, in one question of the cost bar; or one question
+     each;
+115. a new job brings Jobs to the front unless Help is showing an entry's
+     help or Sliders is in front, which keeps a slider in sight while its
+     drag re-runs results but also keeps Jobs behind for an explicit Run
+     after a slider was added, and a closed Jobs panel is never reopened; or
+     the Sliders exception narrowed to a drag in progress;
+116. Help is the front tab below Properties and says "Select an entry and
+     press F1 for its help." until the first help is asked, following the
+     selection only after that (the first rendering of an entry costs about
+     0.3 s); or the help rendered at every selection from the start;
+117. the arrangement of the panels and the window's size are a setting
+     (`saveState` and `saveGeometry`), written on close and read at start by
+     the program's window only, an arrangement of another `LAYOUT_VERSION`
+     giving the default, and Reset layout keeps the window's size; or Reset
+     layout restoring the size too;
+118. large interface text is two points above normal, normal being the
+     desktop's size with a floor of 10 points, and the panels' titles are
+     painted in the panels' font so that they follow it; or fixed sizes (10
+     and 12 points) whatever the desktop;
+119. the canvas bars wrap: a bar is a row of small toolbars flowing onto
+     further lines (four on the structure at 1200 px with the brush, two on
+     a plot), never a chevron, with a separator only between sections on a
+     line; or one row with a chevron, or shorter labels (which P8's icons
+     give anyway);
+120. a result that is not simply current has a status row above its plot
+     (stale with Run again; queued or running with its progress and Cancel;
+     failed with the first line of the message and Run again), hidden when
+     it is current, a result never computed keeping its caption; the tab
+     carries the mark (the word queued while queued, nothing when done), and
+     a result going stale is not redrawn, so it keeps its zoom and its title
+     no longer says STALE; or the Jobs panel alone (decision 100's
+     alternative), or the stale title kept;
+121. a calculation has one state for the tree, the tab and the status row
+     (`marks.calculation_state`, from the merge): a run that failed over an
+     earlier result reads failed while no current result is there, the
+     earlier result staying drawn under the row, and an undo that brings a
+     current result back clears it; or the tree reading stale there, as
+     `Session.status` says;
+122. nothing remembers a chosen calculation: the outliner and the tab shown
+     decide, showing a result's tab while another calculation is selected
+     selects the tab's (but not the neighbour Qt shows when a tab goes
+     away), and a selected term or op keeps its form while Run follows the
+     tab; or a remembered choice of calculation;
+123. the toolbar's Run stays enabled while its calculation runs, a second
+     press queuing a second run, and Cancel beside it is enabled only while
+     a job of that calculation is queued or running; or Run disabled while
+     its calculation runs;
+124. a calculation's form ends with its estimate and a button reading Run,
+     Run again only for a stale result, or Cancel while queued or running,
+     through the window action `run` and so the cost guard, the estimate
+     saying why there is none (invalid, until the system is built, a kind
+     with no declared cost); or the toolbar's Run alone;
+125. a sweep from a parameter's label runs the calculation itself for a
+     calculation's parameter, else the first calculation of the system known
+     to give numbers (its result has them, or its declaration draws a
+     scalar: the gap, the Chern number), else the first one, with a tooltip
+     saying that it has given no number so far, and is refused without a
+     calculation; or the sweep added with an empty calculation for its form
+     to refuse;
+126. a slider or a sweep from a label spans 0 to twice the value, ordered,
+     or -1 to 1 for zero, clipped to the parameter's declared bounds, and a
+     sweep takes 11 values; or the range unclipped, for the sweep's check
+     to refuse;
+127. Attach a slider is refused on a locked parameter while Sweep this
+     parameter is offered (a sweep changes copies of the document only), the
+     numbers of a sweep itself get the lock alone, and attaching twice adds
+     a second slider; or one slider per parameter, and both refused under a
+     lock;
+128. the kind menu: choosing expression on a number stores nothing until an
+     expression is typed, a change of kind keeps what it can (a number
+     becomes the default of piecewise, a profile its formula), and the panel
+     of a structured kind is open while the Field is of that kind, with no
+     toggle to hide it; or the checkable f(r) button that hid the panel;
+129. further neighbours is a check box over a framed group, ticked whenever
+     V2, V3, J2 or J3 is not zero, unticking it setting the four to zero in
+     one undo step, and nothing else folds, since the registry declares no
+     rarity; or a declaration of the rare parameters in the registry,
+     folded on every form;
+130. the spin combo shows what is asked, so it reads spinless while a Zeeman
+     field makes the Hamiltonian spinful (the line under the form says so);
+     or the combo showing what was built, or a hint beside it;
+131. the outliner's Status column holds the state only, as wide as its
+     longest text, and the label says what the row is (an op's parameters, a
+     region's selection, a term's region), elided at 1200x800 with the whole
+     text in the tooltip; or the mixed column of before, scrolled sideways;
+132. the system and the mean field are detail rows across both columns, the
+     status at the right of the label when it fits and wrapped under it
+     otherwise (two lines for most systems at 1200x800), the mean field
+     reading its interactions and, after a run, its total energy; or one
+     line each and a wider Status column;
+133. a calculation never run reads nothing, a queued or cancelled one its
+     word, a scalar result its value after the mark, a calculation names its
+     system only in a document with several, and a system's kind is the last
+     word of its summary and its tooltip, with no icon of its own; or a mark
+     for never run, and an icon of the kind (P8);
+134. the remote `plot` titles a figure as the window does ("c1 · bands ·
+     spinful"), followed by the mark the window shows in the tab when the
+     state is stale, queued, running or failed, and replies with the state,
+     which the MCP tool's text spells out ("stale: the model changed since
+     it was computed"); or the window's title alone, with the state in the
+     reply;
+135. the start budget stays at 2.0 s, which `test_startup` misses under load
+     (the merged tree starts in a median 2.17 s at a load average of 8, 80
+     ms over the plan's base, itself over the budget then); or the budget
+     raised, or the start page building only the cards in sight (about 20
+     ms).
 
 ### Where the section 13 items land
 

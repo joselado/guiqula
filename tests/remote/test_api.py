@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from guiqula.core.results import Result
-from guiqula.remote.api import METHODS, RemoteAPI, jsonable, thinned
+from guiqula.remote.api import METHODS, RemoteAPI, jsonable, plot_title, thinned
 from guiqula.remote.server import INVALID_PARAMS, NO_METHOD, Pending, RemoteError, resolve
 from guiqula.commands import CommandError
 from guiqula.session import Session
@@ -120,6 +120,28 @@ def test_run_result_plot_script(api):
         call(api, "result", calculation="c2")        # not run
     with pytest.raises(RemoteError):
         call(api, "result", calculation="c1", arrays=["nonsense"])
+
+
+def test_a_plot_says_whether_its_result_is_current(api):
+    """The figure sent to a client has no tab and no status row above it, so
+    its title carries the mark the window shows there (ui/marks.py), and the
+    reply the state; a current result reads as the window's title alone."""
+    session = api.session
+    if session.status("c1") != "done":
+        assert call(api, "run", calculation="c1", timeout=600)["status"] == "done"
+    result = session.result("c1")
+    assert plot_title(session, "c1", result) == ("c1 · bands · spinful", "done")
+    assert call(api, "plot", calculation="c1")["state"] == "done"
+    call(api, "do", command="set_param", args={"entry": "t1", "name": "m",
+                                               "value": [0, 0, 0.35]})
+    assert session.is_stale("c1")
+    assert plot_title(session, "c1", result) == ("c1 · bands · spinful ↻", "stale")
+    reply = call(api, "plot", calculation="c1")
+    assert reply["state"] == "stale"
+    assert base64.b64decode(reply["png"])[:8] == b"\x89PNG\r\n\x1a\n"
+    call(api, "do", command="undo")                 # the earlier result is current again
+    assert session.status("c1") == "done"
+    assert call(api, "plot", calculation="c1")["state"] == "done"
 
 
 def test_run_without_waiting_then_wait(api):

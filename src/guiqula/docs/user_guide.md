@@ -9,88 +9,233 @@ of every entry quotes (F1).
 ## Getting started
 
 Install it with `pip install guiqula` (or `pipx install guiqula`) and start the program
-with `guiqula` (from a source checkout,
-`PYTHONPATH=src python -m guiqula`), optionally followed by a project file or the name of a
-preset. `guiqula desktop` adds it to the desktop's application menu, with its icon, and
-lets `.guiqula` files open with it (`guiqula desktop --remove` undoes it). File > Presets
-gallery opens a ready-made document: pick one, press Open, then Run (F5) to compute its
-selected calculation. Everything in a preset can be changed.
+with `guiqula` (from a source checkout, `PYTHONPATH=src python -m guiqula`), optionally
+followed by a project file or the name of a preset. `guiqula desktop` adds it to the
+desktop's application menu, with its icon, and lets `.guiqula` files open with it
+(`guiqula desktop --remove` undoes it).
+
+The program opens on the start page, which stands in the place of the drawings as long as
+the document has no system. It has three bands: the lattices (by dimension, the classical
+systems last) and the examples (the shipped presets, the two teaching ones first) as cards
+with pictures, and the recent files, with Open a project... for the others; a filter box
+at the top narrows the three at once to what matches every word typed. The lattices and
+the examples show their first row, and the recent files their first three, until the
+band's Show all is pressed or the filter holds text. A lattice card makes a new system on
+that lattice, a classical card makes classical spins, a lattice gas or an Ising model, and
+an example card opens that document; File > New brings the page back, and File > Presets
+gallery shows the same examples in a dialog, with the whole description of the one
+selected.
 
 A document holds one or more systems (a geometry and its Hamiltonian, or a classical
-model) and the calculations on them. Build one from scratch with New system on the
-Geometry toolbar: choose a lattice, add geometry ops (a supercell, a ribbon, an island),
-switch to the Hamiltonian workspace to add terms, and to the Calculate workspace to add a
-calculation and run it.
+model) and the calculations on them. The simplest way in is an example: open one, select
+a calculation in the outliner and press Run (F5), then change anything in it and run
+again. From scratch, the way we do this is by choosing a lattice on the start page, then
+adding geometry ops (a supercell, a ribbon, an island) with the "+" of the system's
+Geometry row in the outliner, terms with the "+" of its Hamiltonian row, a calculation
+with the "+" of the Calculations row, and pressing Run, which names the calculation it
+computes. F1 explains whatever is selected.
 
 ## The window
 
-- The workspace tabs (Geometry, Hamiltonian, Calculate) change the toolbar and the canvas
-  view, not the document.
-- The outliner (left) is the whole document as a tree: for each system its lattice and
-  geometry ops, its regions, its terms with the Hilbert space after each (spinless,
-  spinful, Nambu) and its mean field; then the calculations with their status (none,
-  queued, running, done, stale, failed). A check box enables or disables an entry, a
-  drag reorders it, the context menu duplicates, deletes, locks or runs it.
-- The viewport (centre) has the Structure tab (the geometry, or the Hamiltonian, or a
-  Field, drawn on the atoms), the k-space tab (the Brillouin zone and the k-path), and a
-  tab per calculation's result.
-- Properties (right) is the form of the selected entry; Help, next to it, its help.
-- Jobs and Sliders (right), Log and Console (bottom).
-- The status bar shows the selected system (dimension, sites, Hilbert space) and the
-  estimated duration of the selected calculation.
+The window is one document seen through four places: the outliner on the left, the
+drawings in the centre, the form of the selected entry on the right with its help below
+it, and the status bar at the bottom. Above them, the first toolbar row holds the
+workspace tabs (Geometry, Hamiltonian, Calculate; the middle one reads Model for a
+classical system), New system, Add and the run controls. The workspaces follow the
+selection, meaning that selecting a system, its lattice, an op or a region shows Geometry,
+a term, the mean field or a model shows Hamiltonian, and a calculation shows Calculate,
+and since adding an entry selects it, an add shows its workspace too. A workspace changes
+what Add lists and how the Structure tab draws the system (the sites and bonds, or the
+Hamiltonian), never the document; Ctrl+1 to Ctrl+3 choose one by hand.
 
 Every change goes through a command, so it can be undone (Edit > Undo), it is saved with
 the project, and it can be driven from the console or a script.
 
+### Adding entries
+
+An entry is added from the place where it will appear. Each section row of the outliner
+(a system's Geometry, Regions, Hamiltonian or Model, and Calculations) has a "+" at its
+right, which opens the menu of that family for that system: a search line at the top,
+then the entries by group, each with its formula and its one-line description in the
+tooltip. Typing narrows the list to the entries that match and draws the best match in
+bold, Enter adds it, and the arrow keys reach the others. The menu of the Hamiltonian
+ends with Mean field (interactions), which turns the system's mean-field block on and
+selects it, and the menu of the Regions row offers a region by expression and a region
+from the sites selected on the canvas. Add, on the toolbar, is the same menu for the
+workspace shown and the current system (Ctrl+F opens it with the search line ready, or
+New system while the document has no system), and New system lists the lattices by
+dimension with the classical systems in its last section. With several systems, the "+"
+of a system's section adds to that system, while Add and the "+" of Calculations add to
+the system of the selected entry (the first one when nothing is selected).
+
+### Running a calculation
+
+Run reads "Run c1 · bands": it acts on the calculation selected in the outliner, else the
+one whose result tab is shown, else the first. Showing the tab of a result while another
+calculation is selected selects the result's calculation, so the outliner, the tab and Run
+never name two different ones, while a term or an op that is selected keeps its form on
+screen as results are looked at, and Run then follows the tab. The arrow beside Run lists
+the other calculations and Run every stale result; Cancel stops the job of the calculation
+Run names, and Follow is Run > Re-run cheap results automatically (see Calculations and
+results). A calculation's form ends with its estimated duration and a button that reads
+Run, Run again when the result is stale, or Cancel while its job is queued or running, so
+a calculation can be computed from its own form too.
+
+### The outliner
+
+The outliner is the whole document as a tree, and each row says what it is and in what
+state. A system's row gives its name in bold and a summary of what was built ("2D · 8
+sites · spinful", or "0D · 40 sites · classical spins" for a classical one). The label of
+an entry carries its id, its kind and its name, then an op's parameters, a region's
+selection or the region a term acts in, and the Status column carries its state only:
+
+- the Hilbert space after a term (spinless, spinful, Nambu), which is how one sees where
+  a Zeeman field made the Hamiltonian spinful;
+- the number of sites of a region;
+- the mean field's interactions ("U = 3, runs with the calculations"; its total energy
+  after a run, "U = 3, E = -1.68"; "off" when it is off);
+- a calculation's result: a check mark when it is current, a circular arrow when it is
+  stale, the percentage while its job runs, a cross in the error colour when its last run
+  failed, nothing when it was never run, and the value of a single number after its mark
+  (a gap, a Chern number);
+- a cross in the error colour for an entry that pyqula or the planner refuses, an empty
+  circle for a disabled one (the row dimmed), a warning sign for one that is valid but
+  worth a look (it reads a stale result), and locked on a locked entry (m locked when
+  one of its parameters is).
+
+The full label and the messages (why an entry is refused, why a run failed, how to lift a
+lock) are in the row's tooltip. A check box enables or disables an op or a term, a drag
+reorders the entries, and the context menu enables, runs, renames, locks, duplicates,
+moves or deletes.
+
+### The drawings
+
+The centre holds the Structure tab (the geometry, the Hamiltonian or a Field, drawn on the
+atoms), the k-space tab (the Brillouin zone and the k-path, there only while the selected
+system has a periodic direction) and one tab per calculation's result, which can be
+closed (Ctrl+W) or detached into a window of its own. Each drawing has a bar above it
+with what that drawing needs, and on a narrow window the bar wraps onto further lines
+rather than hiding a control:
+
+- every drawing: Fit, Pan and Zoom first and Save image last;
+- the Structure tab: Pick, Box, Lasso and the Select menu, Region from selection,
+  Calculate on selection and Remove selected (enabled while sites are selected), Show (the
+  sites and bonds, the Hamiltonian, a Field) and the 3D box, and the brush while a Field is
+  shown;
+- a result: Pick, Box and Lasso (see Picking from a plot), Overlay, Export, Save data and
+  Detach;
+- the k-space tab: the calculation whose path is drawn, Add points, Remove last and
+  Default path;
+- the 3D scene drawn with pyvista: Reset view and the View menu in place of Fit, Pan and
+  Zoom.
+
+The buttons of the bars are icons, whose tooltips name them (and their keys, where they
+have one). A result
+that is not simply current says so in a row above its plot: stale, with Run again; queued
+or running, with its progress and Cancel; failed, with the first line of the error (the
+whole message in the tooltip) and Run again, the earlier result staying drawn under it
+until a run succeeds. The result's tab and its row in the outliner carry the same mark,
+since the three read one state, and a result never computed says what comes next in its
+caption instead.
+
+### The panels
+
+The right column is Properties, the form of the selected entry, over Help, Sliders and
+Jobs, tabbed, so that the help of an entry (F1, or the ? of its form) sits below the form
+it explains rather than in its place. A new job brings Jobs to the front, unless Help is
+showing an entry's help or Sliders is in front, so a slider being dragged stays in sight.
+The Log and the Console share the bottom area, hidden until the Log button at the right
+of the status bar shows it. The status bar shows the selected system (its dimension,
+sites and Hilbert space), the estimated duration of the calculation Run names, and the
+last message, in the error colour for an error.
+
+The panels can be moved and closed but do not float, since a floating panel cannot be
+moved on a Wayland desktop. View > Panels shows or hides each one, View > Reset layout puts
+them back where they started, and the program keeps their arrangement and the window's
+size for the next start. View > Interface text makes the text of the menus, the panels
+and the forms larger, for a projector or a small screen, as View > Plot text does for the
+drawings.
+
+### The forms
+
+A form speaks the physics, and the engine's names (the pyqula call, has_spin, the
+parameter's name) are in the tooltips and the help. Its head is the entry's title with
+its enabled switch and the ? of its help, then the group and a line of what the entry
+does, and its formula. A term of a system without regions reads "acts everywhere ·
+restrict to a region", whose link opens the menu of the system's Regions row, and once the
+system has a region the form has a region box in its place. Every number of a term is a
+Field, and the button beside it says which kind it is: f(r) for a plain number, else
+expression, piecewise, profile, interpolated, painted or from result; its menu chooses
+the kind (see Fields: parameters that depend on the position).
+
+A right click on a parameter's name opens its menu: Lock this parameter (or Unlock), where
+a lock can name it; Attach a slider, over a range from zero to twice the value (from -1
+to 1 for a zero, within the bounds the parameter takes); Sweep this parameter, which adds
+a sweep of eleven values over the same range and selects it (see Sweeps and sliders);
+and for a Field, Preview on the canvas. The system's form says spin (spinless or
+spinful), superconducting (Nambu), hopping range (neighbours) and sparse matrices (large
+systems). The spin and Nambu choices ask for what a term otherwise decides by itself (a
+Zeeman field makes the Hamiltonian spinful, a pairing makes it Nambu), so spinless there
+does not stop a Zeeman field from making it spinful, as the line under the form says.
+The mean-field form folds the interactions beyond first neighbours under further
+neighbours, ticked whenever one of them is not zero.
+
 ## Systems and geometry
 
-New system makes a quantum system on a lattice; New classical system makes classical
-spins, a lattice gas or an Ising model. A document may hold several systems (a texture
-computed on one can drive another, see Fields). The geometry is the lattice followed by
-its ops, applied in order: changing an op, or the lattice, rebuilds everything after it
-and keeps the terms. Ops that act on positions (keep or remove sites where a condition
-holds, remove atoms) store positions or expressions, not indices, so they survive a
-change of the supercell. A geometry that is not flat is drawn in 3D; the 3D box on the
-canvas toolbar switches to the xy projection, where the selection tools work (see Drawing
-in 3D).
+New system (on the toolbar, or a card of the start page) makes a quantum system on a
+lattice, and from its last section classical spins, a lattice gas or an Ising model. A
+document may hold several systems (a texture computed on one can drive another, see
+Fields). The geometry is the lattice followed by its ops, applied in order: changing an
+op, or the lattice, rebuilds everything after it and keeps the terms. Ops that act on
+positions (keep or remove sites where a condition holds, remove atoms) store positions or
+expressions, not indices, so they survive a change of the supercell. A geometry that is
+not flat is drawn in 3D; the 3D box of the Structure tab's bar switches to the xy
+projection, where the selection tools work (see Drawing in 3D).
 
 ## Selections and regions
 
-On the Structure tab the pick, box and lasso tools select sites (shift adds, ctrl
-toggles); the Select menu selects all, a sublattice, the edge sites (fewer neighbours
-than the rest) or the inverse. The pan and zoom buttons of the canvas toolbar take the
-clicks while they are on (Pick, Box and Lasso then show unchecked): click one of those three
-to select again; the drawing moves as described under Moving in space. With sites selected:
+On the Structure tab the Pick, Box and Lasso tools of its bar select sites (shift adds,
+ctrl toggles); its Select menu selects all, a sublattice, the edge sites (fewer neighbours
+than the rest) or the inverse. The Pan and Zoom buttons of the bar take the clicks while
+they are on (Pick, Box and Lasso then show unchecked): click one of those three to select
+again; the drawing moves as described under Moving in space. With sites selected:
 
 - Remove selected adds (or extends) a Remove atoms op that deletes them by position;
-- Region from selection makes a named region of their positions.
+- Region from selection, on the bar or in the menu of the "+" of the system's Regions row,
+  makes a named region of their positions;
+- Calculate on selection offers what takes the selected sites (see Picking from a plot).
 
-A region can also be an expression of x, y, z and r (Add region). A term restricted to a
-region (the region box of its form) acts only there; a Field can take one value per
-region (piecewise). A region is kept by position, so it follows the geometry as long as
-its sites are still there. A term between sites (Rashba, Haldane, Kane-Mele, Kekule, a
-pairing, the hopping modulation) restricted to a region made of selected sites acts on
-the bonds whose two ends are in it; an expression region holds the bonds whose midpoint
-it holds.
+A region can also be an expression of x, y, z and r (Region by expression, in the same
+menu). A term restricted to a region (the region box of its form, which its link "restrict
+to a region" leads to while the system has none) acts only there; a Field can take one
+value per region (piecewise). A region is kept by position, so it follows the geometry as
+long as its sites are still there. A term between sites (Rashba, Haldane, Kane-Mele,
+Kekule, a pairing, the hopping modulation) restricted to a region made of selected sites
+acts on the bonds whose two ends are in it; an expression region holds the bonds whose
+midpoint it holds.
 
 ## Terms and the Hamiltonian
 
-The Hamiltonian workspace offers the terms by group (onsite, magnetism, spin-orbit,
-topology, superconductivity, fields, disorder); the search box (Ctrl+F) finds one by
-name. Terms are applied in order to the Hamiltonian that the construction (the system's
-form) starts: first-neighbour hopping, or the hoppings to further neighbours given there.
-Before building, guiqula fixes the Hilbert space from the whole stack (a Zeeman field
-needs spin, a pairing needs Nambu), so no term upgrades it halfway.
+The "+" of a system's Hamiltonian row (or Add, in the Hamiltonian workspace) offers the
+terms by group (onsite, magnetism, spin-orbit, topology, superconductivity, fields,
+disorder, and the mean field last); typing in its search line finds one by name or by what
+it does. Terms are applied in order to the Hamiltonian that the construction (the system's
+form) starts: first-neighbour hopping, or the hoppings to further neighbours its hopping
+range gives. Before building, guiqula fixes the Hilbert space from the whole stack (a
+Zeeman field needs spin, a pairing needs Nambu), so no term upgrades it halfway.
 
-A term pyqula refuses is flagged in red with pyqula's message and skipped; the rest of the
-stack still builds, and a result computed without it says so. The Hamiltonian view of the
-canvas (Show: Hamiltonian) draws what the terms did: the atoms coloured by their onsite
-energy, every hopping with a width following its amplitude and a colour following its
-phase, exchange fields as arrows.
+A term pyqula refuses is skipped and flagged with a cross in the error colour, with
+pyqula's message in the tooltip of its row; the rest of the stack still builds, and a
+result computed without it says so. The Hamiltonian view of the canvas (the Hamiltonian
+workspace, or Show: Hamiltonian) draws what the terms did: the atoms coloured by their
+onsite energy, every hopping with a width following its amplitude and a colour following
+its phase, exchange fields as arrows.
 
 ## Fields: parameters that depend on the position
 
-Every number of a term is a Field. The f(r) button next to it opens the Field editor:
+Every number of a term is a Field. The button next to it reads f(r) for a plain number
+and the kind of the Field otherwise, and its menu chooses the kind, which opens the editor
+of that kind under the number:
 
 - a number, or an expression of x, y, z and r (numpy functions such as sin, exp, tanh,
   sqrt, abs, and pi); a comparison is 1 where it holds and 0 elsewhere, so
@@ -103,7 +248,10 @@ Every number of a term is a Field. The f(r) button next to it opens the Field ed
 - from a result: an array of another system's result, site by site (a classical spin
   texture as the exchange field of an electronic system).
 
-While a Field is being edited the canvas previews it on the atoms. A parameter that
+The expression line says in one line what it takes (x, y, z, r; sin, exp, tanh; a
+comparison is 1 or 0), with the whole list in its tooltip. While a Field is being edited
+(a click into one of its boxes) the canvas previews it on the atoms, and Preview on the
+canvas, in the menu of the parameter's name, shows it without editing. A parameter that
 pyqula takes as a number only is marked constant: it accepts no function of position.
 pyqula evaluates the Field of a term between sites at the middle of each bond: a painted
 or from-result Field gives a bond the mean of the values at its two ends.
@@ -112,15 +260,19 @@ or from-result Field gives a bond the mean of the values at its two ends.
 
 The mean-field block closes a system's Hamiltonian: the interactions (a Hubbard U, which
 can depend on the position, and neighbour interactions V1 to V3 and exchange J1 to J3)
-solved self-consistently from an initial guess, at a filling or a chemical potential. It
-runs with the calculations, not while editing, and a calculation whose mean field does not
+solved self-consistently from an initial guess, at a filling or a chemical potential.
+Mean field (interactions), at the end of the menu of the Hamiltonian's "+", turns it on,
+and its row in the outliner says which interactions it holds and, after a run, the total
+energy it found. Its form shows U, V1 and J1 and folds the further neighbours. It runs
+with the calculations, not while editing, and a calculation whose mean field does not
 converge fails rather than silently using the non-interacting Hamiltonian. The engine
 (numpy or jax), the solver, the mixing and the temperature are in its form; empty means
 the engine's own default.
 
 ## Classical systems
 
-A classical system has a Model in place of a Hamiltonian: classical spins, a lattice gas
+A classical system (the last section of New system, or the last cards of the start
+page's lattices) has a Model in place of a Hamiltonian: classical spins, a lattice gas
 at a filling, or an Ising model, set up on the system's geometry, with its own terms
 (exchange shells, fields, chemical potentials, exchange tensors) and calculations
 (minimizing the spins, annealing the gas or the Ising model). Their results are drawn on
@@ -128,16 +280,20 @@ the atoms, and a from-result Field hands them to another system.
 
 ## Calculations and results
 
-The Calculate workspace offers the calculations by group. Run (F5) sends the selected one
-to a worker process, so the window stays responsive; the Jobs dock shows its progress and
-Cancel stops it. Each result has its own tab: the plot (zoom and pan with its toolbar), a
-readout of the point under the mouse, Save data, Export, Detach (a window of its own) and
-Overlay. A result becomes stale (its tab and the outliner say so) when anything it depends
-on changes; Run computes it again. Run > Re-run cheap results automatically does that for
-results estimated under three seconds. Before a run estimated above a minute, a bar asks.
-Run > Run calculations at once, a setting kept like the theme and on by default, runs a
-calculation as soon as it is added or one of its parameters is set, from its form, a pick
-on a plot or a command, through the same bar; off, a calculation waits for Run.
+The "+" of the Calculations row (or Add, in the Calculate workspace) offers the
+calculations by group. Run (F5) sends the calculation it names to a worker process, so the
+window stays responsive; the row above its plot shows the progress, with Cancel, and the
+Jobs panel lists every job. Each result has its own tab: the plot, with the bar of Fit,
+Pan, Zoom, the pick tools, Overlay, Export, Save data, Detach (a window of its own) and
+Save image, and a readout of the point under the mouse. A result becomes stale when
+anything it depends on changes: its tab, its row in the outliner and the row above its
+plot say so, and Run again in that row, Run, or Run every stale result in the menu of
+Run's arrow computes it again. Run > Re-run cheap results automatically (Follow, on the
+toolbar) does that by itself for results estimated under three seconds. Before a run
+estimated above a minute, a bar asks, and the form's estimate line says beforehand that it
+will. Run > Run calculations at once, a setting kept like the theme and on by default,
+runs a calculation as soon as it is added or one of its parameters is set, from its form,
+a pick on a plot or a command, through the same bar; off, a calculation waits for Run.
 
 An undo, or a value set back, makes the earlier result that matches the document current
 again, without a re-run.
@@ -146,15 +302,16 @@ again, without a re-run.
 
 A geometry that is not flat (a 3D lattice, buckled or stacked layers) is drawn in 3D on the
 canvas, and so is a result on its atoms: a magnetization, a local density of states, a
-density. The 3D box on the canvas toolbar decides for both: when it is checked, a flat
+density. The 3D box of the Structure tab's bar decides for both: when it is checked, a flat
 geometry is drawn in 3D too, which is the way to see the magnetization of graphene as
 arrows in space rather than as in-plane arrows and dots, and when it is not, everything is
 drawn in the xy projection, where the selection tools, the readout and the picks work.
 
 View > 3D drawing chooses what draws in 3D. pyvista, the default when it is installed, draws
 with VTK and moves as Blender's viewport does (see Moving in space). matplotlib draws with
-mplot3d, which turns with a drag, and is what remains when pyvista is missing. Reset view
-goes back to the first, oblique view with everything in sight, Home (on the canvas) shows
+mplot3d, which turns with a drag, and is what remains when pyvista is missing. In the
+pyvista scene the bar has Reset view, which goes back to the first, oblique view with
+everything in sight, and the View menu, in place of Fit, Pan and Zoom; Home shows
 everything from the current angle, and Save image writes the view as it is drawn. The camera
 stays where it was left when the same system is drawn again, after an edit, a new result or a
 change of theme. The choice is kept with the settings. pyvista is an optional dependency
@@ -167,7 +324,8 @@ Export writes matplotlib's figure in both cases, in the same projection.
 The drawings move as the two programs this workbench borrows its look from do, so that the
 hands already know how: Inkscape's canvas for a geometry drawn flat (the Structure tab, and a
 result drawn on the atoms), and Blender's viewport for a geometry drawn in 3D with pyvista.
-The bands, the densities of states and the other plots keep the toolbar of matplotlib.
+The bands, the densities of states and the other plots keep matplotlib's own pan and
+zoom, through the Fit, Pan and Zoom of their bar.
 
 On a flat drawing, as in Inkscape:
 
@@ -179,8 +337,8 @@ On a flat drawing, as in Inkscape:
 - ctrl and the arrow keys scroll, + and - zoom, 3 zooms to the selected sites (to everything
   when none is selected), 4 or Home shows the whole drawing, and the backtick goes back to the
   previous zoom and its shifted key forward to the next one;
-- the Pan and Zoom buttons of the toolbar are still there, and while one is on the mouse
-  belongs to it.
+- the Pan and Zoom buttons of the bar are there too, and while one is on the mouse
+  belongs to it; Fit shows the whole drawing.
 
 In the 3D scene, as in Blender:
 
@@ -199,7 +357,7 @@ In the 3D scene, as in Blender:
   puts the selected sites in sight; Home shows everything;
 - an axis view is orthographic, and turning away from it returns to the perspective, as
   Blender's auto perspective does, unless the projection was chosen with 5;
-- the View menu of the scene bar has the same views, the projection and the framing for a
+- the View menu of the bar has the same views, the projection and the framing for a
   keyboard without a numpad, and names the view as Blender does (User Perspective, Top
   Orthographic).
 
@@ -210,7 +368,7 @@ there. The keys of both are in the table under Keyboard shortcuts, and the windo
 ## Picking from a plot
 
 A point of a plot stands for a few physical values, and a calculation can be started or
-moved there. A right click on a result, in any mode of its toolbar, or a click with its
+moved there. A right click on a result, in any mode of its bar, or a click with its
 Pick toggle on, opens a menu whose first line says what the point is: the energy and the
 k-point of a point of the bands or of a spectral function, the energy on a density of
 states, the k-point of a cell of a Fermi surface together with the energy the surface was
@@ -230,7 +388,7 @@ pattern at the energy, the density of states on picked sites. On a sweep the men
 the document at that point of the phase diagram and runs the swept calculation there; a
 picked k-point can become a new vertex of the k-path of the bands; picked sites can be
 selected on the Structure tab or made a region. On a result drawn flat on the atoms, the
-Box and Lasso toggles of its toolbar pick every atom inside a drag, as the canvas tools
+Box and Lasso toggles of its bar pick every atom inside a drag, as the canvas tools
 select them.
 
 Two places that are not plots pick too. A click in the zone of the k-space tab, with Add
@@ -256,7 +414,7 @@ atoms. A marker is bound to the parameter it set, as a slider is, so dragging it
 parameter, one undo step per drag, and with Run > Re-run cheap results automatically the
 LDOS follows the line as it is dragged across the bands; a form, a slider or an undo
 moves the marker in turn, since it always shows the value the parameter holds. The Sliders
-dock lists the markers with the sliders (a marker of a k-point or of sites has no range
+panel lists the markers with the sliders (a marker of a k-point or of sites has no range
 there, only its value), and removing the row removes the marker.
 
 A pick is a set of ordinary commands, meaning that the document holds plain numbers, an
@@ -275,9 +433,19 @@ calculation, `<system>/meanfield`, `<system>/model`, or the system for its latti
 parameter and its range. A range the parameter cannot take (a filling above 1) is refused,
 and a sweep fails at a value pyqula rejects: no point is computed without its entry.
 
-The Sliders dock attaches a slider to any number of the document: dragging it changes the
-parameter (one undo step per drag), and with the automatic re-run on, cheap results follow.
-A marker is a slider drawn on a plot (see Picking from a plot).
+The quickest sweep is Sweep this parameter, in the menu of a parameter's name in its form
+(a right click): eleven values from zero to twice the value (from -1 to 1 for a zero,
+within the bounds the parameter takes), running the calculation itself for a parameter of
+a calculation, else the first calculation of the system known to give numbers (a gap, a
+Chern number), else the first one, which its tooltip then says has given no number so
+far. The sweep is added and selected, so its form is there to change the range or the
+calculation.
+
+A slider is attached to a number from the same menu (Attach a slider, over the same
+range), or named in the Sliders panel with its entry, parameter and range: dragging it
+changes the parameter (one undo step per drag), and with the automatic re-run on, cheap
+results follow. A locked parameter takes no slider. A marker is a slider drawn on a plot
+(see Picking from a plot).
 
 ## Overlays and exports
 
@@ -289,17 +457,18 @@ the script alone. The scripts use pyqula only, not guiqula.
 
 ## The k-space tab
 
-The k-space tab draws the Brillouin zone of the selected system with the high-symmetry
-points pyqula knows for it, pyqula's default path (dashed) and the k-path of the chosen
-calculation. Add points appends vertices (they snap onto the high-symmetry points); with
-it on, a click on a vertex of the path adds that point again, so a path can pass twice
-through a point (Γ K M Γ). A vertex can be dragged, Remove last removes one, and Default
-path goes back to pyqula's. The k-path of a calculation's form takes the same path as text
-(`G K M G`). The latest Fermi surface of the system is drawn underneath, and a click
-in the zone with Add points off picks its k-point (see Picking from a plot). A
-three-dimensional lattice is drawn by the k3 = 0 cut of its zone (the plane of b1 and b2)
-with the high-symmetry points in that plane; a path that leaves the plane (pyqula's
-default one, or `Z` typed in the form) is drawn projected onto it.
+The k-space tab, there while the selected system has a periodic direction, draws the
+Brillouin zone of that system with the high-symmetry points pyqula knows for it, pyqula's
+default path (dashed) and the k-path of the calculation its bar names (path of). Add
+points appends vertices (they snap onto the high-symmetry points); with it on, a click on
+a vertex of the path adds that point again, so a path can pass twice through a point (Γ K
+M Γ). A vertex can be dragged, Remove last removes one, and Default path goes back to
+pyqula's. The k-path of a calculation's form takes the same path as text (`G K M G`). The
+latest Fermi surface of the system is drawn underneath, and a click in the zone with Add
+points off picks its k-point (see Picking from a plot). A three-dimensional lattice is
+drawn by the k3 = 0 cut of its zone (the plane of b1 and b2) with the high-symmetry points
+in that plane; a path that leaves the plane (pyqula's default one, or `Z` typed in the
+form) is drawn projected onto it.
 
 When the k-path of the bands or of the spectral function is left empty they walk pyqula's
 default path, and the k axis names the high-symmetry points that path goes through, as it
@@ -317,7 +486,7 @@ has no k, and its axis keeps the index of the point.
 ## Python nodes, trust and the console
 
 A Python op, term or calculation runs its code in the worker with `g` (the geometry), `h`
-(the Hamiltonian), `np` and `pyqula`: whatever pyqula can do and the palettes do not offer.
+(the Hamiltonian), `np` and `pyqula`: whatever pyqula can do and the Add menus do not offer.
 An error flags the node with the line of its code and the rest carries on. A calculation
 sets `arrays`, numbers and arrays of numbers (what a project file keeps), and may set
 `plot`; a plot that does not fit its arrays is refused when the code runs.
@@ -327,23 +496,26 @@ Python nodes is not: its nodes are skipped until you trust it (the bar at the to
 File > Trust the Python code), since opening a file must not run code someone else wrote.
 File > Always trust Python code in files turns that off for your files.
 
-The Console dock runs Python in its own worker, with `doc`, `g` and `h` of the selected
+The Console, a panel of the bottom area beside the Log (the Log button of the status bar
+shows them), runs Python in its own worker, with `doc`, `g` and `h` of the selected
 system, `do(command, ...)` for commands (undoable, like any edit), `np` and `pyqula`.
 Interrupt stops it and starts afresh.
 
 ## Projects, presets and locks
 
 File > Save writes a `.guiqula` project (the document and its results; a `.json` file
-holds the document alone). New, Open, the gallery's Open and Recover replace the document:
-with unsaved changes they first ask, as Quit does, whether to save them. The program
-autosaves; after a crash, the next start offers to recover the unsaved work. The presets
-gallery (File > Presets gallery) lists the shipped documents: teaching presets, with some
-parameters locked, and examples.
+holds the document alone). New, Open, a card of the start page, the gallery's Open and
+Recover replace the document: with unsaved changes they first ask, as Quit does, whether
+to save them, and New leaves an empty document, on which the start page shows. The program
+autosaves; after a crash, the next start offers to recover the unsaved work. The start
+page and the presets gallery (File > Presets gallery) list the shipped documents:
+teaching presets, with some parameters locked, and examples.
 
 A lock keeps an entry, one parameter of it, or a system's geometry from changing: its
-fields are greyed out and commands that would change it are refused. Right-click a
-parameter's label to lock or unlock it; the outliner's context menu locks an entry or a
-geometry; Edit > Unlock everything lifts them all. Locks guide an exercise, they are not a
+fields are greyed out and commands that would change it are refused. Lock this parameter
+and Unlock, in the menu of a parameter's name (a right click), lock or unlock it; the
+outliner's context menu locks an entry or a geometry; Edit > Unlock everything lifts them
+all. Locks guide an exercise, they are not a
 protection.
 
 ## Undo, themes and settings
@@ -354,8 +526,11 @@ the sliders, the overlays, the theme) is not undone. View > Theme chooses light,
 the desktop's scheme. View > Plot text chooses the size of the text of every drawing, the
 labels, the ticks and the titles of the plots, of the canvas, of the k-space tab and of the
 exported figures: small, normal or large, so that a projector or a small screen gets a
-readable size too. The settings (theme, plot text, recent files, always trust, remote
-control, run at once, the 3D drawing) are a file in the user configuration directory.
+readable size too; View > Interface text does the same for the text of the menus, the
+panels and the forms (normal or large). The settings (theme, plot text, interface text,
+recent files, always trust, remote control, run at once, the 3D drawing, and the
+arrangement of the panels with the window's size) are a file in the user configuration
+directory.
 
 ## Headless use
 
@@ -409,14 +584,14 @@ with connect() as client:
 
 A plugin is a Python package that adds lattices, geometry operations, terms, mean fields,
 classical models or calculations; once installed in guiqula's environment (`pip install
-guiqula-something`), its entries appear in the palettes, forms, help and exported scripts
-like guiqula's own, and run in the workers. Help > Plugins lists the plugins found, what
-each added, and any that failed to load: such a plugin is left out and guiqula starts
-without it (`GUIQULA_NO_PLUGINS=1 guiqula` starts without any). A document records which
-plugin, and which version of it, each of its entries came from, and Help > Plugins lists
-the plugins the open document uses. A document that uses an entry of a plugin that is not
-installed still opens; that entry is skipped and flagged with the plugin's name, which is
-what to `pip install`.
+guiqula-something`), its entries appear in the Add menus, the start page, the forms, the
+help and the exported scripts like guiqula's own, and run in the workers. Help > Plugins
+lists the plugins found, what each added, and any that failed to load: such a plugin is
+left out and guiqula starts without it (`GUIQULA_NO_PLUGINS=1 guiqula` starts without
+any). A document records which plugin, and which version of it, each of its entries came
+from, and Help > Plugins lists the plugins the open document uses. A document that uses an
+entry of a plugin that is not installed still opens; that entry is skipped and flagged
+with the plugin's name, which is what to `pip install`.
 
 The quickest plugin is one Python file in the `plugins` folder of the user configuration
 directory (Help > Plugins shows where): each `*.py` there that declares entries with
@@ -490,7 +665,9 @@ The canvas and outliner keys work while that widget has the focus (click it firs
 
 ## Getting help
 
-F1, or the ? button of a form, shows the help of the selected entry in the Help dock: its
-formula and parameters, the pyqula code it runs with the current values, the docstrings of
-the pyqula functions behind it, and the sections of pyqula's user guide about it. Help >
-pyqula user guide and Help > guiqula user guide open the whole texts.
+F1, or the ? button of a form, shows the help of the selected entry in the Help panel,
+below the form: its formula and parameters, the pyqula code it runs with the current
+values, the docstrings of the pyqula functions behind it, and the sections of pyqula's
+user guide about it. Help > pyqula user guide and Help > guiqula user guide open the whole
+texts, and so do the two buttons at the top of the panel; the link at the foot of the
+start page opens this guide.
