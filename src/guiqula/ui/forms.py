@@ -6,21 +6,24 @@ the user finishes an edit. Validation proper is the registry's: the panel
 sends the value as a command and shows the refusal.
 
 Fields (term parameters, PLAN.md 3.8) are edited as text: a number, or an
-expression of x, y, z, r. The f(r) button next to a Field opens its panel:
-the kind (a number or an expression, one value per region, or a result
-read site by site) and, per region, a value for each region plus the
-default; for a result, the calculation (of another system, drawn on the
-sites), its array, the component and a scale. A Field editor emits
-preview when the user looks at it (focus, typing, the panel), with the
-value being typed when it parses, so the window can draw the Field on the
-structure before anything runs. Constant-only parameters (the pyqula call
-behind them takes no function of position) have no f(r) button.
+expression of x, y, z, r. The button next to a Field (PLAN.md phase 8,
+package P6) says its kind when it is not a number ("f(r)" when it is) and
+its menu lists the kinds: a number, an expression, piecewise (one value per
+region), a profile, interpolated, painted, from a result. Choosing one
+opens the panel of that kind only: the one line of what an expression may
+use; per region, a value for each region plus the default; for a result,
+the calculation (of another system, drawn on the sites), its array, the
+component and a scale. A Field editor emits preview when the user looks at
+it (focus, typing, the panel), with the value being typed when it parses,
+so the window can draw the Field on the structure before anything runs.
+Constant-only parameters (the pyqula call behind them takes no function of
+position) have no such button.
 """
 from PySide6.QtCore import QEvent, Qt, Signal
-from PySide6.QtGui import QFontDatabase
+from PySide6.QtGui import QActionGroup, QFontDatabase
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
-                               QLineEdit, QPlainTextEdit, QPushButton, QSpinBox, QToolButton,
-                               QVBoxLayout, QWidget)
+                               QLineEdit, QMenu, QPlainTextEdit, QPushButton, QSpinBox,
+                               QToolButton, QVBoxLayout, QWidget)
 
 from guiqula.core import fields
 from guiqula.registry.params import (BoolParam, ChoiceParam, CodeParam, ConditionParam,
@@ -32,7 +35,9 @@ INT_LIMIT = 2**31 - 1
 NONE_TEXT = "(none)"
 FIELD_HELP = ("A number, or an expression of the position: x, y, z, r (distance from the "
               "origin), pi, and numpy functions such as sin, cos, exp, tanh, sqrt "
-              "(e.g. 0.3*tanh(x/4)).")
+              "(e.g. 0.3*tanh(x/4)). A comparison is 1 where it holds and 0 elsewhere, so "
+              "0.2*(x > 0) acts on the right half only.")
+FIELD_LINE = "x, y, z, r; sin, exp, tanh; (x > 0) is 1 or 0"
 
 
 def format_number(value):
@@ -142,22 +147,35 @@ class LineEditor(Editor):
         self._quiet(self.edit, self.edit.setText, self._shown)
 
 
-EXPRESSION_KIND, PIECEWISE_KIND = "number or f(x, y, z)", "one value per region"
-RESULT_KIND = "from a result"
-PROFILE_KIND, INTERPOLATED_KIND, PAINTED_KIND = "a profile", "interpolated points", "painted"
-KINDS = (EXPRESSION_KIND, PIECEWISE_KIND, RESULT_KIND, PROFILE_KIND, INTERPOLATED_KIND,
-         PAINTED_KIND)
-MODES = {"piecewise": 1, "from_result": 2, "profile": 3, "interpolated": 4, "painted": 5}
+# the kinds of a Field (fields.kind_of), in the order of its button's menu: kind -> (the
+# button's word, the menu's text, what it is)
+FIELD_KINDS = {
+    "constant": ("f(r)", "number", "the same number on every site, typed in the box"),
+    "expression": ("expression", "expression of x, y, z, r",
+                   "a function of the position typed in the box, such as 0.3*tanh(x/4)"),
+    "piecewise": ("piecewise", "piecewise (one value per region)",
+                  "a number or an expression on each region of the system, another elsewhere"),
+    "profile": ("profile", "profile (gaussian, step, disk...)",
+                "a named shape and its numbers: a gaussian, a step, a disk, a plane wave, a "
+                "domain wall, an Aubry-Andre modulation"),
+    "interpolated": ("interpolated", "interpolated (control points)",
+                     "smoothed between control points x, y, value"),
+    "painted": ("painted", "painted (with the brush)",
+                "values painted site by site with the brush of the Field preview"),
+    "from_result": ("from result", "from result (of another system)",
+                    "read site by site from a result of another system drawn on the sites: a "
+                    "texture, a density, an LDOS"),
+}
+STRUCTURED = ("piecewise", "profile", "interpolated", "painted", "from_result")
 COMPONENTS = ((None, "the value"), (0, "x"), (1, "y"), (2, "z"))
-FIELD_BUTTON_TIPS = {
-    "constant": "make this a function of the position: an expression, one value per region, "
-                "or a result of another system",
-    "expression": "an expression of the position (bold); the panel explains what it may use",
-    "piecewise": "one value per region (bold); the panel edits the values",
-    "from_result": "read from a result of another system, site by site (bold)",
-    "profile": "a named profile (bold); the panel edits its numbers",
-    "interpolated": "interpolated between control points (bold)",
-    "painted": "painted site by site (bold): the Paint tool of the Field preview"}
+
+
+def kind_of(value):
+    """The kind of a Field as its editor shows it: constant (a number, or
+    nothing yet), expression (a string), or the kind of a structured one."""
+    if isinstance(value, dict):
+        return value.get("kind", "piecewise")
+    return "expression" if isinstance(value, str) else "constant"
 
 
 def result_sources(session, system_id):
@@ -230,7 +248,7 @@ class _PieceRow:
 
 
 class FieldEditor(Editor):
-    """A scalar Field with its f(r) panel."""
+    """A scalar Field with its kind menu and its panel."""
 
     preview = Signal()
 
@@ -248,9 +266,13 @@ class FieldEditor(Editor):
         self.marker = QLabel("")
         self.marker.setObjectName(f"fieldKind_{self.name}")
         self.marker.setMinimumWidth(28)
+        self.marker.hide()                      # shown when it has something to say
         self.layout_.addWidget(self.edit, 1)
         self.layout_.addWidget(self.marker)
         self.button = None
+        self.kind_menu = None
+        self.kind_actions = {}                  # kind -> its QAction in the kind menu
+        self.panel_kind = None                  # the kind whose panel is open, or None
         self.rows = []
         self._value = None
         self._shown = None
@@ -259,11 +281,22 @@ class FieldEditor(Editor):
                                      "\n\nConstant only: the pyqula call behind it does not "
                                      "take a function of position."))
         if param.native:
-            self.button = QToolButton()
-            self.button.setText("f(r)")
-            self.button.setCheckable(True)
+            from guiqula.ui.palette import MenuButton
+            self.kind_menu = QMenu(self)
+            self.kind_menu.setObjectName(f"fieldKindMenu_{self.name}")
+            self.kind_menu.setToolTipsVisible(True)
+            group = QActionGroup(self.kind_menu)
+            for kind, (_, text, tip) in FIELD_KINDS.items():
+                action = self.kind_menu.addAction(text)
+                action.setObjectName(f"fieldKind_{self.name}_{kind}")
+                action.setCheckable(True)
+                action.setToolTip(tip)
+                action.setActionGroup(group)
+                action.triggered.connect(lambda _=False, k=kind: self.choose_kind(k))
+                self.kind_actions[kind] = action
+            self.button = MenuButton("f(r)", self.kind_menu)
             self.button.setObjectName(f"fieldButton_{self.name}")
-            self.button.toggled.connect(self._toggle_panel)
+            self.button.clicked.connect(self.show_kind_menu)
             self.layout_.addWidget(self.button)
             self._build_panel()
 
@@ -275,6 +308,12 @@ class FieldEditor(Editor):
             self._look()
         return False
 
+    def show_kind_menu(self):
+        """The button's menu, opened below it with popup() (a click returns
+        at once); returns it."""
+        self.kind_menu.popup(self.button.mapToGlobal(self.button.rect().bottomLeft()))
+        return self.kind_menu
+
     # ---- the panel
     def _build_panel(self):
         self.panel = QFrame()
@@ -282,11 +321,6 @@ class FieldEditor(Editor):
         self.panel.setFrameShape(QFrame.Shape.StyledPanel)
         column = QVBoxLayout(self.panel)
         column.setContentsMargins(6, 4, 6, 4)
-        self.kind = QComboBox()
-        self.kind.setObjectName(f"fieldKindBox_{self.name}")
-        self.kind.addItems(list(KINDS))
-        self.kind.activated.connect(self._kind_chosen)
-        column.addWidget(self.kind)
         self.result_box = QWidget()
         form = QGridLayout(self.result_box)
         form.setContentsMargins(0, 0, 0, 0)
@@ -318,8 +352,9 @@ class FieldEditor(Editor):
         self.no_results.setWordWrap(True)
         self.no_results.setObjectName(f"fieldNoResults_{self.name}")
         column.addWidget(self.no_results)
-        self.help = QLabel(FIELD_HELP)
+        self.help = QLabel(FIELD_LINE)
         self.help.setWordWrap(True)
+        self.help.setToolTip(FIELD_HELP)
         self.help.setObjectName(f"fieldHelp_{self.name}")
         column.addWidget(self.help)
         self.pieces = QWidget()
@@ -426,7 +461,7 @@ class FieldEditor(Editor):
             self._quiet(edit, edit.setText, format_number(value["params"][name]))
 
     def _profile_edited(self, new_name=False):
-        if self._mode() != 3:
+        if self._kind() != "profile":
             return
         if new_name:            # another profile starts from its defaults; the same one stays
             if self.profile_name.currentText() == self._value["name"]:
@@ -444,7 +479,7 @@ class FieldEditor(Editor):
             self._commit_draft(value)
 
     def _points_edited(self):
-        if self._mode() != 4:
+        if self._kind() != "interpolated":
             return
         try:
             points = [[self._number(c, "points") for c in line.replace(";", ",").split(",")]
@@ -458,7 +493,7 @@ class FieldEditor(Editor):
             self._commit_draft(value)
 
     def _paint_edited(self, clear=False):
-        if self._mode() != 5:
+        if self._kind() != "painted":
             return
         try:
             default = self._number(self.paint_default.text(), "elsewhere")
@@ -469,49 +504,51 @@ class FieldEditor(Editor):
         if value != self._value:
             self._commit_draft(value)
 
-    def _toggle_panel(self, shown):
-        self.panel.setVisible(shown)
+    def open_panel(self, shown=True):
+        """Open the panel of the Field's kind (a number's is the line of what
+        an expression may use, as choosing expression opens), or close it."""
+        if self.button is None:
+            return
+        kind = self._kind()
+        self.panel_kind = ("expression" if kind == "constant" else kind) if shown else None
+        self._sync_panel()
         if shown:
             self._look()
 
-    def open_panel(self, shown=True):
-        if self.button is not None:
-            self.button.setChecked(shown)
-
-    def _mode(self):
-        """The index in KINDS of the Field's kind: 0 a number or an
-        expression, 1 piecewise, 2 from a result, 3 profile, 4
-        interpolated, 5 painted."""
-        if isinstance(self._value, dict):
-            return MODES.get(self._value.get("kind"), 1)
-        return 0
+    def _kind(self):
+        """The kind of the stored Field: constant, expression, piecewise,
+        from_result, profile, interpolated or painted."""
+        return kind_of(self._value)
 
     def _piecewise_shown(self):
-        return self._mode() == 1
+        return self._kind() == "piecewise"
 
     def _sync_panel(self):
-        mode = self._mode()
-        piecewise = mode == 1
-        self._quiet(self.kind, self.kind.setCurrentIndex, mode)
-        self.help.setVisible(mode == 0)
-        self.result_box.setVisible(mode == 2)
-        self.no_results.setVisible(mode == 2 and not self.sources)
-        self.profile_box.setVisible(mode == 3)
-        self.points_box.setVisible(mode == 4)
-        self.paint_box.setVisible(mode == 5)
-        if mode == 2:
+        kind = self._kind()
+        shown = self.panel_kind
+        self.panel.setVisible(shown is not None)
+        for name, action in self.kind_actions.items():
+            self._quiet(action, action.setChecked, name == kind)
+        self.help.setVisible(shown == "expression")
+        self.result_box.setVisible(shown == "from_result" and kind == "from_result")
+        self.no_results.setVisible(shown == "from_result" and not self.sources)
+        self.profile_box.setVisible(shown == "profile" and kind == "profile")
+        self.points_box.setVisible(shown == "interpolated" and kind == "interpolated")
+        self.paint_box.setVisible(shown == "painted" and kind == "painted")
+        if kind == "from_result":
             self._sync_result()
-        elif mode == 3:
+        elif kind == "profile":
             self._sync_profile()
-        elif mode == 4:
+        elif kind == "interpolated":
             self._quiet(self.points, self.points.setPlainText, "\n".join(
                 ", ".join(format_number(c) for c in p) for p in self._value["points"]))
             self._quiet(self.length, self.length.setText, format_number(self._value["length"]))
-        elif mode == 5:
+        elif kind == "painted":
             self.paint_info.setText(f"{len(self._value['sites'])} sites painted: paint more "
                                     f"with the Paint tool of the Field preview (Structure tab)")
             self._quiet(self.paint_default, self.paint_default.setText,
                         format_number(self._value["default"]))
+        piecewise = kind == "piecewise"
         self.pieces.setVisible(piecewise)
         self.add.setVisible(piecewise)
         self.add.setEnabled(bool(self.regions))
@@ -573,7 +610,7 @@ class FieldEditor(Editor):
                 "component": None if components is None else 0, "scale": 1.0, "tol": 0.1}
 
     def _result_edited(self, new_calc=False, new_array=False):
-        if self._mode() != 2:
+        if self._kind() != "from_result":
             return
         if new_calc and self.result_calc.currentData() != self._value["calculation"]:
             value = self._result_value(self.result_calc.currentData())   # from its first array
@@ -629,31 +666,54 @@ class FieldEditor(Editor):
         except ValueError as error:
             raise ValueError(f"{box}: {error}") from None
 
-    def _kind_chosen(self, index):
-        mode = self._mode()
-        if index == mode:
-            return
-        simple = self._value if mode == 0 else \
-            self._value["default"] if mode in (1, 5) else 0.0
-        number = simple if isinstance(simple, float) else 0.0
-        if index == 0:
-            self._commit_draft(simple)
-        elif index == 1:
-            self._commit_draft({"kind": "piecewise", "default": simple, "pieces": []})
-        elif index == 3:
-            self._commit_draft({"kind": "profile", "name": "gaussian", "params": {}})
-        elif index == 4:
-            self._commit_draft({"kind": "interpolated", "points": [[0.0, 0.0, number]],
-                                "length": 2.0})
-        elif index == 5:
-            self._commit_draft({"kind": "painted", "sites": [], "tol": 0.1, "default": number})
+    def choose_kind(self, kind):
+        """The kind menu: make the Field of that kind, from what it holds
+        (a number or an expression stays the default of the regions or of
+        the painted sites), and open the panel of that kind only. The same
+        kind opens its panel; expression on a number opens the line of what
+        an expression may use and puts the cursor in the box, since a number
+        is stored until an expression of the position is typed there; from
+        result with nothing to read says so and keeps the value."""
+        current = self._kind()
+        if kind not in FIELD_KINDS:
+            raise ValueError(f"no Field kind {kind!r}; kinds: {', '.join(FIELD_KINDS)}")
+        simple = self._value if current in ("constant", "expression") else \
+            self._value["default"] if current in ("piecewise", "painted") else 0.0
+        if current == "profile" and kind == "expression":     # the formula it stands for
+            try:
+                simple = fields.profile_expression(self._value)
+            except (KeyError, ValueError):
+                pass
+        number = float(simple) if isinstance(simple, (int, float)) else 0.0
+        value = None
+        if kind == current or (kind == "expression" and current == "constant"):
+            pass
+        elif kind == "constant":
+            value = number
+        elif kind == "expression":
+            value = simple
+        elif kind == "piecewise":
+            value = {"kind": "piecewise", "default": simple, "pieces": []}
+        elif kind == "profile":
+            value = {"kind": "profile", "name": "gaussian", "params": {}}
+        elif kind == "interpolated":
+            value = {"kind": "interpolated", "points": [[0.0, 0.0, number]], "length": 2.0}
+        elif kind == "painted":
+            value = {"kind": "painted", "sites": [], "tol": 0.1, "default": number}
         else:
             value = self._result_value()
             if value is None:              # nothing to read: say so, keep the value
-                self._quiet(self.kind, self.kind.setCurrentIndex, mode)
-                self.no_results.show()
+                self.panel_kind = "from_result"
+                self._sync_panel()
                 return
-            self._commit_draft(value)
+        self.panel_kind = None if kind == "constant" else kind
+        if value is not None:
+            self._commit_draft(value)      # the form shows it again: set_value, _sync_panel
+        self._sync_panel()
+        if kind == "expression":
+            self.edit.setFocus()
+            self.edit.selectAll()
+        self._look()
 
     def add_piece(self):
         if not self._piecewise_shown() or not self.regions:
@@ -677,9 +737,9 @@ class FieldEditor(Editor):
             raise self._draft
         if self._draft is not None:
             return self._draft
-        if self._mode() == 1:
+        if self._kind() == "piecewise":
             return self._read_pieces()
-        if self._mode() >= 2:
+        if self._kind() in STRUCTURED:
             return self._value
         return parse_field(self.edit.text())
 
@@ -696,20 +756,27 @@ class FieldEditor(Editor):
         self._shown = _summary(value, self.regions) if structured else format_field(value)
         self._quiet(self.edit, self.edit.setText, self._shown)
         self.edit.setReadOnly(structured)
-        self.edit.setToolTip("edit it in the f(r) panel" if structured else "")
-        kind = fields.kind_of(value) if value is not None else "constant"
-        self.marker.setText({"constant": "", "expression": "f(r)", "piecewise": "per region",
-                             "from_result": "result", "profile": "profile",
-                             "interpolated": "points", "painted": "painted"}[kind])
-        if self.button is not None:
-            self.marker.hide()                  # the button says it instead
-            font = self.button.font()
-            font.setBold(kind != "constant")
-            self.button.setFont(font)
-            self.button.setToolTip(FIELD_BUTTON_TIPS[kind])
-            self._sync_panel()
-            if structured and not self.button.isChecked():
-                self.open_panel()
+        self.edit.setToolTip("edit it in the panel below; the button beside it changes its kind"
+                             if structured else "")
+        kind = self._kind()
+        if self.button is None:                 # constant only: the marker says the kind
+            self.marker.setText("" if kind == "constant" else FIELD_KINDS[kind][0])
+            self.marker.setVisible(kind != "constant")
+            return
+        self.button.setText(FIELD_KINDS[kind][0])
+        font = self.button.font()
+        font.setBold(kind != "constant")
+        self.button.setFont(font)
+        self.button.setToolTip(
+            ("a number; " if kind == "constant" else
+             f"{FIELD_KINDS[kind][0]}: {FIELD_KINDS[kind][2]}; ") +
+            "click to choose the kind of this Field: a number, an expression of the position, "
+            "piecewise per region, a profile, interpolated, painted, or from a result")
+        if structured:                          # its panel is where it is edited
+            self.panel_kind = kind
+        elif self.panel_kind != "expression":   # the line stays while it is typed
+            self.panel_kind = None
+        self._sync_panel()
 
 
 class VectorFieldEditor(Editor):
@@ -747,6 +814,12 @@ class VectorFieldEditor(Editor):
     def set_value(self, value):
         for editor, v in zip(self.components, value):
             editor.set_value(v)
+        # the kind buttons as wide as the widest, so that the components' boxes line up
+        # whatever kind each one shows ("f(r)" beside "expression")
+        buttons = [editor.button for editor in self.components if editor.button is not None]
+        width = max((button.sizeHint().width() for button in buttons), default=0)
+        for button in buttons:
+            button.setMinimumWidth(width)
 
 
 class IntEditor(Editor):
