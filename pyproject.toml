@@ -73,7 +73,11 @@ version = {attr = "guiqula.__version__"}
 "guiqula._vendor.pyqula" = "vendor/pyqula"
 
 [tool.setuptools.package-data]
-guiqula = ["presets/*.json", "docs/*.md", "resources/*", "resources/thumbnails/*/*.png"]
+guiqula = ["presets/*.json", "docs/*.md", "resources/*",
+           # the start page's pictures (phase 8, P1)
+           "resources/thumbnails/*/*.png",
+           # the icons of the controls (Tabler, MIT: resources/icons/LICENSE)
+           "resources/icons/*"]
 "guiqula._vendor.pyqula" = ["datasets/*.txt"]
 
 [tool.setuptools.exclude-package-data]

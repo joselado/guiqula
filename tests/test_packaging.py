@@ -66,6 +66,10 @@ def test_wheel_ships_vendored_pyqula(repo, tmp_path, run_python):
     assert {"README.md", "LICENSE", "environment.yml", "vendor/pyqula_user_guide.md",
             "vendor/VENDOR.md", "plugin_template/pyproject.toml"} <= in_sdist
     assert not [n for n in in_sdist if n.startswith(("tests/", "ui_dump/", "tools/"))]
+    # the icons of the controls and their licence (Tabler Icons, MIT)
+    icons = {p.name for p in (repo / "src" / "guiqula" / "resources" / "icons").iterdir()}
+    assert {"LICENSE", "README.md", "run.svg"} <= icons
+    assert {f"src/guiqula/resources/icons/{name}" for name in icons} <= in_sdist
     if shutil.which("twine"):
         check = subprocess.run(["twine", "check", "--strict", str(sdist), str(wheel)],
                                capture_output=True, text=True, timeout=300)
@@ -88,6 +92,7 @@ def test_wheel_ships_vendored_pyqula(repo, tmp_path, run_python):
                   for p in (repo / "src" / "guiqula" / "resources" / "thumbnails").rglob("*.png")}
     assert thumbnails and thumbnails <= names
     assert "guiqula/resources/thumbnails/presets/haldane_chern.png" in names
+    assert {f"guiqula/resources/icons/{name}" for name in icons} <= names
     metadata = zipfile.ZipFile(wheel).read(next(n for n in names if n.endswith("METADATA")))
     assert b"License-Expression: GPL-3.0-or-later" in metadata
     assert b"Description-Content-Type: text/markdown" in metadata and b"# guiqula" in metadata
