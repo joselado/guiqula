@@ -579,7 +579,7 @@ class StructureView(QWidget):
             button.setChecked(tool == "pick")
             button.clicked.connect(lambda checked=False, t=tool: self.tool_chosen.emit(t))
             self.tool_buttons.addButton(button)
-            self.bar.add("tools", button)
+            self.bar.add("tools", button, tool)
         self.select_button = QToolButton()
         self.select_button.setText("Select")
         self.select_button.setObjectName("selectSitesButton")
@@ -600,19 +600,20 @@ class StructureView(QWidget):
             action.triggered.connect(
                 lambda checked=False, a=args: self.select_requested.emit(dict(a)))
         self.select_button.setMenu(menu)
-        self.bar.add("tools", self.select_button)
+        self.bar.add("tools", self.select_button, "select")
         self.region_button = self._selection_button(
             "Region from selection", "regionFromSelectionButton",
             "a named region of the selected sites, which any term can be restricted to",
-            self.region_requested)
+            self.region_requested, "region")
         self.calculate_button = self._selection_button(
             "Calculate on selection", "calculateOnSelectionButton",
             "what takes the selected sites: the density of states on them, and every "
-            "calculation of sites", self.calculate_requested)
+            "calculation of sites", self.calculate_requested, "calculation")
         self.remove_button = self._selection_button(
             "Remove selected", "removeSelectedButton",
             f"remove the selected atoms (a Remove atoms op, by position; "
-            f"{shortcuts.text('remove_selected')} on the canvas)", self.remove_requested)
+            f"{shortcuts.text('remove_selected')} on the canvas)", self.remove_requested,
+            "remove")
         self.view_box = QComboBox()
         self.view_box.setObjectName("canvasView")
         self.view_box.setToolTip("what the canvas shows: the geometry, what the Hamiltonian "
@@ -650,10 +651,14 @@ class StructureView(QWidget):
             widget.setMaximumWidth(60)
         self.paint_widgets = (self.paint, QLabel("value"), self.brush_value, QLabel("radius"),
                               self.brush_radius, self.brush_component)
-        for widget in (QLabel("Show"), self.view_box, self.box_3d):
-            self.bar.add("view", widget)
+        show = QLabel("Show")
+        show.setObjectName("canvasViewLabel")
+        show.setToolTip("what the canvas shows, chosen beside")
+        self.bar.add("view", show, "show")
+        self.bar.add("view", self.view_box)
+        self.bar.add("view", self.box_3d, "3d")
         for widget in self.paint_widgets:
-            self.bar.add("paint", widget)
+            self.bar.add("paint", widget, "paint" if widget is self.paint else None)
         self.bar.groups["paint"].hide()          # the brush belongs to the Field preview
         self._painting = False
         self.caption = QLabel("No system yet: add one with New system, next to the "
@@ -698,7 +703,7 @@ class StructureView(QWidget):
         bind_keys(self.canvas, self.navigation.key_handlers())
         bind_keys(self.scene.canvas, self.scene.key_handlers())    # Blender's, in the scene
 
-    def _selection_button(self, text, name, tooltip, signal):
+    def _selection_button(self, text, name, tooltip, signal, icon):
         """A control of the bar acting on the selected sites, enabled while
         some are selected (the window's _selection_changed)."""
         button = QToolButton()
@@ -707,7 +712,7 @@ class StructureView(QWidget):
         button.setToolTip(tooltip)
         button.setEnabled(False)
         button.clicked.connect(lambda checked=False: signal.emit())
-        self.bar.add("selection", button)
+        self.bar.add("selection", button, icon)
         return button
 
     # ---- drawing

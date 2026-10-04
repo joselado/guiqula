@@ -160,6 +160,23 @@ def set_ui_text(size="normal"):
     return size
 
 
+def ui_scale():
+    """How much larger the active interface text is than the normal one: 1,
+    or 1.2 at large (what the formula images and the fixed-width fonts follow)."""
+    return UI_POINTS[ui_text] / UI_POINTS["normal"]
+
+
+def fixed_font(points=None):
+    """The desktop's fixed-width font at the points of the interface text
+    (the console, a Python node's code), so that it follows View > Interface
+    text as the other widgets do."""
+    from PySide6.QtGui import QFontDatabase
+    font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
+    if points and points > 0:            # a desktop font given in pixels reads -1: left alone
+        font.setPointSizeF(points)
+    return font
+
+
 def ui_points(app):
     """The point size of the widgets' font at the active interface text
     size, or None when the desktop's font is given in pixels (left alone)."""

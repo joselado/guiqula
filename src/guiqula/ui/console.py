@@ -5,10 +5,12 @@ runs the input, Shift+Enter adds a line, Up and Down walk the history;
 Interrupt stops what runs and starts the console afresh (its variables are
 lost, as when a kernel restarts). The window sends the code to the
 Session and writes what comes back."""
-from PySide6.QtCore import QEvent, Qt, Signal
-from PySide6.QtGui import QFontDatabase, QTextCursor
+from PySide6.QtCore import QEvent, Qt, QTimer, Signal
+from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QVBoxLayout,
                                QWidget)
+
+from guiqula.ui import theme
 
 PLACEHOLDER = ("Python, run in the worker: g and h (the geometry and Hamiltonian of the "
                "selected system), doc (the document), do(command, **args) (a command, "
@@ -22,17 +24,16 @@ class ConsoleWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("console")
-        font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
         self.output = QPlainTextEdit()
         self.output.setObjectName("consoleOutput")
         self.output.setReadOnly(True)
         self.output.setMaximumBlockCount(5000)
-        self.output.setFont(font)
         self.input = QPlainTextEdit()
         self.input.setObjectName("consoleInput")
-        self.input.setFont(font)
         self.input.setPlaceholderText(PLACEHOLDER)
-        self.input.setMaximumHeight(4 * self.input.fontMetrics().lineSpacing() + 12)
+        # the fixed-width font at the console's first show (_follow_font): its first use
+        # costs about 6 ms, and the console is hidden at start (tests/ui/test_startup.py)
+        self._fonts_set = False
         self.input.installEventFilter(self)
         self.system_label = QLabel("")
         self.system_label.setObjectName("consoleSystem")
@@ -58,6 +59,27 @@ class ConsoleWidget(QWidget):
         layout.addLayout(row)
         self.history = []
         self._position = 0
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self._fonts_set:
+            self._follow_font()
+
+    def changeEvent(self, event):
+        """View > Interface text: the fixed-width font at the new size, once
+        the change is over (the style sheet's repolish, which comes after,
+        gives each box back the font it had when it was first polished)."""
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.FontChange and self._fonts_set:
+            QTimer.singleShot(0, self._follow_font)
+
+    def _follow_font(self):
+        """The fixed-width font of the desktop at the interface text's points."""
+        self._fonts_set = True
+        font = theme.fixed_font(self.font().pointSizeF())
+        for box in (self.output, self.input):
+            box.setFont(font)
+        self.input.setMaximumHeight(4 * self.input.fontMetrics().lineSpacing() + 12)
 
     def eventFilter(self, watched, event):
         if watched is self.input and event.type() == QEvent.Type.KeyPress:

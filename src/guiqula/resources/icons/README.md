@@ -70,3 +70,4 @@ every icon in both themes.
 | `invalid` | `alert-triangle` | 3.35.0 |
 | `disabled` | `circle-off` | 3.35.0 |
 | `running` | `hourglass-high` | 3.35.0 |
+| `view` | `perspective` | 3.35.0 |

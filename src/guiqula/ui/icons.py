@@ -10,10 +10,11 @@ failed mark); the disabled state is the same picture in DISABLED, the
 colour the palette gives a disabled button's text, so that a disabled
 button's icon greys with its label, and the selected state (a selected row
 of a list or a tree) is in the highlighted text colour. Each icon holds
-renderings at the sizes of SIZES, 16 to 24 px on a plain screen and twice
-that on a 2x one, made by QSvgRenderer: about 2 ms for the first icon() of
-a name, a dictionary lookup afterwards. Nothing is read or drawn before the
-first icon() call, so importing this module costs nothing at start. Without
+renderings at the sizes of SIZES, 16 px (SIZE, what every control shows)
+and 24 px, and those times the pixel ratio of a screen that has one above
+1, made by QSvgRenderer: about 0.3 ms for the first icon() of a name, a
+dictionary lookup afterwards. Nothing is read or drawn before the first
+icon() call, so importing this module costs nothing at start. Without
 QtSvg (a Qt built without it) icon() gives an empty icon and the controls
 keep their text.
 
@@ -22,13 +23,17 @@ empties the cache and runs the callbacks registered with on_theme_change:
 the window registers the method that sets its icons, which then sets them
 again in the colours of the new theme. A bound method is held weakly, so a
 closed window is never kept alive by its callback, and a callback whose Qt
-object was deleted is dropped."""
+object was deleted is dropped. follow(widget, method) is the usual way in:
+the method sets the widget's icons when the widget is first shown, so a
+control out of sight at start (the structure canvas's bar behind the start
+page, the k-space tab) costs nothing then, and again after every change of
+theme from then on, through on_theme_change."""
 import types
 import weakref
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QRectF, Qt
-from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPalette, QPixmap
+from PySide6.QtCore import QByteArray, QEvent, QObject, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImage, QPainter, QPalette, QPixmap
 
 from guiqula.ui import theme
 
@@ -46,9 +51,12 @@ NAMES = (
     # Attach a slider, and the marks of ui/marks.py the list leaves out
     "remove", "run_stale", "kspace", "structure", "settings", "theme", "3d", "show",
     "slider", "invalid", "disabled", "running",
+    # the View menu of the 3D scene (Blender's views, perspective and orthographic)
+    "view",
 )
 
-SIZES = (16, 20, 24, 32, 40, 48)      # pixels of the renderings each icon holds
+SIZE = 16                 # pixels of the icon of a control, in a bar, a row or a tree
+SIZES = (SIZE, 24)        # pixels of the renderings each icon holds on a plain screen
 
 _cache = {}           # (theme name, icon name, colour name) -> QIcon
 _listeners = []       # callables giving a callback of on_theme_change, or None when gone
@@ -76,6 +84,44 @@ def icon(name, color="TEXT"):
     return _cache[key]
 
 
+def size():
+    """The QSize of a control's icon (setIconSize)."""
+    return QSize(SIZE, SIZE)
+
+
+def follow(widget, method):
+    """Set a widget's icons: method() (a bound method of the widget or of
+    its owner, never a lambda) runs at the widget's first show, at once if
+    it is shown already, and from then on after every change of theme
+    (on_theme_change). A widget never shown costs nothing."""
+    if widget.isVisible():
+        method()
+        on_theme_change(method)
+    else:
+        _FirstShow(widget, method)
+
+
+class _FirstShow(QObject):
+    """The event filter of follow(): at its widget's first Show event it
+    runs the method, registers it with on_theme_change and goes."""
+
+    def __init__(self, widget, method):
+        super().__init__(widget)
+        self._method = weakref.WeakMethod(method) if isinstance(method, types.MethodType) \
+            else (lambda: method)
+        widget.installEventFilter(self)
+
+    def eventFilter(self, watched, event):
+        if event.type() == QEvent.Type.Show:
+            watched.removeEventFilter(self)
+            method = self._method()
+            self.deleteLater()
+            if method is not None:
+                method()
+                on_theme_change(method)
+        return False
+
+
 def on_theme_change(callback):
     """Call `callback()` after every theme.apply, once the cache is empty,
     so that it sets its icons again; returns a function that removes it. A
@@ -86,6 +132,13 @@ def on_theme_change(callback):
     else:
         def reference():
             return callback
+    # the callbacks of objects collected since (the forms of earlier selections) go now,
+    # not only at the next change of theme, so that the list does not grow with them
+    _listeners[:] = [r for r in _listeners if r() is not None]
+    same = next((r for r in _listeners if isinstance(r, weakref.WeakMethod)
+                 and r == reference), None)
+    if same is not None:                  # registered already (the menus share one method)
+        return lambda: _forget(same)
     _listeners.append(reference)
     return lambda: _forget(reference)
 
@@ -131,7 +184,7 @@ def _draw(name, colors):
     source = (DIRECTORY / f"{name}.svg").read_bytes().replace(b"currentColor", color.encode())
     renderer = QSvgRenderer(QByteArray(source))
     result = QIcon()
-    for size in SIZES:
+    for size in _sizes():
         image = QImage(size, size, QImage.Format.Format_ARGB32_Premultiplied)
         image.fill(Qt.GlobalColor.transparent)
         painter = QPainter(image)
@@ -139,10 +192,22 @@ def _draw(name, colors):
         painter.end()
         result.addPixmap(QPixmap.fromImage(image), normal, QIcon.State.Off)
         for mode, other in others:
-            tinted = image.copy()
+            # the colour kept where the rendering is drawn: a plain fill, then its alpha
+            # (DestinationIn; SourceIn's fillRect costs 3 ms the first time it is used)
+            tinted = QImage(size, size, QImage.Format.Format_ARGB32_Premultiplied)
+            tinted.fill(QColor(other))
             painter = QPainter(tinted)
-            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
-            painter.fillRect(tinted.rect(), QColor(other))
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
+            painter.drawImage(0, 0, image)
             painter.end()
             result.addPixmap(QPixmap.fromImage(tinted), mode, QIcon.State.Off)
     return result
+
+
+def _sizes():
+    """SIZES, and SIZES times the pixel ratio of each screen above 1 (a
+    rendering per size: drawing the 2x ones on a plain screen would double
+    the cost of every icon for nothing)."""
+    app = QGuiApplication.instance()
+    ratios = {screen.devicePixelRatio() for screen in app.screens()} if app is not None else ()
+    return sorted({round(size * ratio) for size in SIZES for ratio in {1.0, *ratios}})

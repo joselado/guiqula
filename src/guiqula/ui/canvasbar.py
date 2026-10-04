@@ -16,13 +16,19 @@ structure's tools. A separator is drawn before a group that starts a
 section, unless the group begins a line; a joined group continues the
 section of the one before it, and the end group (Save image) sits at the
 right of its line.
+
+The controls show their icons (ui/icons.py, PLAN.md phase 8, package P8),
+their text becoming the start of their tooltip: the icon is named when a
+control is added (button, add), and the bar sets every icon at its first
+show and again after a change of theme.
 """
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
 from PySide6.QtCore import QRect, QSize, Qt, Signal
 from PySide6.QtGui import QPainter
-from PySide6.QtWidgets import QLayout, QStyle, QStyleOption, QToolBar, QToolButton, QWidget
+from PySide6.QtWidgets import (QCheckBox, QLabel, QLayout, QStyle, QStyleOption, QToolBar,
+                               QToolButton, QWidget)
 
-from guiqula.ui import shortcuts
+from guiqula.ui import icons, shortcuts
 
 KEPT = ("Home", "Pan", "Zoom", "Save")     # matplotlib's tools the bar stands on
 SECTION_GAP = 9          # pixels between two sections, the separator in the middle
@@ -211,8 +217,10 @@ class CanvasBar(QWidget):
         self.groups = {}
         self.actions_of = {}               # widget -> the QAction showing it in its group
         self.group_of = {}                 # widget -> its group
+        self.icon_of = {}                  # widget -> the name of its icon (ui/icons.py)
         self.scene = None
         self.in_scene = False
+        self._icons_set = False
         self.toolbar = HiddenToolbar(canvas, self, self._mode_changed)
         if toolbar_name:
             self.toolbar.setObjectName(toolbar_name)
@@ -220,13 +228,16 @@ class CanvasBar(QWidget):
         self.group("save", joined=True, end=True)     # at the end of the last section
         fit_tip = fit_tip or (f"show the whole drawing again ({shortcuts.text('fit')}, "
                               f"{shortcuts.text('zoom_drawing')} on a flat drawing)")
-        self.fit_button = self.button("navigation", "fit", "Fit", fit_tip, self.fit)
+        self.fit_button = self.button("navigation", "fit", "Fit", fit_tip, self.fit,
+                                      icon="fit")
         self.pan_button = self.button("navigation", "pan", "Pan", PAN_TIP,
-                                      lambda: self.toolbar.pan(), checkable=True)
+                                      lambda: self.toolbar.pan(), checkable=True, icon="pan")
         self.zoom_button = self.button("navigation", "zoom", "Zoom", ZOOM_TIP,
-                                       lambda: self.toolbar.zoom(), checkable=True)
+                                       lambda: self.toolbar.zoom(), checkable=True,
+                                       icon="zoom_in")
         self.save_button = self.button("save", "saveImage", "Save image", SAVE_TIP,
-                                       lambda: self.toolbar.save_figure())
+                                       lambda: self.toolbar.save_figure(), icon="image")
+        icons.follow(self, self.set_icons)
 
     # ---- building
     def control_name(self, key):
@@ -254,16 +265,52 @@ class CanvasBar(QWidget):
         self.groups[name] = bar
         return bar
 
-    def add(self, group, widget):
+    def add(self, group, widget, icon=None):
         """Put a widget in a group; returns the QAction that shows or hides it
-        (Qt ignores setVisible on a widget of a toolbar)."""
+        (Qt ignores setVisible on a widget of a toolbar). icon: the name of
+        its icon (ui/icons.py); a tool button or a check box then shows the
+        icon alone, its text leading its tooltip, and a label shows the icon
+        in place of its text."""
         action = self.group(group).addWidget(widget)
         self.actions_of[widget] = action
         self.group_of[widget] = self.groups[group]
+        if icon is not None:
+            self.set_icon(widget, icon)
         return action
 
-    def button(self, group, key, text, tooltip, slot=None, checkable=False):
-        """A tool button named after key (names), in a group."""
+    def set_icon(self, widget, icon):
+        """Give a control of the bar its icon (by name), now if the bar has
+        set its icons already, else with them."""
+        text = widget.text() if hasattr(widget, "text") else ""
+        if isinstance(widget, QLabel):
+            widget.setAccessibleName(text)
+        tip = widget.toolTip()
+        if text and not tip.startswith(text):
+            widget.setToolTip(f"{text}: {tip}" if tip else text)
+        self.icon_of[widget] = icon
+        if self._icons_set:
+            self._set_icon(widget, icon)
+
+    def set_icons(self):
+        """Every control's icon, in the colours of the active theme (at the
+        bar's first show and after every change of theme, icons.follow)."""
+        self._icons_set = True
+        for widget, name in self.icon_of.items():
+            self._set_icon(widget, name)
+
+    @staticmethod
+    def _set_icon(widget, name):
+        if isinstance(widget, QLabel):
+            widget.setPixmap(icons.icon(name).pixmap(icons.size(), widget.devicePixelRatioF()))
+        else:
+            widget.setIcon(icons.icon(name))
+            widget.setIconSize(icons.size())
+        if isinstance(widget, QCheckBox):
+            widget.setText("")                 # the icon alone, the text in the tooltip
+
+    def button(self, group, key, text, tooltip, slot=None, checkable=False, icon=None):
+        """A tool button named after key (names), in a group; icon: the name
+        of its icon (add)."""
         button = QToolButton()
         button.setText(text)
         button.setObjectName(self.control_name(key))
@@ -271,7 +318,7 @@ class CanvasBar(QWidget):
         button.setCheckable(checkable)
         if slot is not None:
             button.clicked.connect(lambda checked=False: slot())
-        self.add(group, button)
+        self.add(group, button, icon)
         return button
 
     def set_shown(self, widget, shown):
@@ -288,9 +335,9 @@ class CanvasBar(QWidget):
         self.scene = scene
         self.group("scene", after="navigation")
         self.group("sceneSave", joined=True, end=True)
-        self.add("scene", scene.reset)
-        self.add("scene", scene.view_button)
-        self.add("sceneSave", scene.save)
+        self.add("scene", scene.reset, "fit")
+        self.add("scene", scene.view_button, "view")
+        self.add("sceneSave", scene.save, "image")
         self.show_scene(False)
 
     def show_scene(self, scene):

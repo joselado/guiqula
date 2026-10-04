@@ -115,10 +115,10 @@ def test_the_estimate_line_says_why_there_is_none(window, qtbot):
     calc = session.do("add_calculation", system="s1", kind="python")
     try:
         window.select(calc)
-        estimate = window.properties.form.findChild(QLabel, "formEstimate")
+        estimate = window.properties.findChild(QLabel, "formEstimate")
         assert estimate.text() == "no estimate, so Run does not ask first"     # no cost
         session.act("trust", enabled=False)
-        estimate = window.properties.form.findChild(QLabel, "formEstimate")
+        estimate = window.properties.findChild(QLabel, "formEstimate")
         assert estimate.text().startswith("invalid: Python code") and "trusted" in estimate.text()
     finally:
         session.act("trust")
@@ -127,7 +127,7 @@ def test_the_estimate_line_says_why_there_is_none(window, qtbot):
     calc = session.do("add_calculation", system=system, kind="bands")
     try:
         window.select(calc)                     # before its system is built
-        estimate = window.properties.form.findChild(QLabel, "formEstimate")
+        estimate = window.properties.findChild(QLabel, "formEstimate")
         assert estimate.text() == f"estimate: once {system} is built"
         settle(qtbot, window)
         assert estimate.text() == "estimate: under a second"
@@ -184,11 +184,14 @@ def test_the_form_runs_runs_again_and_cancels(window, qtbot):
         settle(qtbot, window)
         window.select(calc)
         form = window.properties.form
-        button = form.findChild(QPushButton, "formRun")
-        estimate = form.findChild(QLabel, "formEstimate")
-        layout = form.layout()                         # the form ends with them
-        assert layout.indexOf(form.findChild(QPushButton, "formRun").parentWidget()) \
-            == layout.count() - 3                      # then the error line and the stretch
+        button = window.properties.findChild(QPushButton, "formRun")
+        estimate = window.properties.findChild(QLabel, "formEstimate")
+        # the row is the form's, shown under it in the panel's footer, out of the scrolled
+        # area, so that Run stays in sight however long the form is (package P8)
+        assert form.run_button is button and form.run_estimate is estimate
+        footer = window.properties.footer
+        assert button.parentWidget() is form.run_row and form.run_row.parentWidget() is footer
+        assert footer.isVisible() and not window.properties.scroll.isAncestorOf(button)
         assert button.text() == "Run" and estimate.text() == "estimate: under a second"
         assert button.toolTip().endswith("(F5)")
         button.click()                                 # Run
@@ -207,7 +210,7 @@ def test_the_form_runs_runs_again_and_cancels(window, qtbot):
         assert window.properties.form is form and button.text() == "Run"
         session.do("set_param", entry=calc, name="delta", value=0.1)
         assert session.status(calc) == "stale"
-        button = window.properties.form.findChild(QPushButton, "formRun")
+        button = window.properties.findChild(QPushButton, "formRun")
         assert button.text() == "Run again" and "changed" in button.toolTip()
         button.click()
         job = session.calc_jobs[calc]
@@ -215,6 +218,7 @@ def test_the_form_runs_runs_again_and_cancels(window, qtbot):
         assert job.status == "done" and button.text() == "Run"
         # a term's form has no Run
         window.select("t1")
-        assert window.properties.form.findChild(QPushButton, "formRun") is None
+        assert window.properties.findChild(QPushButton, "formRun") is None
+        assert not window.properties.footer.isVisible()
     finally:
         session.do("remove", entry=calc)

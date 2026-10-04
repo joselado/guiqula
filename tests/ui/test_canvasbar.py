@@ -218,6 +218,9 @@ def test_a_failed_run_says_why_even_over_an_earlier_result(window, qtbot):
     assert window.viewport.tabText(index) == f"{calc} python {marks.FAILED}"
     assert window.viewport.tabBar().tabTextColor(index).name() == theme.ERROR
     assert window.outliner.item(calc).text(1) == marks.FAILED   # the tree reads it the same
+    window.select(calc)                                  # and the form (P8)
+    assert window.properties.form.status.text().startswith("result: failed, ") and \
+        "no band here" in window.properties.form.status.text()
     assert view.result is first.value                    # the earlier result stays drawn
     window.toggle_detached(calc)                         # its window's title says it too
     assert window.plot_windows[calc].windowTitle() == f"Result {calc} python {marks.FAILED}"
@@ -230,6 +233,7 @@ def test_a_failed_run_says_why_even_over_an_earlier_result(window, qtbot):
     assert session.status(calc) == "done"
     assert not row.isVisibleTo(view) and window.viewport.tabText(index) == f"{calc} python"
     assert window.outliner.item(calc).text(1) == marks.DONE
+    assert window.properties.form.status.text() == "result: done"
     assert window.viewport.tabBar().tabTextColor(index).name() != theme.ERROR
     assert window.viewport.tabToolTip(index) == ""
 

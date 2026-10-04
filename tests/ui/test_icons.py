@@ -12,7 +12,7 @@ from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QIcon, QImage, QPalette
 from PySide6.QtWidgets import QGridLayout, QToolButton, QWidget
 
-from guiqula.ui import icons, theme
+from guiqula.ui import icons, marks, theme
 
 THEMES = ("light", "dark")
 
@@ -33,11 +33,12 @@ def pixels(qicon, size, mode=QIcon.Mode.Normal):
     return argb >> 24, argb & 0xFFFFFF
 
 
-def ink(qicon, mode=QIcon.Mode.Normal, size=48):
+def ink(qicon, mode=QIcon.Mode.Normal, size=24):
     """The colour of the opaque pixels of an icon, or None when they are not
-    all of one colour: at 48 px every icon has some (at 16 px Tabler's
-    strokes are 1.3 px wide, mostly antialiased). A stroke crossing itself
-    adds up to opaque through rounding, one unit off per channel at most."""
+    all of one colour: at 24 px, the largest rendering on a plain screen,
+    Tabler's strokes are 2 px wide and every icon has some (at 16 px they are
+    1.3 px wide, mostly antialiased). A stroke crossing itself adds up to
+    opaque through rounding, one unit off per channel at most."""
     alpha, rgb = pixels(qicon, size, mode)
     values, counts = np.unique(rgb[alpha == 255], return_counts=True)
     assert len(values), "no opaque pixel"
@@ -215,3 +216,175 @@ def test_a_sheet_of_every_icon_in_both_themes(app, shot):
         assert shot(page, f"icons_{theme_name}").stat().st_size > 0
         page.close()
         page.deleteLater()
+
+
+def test_follow_sets_the_icons_at_the_first_show_and_after_a_change_of_theme(app):
+    """A widget out of sight costs nothing: follow() sets its icons when it is
+    first shown, and from then on after every change of theme."""
+    calls = []
+    window = Window(calls)
+    icons.follow(window, window.set_icons)
+    theme.apply(app, "dark")                       # not shown yet: nothing drawn
+    assert calls == [] and window.windowIcon().isNull()
+    window.show()
+    app.processEvents()
+    assert calls == ["dark"] and ink(window.windowIcon()) == theme.COLORS["dark"]["TEXT"]
+    window.hide()
+    window.show()                                  # the first show only
+    assert calls == ["dark"]
+    theme.apply(app, "light")
+    assert calls == ["dark", "light"]
+    shown = Window([])
+    shown.show()
+    icons.follow(shown, shown.set_icons)           # shown already: at once
+    assert shown.calls == ["light"]
+    window.close()
+    shown.close()
+
+
+@pytest.fixture(scope="module")
+def window(qapp):
+    """The window at the small laptop's size on a preset, its controls shown:
+    the structure canvas, the k-space tab, a result's view with its status
+    row, a form."""
+    from guiqula.ui.app import build_main_window
+    theme.apply(qapp, "light")
+    window = build_main_window()
+    window.resize(1200, 800)
+    window.show()
+    window.start_session("honeycomb_zeeman_rashba", warm=False)
+    yield window
+    window.close()
+
+
+def shown_everything(window, qtbot):
+    from PySide6.QtWidgets import QApplication
+    from guiqula.ui.mainwindow import KSPACE_TAB
+    qtbot.waitUntil(lambda: window.session.build_is_current("s1"), timeout=120_000)
+    window.viewport.setCurrentIndex(KSPACE_TAB)
+    window.select("t1")
+    window.show_result("c1")
+    view = window.plots["c1"]
+    view.set_status("stale")                      # the status row, shown
+    for _ in range(5):
+        QApplication.processEvents()
+    return view
+
+
+# the controls package P8 names (PLAN.md section 7), by objectName, with their icon
+WINDOW_ICONS = {"newSystemButton": "new", "addButton": "add", "runButton": "run",
+                "cancelButton": "cancel", "autoRerunButton": "follow", "logToggle": "log"}
+BAR_ICONS = {"{key}Fit": "fit", "{key}Pan": "pan", "{key}Zoom": "zoom_in",
+             "{key}SaveImage": "image"}
+STRUCTURE_ICONS = {"tool_pick": "pick", "tool_box": "box", "tool_lasso": "lasso",
+                   "selectSitesButton": "select", "regionFromSelectionButton": "region",
+                   "calculateOnSelectionButton": "calculation",
+                   "removeSelectedButton": "remove", "canvasViewLabel": "show",
+                   "view3dBox": "3d", "paintTool": "paint", "structureSceneReset": "fit",
+                   "structureSceneView": "view", "structureSceneSave": "image"}
+PLOT_ICONS = {"fit_c1": "fit", "pan_c1": "pan", "zoom_c1": "zoom_in", "saveImage_c1": "image",
+              "pickTool_c1": "pick", "boxTool_c1": "box", "lassoTool_c1": "lasso",
+              "overlay_c1": "overlay", "export_c1": "export", "saveData_c1": "data",
+              "detach_c1": "detach", "plotRun_c1": "run", "plotCancel_c1": "cancel"}
+
+
+def drawn(widget):
+    """The icon a control shows (a label's pixmap as an icon)."""
+    from PySide6.QtWidgets import QLabel
+    if isinstance(widget, QLabel):
+        return QIcon(widget.pixmap())
+    return widget.icon()
+
+
+def same(widget, name, color="TEXT"):
+    """Whether a control shows the icon of a name: a button's ink, a label's
+    pixmap (drawn at 16 px)."""
+    from PySide6.QtWidgets import QLabel
+    if isinstance(widget, QLabel):
+        expected = icons.icon(name, color).pixmap(icons.size(), widget.devicePixelRatioF())
+        return widget.pixmap().toImage() == expected.toImage()
+    return ink(widget.icon()) == ink(icons.icon(name, color))
+
+
+def test_every_control_the_package_names_carries_an_icon(window, qtbot):
+    from PySide6.QtWidgets import QWidget
+    from guiqula.ui import outliner as tree
+    view = shown_everything(window, qtbot)
+    names = dict(WINDOW_ICONS)
+    for key in ("structure", "kspace"):
+        names.update({name.format(key=key): icon for name, icon in BAR_ICONS.items()})
+    names.update(STRUCTURE_ICONS)
+    names.update(PLOT_ICONS)
+    missing = [name for name in names
+               if window.findChild(QWidget, name) is None or drawn(
+                   window.findChild(QWidget, name)).isNull()]
+    assert not missing
+    for name, icon in names.items():               # the icon named, in the theme's text
+        assert same(window.findChild(QWidget, name), icon), name
+    # the text of the bars' controls stays, as the start of their tooltip
+    fit = window.findChild(QWidget, "structureFit")
+    assert fit.text() == "Fit" and fit.toolTip().startswith("Fit: ")
+    assert fit.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonIconOnly
+    for name in ("newSystemButton", "addButton", "runButton", "logToggle"):   # beside
+        assert window.findChild(QWidget, name).toolButtonStyle() == \
+            Qt.ToolButtonStyle.ToolButtonTextBesideIcon, name
+    assert window.cancel_button.toolTip().startswith("Cancel: ") and \
+        window.auto_rerun_button.toolTip().startswith("Follow: ")
+    assert same(view.status.mark, "stale")                     # the status row's mark
+    assert view.status.text.full.startswith(marks.STALE) and \
+        not view.status.text.text().startswith(marks.STALE)    # drawn as the icon beside
+    view.set_status("done")
+    form = window.properties.form                  # t1's form and its ?
+    assert ink(form.help_button.icon()) == ink(icons.icon("help"))
+    tabs = window.viewport
+    assert not tabs.tabIcon(0).isNull() and not tabs.tabIcon(1).isNull()
+    # the outliner: the kind of each row, and its marks drawn as icons
+    kinds = {item_id: window.outliner.item(item_id).data(0, tree.KIND_ROLE)
+             for item_id in ("s1", "s1/base", "op1", "t1", "s1/meanfield", "c1",
+                             "s1/geometry")}
+    assert kinds == {"s1": "structure", "s1/base": "lattice", "op1": "op", "t1": "term",
+                     "s1/meanfield": "meanfield", "c1": "calculation", "s1/geometry": None}
+    assert tree.status_parts(f"{marks.DONE} 1") == [("done", ""), (None, "1")]
+    assert tree.status_parts(marks.FAILED, "invalid") == [("invalid", "")]
+    assert tree.status_parts(marks.FAILED, "failed") == [("failed", "")]
+    assert tree.status_parts("70%", "running") == [("running", "70%")]
+    assert tree.status_parts(f"m {marks.LOCKED}") == [(None, "m"), ("locked", "")]
+    assert tree.status_parts("spinful") == [(None, "spinful")]
+
+
+def test_the_menus_get_their_icons_when_they_first_open(window):
+    from PySide6.QtWidgets import QApplication, QMenu
+    menu = next(m for m in window.findChildren(QMenu) if m.title() == "&File")
+    new = next(a for a in menu.actions() if a.text() == "&New")
+    menu.popup(window.mapToGlobal(window.rect().center()))
+    QApplication.processEvents()
+    menu.hide()
+    assert ink(new.icon()) == ink(icons.icon("new"))
+
+
+def test_the_icons_change_with_the_theme(window, qtbot, qapp):
+    shown_everything(window, qtbot)
+    controls = [window.run_button, window.structure.bar.fit_button, window.plots["c1"].export,
+                window.properties.form.help_button]
+    try:
+        for name in THEMES:
+            window.set_theme(name)
+            for control in controls:
+                assert ink(control.icon()) == theme.COLORS[name]["TEXT"], control.objectName()
+            assert ink(window.run_button.icon(), QIcon.Mode.Disabled) == \
+                theme.COLORS[name]["DISABLED"]
+    finally:
+        window.set_theme("light")
+
+
+def test_the_start_page_and_its_buttons(qapp):
+    from guiqula.ui.app import build_main_window
+    theme.apply(qapp, "light")
+    window = build_main_window()
+    window.show()
+    qapp.processEvents()
+    page = window.start_page
+    assert ink(page.open_button.icon()) == ink(icons.icon("open"))
+    assert ink(page.search_icon.icon()) == ink(icons.icon("search"))
+    assert "+ of the Hamiltonian row" in page.footer.text()       # not "in the workspace"
+    window.close()

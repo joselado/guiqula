@@ -78,7 +78,7 @@ from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QMenu, QProgressBar,
 
 from guiqula.core import picks as pick_tools
 from guiqula.core.results import PLOT_KINDS as KINDS  # noqa: F401 (the kinds drawn here)
-from guiqula.ui import shortcuts
+from guiqula.ui import icons, shortcuts
 from guiqula.ui import structure as structure_tools
 from guiqula.ui import theme
 from guiqula.ui.canvas_navigation import CanvasNavigation, bind_keys
@@ -95,6 +95,11 @@ OVERLAY_MODES = ("overlay", "difference")
 # what the status row above a plot says (StatusRow); a result that is current, or that
 # was never computed (the caption says so), has no row
 ROW_STATES = ("stale", "queued", "running", "failed")
+MARK_ICONS = {"stale": "stale", "queued": "running", "running": "running", "failed": "failed"}
+# the Detach button's tooltip, attached (False) and detached (True): its icon alone shows
+DETACH_TIPS = {False: "Detach: show this result in a window of its own, to compare it with "
+                      "another; Attach puts it back",
+               True: "Attach: put this result back in its tab of the viewport"}
 
 
 def _lines(ax, result):
@@ -381,16 +386,20 @@ class _Elided(QLabel):
     def __init__(self):
         super().__init__()
         self.full = ""
+        self.shown = ""
         self.setMinimumWidth(0)
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
 
-    def set_full(self, text):
+    def set_full(self, text, shown=None):
+        """The text (and the tooltip); shown: what the line shows of it, when
+        that is less (the status row's mark, drawn as an icon beside)."""
         self.full = text
+        self.shown = text if shown is None else shown
         self.setToolTip(text)
         self._elide()
 
     def _elide(self):
-        line = self.full.splitlines()[0] if self.full else ""
+        line = self.shown.splitlines()[0] if self.shown else ""
         self.setText(self.fontMetrics().elidedText(line, Qt.TextElideMode.ElideRight,
                                                    max(self.contentsRect().width(), 0)))
 
@@ -412,6 +421,9 @@ class StatusRow(QFrame):
     def __init__(self, suffix="", parent=None):
         super().__init__(parent)
         self.setObjectName(f"plotStatus{suffix}")
+        self.mark = QLabel()                 # the state's mark, as an icon (ui/icons.py)
+        self.mark.setObjectName(f"plotStatusMark{suffix}")
+        self.mark.setFixedSize(icons.size())
         self.text = _Elided()
         self.text.setObjectName(f"plotStatusText{suffix}")
         self.progress = QProgressBar()
@@ -432,14 +444,37 @@ class StatusRow(QFrame):
         self.cancel.setToolTip("stop the job computing this result (its worker is restarted; "
                                f"{shortcuts.text('cancel')} stops the selected calculation's)")
         self.cancel.clicked.connect(lambda checked=False: self.cancel_requested.emit())
+        for button in (self.run, self.cancel):
+            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         row = QHBoxLayout(self)
         row.setContentsMargins(8, 2, 4, 2)
+        row.addWidget(self.mark)
         row.addWidget(self.text, 1)
         row.addWidget(self.progress)
         row.addWidget(self.run)
         row.addWidget(self.cancel)
         self.state = "done"
         self.hide()
+        icons.follow(self, self._set_icons)
+
+    def _set_icons(self):
+        """The icons of Run again and Cancel and of the state's mark, in the
+        colours of the active theme (icons.follow: at the row's first show,
+        and after every change of theme)."""
+        self.run.setIcon(icons.icon("run"))
+        self.cancel.setIcon(icons.icon("cancel"))
+        for button in (self.run, self.cancel):
+            button.setIconSize(icons.size())
+        self._set_mark()
+
+    def _set_mark(self):
+        name = MARK_ICONS.get(self.state)
+        if name is None:
+            self.mark.clear()
+            return
+        color = "ERROR" if self.state in ERROR_STATES else "TEXT"
+        self.mark.setPixmap(icons.icon(name, color).pixmap(icons.size(),
+                                                           self.devicePixelRatioF()))
 
     def show_state(self, state, progress=None, message=""):
         """Show a state of the result (ROW_STATES; any other hides the row):
@@ -457,7 +492,10 @@ class StatusRow(QFrame):
             text = mark("running") + (f": {message}" if message else "")
         else:
             text = f"{mark('failed')} failed: {message or 'no message'}"
-        self.text.set_full(text)
+        sign = mark(state)                  # drawn as the icon beside, not in the line
+        self.text.set_full(text, text[len(sign):].lstrip()
+                           if state in ("stale", "failed") and text.startswith(sign) else text)
+        self._set_mark()
         running = state in ("queued", "running")
         if running and progress:
             self.progress.setRange(0, 100)
@@ -563,7 +601,7 @@ class PlotView(QWidget):
             button.setObjectName(f"{tool}Tool{suffix}")
             button.setToolTip(tip)
             button.toggled.connect(lambda on, t=tool: self._tool_toggled(t, on))
-            self.bar.add("picks", button)
+            self.bar.add("picks", button, tool)
             self.pick_tools[tool] = button
         self.overlay = QToolButton()
         self.overlay.setText("Overlay")
@@ -589,11 +627,11 @@ class PlotView(QWidget):
         self.detach = QToolButton()
         self.detach.setText("Detach")
         self.detach.setObjectName(f"detach{suffix}")
-        self.detach.setToolTip("show this result in a window of its own, to compare it with "
-                               "another; Attach puts it back")
+        self.detach.setToolTip(DETACH_TIPS[False])
         self.detach.clicked.connect(lambda: self.detach_requested.emit(self.calc_id))
-        for widget in (self.overlay, self.export, self.save_data, self.detach):
-            self.bar.add("result", widget)
+        for widget, icon in ((self.overlay, "overlay"), (self.export, "export"),
+                             (self.save_data, "data"), (self.detach, "detach")):
+            self.bar.add("result", widget, icon)
         self.status = StatusRow(suffix)
         self.status.run_requested.connect(lambda: self.run_requested.emit(self.calc_id))
         self.status.cancel_requested.connect(lambda: self.cancel_requested.emit(self.calc_id))
@@ -773,6 +811,7 @@ class PlotView(QWidget):
 
     def set_detached(self, detached):
         self.detach.setText("Attach" if detached else "Detach")
+        self.detach.setToolTip(DETACH_TIPS[bool(detached)])
 
     # ---- the readout
     def point_near(self, x_pixels, y_pixels, radius=READOUT_PIXELS):

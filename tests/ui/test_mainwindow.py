@@ -31,11 +31,16 @@ def test_main_window_builds_without_workers(qtbot, shot):
                        (QToolBar, "structureToolbar"), (QToolBar, "runToolbar"),
                        (QWidget, "kspaceBar"), (QStackedWidget, "centralStack"),
                        (QWidget, "startPage"), (QLineEdit, "startSearch"),
-                       (QAbstractButton, "startLattice_honeycomb_lattice"),
-                       (QAbstractButton, "startClassical_ising"),
-                       (QAbstractButton, "startPreset_haldane_chern"),
+                       (QAbstractButton, "startLattice_dimer"),   # the first in sight
                        (QToolButton, "startOpenButton")]:
         assert window.findChild(kind, name) is not None, name
+    # a card out of sight is made when it is asked for by name (the page makes the cards as
+    # they come into sight, so that the window shows sooner)
+    for kind, name in (("lattice", "honeycomb_lattice"), ("classical", "ising"),
+                       ("preset", "haldane_chern")):
+        card = window.start_page.card(kind, name)
+        assert isinstance(card, QAbstractButton) and window.findChild(
+            QAbstractButton, card.objectName()) is card
     # without a session the start page stands in the viewport's place (PLAN.md phase 8, P1)
     assert window.central_stack.currentWidget() is window.start_page
     assert window.start_page.isVisible() and not window.viewport.isVisible()

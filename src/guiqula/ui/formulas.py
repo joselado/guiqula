@@ -20,10 +20,12 @@ class FormulaError(ValueError):
     """mathtext cannot parse the formula."""
 
 
-def png(tex, color=None, dpi=DPI):
+def png(tex, color=None, dpi=None):
     """PNG bytes of a formula (without the $ delimiters), transparent, in
-    the text colour of the active theme unless a colour is given."""
-    return _png(tex, color or theme.TEXT, dpi)
+    the text colour of the active theme unless a colour is given, at DPI
+    times the interface text's scale unless a resolution is given (large
+    text, large formulas)."""
+    return _png(tex, color or theme.TEXT, dpi or int(round(DPI * theme.ui_scale())))
 
 
 @lru_cache(maxsize=512)
@@ -40,7 +42,7 @@ def _png(tex, color, dpi):
 def pixmap(tex, color=None, ratio=1.0):
     """A QPixmap of the formula, sharp on a screen with this pixel ratio."""
     image = QPixmap()
-    image.loadFromData(png(tex, color, int(round(DPI * ratio))), "PNG")
+    image.loadFromData(png(tex, color, int(round(DPI * ratio * theme.ui_scale()))), "PNG")
     image.setDevicePixelRatio(ratio)
     return image
 

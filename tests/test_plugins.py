@@ -238,3 +238,29 @@ def test_the_plugins_page_and_the_missing_entry_text(monkeypatch):
     page = entries.plugins_page(document)
     assert ("## Used by the open document\n\n- guiqula-q==3.1: **not installed**\n"
             "- guiqula-x==1.0: installed") in page
+
+
+def test_no_plugin_is_known_without_importlib_metadata(tmp_path, monkeypatch):
+    """The start of the window asks first whether any entry_points.txt on the
+    path names the group (5 ms where importlib.metadata takes 30): certain
+    only when none does and every path entry is a folder."""
+    from guiqula.registry import plugins
+    site = tmp_path / "site"
+    info = site / "other-1.0.dist-info"
+    info.mkdir(parents=True)
+    (info / "entry_points.txt").write_text("[console_scripts]\nother = other:main\n")
+    monkeypatch.setenv("GUIQULA_NO_PLUGINS", "")          # the suite turns them off
+    monkeypatch.setattr("sys.path", [str(site), str(tmp_path / "missing")])
+    assert plugins.none_declared() and plugins.discover() == []
+    install(site, "guiqula-example-plugin", "guiqula_example_plugin", source="")
+    assert not plugins.none_declared()                    # importlib.metadata then decides
+    assert [p.name for p in plugins.discover()] == ["guiqula_example_plugin"]
+    archive = tmp_path / "packages.zip"
+    archive.write_bytes(b"")
+    monkeypatch.setattr("sys.path", [str(archive)])       # a zip: not certain
+    assert not plugins.none_declared()
+    egg = tmp_path / "old.egg"
+    (egg / "EGG-INFO").mkdir(parents=True)
+    (egg / "EGG-INFO" / "entry_points.txt").write_text("[guiqula.plugins]\nold = old\n")
+    monkeypatch.setattr("sys.path", [str(egg)])
+    assert not plugins.none_declared()

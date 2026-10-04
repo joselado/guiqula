@@ -20,7 +20,7 @@ Constant-only parameters (the pyqula call behind them takes no function of
 position) have no such button.
 """
 from PySide6.QtCore import QEvent, Qt, Signal
-from PySide6.QtGui import QActionGroup, QFontDatabase
+from PySide6.QtGui import QActionGroup
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
                                QLineEdit, QMenu, QPlainTextEdit, QPushButton, QSpinBox,
                                QToolButton, QVBoxLayout, QWidget)
@@ -30,6 +30,7 @@ from guiqula.registry.params import (BoolParam, ChoiceParam, CodeParam, Conditio
                                      FieldParam, FloatParam, FloatVectorParam, IntParam,
                                      IntVectorParam, KPathParam, PositionsParam, SeedParam,
                                      TextParam, VectorFieldParam)
+from guiqula.ui import theme
 
 INT_LIMIT = 2**31 - 1
 NONE_TEXT = "(none)"
@@ -904,7 +905,7 @@ class CodeEditor(Editor):
         super().__init__(param, parent)
         self.text = QPlainTextEdit()
         self.text.setObjectName(f"code_{param.name}")
-        self.text.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+        self.text.setFont(theme.fixed_font(self.font().pointSizeF()))   # interface text
         self.text.setMinimumHeight(8 * self.text.fontMetrics().lineSpacing())
         self.text.setTabChangesFocus(False)
         self.text.installEventFilter(self)

@@ -40,7 +40,7 @@ from guiqula.core.document import DocumentError
 from guiqula.registry import base as registry
 from guiqula.registry import cost
 from guiqula.registry.params import FieldParam, VectorFieldParam
-from guiqula.ui import formulas, theme
+from guiqula.ui import formulas, icons, marks, theme
 from guiqula.ui.forms import format_number, make_editor, result_sources
 from guiqula.ui.outliner import system_of
 from guiqula.ui.sliders import range_from
@@ -140,6 +140,7 @@ class Form(QWidget):
         self.help_button.setToolTip("the help of this entry: pyqula's documentation of it (F1)")
         self.help_button.setVisible(bool(item_id))
         self.help_button.clicked.connect(lambda: panel.help_requested.emit(self.item_id))
+        icons.follow(self.help_button, self._set_icons)     # never, for the empty form
         self.doc = QLabel(doc, self)
         self.doc.setObjectName("formDoc")
         self.doc.setWordWrap(True)
@@ -163,6 +164,15 @@ class Form(QWidget):
     @property
     def session(self):
         return self.panel.session
+
+    def _set_icons(self):
+        """The ? as the help icon, and the run row's button (icons.follow:
+        at the first show of the ? and after every change of theme)."""
+        self.help_button.setIcon(icons.icon("help"))
+        self.help_button.setIconSize(icons.size())
+        update = getattr(self, "update_run", None)
+        if update is not None and self.session is not None:     # not after the session closed
+            update()
 
     def signature(self):
         return (self.item_id,)
@@ -723,7 +733,13 @@ class EntryForm(Form):
     def _status(self):
         session = self.session
         if self.family == "calculation":
-            return f"result: {session.status(self.item_id)}"
+            # the state the tab, the plot's status row and the outliner read (ui/marks.py)
+            state, _ = marks.calculation_state(session, self.item_id)
+            job = session.calc_jobs.get(self.item_id)
+            if state == "failed" and job is not None and job.error:
+                line = next((line for line in str(job.error).splitlines() if line.strip()), "")
+                return f"result: failed, {line}"
+            return f"result: {state}"
         try:
             stage = session.plan_system(self.system_id).stage(self.item_id)
         except (KeyError, DocumentError):
@@ -753,17 +769,19 @@ class EntryForm(Form):
         self.panel.regions_requested.emit(self.system_id, where)
 
     def _add_run_row(self):
-        """A calculation's form ends with its estimate and a button, formRun,
+        """A calculation's form has its estimate and a button, formRun,
         which reads Run, Run again when the result is stale and Cancel while
-        it runs (PLAN.md phase 8, package P4). Run is the window's run
-        action, through the cost guard, and Cancel the session's cancel; the
-        window calls update_run() as the Document, the builds and the jobs
-        change."""
+        it runs (PLAN.md phase 8, package P4), in a row (run_row) that the
+        panel shows under the form, so that it stays in sight however long
+        the form is (package P8). Run is the window's run action, through
+        the cost guard, and Cancel the session's cancel; the window calls
+        update_run() as the Document, the builds and the jobs change."""
         if self.family != "calculation":
             return
         from guiqula.ui import marks, shortcuts
         row = QWidget(self)
         row.setObjectName("formRunRow")
+        row.hide()                               # until the panel puts it in its footer
         line = QHBoxLayout(row)
         line.setContentsMargins(0, 0, 0, 0)
         estimate = QLabel(row)
@@ -771,13 +789,14 @@ class EntryForm(Form):
         estimate.setWordWrap(True)
         button = QPushButton(row)
         button.setObjectName("formRun")
+        button.setIconSize(icons.size())
         line.addWidget(estimate, 1)
         line.addWidget(button)
-        self.layout().insertWidget(self.layout().count() - 2, row)
-        self.run_button, self.run_estimate = button, estimate
+        self.run_row, self.run_button, self.run_estimate = row, button, estimate
 
         def running():
-            return self.session.status(self.item_id) in ("queued", "running")
+            return marks.calculation_state(self.session, self.item_id)[0] in ("queued",
+                                                                              "running")
 
         def update():
             session, calc = self.session, self.item_id
@@ -786,12 +805,14 @@ class EntryForm(Form):
             except (DocumentError, KeyError):    # removed: the form goes with the refresh
                 return
             self.update_reports()                # its result line: queued, running, done
-            state = session.status(calc)
+            # the state the tab, the plot's status row and the outliner read (ui/marks.py)
+            state, progress = marks.calculation_state(session, calc)
             if state in ("queued", "running"):
-                job = session.calc_jobs.get(calc)
                 text = "queued, waiting for a worker" if state == "queued" else \
-                    f"running, {marks.mark('running', job.progress if job else None)}"
+                    f"running, {marks.mark('running', progress)}" if progress else \
+                    "running in a worker, no progress reported yet"
                 button.setText("Cancel")
+                button.setIcon(icons.icon("cancel"))
                 button.setToolTip(("take this job out of the queue" if state == "queued" else
                                    "stop this job; its worker is restarted")
                                   + f" ({shortcuts.text('cancel')})")
@@ -809,6 +830,7 @@ class EntryForm(Form):
                         (" with the mean field" if cost_of["meanfield"] else "") + \
                         (", so Run asks first" if cost_of["seconds"] > cost.SLOW else "")
                 button.setText("Run again" if state == "stale" else "Run")
+                button.setIcon(icons.icon("run"))
                 button.setToolTip(
                     ("the model changed since this was computed: compute it again"
                      if state == "stale" else "compute it in a worker")
@@ -1091,7 +1113,11 @@ class ModelForm(Form):
                 editor.set_value(model.params[name])
 
 
-class PropertiesPanel(QScrollArea):
+class PropertiesPanel(QWidget):
+    """The Properties panel: the form of the selected item in a scrolled
+    area and, under it, the footer, where a calculation's form puts its
+    estimate and its Run (the form's run_row), so that Run stays in sight
+    however long the form is (PLAN.md phase 8, package P8)."""
     preview = Signal(str, str)        # entry (or <system>/meanfield), parameter name
     help_requested = Signal(str)      # the ? of a form: the item whose help to show
     regions_requested = Signal(str, object)   # a term's region link: system, global QPoint
@@ -1099,8 +1125,22 @@ class PropertiesPanel(QScrollArea):
     def __init__(self, run, parent=None):
         super().__init__(parent)
         self.setObjectName("properties")
-        self.setWidgetResizable(True)
         self.setMinimumWidth(280)
+        self.scroll = QScrollArea()
+        self.scroll.setObjectName("propertiesScroll")
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.footer = QFrame()
+        self.footer.setObjectName("propertiesFooter")
+        self.footer.setFrameShape(QFrame.Shape.NoFrame)
+        line = QVBoxLayout(self.footer)
+        line.setContentsMargins(9, 4, 9, 6)
+        self.footer.hide()                         # shown with a run row
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(self.scroll, 1)
+        layout.addWidget(self.footer)
         self.run = run
         self.session = None
         self.item_id = ""
@@ -1108,11 +1148,16 @@ class PropertiesPanel(QScrollArea):
         self._signature = None
         self._set_form(EmptyForm(self))
 
+    def verticalScrollBar(self):
+        """The scroll bar of the form (shown when it is taller than the panel)."""
+        return self.scroll.verticalScrollBar()
+
     def _set_form(self, form):
         """Replace the form; the old one is deleted later, since this may
-        run inside a signal of one of its own editors."""
+        run inside a signal of one of its own editors. A form's run_row goes
+        in the footer."""
         shown = self.form
-        old = self.takeWidget()
+        old = self.scroll.takeWidget()
         if old is not None:
             old.hide()
             old.deleteLater()
@@ -1123,7 +1168,19 @@ class PropertiesPanel(QScrollArea):
             form.deleteLater()
             return
         self.form = form
-        self.setWidget(form)
+        footer = self.footer.layout()
+        while footer.count():
+            row = footer.takeAt(0).widget()
+            if row is not None:
+                row.hide()
+                row.setParent(None)         # gone from findChild at once
+                row.deleteLater()
+        row = getattr(form, "run_row", None)
+        if row is not None:
+            footer.addWidget(row)
+            row.show()
+        self.footer.setVisible(row is not None)
+        self.scroll.setWidget(form)
 
     def _make(self, item_id):
         document = self.session.document

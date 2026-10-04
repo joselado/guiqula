@@ -40,6 +40,8 @@ from guiqula.ui import theme
 RENDERERS = ("matplotlib", "pyvista")
 GLYPH_LIMIT = 4000        # above this many sites they are drawn as points, not spheres
 HINT = "middle drag: orbit · shift+middle: pan · ctrl+middle: zoom · wheel: zoom · numpad: views"
+VIEW_TIP = ("the views of the numpad, the projection and framing (the view shown is "
+            "Blender's name for it)")
 HELP = ("as in Blender: the middle button (or alt and the left button) orbits, with shift it "
         "pans and with ctrl it zooms; the wheel zooms, ctrl+wheel and shift+wheel pan; numpad "
         "1, 3 and 7 give the front, right and top views (ctrl: the opposite side), 4, 6, 8 and "
@@ -547,8 +549,15 @@ class _Hint(QLabel):
         self.setMinimumWidth(0)
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
 
+    def set_full(self, text):
+        self.full = text
+        self._elide()
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self._elide()
+
+    def _elide(self):
         self.setText(self.fontMetrics().elidedText(self.full, Qt.TextElideMode.ElideRight,
                                                    self.width()))
 
@@ -576,8 +585,7 @@ class SceneView(QWidget):
         self.view_button = QToolButton()
         self.view_button.setObjectName(f"{name}View")
         self.view_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        self.view_button.setToolTip("the views of the numpad, the projection and framing "
-                                    "(the view shown is Blender's name for it)")
+        self.view_button.setToolTip(VIEW_TIP)
         self.view_menu = QMenu(self.view_button)
         self.view_menu.setObjectName(f"{name}ViewMenu")
         self.view_actions = {}
@@ -604,8 +612,6 @@ class SceneView(QWidget):
             self.view_menu.addAction(action)
             self.view_actions[key] = action
         self.view_button.setMenu(self.view_menu)
-        self.view_button.setMinimumWidth(      # the longest name, and the menu arrow
-            self.view_button.fontMetrics().horizontalAdvance("View: Bottom Orthographic") + 36)
         self.save = QToolButton()
         self.save.setText("Save image")
         self.save.setObjectName(f"{name}Save")
@@ -633,8 +639,15 @@ class SceneView(QWidget):
         self._show_view()
 
     def _show_view(self):
+        """The view's name, Blender's (User Perspective, Top Orthographic...):
+        the View button's text, which its icon stands for in the bar, and
+        its tooltip, and the start of the line over the scene, where
+        Blender writes it in the corner of its viewport."""
         view = self.canvas.view
-        self.view_button.setText(f"View: {view.description()}")
+        text = f"View: {view.description()}"
+        self.view_button.setText(text)
+        self.view_button.setToolTip(f"{text}; {VIEW_TIP}")
+        self.hint.set_full(f"{view.description()} · {HINT}")
         self.view_actions["orthographic"].setChecked(view.ortho)
 
     def show_scene(self, build, keep=False, fit=True, **overlays):

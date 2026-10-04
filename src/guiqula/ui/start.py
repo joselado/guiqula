@@ -21,13 +21,13 @@ import re
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPalette, QPen, QPixmap
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QPainter, QPalette, QPen, QPixmap
 from PySide6.QtWidgets import (QAbstractButton, QFrame, QHBoxLayout, QLabel, QLayout,
                                QLineEdit, QScrollArea, QSizePolicy, QToolButton, QVBoxLayout,
                                QWidget)
 
 from guiqula.io import project
-from guiqula.ui import shortcuts
+from guiqula.ui import icons, shortcuts
 from guiqula.ui.palette import grouped
 
 THUMBNAILS = Path(__file__).resolve().parents[1] / "resources" / "thumbnails"
@@ -36,6 +36,7 @@ PREFIXES = {"lattice": "startLattice", "classical": "startClassical",
             "preset": "startPreset", "recent": "startRecent"}
 PICTURE = QSize(160, 120)       # the picture of a card, as tools/make_thumbnails.py draws it
 PAD = 6                         # inside a card, around its picture and text
+CARD = QSize(PICTURE.width() + 2 * PAD, 0)      # the width of a card (Card.sizeHint)
 SPACING = 10                    # between cards
 # lines of a card's text: the title, and the smaller lines below it, which hold the teaching
 # mark and the first sentence (and whatever line a one-line title leaves)
@@ -43,9 +44,9 @@ LINES = {"lattice": (2, 0), "classical": (2, 0), "preset": (2, 4)}
 RECENT_SHOWN = 3                # recent files in sight until Show all
 TEACHING = "teaching, some parameters locked"
 CLASSICAL_GROUP = "Classical"
-FOOTER = ("Then add terms in the Hamiltonian workspace and a calculation in Calculate; "
-          "Run ({run}) computes it, {help} explains any entry. "
-          "<a href=\"guide\">guiqula's guide</a>")
+FOOTER = ("Then add terms with the + of the Hamiltonian row in the outliner, and a "
+          "calculation with the + of Calculations; Run ({run}) computes it, {help} explains "
+          "any entry. <a href=\"guide\">guiqula's guide</a>")
 
 
 def thumbnail(kind, name):
@@ -79,6 +80,11 @@ def presets():
     teaching ones first, then the examples, each by title."""
     return sorted((preset_info(name) for name in project.presets()),
                   key=lambda info: (not info["teaching"], info["title"].lower()))
+
+
+def card_search(name, title, sentence="", tag="", search=""):
+    """The text the filter reads of a card."""
+    return " ".join([name, title, sentence, tag, search]).lower()
 
 
 def matches(words, text):
@@ -123,7 +129,7 @@ class Card(QAbstractButton):
         super().__init__(parent)
         self.kind, self.name, self.title, self.sentence, self.tag = kind, name, title, \
             sentence, tag
-        self.search = " ".join([name, title, sentence, tag, search]).lower()
+        self.search = card_search(name, title, sentence, tag, search)
         self.picture = None
         self.picture_path = thumbnail(kind, name) if kind in FOLDERS else None
         self.deferred = False          # the start page reads the pictures after its first paint
@@ -417,6 +423,18 @@ class Heading(Title):
     breaks = True
 
 
+class Slot:
+    """A card of a band, made when it comes into sight (Band.add_later):
+    what the filter reads (kind, name, search, group) and make(), which
+    returns the card; card is None until it is made."""
+    __slots__ = ("kind", "name", "search", "group", "make", "card")
+
+    def __init__(self, kind, name, search, group, make):
+        self.kind, self.name, self.search, self.group, self.make = kind, str(name), search, \
+            group, make
+        self.card = None
+
+
 class Band(QWidget):
     """A band of the page: a heading with its Show all toggle, the cards,
     and a line for when the filter leaves none. Until Show all (or while
@@ -426,7 +444,8 @@ class Band(QWidget):
         super().__init__(parent)
         self.setObjectName(f"startBand_{key}")
         self.key, self.rows, self.noun = key, rows, noun
-        self.cards, self.headings = [], {}       # group -> Heading
+        self.slots, self.headings = [], {}       # [Slot] in the band's order; group -> Heading
+        self.order = []                          # the slots and the headings, in order
         self.expanded = False
         self.words = []
         self.heading = heading = Title(title, grow=2)
@@ -457,32 +476,83 @@ class Band(QWidget):
         layout.addLayout(self.flow)
         layout.addWidget(self.empty)
 
+    @property
+    def cards(self):
+        """Every card of the band, in its order, each made if it was not
+        yet (tests, drivers); the page itself reads made() and the slots."""
+        return [self.make(slot) for slot in self.slots]
+
+    def made(self):
+        """The cards made so far, in the band's order."""
+        return [slot.card for slot in self.slots if slot.card is not None]
+
     def set_empty(self, none, unmatched):
         """What the band says when it has no card at all, and when the
         filter leaves none of its cards."""
         self.empty_texts = (none, unmatched)
-        self.empty.setText(unmatched if self.cards else none)
+        self.empty.setText(unmatched if self.slots else none)
 
     def add_heading(self, group):
         heading = Heading(group, muted=True)
         heading.setObjectName(f"startGroup_{group}")
+        heading.hide()                 # shown with the band whole (update_cards)
         self.headings[group] = heading
+        self.order.append(heading)
         self.flow.addWidget(heading)
         return heading
 
     def add(self, card, group=None):
+        """A card made already (a recent file's row)."""
+        slot = Slot(card.kind, card.name, card.search, group, None)
+        slot.card = card
         card.group = group
-        self.cards.append(card)
+        self.slots.append(slot)
+        self.order.append(slot)
         self.flow.addWidget(card)
         return card
 
+    def add_later(self, kind, name, search, group, make):
+        """A card made when it first comes into sight (or is asked for by
+        name): make() returns it. At start a band shows one row, so the
+        other cards cost nothing until Show all or the filter."""
+        slot = Slot(kind, name, search, group, make)
+        self.slots.append(slot)
+        self.order.append(slot)
+        return slot
+
+    def make(self, slot):
+        """The card of a slot, made and put in its place in the flow."""
+        if slot.card is None:
+            card = slot.make()
+            card.group = slot.group
+            card.hide()                # update_cards shows it
+            place = 0
+            for entry in self.order:
+                if entry is slot:
+                    break
+                if not isinstance(entry, Slot) or entry.card is not None:
+                    place += 1
+            self.flow.addWidget(card)
+            self.flow.items.insert(place, self.flow.items.pop())
+            self.flow.invalidate()
+            slot.card = card
+        return slot.card
+
+    def find(self, kind, name):
+        """The card of a kind and a name, made if need be, or None."""
+        for slot in self.slots:
+            if slot.kind == kind and slot.name == str(name):
+                return self.make(slot)
+        return None
+
     def clear_cards(self):
-        for card in self.cards:
+        for card in self.made():
             self.flow.removeWidget(card)
             card.hide()
             card.setParent(None)       # gone from findChild now, its name free for another
             card.deleteLater()
-        self.cards = []
+        self.order = [entry for entry in self.order if not isinstance(entry, Slot)]
+        self.slots = []
 
     def set_expanded(self, expanded):
         self.expanded = bool(expanded)
@@ -492,33 +562,38 @@ class Band(QWidget):
         """How many cards are in sight while the band is folded."""
         if self.rows:
             return RECENT_SHOWN
-        if not self.cards:
+        if not self.slots:
             return 0
         width = self.width() if self.width() > 0 else 600
-        return self.flow.per_row(width, self.cards[0].sizeHint().width())
+        return self.flow.per_row(width, CARD.width())
 
     def filter(self, text):
         self.words = text.lower().split()
         self.update_cards()
 
     def update_cards(self):
-        matching = [card for card in self.cards if matches(self.words, card.search)]
+        """Show the cards in sight (made now if they were not) and hide the
+        others; returns the object names of the cards in sight."""
+        matching = [slot for slot in self.slots if matches(self.words, slot.search)]
         whole = self.expanded or bool(self.words)
         limit = len(matching) if whole else self.shown()
         visible = set(map(id, matching[:limit]))
-        for card in self.cards:
-            card.setVisible(id(card) in visible)
+        for slot in matching[:limit]:
+            self.make(slot)
+        for slot in self.slots:
+            if slot.card is not None:
+                slot.card.setVisible(id(slot) in visible)
         for group, heading in self.headings.items():
-            heading.setVisible(whole and any(id(c) in visible and c.group == group
-                                             for c in self.cards))
+            heading.setVisible(whole and any(id(s) in visible and s.group == group
+                                             for s in self.slots))
         folded = len(matching) > self.shown()
         self.more.setVisible(not self.words and (folded or self.expanded))
         self.more.setText("Show fewer" if self.expanded else f"Show all {len(matching)}")
         self.more.setToolTip("show only the first row" if self.expanded else
                              f"show the {len(matching)} {self.noun}")
-        self.empty.setText(self.empty_texts[1] if self.cards else self.empty_texts[0])
+        self.empty.setText(self.empty_texts[1] if self.slots else self.empty_texts[0])
         self.empty.setVisible(not matching)
-        return [card.objectName() for card in self.cards if id(card) in visible]
+        return [slot.card.objectName() for slot in self.slots if id(slot) in visible]
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -545,7 +620,15 @@ class StartPage(QWidget):
         super().__init__(parent)
         self.setObjectName("startPage")
         self._pictures_loaded = False
-        self.search = QLineEdit()
+        # made from the top down, each part in its place at once: with the application's
+        # style sheet, every new parent of a part styles its whole subtree again
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        top = QHBoxLayout()
+        top.setContentsMargins(16, 10, 16, 0)
+        layout.addLayout(top)
+        self.search = QLineEdit(self)
         self.search.setObjectName("startSearch")
         self.search.setPlaceholderText("Filter the lattices, examples and recent files")
         self.search.setToolTip("type to narrow every band: a lattice by its name or "
@@ -553,42 +636,58 @@ class StartPage(QWidget):
                                "by its name")
         self.search.setClearButtonEnabled(True)
         self.search.textChanged.connect(self.filter)
+        self.search_icon = self.search.addAction(QIcon(),
+                                                 QLineEdit.ActionPosition.LeadingPosition)
+        top.addWidget(self.search)
+        # made after the filter, which so comes first in the focus chain and has the focus
+        self.scroll = QScrollArea(self)
+        self.scroll.setObjectName("startScroll")
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        layout.addWidget(self.scroll, 1)
         content = QWidget()
         content.setObjectName("startContent")
+        self.scroll.setWidget(content)
+        column = QVBoxLayout(content)
+        column.setContentsMargins(16, 8, 16, 12)
+        column.setSpacing(14)
         self.lattices = Band("lattices", "Start from a lattice",
                              "a new system on a lattice: then shape it with geometry ops "
                              "(supercell, ribbon, island...) in the Geometry workspace",
-                             "lattices and classical systems, by dimension")
+                             "lattices and classical systems, by dimension", parent=content)
+        # the cards are made as they come into sight (Band.add_later): at start one row of
+        # each band, so the window shows sooner (tests/ui/test_startup.py)
         for spec in grouped("lattice"):
             if spec.group not in self.lattices.headings:
                 self.lattices.add_heading(spec.group)
-            self.lattices.add(Card("lattice", spec.kind, spec.label, tag=spec.group,
-                                   search=f"{spec.group} {spec.doc}",
-                                   tooltip=f"<b>{spec.label}</b> ({spec.group})<br>"
-                                           f"{spec.doc}<br>A click adds a system on it "
-                                           f"(New system)."), spec.group)
+            self.lattices.add_later("lattice", spec.kind, card_search(
+                spec.kind, spec.label, tag=spec.group, search=f"{spec.group} {spec.doc}"),
+                spec.group, lambda spec=spec: self._lattice_card(spec))
         if classical:
             self.lattices.add_heading(CLASSICAL_GROUP)
             for kind, label in classical.items():
-                self.lattices.add(Card("classical", kind, label, tag="classical",
-                                       search="classical",
-                                       tooltip=f"<b>{label}</b><br>A classical system on "
-                                               f"its usual lattice, in a supercell (New "
-                                               f"system > Classical systems)."),
-                                  CLASSICAL_GROUP)
+                self.lattices.add_later("classical", kind, card_search(
+                    kind, label, tag="classical", search="classical"), CLASSICAL_GROUP,
+                    lambda kind=kind, label=label: self._classical_card(kind, label))
         self.lattices.set_empty("No lattice is declared.", "No lattice matches the filter.")
         self.presets = Band("presets", "Open an example",
                             "documents shipped with guiqula, fully editable; the teaching "
-                            "ones lock what their exercise keeps fixed", "examples")
+                            "ones lock what their exercise keeps fixed", "examples",
+                            parent=content)
         for info in presets():
-            self.presets.add(preset_card(info))
+            self.presets.add_later("preset", info["name"], card_search(
+                info["name"], info["title"], info["sentence"],
+                TEACHING if info["teaching"] else "", info["description"]), None,
+                lambda info=info: self._preset_card(info))
         self.presets.set_empty("No example is shipped.", "No example matches the filter.")
         self.recent = Band("recent", "Recent files",
                            "the project files opened or saved last", "recent files",
-                           rows=True)
-        self.open_button = QToolButton()
+                           rows=True, parent=content)
+        self.open_button = QToolButton(self.recent)
         self.open_button.setObjectName("startOpenButton")
         self.open_button.setText("Open a project...")
+        self.open_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.open_button.setToolTip(f"open a .guiqula project or a JSON document "
                                     f"({shortcuts.text('open')})")
         self.open_button.clicked.connect(self.open_requested)
@@ -596,43 +695,54 @@ class StartPage(QWidget):
         self.recent.set_empty("Projects you save or open will be listed here.",
                               "No recent file matches the filter.")
         self.footer = QLabel(FOOTER.format(run=shortcuts.text("run"),
-                                           help=shortcuts.text("help")))
+                                           help=shortcuts.text("help")), content)
         self.footer.setObjectName("startFooter")
         self.footer.setWordWrap(True)
         self.footer.setToolTip("the guide opens in the Help panel")
         self.footer.setTextInteractionFlags(Qt.TextInteractionFlag.LinksAccessibleByMouse
                                             | Qt.TextInteractionFlag.LinksAccessibleByKeyboard)
         self.footer.linkActivated.connect(lambda link: self.guide_requested.emit())
-        for card in self.lattices.cards:
-            signal = self.lattice_chosen if card.kind == "lattice" else self.classical_chosen
-            card.clicked.connect(lambda checked=False, s=signal, k=card.name: s.emit(k))
-            card.deferred = True
-        for card in self.presets.cards:
-            card.clicked.connect(lambda checked=False, n=card.name: self.preset_chosen.emit(n))
-            card.deferred = True
-        column = QVBoxLayout(content)
-        column.setContentsMargins(16, 8, 16, 12)
-        column.setSpacing(14)
         for band in (self.lattices, self.presets, self.recent):
             band.update_cards()            # folded before the first layout: fewer to place
             column.addWidget(band)
         column.addWidget(self.footer)
         column.addStretch(1)
-        self.scroll = QScrollArea()
-        self.scroll.setObjectName("startScroll")
-        self.scroll.setWidgetResizable(True)
-        self.scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.scroll.setWidget(content)
-        top = QHBoxLayout()
-        top.setContentsMargins(16, 10, 16, 0)
-        top.addWidget(self.search)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        layout.addLayout(top)
-        layout.addWidget(self.scroll, 1)
         self.set_recent([])
+        icons.follow(self, self._set_icons)
+
+    def _set_icons(self):
+        """The filter's search icon and Open a project's (icons.follow: at
+        the page's first show and after every change of theme)."""
+        self.search_icon.setIcon(icons.icon("search"))
+        self.open_button.setIcon(icons.icon("open"))
+        self.open_button.setIconSize(icons.size())
+
+    # ---- the cards, made as they come into sight
+    def _lattice_card(self, spec):
+        card = Card("lattice", spec.kind, spec.label, tag=spec.group,
+                    search=f"{spec.group} {spec.doc}",
+                    tooltip=f"<b>{spec.label}</b> ({spec.group})<br>{spec.doc}<br>A click "
+                            f"adds a system on it (New system).")
+        card.clicked.connect(lambda checked=False, k=spec.kind: self.lattice_chosen.emit(k))
+        return self._deferred(card)
+
+    def _classical_card(self, kind, label):
+        card = Card("classical", kind, label, tag="classical", search="classical",
+                    tooltip=f"<b>{label}</b><br>A classical system on its usual lattice, in "
+                            f"a supercell (New system > Classical systems).")
+        card.clicked.connect(lambda checked=False, k=kind: self.classical_chosen.emit(k))
+        return self._deferred(card)
+
+    def _preset_card(self, info):
+        card = preset_card(info)
+        card.clicked.connect(lambda checked=False, n=info["name"]: self.preset_chosen.emit(n))
+        return self._deferred(card)
+
+    def _deferred(self, card):
+        """Before the page's first paint a card waits for load_pictures; after
+        it, a card reads its picture as it comes into sight."""
+        card.deferred = not self._pictures_loaded
+        return card
 
     # ---- the bands
     def bands(self):
@@ -642,6 +752,10 @@ class StartPage(QWidget):
         """The card of a lattice, a classical system or a preset by its
         name, or the row of a recent file by its place (0: the newest)."""
         found = self.findChild(QAbstractButton, f"{PREFIXES[kind]}_{name}")
+        for band in self.bands():
+            if found is not None:
+                break
+            found = band.find(kind, name)
         if found is None:
             raise KeyError(f"no {kind} card {name!r}")
         return found
@@ -668,7 +782,7 @@ class StartPage(QWidget):
         return self.visible_cards()
 
     def visible_cards(self):
-        return [card.objectName() for band in self.bands() for card in band.cards
+        return [card.objectName() for band in self.bands() for card in band.made()
                 if not card.isHidden()]
 
     # ---- the pictures, after the first paint
@@ -679,12 +793,14 @@ class StartPage(QWidget):
             QTimer.singleShot(0, self.load_pictures)
 
     def load_pictures(self, every=False):
-        """Read the pictures of the cards in sight (of every card: every),
-        and let the others read theirs when they come into sight; returns
-        the cards read that have none."""
+        """Read the pictures of the cards in sight (of every card: every,
+        each made if it was not), and let the others read theirs when they
+        come into sight; returns the cards read that have none."""
         self._pictures_loaded = True
         missing = []
-        for card in self.lattices.cards + self.presets.cards:
+        cards = self.lattices.cards + self.presets.cards if every else \
+            self.lattices.made() + self.presets.made()
+        for card in cards:
             card.deferred = False
             if (every or not card.isHidden()) and not card.load_picture():
                 missing.append(card.objectName())

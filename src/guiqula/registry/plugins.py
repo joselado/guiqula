@@ -58,9 +58,49 @@ def directory():
     return env.user_config_dir() / "plugins"
 
 
+def none_declared():
+    """Whether certainly no installed distribution declares an entry point of
+    the group: no entry_points.txt of a .dist-info or an .egg-info folder (or
+    of an .egg's EGG-INFO) on a folder of sys.path names it. A quick look at
+    those files, about 5 ms for 430 distributions where importlib.metadata
+    takes 30 ms to build its objects, which the start of the window pays
+    (tests/ui/test_startup.py). False whenever the answer is not certain,
+    and discover() then asks importlib.metadata: a candidate was found, a
+    path entry is a file (a zip), or a finder other than the standard one
+    lists distributions of its own."""
+    from importlib.machinery import PathFinder
+    if any(finder is not PathFinder and hasattr(finder, "find_distributions")
+           for finder in sys.meta_path):
+        return False
+    needle = GROUP.encode()
+    for entry in sys.path:
+        root = entry or "."
+        try:
+            children = list(os.scandir(root))
+        except NotADirectoryError:
+            return False                         # a zip on the path
+        except OSError:                          # missing: importlib skips it too
+            if os.path.exists(root):
+                return False
+            continue
+        egg = root.lower().endswith(".egg")
+        for child in children:
+            low = child.name.lower()
+            if low.endswith((".dist-info", ".egg-info")) or (egg and low == "egg-info"):
+                try:
+                    with open(os.path.join(child.path, "entry_points.txt"), "rb") as file:
+                        if needle in file.read():
+                            return False
+                except FileNotFoundError:
+                    continue
+                except OSError:                  # unreadable: let importlib decide
+                    return False
+    return True
+
+
 def discover():
     """The entry points of the group, by name (none when disabled)."""
-    if disabled():
+    if disabled() or none_declared():
         return []
     try:
         points = importlib.metadata.entry_points(group=GROUP)

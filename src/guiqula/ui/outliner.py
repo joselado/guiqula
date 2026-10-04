@@ -42,25 +42,44 @@ status after the label when both fit, and under it, wrapped, when they do
 not, so that they are never cut either. Every row's tooltip is its full
 label and its state in words, with the messages (why an entry is invalid,
 why a job failed, what a warning means).
+
+Icons (package P8, ui/icons.py): a row's kind is the icon before its label
+(KIND_ROLE: a system, the lattice, an op, a region, a term, the mean
+field, a calculation, Python code), and the marks of the Status column
+are drawn as icons, failed and invalid in the error colour, stale and
+disabled dimmed; the text of the column keeps the Unicode of ui/marks.py,
+which the tooltips and the tests read, and the state of its leading mark
+(MARK_ROLE) tells the icon of a failed job from that of an invalid entry,
+which share their sign.
 """
 import math
 
 from PySide6.QtCore import QEvent, QRect, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import (QAction, QBrush, QColor, QFontMetrics, QFontMetricsF, QPalette,
-                           QRegion)
+from PySide6.QtGui import (QAction, QBrush, QColor, QFontMetrics, QFontMetricsF, QIcon,
+                           QPalette, QRegion)
 from PySide6.QtWidgets import (QAbstractItemView, QHeaderView, QInputDialog, QMenu, QStyle,
                                QStyledItemDelegate, QStyleOptionViewItem, QToolButton,
                                QTreeWidget, QTreeWidgetItem, QWidget)
 
 from guiqula.core import regions as region_tools
 from guiqula.registry import base as registry
-from guiqula.ui import marks, shortcuts, theme
+from guiqula.ui import icons, marks, shortcuts, theme
 from guiqula.ui.plots import scalar_rows
 
 ID_ROLE = Qt.ItemDataRole.UserRole
 ADD_ROLE = Qt.ItemDataRole.UserRole + 1      # the path of a section row's "+", in its status
 # a row whose status reads after or under its label, across both columns (in its column 0)
 DETAIL_ROLE = Qt.ItemDataRole.UserRole + 2
+KIND_ROLE = Qt.ItemDataRole.UserRole + 3     # the icon of what a row is (column 0)
+MARK_ROLE = Qt.ItemDataRole.UserRole + 4     # the state of a status's leading mark (column 1)
+# the marks of ui/marks.py drawn as icons (the sign ✗ is failed or invalid, by MARK_ROLE)
+MARK_ICONS = {marks.DONE: "done", marks.STALE: "stale", marks.DISABLED: "disabled",
+              marks.LOCKED: "locked"}
+MARK_COLORS = {"failed": "ERROR", "invalid": "ERROR", "stale": "DISABLED",
+               "disabled": "DISABLED"}
+ICON_GAP = 3                 # pixels between an icon of the Status column and its text
+ICON_ROW = 4                 # pixels a row is higher than its icon (every row: Fusion's)
+INDENT = 14                  # pixels of indentation per level of the tree
 MOVABLE = ("op", "term", "region", "calculation")
 # the rows of a system that carry a "+", and the name of their section in a path
 ADD_SECTIONS = {"geometry": "geometry", "regions": "regions", "hamiltonian": "hamiltonian",
@@ -237,6 +256,44 @@ def wrapped(font, text, width):
     return "\n".join(lines + ([line] if line else []))
 
 
+def status_parts(text, state=None):
+    """The status of a row as it is drawn: [(icon name or None, text)],
+    each mark of ui/marks.py an icon (state: MARK_ROLE, the state of the
+    leading mark), the rest text; a running job's progress follows its
+    icon."""
+    parts = []
+    for i, word in enumerate(text.split(" ") if text else []):
+        if word == marks.FAILED:
+            parts.append(("invalid" if state == "invalid" else "failed", ""))
+        elif word in MARK_ICONS:
+            parts.append((MARK_ICONS[word], ""))
+        elif i == 0 and state == "running":
+            parts.append(("running", "" if word == "running" else word))
+        elif parts and parts[-1][0] is None:
+            parts[-1] = (None, f"{parts[-1][1]} {word}")
+        else:
+            parts.append((None, word))
+    return parts
+
+
+def status_width(font, text, state=None):
+    """The pixels a status takes as it is drawn (status_parts): its texts,
+    an icon per mark, a space between two parts."""
+    parts = status_parts(text, state)
+    if not any(name for name, _ in parts):
+        return text_width(font, text)
+    space = QFontMetricsF(font).horizontalAdvance(" ")
+    width = 0.0
+    for i, (name, words) in enumerate(parts):
+        if i:
+            width += space
+        if name:
+            width += icons.SIZE + (ICON_GAP if words else 0)
+        if words:
+            width += QFontMetricsF(font).horizontalAdvance(words)
+    return math.ceil(width) + 1
+
+
 def add_room(height):
     """The pixels the "+" of a section row takes at the right of its status
     cell: the button is as wide as the row is high, plus 4."""
@@ -260,16 +317,62 @@ class AddCell(QWidget):
 
 
 class StatusDelegate(QStyledItemDelegate):
-    """The status column: the text of a row with a "+" stops short of it.
-    The column is as wide as its longest text (Outliner.status_width), so
-    this elision is a safety net that the tests check never cuts."""
+    """The status column: the marks drawn as icons (status_parts), and the
+    text of a row with a "+" stopping short of it. The column is as wide as
+    its longest status (Outliner.status_width), so this elision is a safety
+    net that the tests check never cuts."""
 
     def initStyleOption(self, option, index):
         super().initStyleOption(option, index)
-        if index.data(ADD_ROLE):
+        if index.data(ADD_ROLE) and not any(
+                name for name, _ in status_parts(option.text, index.data(MARK_ROLE))):
             room = add_room(option.rect.height()) + text_margin(option.widget or self.parent())
             option.text = option.fontMetrics.elidedText(
                 option.text, Qt.TextElideMode.ElideRight, max(0, option.rect.width() - room))
+
+    def paint(self, painter, option, index):
+        state = index.data(MARK_ROLE)
+        parts = status_parts(index.data() or "", state)
+        if not any(name for name, _ in parts):
+            super().paint(painter, option, index)
+            return
+        view = option.widget or self.parent()
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        opt.text = ""                        # the background and the focus, the parts below
+        style = view.style()
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, view)
+        selected = bool(opt.state & QStyle.StateFlag.State_Selected)
+        if selected:
+            color = opt.palette.color(QPalette.ColorRole.HighlightedText)
+        else:
+            brush = index.data(Qt.ItemDataRole.ForegroundRole)
+            color = brush.color() if isinstance(brush, QBrush) else \
+                opt.palette.color(QPalette.ColorRole.Text)
+        mode = QIcon.Mode.Selected if selected else QIcon.Mode.Normal
+        metrics = QFontMetricsF(opt.font)
+        rect = opt.rect
+        right = rect.right() - (add_room(rect.height()) if index.data(ADD_ROLE) else 0)
+        x = rect.left() + text_margin(view)
+        painter.save()
+        painter.setFont(opt.font)
+        painter.setPen(color)
+        for i, (name, words) in enumerate(parts):
+            if i:
+                x += metrics.horizontalAdvance(" ")
+            if name:
+                icon = icons.icon(name, MARK_COLORS.get(name, "TEXT"))
+                top = rect.top() + (rect.height() - icons.SIZE) // 2
+                icon.paint(painter, QRect(round(x), top, icons.SIZE, icons.SIZE),
+                           Qt.AlignmentFlag.AlignCenter, mode)
+                x += icons.SIZE + (ICON_GAP if words else 0)
+            if words:
+                room = max(0, int(right - x))
+                painter.drawText(QRect(round(x), rect.top(), room, rect.height()),
+                                 int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+                                 metrics.elidedText(words, Qt.TextElideMode.ElideRight, room))
+                x += metrics.horizontalAdvance(words)
+        painter.restore()
 
 
 class EntryDelegate(QStyledItemDelegate):
@@ -281,9 +384,19 @@ class EntryDelegate(QStyledItemDelegate):
         super().__init__(view)
         self.view = view
 
+    def initStyleOption(self, option, index):
+        """The row's kind as its icon (KIND_ROLE), in the active theme."""
+        super().initStyleOption(option, index)
+        name = index.data(KIND_ROLE)
+        if name:
+            option.icon = icons.icon(name)
+            option.decorationSize = icons.size()
+            option.features |= QStyleOptionViewItem.ViewItemFeature.HasDecoration
+
     def line_height(self, option, index):
-        """The height of the row's first line: a row of one line."""
-        return super().sizeHint(option, index).height()
+        """The height of the row's first line: a row of one line, as high
+        with an icon as without one (a section row has none)."""
+        return max(super().sizeHint(option, index).height(), icons.SIZE + ICON_ROW)
 
     def layout(self, option, index):
         """(rect of the first line, rect of the status, on one line) of a
@@ -313,6 +426,7 @@ class EntryDelegate(QStyledItemDelegate):
 
     def sizeHint(self, option, index):
         hint = super().sizeHint(option, index)
+        hint.setHeight(self.line_height(option, index))
         if not index.data(DETAIL_ROLE):
             return hint
         opt = QStyleOptionViewItem(option)
@@ -380,6 +494,9 @@ class Outliner(QTreeWidget):
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
         self.setUniformRowHeights(False)          # a detail row may read on two lines
+        # a level indents by INDENT rather than Fusion's 20 px, which gives the labels of a
+        # term (two levels down, after its check box and its icon) back the room of its icon
+        self.setIndentation(INDENT)
         self.setDragEnabled(True)
         self.setAcceptDrops(True)
         self.setDropIndicatorShown(True)
@@ -399,6 +516,7 @@ class Outliner(QTreeWidget):
         self.setItemDelegateForColumn(0, self._entry_delegate)
         self._status_delegate = StatusDelegate(self)
         self.setItemDelegateForColumn(1, self._status_delegate)
+        icons.follow(self, self._icons_changed)
         for text, shortcut, slot in (("Delete", "delete", self.delete_current),
                                      ("Rename", "rename", self.rename_current),
                                      ("Duplicate", "duplicate", self.duplicate_current),
@@ -407,6 +525,11 @@ class Outliner(QTreeWidget):
             action = shortcuts.bind(QAction(text, self), shortcut)
             action.triggered.connect(slot)
             self.addAction(action)
+
+    def _icons_changed(self):
+        """The rows' icons are drawn from ui/icons.py at paint time (the
+        delegates): after a change of theme they are drawn again."""
+        self.viewport().update()
 
     # ---- state
     def current_id(self):
@@ -455,11 +578,14 @@ class Outliner(QTreeWidget):
         finally:
             self.blockSignals(False)
 
-    def _add(self, parent, item_id, label, status="", details=(), movable=False):
-        """A row: what it is (label), its state (status), and the state and
-        the messages in words (details), which close its tooltip."""
+    def _add(self, parent, item_id, label, status="", details=(), movable=False, kind=None):
+        """A row: what it is (label, and kind, the name of its icon), its
+        state (status), and the state and the messages in words (details),
+        which close its tooltip."""
         item = QTreeWidgetItem(parent, [label, status]) if parent is not None \
             else QTreeWidgetItem([label, status])
+        if kind is not None:
+            item.setData(0, KIND_ROLE, kind)
         if parent is None:
             self.addTopLevelItem(item)
         item.setData(0, ID_ROLE, item_id)
@@ -552,7 +678,8 @@ class Outliner(QTreeWidget):
             line = next((line for line in error.splitlines() if line.strip()), error)
             status = f"{marks.mark('failed')} {line}"
             details = [f"{kind}, which cannot be built: {error}"]
-        top = self._add(None, system.id, _entry_text(system.id, system.name), status, details)
+        top = self._add(None, system.id, _entry_text(system.id, system.name), status, details,
+                        kind="structure")
         font = self.font()
         font.setBold(True)
         top.setFont(0, font)
@@ -566,6 +693,7 @@ class Outliner(QTreeWidget):
         except Exception as error:     # a broken document still displays
             item = self._add(top, f"{system.id}/problem", "cannot plan", marks.mark("invalid"),
                              [f"invalid: {error}"])
+            item.setData(1, MARK_ROLE, "invalid")
             self._paint(item, theme.ERROR)
             return
         stages = {s.id: s for s in plan.stages if s.id}
@@ -574,7 +702,7 @@ class Outliner(QTreeWidget):
                              details=["the base lattice, then the ops in their order"])
         base = plan.stages[0]
         base_item = self._add(geometry, f"{system.id}/base", _label("lattice", base.kind),
-                              details=["the base lattice"])
+                              details=["the base lattice"], kind="lattice")
         if base.problem:
             self._mark_invalid(base_item, base.problem)
         for op in system.geometry.ops:
@@ -590,7 +718,7 @@ class Outliner(QTreeWidget):
             selection = _selection_text(region.select)
             name = region.name if region.name != region.id else ""
             item = self._add(regions, region.id, _entry_text(region.id, name, selection),
-                             details=[f"the sites of {selection}"], movable=True)
+                             details=[f"the sites of {selection}"], movable=True, kind="region")
             if positions is not None:
                 try:
                     inside = int(region_tools.evaluate_positions(region.select,
@@ -624,7 +752,7 @@ class Outliner(QTreeWidget):
         item = self._add(branch, f"{system.id}/model", " · ".join(
             part for part in (_label("model", model.kind), setup) if part),
             details=["the model's set-up" + (f": {_summary(model.params, 400)}" if setup
-                                             else "")])
+                                             else "")], kind="term")
         if stage is not None and stage.problem:
             self._mark_invalid(item, stage.problem)
         for term in model.terms:
@@ -635,7 +763,7 @@ class Outliner(QTreeWidget):
         across the row (a detail row) so that they are never cut."""
         block = system.hamiltonian.meanfield
         item = self._add(parent, f"{system.id}/meanfield", "Mean field",
-                         details=[_label("meanfield", block.kind)])
+                         details=[_label("meanfield", block.kind)], kind="meanfield")
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
         item.setCheckState(0, Qt.CheckState.Checked if block.enabled else Qt.CheckState.Unchecked)
         if not block.enabled:
@@ -669,21 +797,24 @@ class Outliner(QTreeWidget):
         """An op or a term: what it is in the label (with an op's parameters
         and the region a term is restricted to), its state in the status."""
         region = getattr(entry, "region", None)
+        code = isinstance(entry.params.get("code"), str)          # a Python node
         item = self._add(parent, entry.id, _entry_text(
             entry.id, _label(family, entry.kind), entry.name, summary,
-            f"in {region}" if region else ""), movable=True)
+            f"in {region}" if region else ""), movable=True,
+            kind="python" if code else "op" if family == "geometry_op" else "term")
         details = self._details[entry.id]
         if summary and _summary(entry.params, 400) != summary:     # cut in the label
             details.append(_summary(entry.params, 400))
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
         item.setCheckState(0, Qt.CheckState.Checked if entry.enabled else Qt.CheckState.Unchecked)
-        if isinstance(entry.params.get("code"), str):          # a Python node: its code
+        if code:                                               # a Python node: its code
             details.append(entry.params["code"].rstrip())
         message = stage.problem
         if report is not None and report["status"] == "invalid":
             message = report["message"]
         if not entry.enabled:
             item.setText(1, marks.mark("disabled"))
+            item.setData(1, MARK_ROLE, "disabled")
             details.append("disabled: left out of the stack until its checkbox is ticked")
             self._paint(item, theme.DISABLED)
         elif message:
@@ -728,14 +859,15 @@ class Outliner(QTreeWidget):
 
     def _mark_invalid(self, item, message):
         item.setText(1, marks.mark("invalid"))
+        item.setData(1, MARK_ROLE, "invalid")
         self._details[item.data(0, ID_ROLE)].append(f"invalid, skipped: {message}")
         self._paint(item, theme.ERROR)
 
     @staticmethod
     def _calculation_status(session, calc_id, job=None):
-        """(status, colour or None, its state and messages in words) of a
-        calculation's row; job: the one an event is about, which the session
-        may not hold yet."""
+        """(status, colour or None, its state and messages in words, the
+        state) of a calculation's row; job: the one an event is about, which
+        the session may not hold yet."""
         state, progress = marks.calculation_state(session, calc_id, job)
         if job is None or job.done:
             job = session.calc_jobs.get(calc_id)
@@ -763,13 +895,16 @@ class Outliner(QTreeWidget):
             details.append(", ".join(f"{label} = {text}" for label, text in rows))
         color = theme.ERROR if state in marks.ERROR_STATES else \
             theme.DISABLED if state in marks.DIM_STATES else None
-        return status, color, details
+        return status, color, details, state
 
     def _add_calculation(self, session, parent, calc, several=False):
         label = _label("calculation", calc.kind) + (f" on {calc.system}" if several else "")
-        status, color, details = self._calculation_status(session, calc.id)
+        status, color, details, state = self._calculation_status(session, calc.id)
+        code = isinstance(calc.params.get("code"), str)          # a Python calculation
         item = self._add(parent, calc.id, _entry_text(calc.id, label, calc.name), status,
-                         details + ([] if several else [f"on {calc.system}"]), movable=True)
+                         details + ([] if several else [f"on {calc.system}"]), movable=True,
+                         kind="python" if code else "calculation")
+        item.setData(1, MARK_ROLE, state)
         if color is not None:
             self._paint(item, color, (1,))
 
@@ -779,11 +914,12 @@ class Outliner(QTreeWidget):
         item = self._items.get(calc_id)
         if item is None:
             return
-        status, color, details = self._calculation_status(session, calc_id, job)
+        status, color, details, state = self._calculation_status(session, calc_id, job)
         lock = self._locks.get(calc_id)
         if lock is not None:
             status = f"{status} · {lock[0]}" if status else lock[0]
         item.setText(1, status)
+        item.setData(1, MARK_ROLE, state)
         item.setData(1, Qt.ItemDataRole.ForegroundRole,
                      QBrush(QColor(color)) if color is not None else None)
         several = self._session is not None and len(self._session.document.systems) > 1
@@ -807,7 +943,8 @@ class Outliner(QTreeWidget):
             if item.data(0, DETAIL_ROLE):
                 continue
             text = item.text(1)
-            need = text_width(self.item_font(item, 1), text) + 2 * margin if text else 0
+            need = status_width(self.item_font(item, 1), text, item.data(1, MARK_ROLE)) \
+                + 2 * margin if text else 0
             if item.data(1, ADD_ROLE):
                 height = self._entry_delegate.line_height(option, self.indexFromItem(item, 0))
                 need = (need - margin if text else margin) + add_room(height)

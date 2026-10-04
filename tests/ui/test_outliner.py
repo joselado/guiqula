@@ -14,7 +14,9 @@ from PySide6.QtWidgets import QApplication, QStyle, QStyleOptionViewItem
 from guiqula.io import project
 from guiqula.ui import marks, theme
 from guiqula.ui.app import build_main_window
-from guiqula.ui.outliner import ADD_ROLE, _summary, text_margin, text_width, wrapped
+from guiqula.ui.outliner import (ADD_ROLE, MARK_ROLE, _summary, text_margin, text_width,
+                                 wrapped)
+from guiqula.ui.outliner import status_width as drawn_width
 
 
 @pytest.fixture(scope="module")
@@ -84,7 +86,8 @@ def cut(outliner):
             outliner.initViewItemOption(option)
             option.rect = rect
             outliner.itemDelegateForColumn(1).initStyleOption(option, index)
-            width = QFontMetricsF(option.font).horizontalAdvance(text)
+            # as it is drawn: the marks as icons (P8), the rest as text
+            width = drawn_width(option.font, text, item.data(1, MARK_ROLE))
             if option.text != text or width > rect.width() - 2 * margin:
                 out.append((item_id, text, "elided"))
         if item.data(1, ADD_ROLE):
@@ -92,8 +95,8 @@ def cut(outliner):
             left = button.mapTo(view, QPoint(0, 0)).x()
             if not button.isVisible() or left + button.width() > view.width():
                 out.append((item_id, text, "+ out of sight"))
-            elif text and rect.x() + margin + QFontMetricsF(outliner.font()) \
-                    .horizontalAdvance(text) > left:
+            elif text and rect.x() + margin + drawn_width(
+                    outliner.font(), text, item.data(1, MARK_ROLE)) > left:
                 out.append((item_id, text, "under the +"))
     return out
 

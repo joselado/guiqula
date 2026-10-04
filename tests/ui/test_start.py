@@ -298,3 +298,34 @@ def test_the_gallery_is_made_of_the_same_cards(empty, qtbot):
     assert empty.session.document.notes.startswith("Chern insulator")
     assert not gallery.isVisible()
     assert empty.central_stack.currentWidget() is empty.viewport
+
+
+def test_the_cards_are_made_as_they_come_into_sight(qapp):
+    """At start a band makes only the cards of its first row (package P8: the
+    start budget of tests/ui/test_startup.py), in their places among the
+    headings; Show all, the filter or a card asked for by name make the
+    others, and a resize to a wider row makes the ones it shows."""
+    window = build_main_window()
+    window.resize(1200, 800)
+    window.show()
+    qapp.processEvents()
+    try:
+        page = window.start_page
+        lattices = page.lattices
+        shown = lattices.shown()
+        assert 0 < len(lattices.made()) <= shown + 1 < len(lattices.slots)
+        assert [c.objectName() for c in lattices.made()] == \
+            [f"startLattice_{s.name}" for s in lattices.slots[:len(lattices.made())]]
+        assert len(page.presets.made()) < len(page.presets.slots)
+        window.resize(1600, 1000)                  # a wider row: its cards are made
+        qapp.processEvents()
+        assert len([c for c in lattices.made() if not c.isHidden()]) == lattices.shown() > shown
+        card = page.card("lattice", "kagome_lattice")        # by name: made, in its place
+        order = [item.widget() for item in lattices.flow.items]
+        assert order.index(lattices.headings["2D"]) < order.index(card) < \
+            order.index(lattices.headings["3D"])
+        lattices.more.click()                                 # Show all: every card
+        assert len(lattices.made()) == len(lattices.slots)
+        assert [c.name for c in lattices.made()] == [s.name for s in lattices.slots]
+    finally:
+        window.close()

@@ -88,7 +88,7 @@ from guiqula.ui.properties import PropertiesPanel
 from guiqula.ui.start import StartPage
 from guiqula.ui import structure as structure_tools
 from guiqula.ui.structure import StructureView
-from guiqula.ui import pyvista_view, shortcuts, theme
+from guiqula.ui import icons, pyvista_view, shortcuts, theme
 
 POLL_MS = 30
 BUILD_DELAY_MS = 150
@@ -134,7 +134,7 @@ LOG_HEIGHT = 160             # pixels the bottom area takes when the Log toggle 
 # the version of the window's saveState() kept in the settings (layout): a change of the
 # docks or the toolbars that a stored arrangement would misplace raises it, and a stored
 # one of another version gives the default arrangement
-LAYOUT_VERSION = 3           # 3: the selection row went to the canvas bar (package P3)
+LAYOUT_VERSION = 4           # 4: the first row shows icons, Properties has a footer (P8)
 # what each panel is, in the tooltip of its entry of View > Panels
 PANEL_TIPS = {"outlinerDock": "the systems, their geometry, terms and mean field, and the "
                               "calculations",
@@ -208,6 +208,27 @@ class MainWindow(QMainWindow):
         self._auto_keys = {}           # calculation id -> key it was last re-run for
         self._auto_jobs = set()        # ids of the jobs the auto re-run started
 
+        # the central column is in the window before what goes in it is made, so that each
+        # part is parented into the window once (with the application's style sheet every
+        # new parent restyles the whole subtree again: about 15 ms at start, test_startup)
+        central = QWidget()
+        central.setObjectName("central")
+        column = QVBoxLayout(central)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(0)
+        self.error_bar = MessageBar("errorBar")
+        self.recovery_bar = MessageBar("recoveryBar")
+        self.cost_bar = MessageBar("costBar")
+        self.trust_bar = MessageBar("trustBar")
+        column.addWidget(self.recovery_bar)
+        column.addWidget(self.trust_bar)
+        column.addWidget(self.error_bar)
+        column.addWidget(self.cost_bar)
+        self.central_stack = QStackedWidget()
+        self.central_stack.setObjectName("centralStack")
+        column.addWidget(self.central_stack, 1)
+        self.setCentralWidget(central)
+
         self.outliner = Outliner()
         self.outliner.selected.connect(self.select)
         self.outliner.command.connect(self._outliner_command)
@@ -217,15 +238,22 @@ class MainWindow(QMainWindow):
         self.properties.help_requested.connect(lambda item: self.show_help(item))
         self.properties.regions_requested.connect(self.open_regions_menu)
         self.help_panel = HelpPanel()
+        # the start page in the viewport's place while the document has no system (PLAN.md
+        # phase 8, package P1), below the bars, so that the recovery bar shows over it
+        self.start_page = StartPage({kind: label
+                                     for kind, (_, _, label) in CLASSICAL_STARTS.items()},
+                                    self.central_stack)
+        self.central_stack.addWidget(self.start_page)
+        self.viewport = QTabWidget()
+        self.viewport.setObjectName("viewport")
+        self.viewport.setTabsClosable(True)
+        self.central_stack.addWidget(self.viewport)
         self.structure = StructureView()
         self.structure.selection_changed.connect(self._selection_changed)
         self.structure.view_chosen.connect(self.set_canvas_view)
         self.structure.projection_chosen.connect(self.set_projection)
         self.structure.paint_stroke.connect(self._paint_stroke)
         self.structure.navigation_changed.connect(self._navigation_changed)
-        self.viewport = QTabWidget()
-        self.viewport.setObjectName("viewport")
-        self.viewport.setTabsClosable(True)
         self.viewport.addTab(self.structure, "Structure")
         self.kspace_view = KSpaceView()
         self.kspace_view.path_edited.connect(
@@ -239,14 +267,6 @@ class MainWindow(QMainWindow):
             for side in (QTabBar.ButtonPosition.LeftSide, QTabBar.ButtonPosition.RightSide):
                 self.viewport.tabBar().setTabButton(tab, side, None)    # always there
         self.viewport.tabCloseRequested.connect(self._close_tab)
-        self.error_bar = MessageBar("errorBar")
-        self.recovery_bar = MessageBar("recoveryBar")
-        self.cost_bar = MessageBar("costBar")
-        self.trust_bar = MessageBar("trustBar")
-        # the start page in the viewport's place while the document has no system (PLAN.md
-        # phase 8, package P1), below the bars, so that the recovery bar shows over it
-        self.start_page = StartPage({kind: label
-                                     for kind, (_, _, label) in CLASSICAL_STARTS.items()})
         self.start_page.lattice_chosen.connect(
             lambda kind: self.new_system(kind) if self.session is not None else None)
         self.start_page.classical_chosen.connect(
@@ -260,21 +280,6 @@ class MainWindow(QMainWindow):
         self.start_page.guide_requested.connect(
             lambda: self._window_act("help", self.help, guide="guiqula"))
         self.start_page.set_recent(settings.load()["recent"] if use_settings else [])
-        self.central_stack = QStackedWidget()
-        self.central_stack.setObjectName("centralStack")
-        self.central_stack.addWidget(self.start_page)
-        self.central_stack.addWidget(self.viewport)
-        central = QWidget()
-        central.setObjectName("central")
-        column = QVBoxLayout(central)
-        column.setContentsMargins(0, 0, 0, 0)
-        column.setSpacing(0)
-        column.addWidget(self.recovery_bar)
-        column.addWidget(self.trust_bar)
-        column.addWidget(self.error_bar)
-        column.addWidget(self.cost_bar)
-        column.addWidget(self.central_stack, 1)
-        self.setCentralWidget(central)
 
         self.jobs = JobPanel()
         self.jobs.cancel_requested.connect(self.cancel_job)
@@ -337,6 +342,7 @@ class MainWindow(QMainWindow):
                                    "far, and the Python console (View > Panels)")
         self.log_toggle.clicked.connect(lambda checked: self._window_act("log", self.set_log,
                                                                          enabled=checked))
+        self.log_toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.statusBar().addPermanentWidget(self.log_toggle)
         for name in BOTTOM_DOCKS:
             self.docks[name].toggleViewAction().toggled.connect(self._sync_log_toggle)
@@ -372,6 +378,28 @@ class MainWindow(QMainWindow):
                 self.set_renderer_3d(renderer, remember=False)
             except ValueError as error:          # pyvista chosen, and gone since
                 self.message(f"3D drawing with matplotlib: {error}", error=True)
+        # the icons of the controls (PLAN.md phase 8, package P8), set at the window's first
+        # show and after every change of theme; each bar, view and row sets its own the same
+        # way when it is first shown, so that what is out of sight at start costs nothing
+        icons.follow(self, self._set_icons)
+
+    def _set_icons(self):
+        """The icons of the window's own controls (icons.follow): the first
+        toolbar row, the Log toggle and the viewport's Structure and k-space
+        tabs; the menus' are set as each opens first (_set_menu_icons)."""
+        for button, name in ((self.new_system_button, "new"), (self.add_button, "add"),
+                             (self.run_button, "run"), (self.cancel_button, "cancel"),
+                             (self.auto_rerun_button, "follow"), (self.log_toggle, "log")):
+            button.setIcon(icons.icon(name))
+            button.setIconSize(icons.size())
+        self.viewport.setTabIcon(STRUCTURE_TAB, icons.icon("structure"))
+        self.viewport.setTabIcon(KSPACE_TAB, icons.icon("kspace"))
+
+    def _set_menu_icons(self):
+        """The icons of the menus' entries (icons.follow of each menu: at its
+        first opening, and after every change of theme)."""
+        for action, name in self._menu_icons.items():
+            action.setIcon(icons.icon(name))
 
     # ---- construction helpers
     def _dock(self, title, widget, name, area):
@@ -524,19 +552,23 @@ class MainWindow(QMainWindow):
         self.cancel_button.setText("Cancel")
         self.cancel_button.setObjectName("cancelButton")
         self.cancel_button.clicked.connect(self.cancel_selected)
-        self._tip(self.cancel_button, "stop its job (the worker is restarted)", "cancel")
+        self._tip(self.cancel_button, "Cancel: stop its job (the worker is restarted)", "cancel")
         run.addWidget(self.cancel_button)
         self.auto_rerun_button = QToolButton()
         self.auto_rerun_button.setText("Follow")
         self.auto_rerun_button.setObjectName("autoRerunButton")
         self.auto_rerun_button.setCheckable(True)
         self.auto_rerun_button.setToolTip(
-            f"cheap results are computed again as the model changes: a stale result that "
+            f"Follow: cheap results are computed again as the model changes: a stale result that "
             f"takes less than {AUTO_RERUN_SECONDS:g} s runs again by itself (Run > Re-run "
             f"cheap results automatically)")
         self.auto_rerun_button.clicked.connect(lambda checked: self._window_act(
             "auto_rerun", self.set_auto_rerun, enabled=checked))
         run.addWidget(self.auto_rerun_button)
+        # the icons (PLAN.md phase 8, package P8, _set_icons): New system, Add and Run keep
+        # their text beside, Cancel and Follow show the icon alone, their name in the tooltip
+        for button in (self.new_system_button, self.add_button, self.run_button):
+            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         # the selection tools sit on the canvas they act on, in its bar (PLAN.md phase 8,
         # package P3); the window acts on what they ask
         structure = self.structure
@@ -755,9 +787,10 @@ class MainWindow(QMainWindow):
         return action
 
     def _build_menus(self):
+        self._menu_icons = {}          # QAction -> the name of its icon (_set_menu_icons)
         file_menu = self.menuBar().addMenu("&File")
-        self._action(file_menu, "&New", self.new_document, "new")
-        self._action(file_menu, "&Open...", self.open_dialog, "open")
+        self._menu_icons[self._action(file_menu, "&New", self.new_document, "new")] = "new"
+        self._menu_icons[self._action(file_menu, "&Open...", self.open_dialog, "open")] = "open"
         self.recent_menu = file_menu.addMenu("Open &recent")
         self.recent_menu.setObjectName("recentMenu")
         self.recent_menu.aboutToShow.connect(self._fill_recent)
@@ -766,9 +799,10 @@ class MainWindow(QMainWindow):
         presets = file_menu.addMenu("Open &preset")
         for name in project.presets():
             self._action(presets, name, lambda checked=False, n=name: self.open_document(n))
-        self._action(file_menu, "&Save", self.save, "save")
+        self._menu_icons[self._action(file_menu, "&Save", self.save, "save")] = "save"
         self._action(file_menu, "Save &as...", self.save_as, "save_as")
-        self._action(file_menu, "&Export pyqula script...", self.export_script, "export_script")
+        self._menu_icons[self._action(file_menu, "&Export pyqula script...", self.export_script,
+                                      "export_script")] = "export"
         self._action(file_menu, "Export &figure, data and script...",
                      lambda: self.export_bundle_dialog(self.selected_calculation()),
                      "export_bundle", "exportBundleAction")
@@ -801,6 +835,7 @@ class MainWindow(QMainWindow):
         edit = self.menuBar().addMenu("&Edit")
         self.undo_action = self._action(edit, "&Undo", lambda: self.undo(), "undo", "undoAction")
         self.redo_action = self._action(edit, "&Redo", lambda: self.redo(), "redo", "redoAction")
+        self._menu_icons.update({self.undo_action: "undo", self.redo_action: "redo"})
         self.history_menu = edit.addMenu("Undo &history")
         self.history_menu.setObjectName("historyMenu")
         self.history_menu.aboutToShow.connect(self._fill_history)
@@ -817,9 +852,11 @@ class MainWindow(QMainWindow):
         self._action(view, "&Structure tab", lambda: self.viewport.setCurrentIndex(STRUCTURE_TAB),
                      "structure_tab")
         self._action(view, "&Close result tab", self.close_current_result, "close_result")
-        self._action(view, "&Find in palette", self.focus_search, "find")
+        self._menu_icons[self._action(view, "&Find in palette", self.focus_search, "find")] = \
+            "search"
         view.addSeparator()
         themes = view.addMenu("&Theme")
+        self._menu_icons[themes.menuAction()] = "theme"
         themes.setObjectName("themeMenu")
         group = QActionGroup(self)
         self.theme_actions = {}
@@ -886,6 +923,7 @@ class MainWindow(QMainWindow):
         view.addSeparator()
         panels = view.addMenu("&Panels")
         panels.setObjectName("panelsMenu")
+        self._menu_icons[panels.menuAction()] = "panels"
         panels.setToolTipsVisible(True)
         for name, dock in self.docks.items():
             action = dock.toggleViewAction()
@@ -899,12 +937,15 @@ class MainWindow(QMainWindow):
                          "and Jobs, the Log and the Console hidden (the window keeps its size)")
         view.setToolTipsVisible(True)
         run = self.menuBar().addMenu("&Run")
-        self._action(run, "&Run calculation", self.run_selected, "run", "runAction")
-        self._action(run, "&Cancel", self.cancel_selected, "cancel", "cancelAction")
+        self._menu_icons[self._action(run, "&Run calculation", self.run_selected, "run",
+                                      "runAction")] = "run"
+        self._menu_icons[self._action(run, "&Cancel", self.cancel_selected, "cancel",
+                                      "cancelAction")] = "cancel"
         run.addSeparator()
         self.auto_rerun_action = self._action(
             run, "Re-run cheap results &automatically", lambda: self.set_auto_rerun(
                 self.auto_rerun_action.isChecked()), name="autoRerunAction")
+        self._menu_icons[self.auto_rerun_action] = "follow"
         self.auto_rerun_action.setCheckable(True)
         self.auto_rerun_action.setToolTip(f"a stale result is computed again as soon as the "
                                           f"geometry is rebuilt, when it takes less than "
@@ -920,8 +961,10 @@ class MainWindow(QMainWindow):
                                            "(F5) runs it")
         run.setToolTipsVisible(True)
         help_menu = self.menuBar().addMenu("&Help")
-        self._action(help_menu, "&Help on the selected entry", lambda: self.show_help(),
-                     "help", "helpAction")
+        self._menu_icons[self._action(help_menu, "&Help on the selected entry",
+                                      lambda: self.show_help(), "help", "helpAction")] = "help"
+        for menu in (file_menu, edit, view, run, help_menu):
+            icons.follow(menu, self._set_menu_icons)
         self._action(help_menu, "&pyqula user guide", lambda: self._act("help", guide="pyqula"),
                      name="pyqulaGuideAction")
         self._action(help_menu, "&guiqula user guide",
@@ -2092,9 +2135,9 @@ class MainWindow(QMainWindow):
                       "run")
         self.run_button.setEnabled(calc is not None)
         self.cancel_button.setEnabled(running)
-        self._tip(self.cancel_button, f"stop the job of {calc} (its worker is restarted)"
-                  if running else "stop the job of the selected calculation, while it runs",
-                  "cancel")
+        self._tip(self.cancel_button, f"Cancel: stop the job of {calc} (its worker is "
+                                      f"restarted)" if running else
+                  "Cancel: stop the job of the selected calculation, while it runs", "cancel")
         update = getattr(self.properties.form, "update_run", None)
         if update is not None:
             update()
@@ -3208,14 +3251,19 @@ class MainWindow(QMainWindow):
             self._refresh_structure()
             for calc in list(self.plots):
                 self._draw_result(calc, force=True)
-        page = self.help_panel.page                  # its equations, in the new text colour
+        self._show_help_again()                      # its equations, in the new text colour
+        return applied
+
+    def _show_help_again(self):
+        """Draw the help page shown again (its equations follow the theme's
+        text colour and the interface text's size)."""
+        page = self.help_panel.page
         if page is not None:
             {"item": lambda: self.help_panel.show_item(page[1], remember=False),
              "section": lambda: self.help_panel.show_section(*page[1:], remember=False),
              "contents": lambda: self.help_panel.show_contents(page[1], remember=False),
              "plugins": lambda: self.help_panel.show_plugins(remember=False)
              }[page[0]]()
-        return applied
 
     def set_plot_text(self, name="normal", remember=True):
         """The size of the text of every drawing (ui/theme.py: small,
@@ -3243,7 +3291,8 @@ class MainWindow(QMainWindow):
             settings.put("ui_text", name)
         if self.session is not None:
             self.outliner.refresh(self.session)
-            self.properties.show_item(self.session, self.selected)
+            self.properties.show_item(self.session, self.selected)   # its formula images
+        self._show_help_again()                      # its equations at the new size
         return name
 
     # ---- the panels (PLAN.md phase 8, package P5)
