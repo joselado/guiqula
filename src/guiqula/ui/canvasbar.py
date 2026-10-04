@@ -282,7 +282,7 @@ class CanvasBar(QWidget):
         """Give a control of the bar its icon (by name), now if the bar has
         set its icons already, else with them."""
         text = widget.text() if hasattr(widget, "text") else ""
-        if isinstance(widget, QLabel):
+        if isinstance(widget, (QLabel, QCheckBox)):        # their text goes: a reader's name
             widget.setAccessibleName(text)
         tip = widget.toolTip()
         if text and not tip.startswith(text):

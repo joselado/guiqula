@@ -1,7 +1,8 @@
 """The icons of the controls (PLAN.md section 7, phase 8, P8): a vendored
-subset of Tabler Icons, outline style, under the MIT licence kept in
-resources/icons/LICENSE; resources/icons/README.md lists our name of each
-icon, Tabler's name and the version, so that a refresh is reproducible.
+subset of Tabler Icons, outline style but for the filled stop square of
+cancel, under the MIT licence kept in resources/icons/LICENSE;
+resources/icons/README.md lists our name of each icon, Tabler's name and
+style and the version, so that a refresh is reproducible.
 
 icon(name) gives a QIcon drawn in the colours of the active theme. Every
 file draws in currentColor alone, which is replaced by the theme's text

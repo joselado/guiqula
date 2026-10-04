@@ -730,7 +730,7 @@ class MainWindow(QMainWindow):
         for calc in calculations:
             if calc.id == chosen:
                 continue
-            action = menu.addAction(f"Run {calc.id} · {calc.kind}")
+            action = menu.addAction(icons.icon("run"), f"Run {calc.id} · {calc.kind}")
             action.setObjectName(f"runCalc_{calc.id}")
             action.setToolTip(f"{self._calculation_label(calc.id)} on {calc.system}, through "
                               f"the cost guard")
@@ -738,6 +738,7 @@ class MainWindow(QMainWindow):
         if menu.actions():
             menu.addSeparator()
         self.run_stale_action.setEnabled(bool(self._stale_results()))
+        self.run_stale_action.setIcon(icons.icon("run_stale"))     # in the active theme
         menu.addAction(self.run_stale_action)
         return [a.objectName() for a in menu.actions() if a.objectName()]
 
@@ -945,7 +946,8 @@ class MainWindow(QMainWindow):
         self.auto_rerun_action = self._action(
             run, "Re-run cheap results &automatically", lambda: self.set_auto_rerun(
                 self.auto_rerun_action.isChecked()), name="autoRerunAction")
-        self._menu_icons[self.auto_rerun_action] = "follow"
+        # no icon here: a checkable entry with one loses its check box in the menu, and
+        # its state would read only as a faint frame around the icon
         self.auto_rerun_action.setCheckable(True)
         self.auto_rerun_action.setToolTip(f"a stale result is computed again as soon as the "
                                           f"geometry is rebuilt, when it takes less than "
@@ -2297,14 +2299,16 @@ class MainWindow(QMainWindow):
     def _draw_result(self, calc, force=False):
         """Draw a calculation's latest result into its view, unless the view
         already shows exactly that (a redraw would lose the zoom) and force
-        is false (a new theme). Whether it is stale goes to the tab's mark
-        and the status row, not into the figure, so a result going stale
-        keeps its zoom."""
+        is false (a new theme, which also clears an empty view again).
+        Whether it is stale goes to the tab's mark and the status row, not
+        into the figure, so a result going stale keeps its zoom."""
         view = self.plots[calc]
         result = self.session.result(calc)
         stale = self.session.is_stale(calc) if result is not None else False
         if result is None:
-            if view.result is not None or not view.caption.text().startswith(calc):
+            # an empty view is cleared again by a new theme too (force), so that its
+            # figure takes the theme's colours rather than keeping the old one's
+            if force or view.result is not None or not view.caption.text().startswith(calc):
                 view.clear(f"{calc}: no result yet; press Run (F5).")
             self._show_state(calc)
             return

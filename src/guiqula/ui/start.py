@@ -509,6 +509,7 @@ class Band(QWidget):
         self.slots.append(slot)
         self.order.append(slot)
         self.flow.addWidget(card)
+        self._chain(slot)
         return card
 
     def add_later(self, kind, name, search, group, make):
@@ -536,7 +537,27 @@ class Band(QWidget):
             self.flow.items.insert(place, self.flow.items.pop())
             self.flow.invalidate()
             slot.card = card
+            self._chain(slot)
         return slot.card
+
+    def _chain(self, slot):
+        """Put a slot's card in the focus chain right after the nearest card
+        made before it in the band, or after the band's heading row (Show
+        all, Open a project) when none is: a widget that joins the page after
+        its neighbours is otherwise the last of the window's chain, and Tab
+        would leave the page before it reached the cards made in sight."""
+        before = None
+        for index in reversed(range(self.top.count())):
+            before = self.top.itemAt(index).widget()
+            if before is not None:
+                break
+        for entry in self.order:
+            if entry is slot:
+                break
+            if isinstance(entry, Slot) and entry.card is not None:
+                before = entry.card
+        if before is not None and before.window() is slot.card.window():
+            QWidget.setTabOrder(before, slot.card)
 
     def find(self, kind, name):
         """The card of a kind and a name, made if need be, or None."""

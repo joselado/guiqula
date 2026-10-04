@@ -1,16 +1,21 @@
 # The icons
 
 The icons of guiqula's controls are a subset of [Tabler Icons](https://tabler.io/icons),
-version 3.35.0, outline style, under the MIT licence kept in `LICENSE` next to them. Each
-file is Tabler's SVG as published, saved under the name guiqula calls it by, the names
+version 3.35.0, under the MIT licence kept in `LICENSE` next to them. Each file is
+Tabler's SVG as published, saved under the name guiqula calls it by, the names
 `guiqula.ui.icons.NAMES` lists; every file draws in `currentColor` alone, which
-`icons.icon()` replaces by a colour of the active theme.
+`icons.icon()` replaces by a colour of the active theme. The style is Tabler's outline
+one, with one exception, `cancel`, which is the filled stop square: at 16 px the outline
+square, greyed while nothing runs, reads as an empty check box, the one that the 3D switch
+of the canvas bar draws. In the table a Tabler name alone is the outline style and
+`filled/` names the filled one.
 
 To fetch the whole set again, from this folder (the table below is what the loop reads):
 
 ```bash
 sed -n 's/^| `\(.*\)` | `\(.*\)` | 3.35.0 |$/\1 \2/p' README.md | while read ours tabler; do
-    curl -sfL -o "$ours.svg" "https://unpkg.com/@tabler/icons@3.35.0/icons/outline/$tabler.svg"
+    case $tabler in */*) ;; *) tabler=outline/$tabler ;; esac
+    curl -sfL -o "$ours.svg" "https://unpkg.com/@tabler/icons@3.35.0/icons/$tabler.svg"
 done
 ```
 
@@ -26,7 +31,7 @@ every icon in both themes.
 | `undo` | `arrow-back-up` | 3.35.0 |
 | `redo` | `arrow-forward-up` | 3.35.0 |
 | `run` | `player-play` | 3.35.0 |
-| `cancel` | `player-stop` | 3.35.0 |
+| `cancel` | `filled/player-stop` | 3.35.0 |
 | `follow` | `repeat` | 3.35.0 |
 | `add` | `plus` | 3.35.0 |
 | `search` | `search` | 3.35.0 |

@@ -163,15 +163,31 @@ def test_the_files_the_names_the_table_and_the_licence_agree():
     files = {path.stem: path for path in icons.DIRECTORY.glob("*.svg")}
     assert set(files) == set(icons.NAMES)        # every file is a name and the reverse
     readme = (icons.DIRECTORY / "README.md").read_text()
-    table = dict(re.findall(r"^\| `(\w+)` \| `([\w-]+)` \| 3\.35\.0 \|$", readme, re.M))
+    table = dict(re.findall(r"^\| `(\w+)` \| `([\w/-]+)` \| 3\.35\.0 \|$", readme, re.M))
     assert set(table) == set(icons.NAMES)
     for name, path in files.items():
         svg = path.read_text()
-        assert f"icon-tabler-{table[name]}\"" in svg, f"{name}.svg is not Tabler's {table[name]}"
+        style, _, tabler = table[name].rpartition("/")         # outline unless named
+        assert f"icons-tabler-{style or 'outline'} icon-tabler-{tabler}\"" in svg, \
+            f"{name}.svg is not Tabler's {table[name]}"
         assert "currentColor" in svg and not re.search(r"#[0-9a-fA-F]{3,6}\b", svg), name
     licence = (icons.DIRECTORY / "LICENSE").read_text()
     assert licence.startswith("MIT License") and "Paweł Kuna" in licence
 
+
+
+def test_cancel_is_a_filled_stop_square_not_an_empty_check_box(app):
+    """Tabler's outline stop is a hollow rounded square, which at 16 px,
+    greyed while nothing runs, reads as the empty check box of the canvas
+    bar's 3D switch; Cancel is the filled square, whose middle is ink."""
+    for name in THEMES:
+        theme.apply(app, name)
+        for mode in (QIcon.Mode.Normal, QIcon.Mode.Disabled):
+            alpha, _ = pixels(icons.icon("cancel"), 16, mode)
+            assert alpha[6:10, 6:10].min() == 255, (name, mode)
+            alpha, _ = pixels(icons.icon("run"), 16, mode)        # an outline beside it
+            assert alpha[7:9, 7:9].max() < 255, (name, mode)
+    theme.apply(app, "light")
 
 def test_importing_the_icons_draws_nothing(run_python):
     """The icons are read and drawn at the first icon() call, never at the
@@ -325,6 +341,10 @@ def test_every_control_the_package_names_carries_an_icon(window, qtbot):
     fit = window.findChild(QWidget, "structureFit")
     assert fit.text() == "Fit" and fit.toolTip().startswith("Fit: ")
     assert fit.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonIconOnly
+    box = window.structure.box_3d                  # a check box shows its icon alone
+    assert box.text() == "" and box.toolTip().startswith("3D: ") and \
+        box.accessibleName() == "3D"
+    assert window.findChild(QWidget, "canvasViewLabel").accessibleName() == "Show"
     for name in ("newSystemButton", "addButton", "runButton", "logToggle"):   # beside
         assert window.findChild(QWidget, name).toolButtonStyle() == \
             Qt.ToolButtonStyle.ToolButtonTextBesideIcon, name
@@ -361,6 +381,42 @@ def test_the_menus_get_their_icons_when_they_first_open(window):
     menu.hide()
     assert ink(new.icon()) == ink(icons.icon("new"))
 
+
+
+def test_a_checkable_menu_entry_keeps_its_check_box(window):
+    """Fusion draws a checkable menu entry that has an icon without its check
+    box, its state a faint frame around the icon: Re-run cheap results
+    automatically lost its box beside Run calculations at once."""
+    from PySide6.QtWidgets import QApplication, QMenu
+    menus = [m for m in window.findChildren(QMenu)
+             if m.title() in ("&File", "&Edit", "&View", "&Run", "&Help")]
+    for menu in menus:                                  # their icons, set at the first opening
+        menu.popup(window.mapToGlobal(window.rect().center()))
+        QApplication.processEvents()
+        menu.hide()
+    checkable = [a for m in menus for a in m.actions() if a.isCheckable()]
+    assert window.auto_rerun_action in checkable
+    assert [a.text() for a in checkable if not a.icon().isNull()] == []
+    assert any(not a.icon().isNull() for m in menus for a in m.actions())
+
+
+def test_the_run_buttons_menu_has_its_icons(window, qtbot, qapp):
+    """The other calculations to run and Run every stale result, in the
+    active theme each time the menu opens."""
+    shown_everything(window, qtbot)
+    try:
+        for name in THEMES:
+            window.set_theme(name)
+            listed = window._fill_run_menu()
+            actions = {a.objectName(): a for a in window.run_menu.actions()}
+            assert "runStaleAction" in listed and any(n.startswith("runCalc_") for n in listed)
+            assert ink(actions["runStaleAction"].icon()) == ink(icons.icon("run_stale")) == \
+                theme.COLORS[name]["TEXT"]
+            for key in listed:
+                if key.startswith("runCalc_"):
+                    assert ink(actions[key].icon()) == theme.COLORS[name]["TEXT"], key
+    finally:
+        window.set_theme("light")
 
 def test_the_icons_change_with_the_theme(window, qtbot, qapp):
     shown_everything(window, qtbot)

@@ -113,3 +113,23 @@ def test_the_bar_of_the_scene_takes_two_lines_at_1200_px(window, qtbot):
         session.act("renderer_3d", name="matplotlib")
         session.act("load", path="honeycomb_zeeman_rashba")
         settle(qtbot, window)
+
+
+def test_an_empty_result_view_follows_the_theme(window, qtbot):
+    """A calculation never run shows an empty figure; a change of theme drew
+    every result again but left an empty view alone, so that it stayed white
+    in the dark theme (before phase 8 too)."""
+    from matplotlib.colors import to_hex
+    settle(qtbot, window)
+    session = window.session
+    assert session.result("c2") is None
+    window.show_result("c2")
+    view = window.plots["c2"]
+    try:
+        for name in ("dark", "light"):
+            window.set_theme(name)
+            QApplication.processEvents()
+            assert to_hex(view.figure.get_facecolor()) == theme.COLORS[name]["FIGURE"], name
+            assert view.caption.text().startswith("c2: no result yet")
+    finally:
+        window.set_theme("light")

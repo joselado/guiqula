@@ -329,3 +329,45 @@ def test_the_cards_are_made_as_they_come_into_sight(qapp):
         assert [c.name for c in lattices.made()] == [s.name for s in lattices.slots]
     finally:
         window.close()
+
+
+def page_chain(page):
+    """The object names of the start page's widgets that take the focus, in
+    the order Tab walks them from the filter."""
+    chain, widget = [], page.search
+    for _ in range(1000):
+        widget = widget.nextInFocusChain()
+        if widget is page.search:
+            break
+        if page.isAncestorOf(widget) and widget.isVisible() and \
+                widget.focusPolicy() & Qt.FocusPolicy.TabFocus:
+            chain.append(widget.objectName())
+    return chain
+
+
+def test_tab_walks_the_cards_in_their_order_however_late_they_were_made(qapp):
+    """A card made when it comes into sight (package P8) joins the window's
+    focus chain last unless it is put in its place: Tab went from the first
+    row of each band to the outliner, and reached the other lattices after
+    the recent files. A card made out of order (the filter finds a late one
+    first) goes after the nearest card made before it."""
+    window = build_main_window()
+    window.resize(1200, 800)
+    window.show()
+    qapp.processEvents()
+    try:
+        page = window.start_page
+        page.set_recent(["/nowhere/a.guiqula", "/nowhere/b.guiqula"])
+        late = page.lattices.slots[-5]
+        assert late.card is None
+        assert page.filter(late.name) and late.card is not None    # made before the others
+        page.filter("")
+        for band in (page.lattices, page.presets):
+            band.set_expanded(True)
+        qapp.processEvents()
+        assert page_chain(page) == ["startScroll", "startMore_lattices"] + \
+            [slot.card.objectName() for slot in page.lattices.slots] + \
+            ["startMore_presets"] + [slot.card.objectName() for slot in page.presets.slots] + \
+            ["startOpenButton", "startRecent_0", "startRecent_1", "startFooter"]
+    finally:
+        window.close()
