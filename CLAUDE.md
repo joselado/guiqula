@@ -58,10 +58,10 @@ Add menus on the outliner, Run where the result is, the panels, the bars, the fo
 outliner, icons, the documentation), was planned on 2026-10-03 (packages P1 to P9 and
 decisions 90 to 106 at the end of PLAN.md's section 7; the maintainer answered 93, the
 workspace tabs stay and follow the selection) and built on 2026-10-03 and 2026-10-04 on
-branch phase8 by a workflow, package by package; its report, with decisions 107 to 135 for
-the maintainer to confirm, closes PLAN.md's section 7, whose P8 paragraph (the icons) is
-completed when that package is merged, and section 4 draws the window as built. Nothing
-is uploaded or pushed without the maintainer.
+branch phase8 by a workflow, package by package, P8 (the icons) and P9 (the documentation)
+last; its report, with decisions 107 to 145 for the maintainer to confirm, closes PLAN.md's
+section 7, and section 4 draws the window as built. Nothing is uploaded or pushed without
+the maintainer.
 
 ## Code map
 
@@ -107,7 +107,9 @@ a `Session`.
   `trusted=True` (the Session's flag, never the Document's; the UI plans only through
   `Session.plan_system`/`plan_calculation`/`calculation_key`). `plugins.py` loads the
   plugins right after the built-in entries, in the window and the workers alike: entry points
-  of the group `guiqula.plugins` and the `*.py` of the user's plugins folder; a failing one is
+  of the group `guiqula.plugins` and the `*.py` of the user's plugins folder (`none_declared`
+  reads the `entry_points.txt` files on the path first, about 5 ms, and only a file naming
+  the group, or a doubt, costs `importlib.metadata`'s 30 ms of the start); a failing one is
   left out whole and listed (Help > Plugins); `EntrySpec.plugin` names it; the test suite
   sets `$GUIQULA_NO_PLUGINS`; `plugin_template/` is a plugin package with its test. `cost.py`
   estimates durations (the cost guard). Adding a term = one `entry(...)` call plus its case
@@ -180,8 +182,10 @@ a `Session`.
   page and the gallery, `lattices/`, `classical/`, `presets/`, PNG files made by
   `tools/make_thumbnails.py` and shipped as package data; `tests/ui/test_start.py` fails
   for a lattice, a classical system or a preset without one), and `icons/` (phase 8, P8:
-  the Tabler Icons of the controls, SVG with `currentColor`, their MIT licence and a
-  README of the names).
+  the 51 Tabler Icons of the controls, SVG files drawn in `currentColor`, outline but the
+  filled `cancel`, their MIT licence, and a README whose table of our names, Tabler's names
+  and styles is what its fetch loop and `tests/ui/test_icons.py` read; a new icon is a row
+  there, its file and its name in `icons.NAMES`).
 - `packaging/README.md`: what each distribution is (pip only: sdist and wheel, the conda
   file, `guiqula desktop`), what was verified, the release checklist (built and uploaded by
   hand; there is no CI).
@@ -208,8 +212,12 @@ a `Session`.
   shown with `popup()`, never `exec()`; `pick` and `pick_to` take a calculation and a
   point, or `system` and `values`: the k-space tab's click, Calculate on selection),
   `start.py` (the start page, `startPage`: the lattices, the examples and the recent files
-  as cards with the pictures of `resources/thumbnails/`, read when a card comes into sight,
-  a filter, Show all; `preset_card` makes the gallery's cards too), `palette.py`
+  as cards with the pictures of `resources/thumbnails/`, a filter, Show all; a card is made,
+  and its picture read, when it comes into sight, one row of each band at start, so a
+  folded card is no widget for `findChild`, `drive.py --widget` or the remote `widgets` and
+  `screenshot` until Show all, the `start` action's filter or `StartPage.card()` makes it,
+  and `Band._chain` puts a card made later in its band's Tab order; `preset_card` makes the
+  gallery's cards too), `palette.py`
   (`PaletteMenu`, the Add menu of one family: a search line, the entries by group,
   `search_entries`, Enter adding the best match; `MenuButton`, which opens its menu with
   `popup()`), `canvasbar.py` (`CanvasBar`, the bar of a drawing: Fit, Pan, Zoom, the
@@ -217,22 +225,34 @@ a `Session`.
   `NavigationToolbar2QT` kept as `canvas.toolbar`, `HiddenToolbar`, whose mode
   `CanvasNavigation` and the tests read), `marks.py` (the marks of a state, one set for the
   outliner, the result tabs and the status row: `mark`, `calculation_state`; no Qt),
-  `icons.py` (phase 8, P8: `icon(name)`, an SVG of `resources/icons/` tinted with the
-  theme's colour, cached per theme, `on_theme_change`),
+  `icons.py` (phase 8, P8: `icon(name, color="TEXT")`, an SVG of `resources/icons/` drawn
+  in a colour of the active theme, grey when disabled, cached per theme and emptied by
+  `theme.apply`; `follow(widget, method)` sets a widget's icons at its first show and again
+  after every change of theme, `on_theme_change`, which is how a control gets its icon, so
+  nothing out of sight costs the start; pixmaps at 16 and 24 px, since a Python
+  `QIconEngine` subclass crashes PySide6 6.11; a checkable menu entry gets no icon, which
+  would hide its check box; `tests/ui/test_icons.py` draws every icon in both themes and
+  checks the controls that carry one, `tests/ui/test_look.py` the look of phase 8: Run in
+  sight under a long form, the fonts and formulas at large text, the scene's bar on two
+  lines, an empty result view in the theme),
   `help.py` (the Help panel, below Properties: F1, a form's ?, the guides; Markdown in a QTextBrowser, whose
   `loadResource` serves the equations), `shortcuts.py` (the one
   table of keyboard shortcuts: menus, the canvas and outliner keys, the dialog; a test
   refuses ambiguous keys), `outliner.py` (the tree: a "+" on each section row,
   `outlinerAdd_<system>_<section>` and `outlinerAdd_calculations`, `add_requested`; a label
-  that says what the row is, a Status column that holds the state only and is as wide as
-  its longest text, `status_width`; the system and the mean field as detail rows across
-  both columns), `gallery.py`
+  that says what the row is, after the icon of its kind (`KIND_ROLE`), a Status column that
+  holds the state only and is as wide as its longest text, `status_width`, its marks drawn
+  as icons at paint time (`status_parts`, `MARK_ROLE`) while its text keeps `marks.py`'s
+  Unicode, which the tooltips and the tests read; the system and the mean field as detail
+  rows across both columns), `gallery.py`
   (presets, the start page's cards), `sliders.py` (the Sliders panel; `range_from`, the
   range a label's menu gives a slider or a sweep), `kspace.py` (the Brillouin-zone canvas,
   its tab hidden for a system without a periodic direction),
   `properties.py` + `forms.py` (forms from the parameter declarations, in the words of the
   physics: the label's menu `paramMenu_<p>` (Lock, Attach a slider, Sweep this parameter,
-  Preview on the canvas), the region link, a calculation's estimate and `formRun`, the
+  Preview on the canvas), the region link, a calculation's estimate and `formRun` in the
+  footer of the panel, `propertiesFooter`, under the scrolled form, `propertiesScroll` (the
+  panel, `properties`, is a QWidget since P8; its `verticalScrollBar()` is the form's), the
   system form's spin, Nambu, hopping range and sparse; the Field editor, whose button
   shows the kind and opens the kind menu `fieldKindMenu_<p>`), `formulas.py` (mathtext
   images; rich tooltips of the Add menus), `structure.py`
@@ -251,8 +271,8 @@ a `Session`.
   and the results drawn flat on the atoms; `bind_keys` makes the QShortcuts of the table's
   "2D canvas" context; the "3D canvas" keys are the scene's own `keyPressEvent`), `plots.py`
   (`PlotView` per calculation, `plot_<id>`, with its bar `plotBar_<id>` and its status row
-  `plotStatus_<id>` (stale with Run again, queued or running with the progress and Cancel,
-  failed; `ROW_STATES`), and `ResultWindow`, the plain window of a detached one, never a floating dock, which Wayland cannot move; lines, colored_scatter, heatmap,
+  `plotStatus_<id>` (the state's icon `plotStatusMark_<id>`; stale with Run again, queued or
+  running with the progress and Cancel, failed; `ROW_STATES`), and `ResultWindow`, the plain window of a detached one, never a floating dock, which Wayland cannot move; lines, colored_scatter, heatmap,
   structure_scalar, structure_vector, scalar; the right click, the Pick, Box and Lasso
   toggles, `pick_requested`; the markers, sliders with `on` drawn by `set_markers` and
   dragged through `marker_moved`), `jobpanel.py`,
@@ -413,10 +433,12 @@ extra, is not, and no test needs it. pyvista 0.48.4 with VTK 9.6.2, the `3d` ext
 installed (`tests/ui/test_pyvista_view.py` skips without it); it renders off-screen through
 XWayland here and falls back to EGL by itself without a display, while a VTK widget
 embedded in Qt (`QVTKRenderWindowInteractor`) segfaults on the offscreen platform, which
-is why `ui/pyvista_view.py` paints an image instead. `tests/ui/test_startup.py`'s 2.0 s budget is tight on
-this interpreter: it passes on a quiet machine, but the start took 2.2 to 3.0 s at a load
-average of about 5 and 3.6 s at 16 (2026-09-28), so a failure there under load is the
-load before it is the code.
+is why `ui/pyvista_view.py` paints an image instead. `tests/ui/test_startup.py`'s 2.0 s budget
+holds on a quiet machine: the probe took a median of 1.28 s on the finished phase 8 and 1.30 s
+on the tree before it at a load average of 2.5 to 3.2 (2026-10-04), while under the load of
+several suites at once (about 8) the tree before P8 took 2.1 to 2.2 s (2026-10-03), so a
+failure there under load is the load before it is the code; measure it alternately against
+an older tree (a `git worktree add --detach` in a `mktemp -d` directory) rather than once.
 
 ## Commands
 

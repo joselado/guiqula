@@ -173,7 +173,9 @@ def tools():
                        "(structureView: the canvas; plot_c1: a result view; outliner; "
                        "helpDock...; widgets lists them). Needs a window.",
          _schema({"widget": {"type": "string"}}), True),
-        ("widgets", "The names of the window's widgets a screenshot takes.", _schema(), True),
+        ("widgets", "The names of the window's widgets a screenshot takes (a folded card of "
+                    "the start page is listed once Show all or a search has made it).",
+         _schema(), True),
         ("help", "Help as Markdown: of a document item (item: t1, c1, s1/base...), of a "
                  "registry entry (kind, with family if ambiguous), or of a section of a "
                  'guide (guide: "pyqula" or "guiqula", anchor: a heading); a guide alone '

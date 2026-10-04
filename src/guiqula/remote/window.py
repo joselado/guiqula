@@ -11,7 +11,10 @@ from guiqula.remote.server import INVALID_PARAMS, RemoteError, Server
 
 def widget_tree(widget, depth=0):
     """Lines "name (Class)", indented by nesting, of the widgets that have
-    an objectName (what a screenshot, and tools/drive.py's --widget, take)."""
+    an objectName (what a screenshot, and tools/drive.py's --widget, take).
+    The start page makes its cards as they come into sight (ui/start.py),
+    so a folded card is listed only once Show all, the start action's
+    filter or StartPage.card() has made it."""
     lines = []
     name = widget.objectName()
     if name and not name.startswith("qt_"):

@@ -46,7 +46,9 @@ s1/model, calculations or systems, and search: an Add menu opened as its
 "+" does, whose widget is paletteMenu_<family> or regionsMenu), run_stale
 (every stale result), start (search: the start page's filter, whose widget
 is startPage, shown while the document has no system; its cards are
-startLattice_<kind>, startPreset_<name>, ...), run (calculation, or the
+startLattice_<kind>, startPreset_<name>, ..., made as they come into sight,
+so that a folded card is a widget only after Show all, a search or
+window.start_page.card(kind, name)), run (calculation, or the
 selected one: as the Run button does, through the cost guard); the
 session's undo, redo (with "steps") and history; lock and unlock are
 mutations. The driven window never reads or writes the settings file.

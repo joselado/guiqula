@@ -853,7 +853,7 @@ class MainWindow(QMainWindow):
         self._action(view, "&Structure tab", lambda: self.viewport.setCurrentIndex(STRUCTURE_TAB),
                      "structure_tab")
         self._action(view, "&Close result tab", self.close_current_result, "close_result")
-        self._menu_icons[self._action(view, "&Find in palette", self.focus_search, "find")] = \
+        self._menu_icons[self._action(view, "&Find in the Add menu", self.focus_search, "find")] = \
             "search"
         view.addSeparator()
         themes = view.addMenu("&Theme")

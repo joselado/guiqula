@@ -18,13 +18,16 @@ The program opens on the start page, which stands in the place of the drawings a
 the document has no system. It has three bands: the lattices (by dimension, the classical
 systems last) and the examples (the shipped presets, the two teaching ones first) as cards
 with pictures, and the recent files, with Open a project... for the others; a filter box
-at the top narrows the three at once to what matches every word typed. The lattices and
-the examples show their first row, and the recent files their first three, until the
-band's Show all is pressed or the filter holds text. A lattice card makes a new system on
-that lattice, a classical card makes classical spins, a lattice gas or an Ising model, and
-an example card opens that document; File > New brings the page back, and File > Presets
-gallery shows the same examples in a dialog, with the whole description of the one
-selected.
+at the top, with the focus when the page first shows, narrows the three at once to what
+matches every word typed. The lattices and the examples show their first row, and the
+recent files their first three, until the band's Show all is pressed or the filter holds
+text. A lattice card makes a new system on that lattice, a classical card makes classical
+spins, a lattice gas or an Ising model, and an example card opens that document; a line
+at the foot of the page says what comes next and links to this guide. Tab walks the
+filter, each band's Show all and its cards in their order, Open a project... and the
+recent files, and Enter or Space presses the card that has the focus. File > New brings
+the page back, and File > Presets gallery shows the same examples in a dialog, with the
+whole description of the one selected.
 
 A document holds one or more systems (a geometry and its Hamiltonian, or a classical
 model) and the calculations on them. The simplest way in is an example: open one, select
@@ -41,7 +44,11 @@ The window is one document seen through four places: the outliner on the left, t
 drawings in the centre, the form of the selected entry on the right with its help below
 it, and the status bar at the bottom. Above them, the first toolbar row holds the
 workspace tabs (Geometry, Hamiltonian, Calculate; the middle one reads Model for a
-classical system), New system, Add and the run controls. The workspaces follow the
+classical system), New system, Add and the run controls. New system, Add and Run show
+their names beside their icons; Cancel, a filled square, and Follow, two arrows in a loop,
+show the icon alone, and their tooltips name them, as for every control that shows only an
+icon. The icons are drawn in the text colour of the theme, so they change with it, and
+greyed with the control when it is disabled. The workspaces follow the
 selection, meaning that selecting a system, its lattice, an op or a region shows Geometry,
 a term, the mean field or a model shows Hamiltonian, and a calculation shows Calculate,
 and since adding an entry selects it, an add shows its workspace too. A workspace changes
@@ -75,33 +82,40 @@ one whose result tab is shown, else the first. Showing the tab of a result while
 calculation is selected selects the result's calculation, so the outliner, the tab and Run
 never name two different ones, while a term or an op that is selected keeps its form on
 screen as results are looked at, and Run then follows the tab. The arrow beside Run lists
-the other calculations and Run every stale result; Cancel stops the job of the calculation
-Run names, and Follow is Run > Re-run cheap results automatically (see Calculations and
-results). A calculation's form ends with its estimated duration and a button that reads
-Run, Run again when the result is stale, or Cancel while its job is queued or running, so
-a calculation can be computed from its own form too.
+the other calculations and Run every stale result; Cancel (the filled square) stops the
+job of the calculation Run names, and Follow (the two arrows) is Run > Re-run cheap results
+automatically (see Calculations and results). A selected calculation also has its own run
+row at the foot of Properties, below the form, so that it stays in sight however long the
+form is: its estimated duration and a button that reads Run, Run again when the result is
+stale, or Cancel while its job is queued or running, the line beside it saying "running
+in a worker" until the job reports its progress. A calculation can thus be computed from
+its own form too, and the form's result line says the same state as the tab and the
+outliner.
 
 ### The outliner
 
 The outliner is the whole document as a tree, and each row says what it is and in what
-state. A system's row gives its name in bold and a summary of what was built ("2D · 8
-sites · spinful", or "0D · 40 sites · classical spins" for a classical one). The label of
-an entry carries its id, its kind and its name, then an op's parameters, a region's
-selection or the region a term acts in, and the Status column carries its state only:
+state. An icon before the label gives the kind of row: a system (the same icon for a
+quantum and a classical one), its lattice, an op, a region, a term (a sum sign), the mean
+field, a calculation, Python code. A system's row gives its name in bold and a summary of
+what was built ("2D · 8 sites · spinful", or "0D · 40 sites · classical spins" for a
+classical one). The label of an entry carries its id, its kind and its name, then an op's
+parameters, a region's selection or the region a term acts in, and the Status column
+carries its state only, the marks drawn as icons:
 
 - the Hilbert space after a term (spinless, spinful, Nambu), which is how one sees where
   a Zeeman field made the Hamiltonian spinful;
 - the number of sites of a region;
 - the mean field's interactions ("U = 3, runs with the calculations"; its total energy
   after a run, "U = 3, E = -1.68"; "off" when it is off);
-- a calculation's result: a check mark when it is current, a circular arrow when it is
-  stale, the percentage while its job runs, a cross in the error colour when its last run
-  failed, nothing when it was never run, and the value of a single number after its mark
-  (a gap, a Chern number);
-- a cross in the error colour for an entry that pyqula or the planner refuses, an empty
-  circle for a disabled one (the row dimmed), a warning sign for one that is valid but
-  worth a look (it reads a stale result), and locked on a locked entry (m locked when
-  one of its parameters is).
+- a calculation's result: a check mark when it is current, a circular arrow, dimmed, when
+  it is stale, an hourglass and the percentage while its job runs, a cross in the error
+  colour when its last run failed, the word queued or cancelled, nothing when it was never
+  run, and the value of a single number after its mark (a gap, a Chern number);
+- a warning triangle in the error colour for an entry that pyqula or the planner refuses,
+  a crossed-out circle for a disabled one (the row dimmed), the sign ⚠ for one that is
+  valid but worth a look (it reads a stale result), and a padlock on a locked entry (m and
+  a padlock when one of its parameters is).
 
 The full label and the messages (why an entry is refused, why a run failed, how to lift a
 lock) are in the row's tooltip. A check box enables or disables an op or a term, a drag
@@ -129,14 +143,16 @@ rather than hiding a control:
 - the 3D scene drawn with pyvista: Reset view and the View menu in place of Fit, Pan and
   Zoom.
 
-The buttons of the bars are icons, whose tooltips name them (and their keys, where they
-have one). A result
-that is not simply current says so in a row above its plot: stale, with Run again; queued
-or running, with its progress and Cancel; failed, with the first line of the error (the
-whole message in the tooltip) and Run again, the earlier result staying drawn under it
-until a run succeeds. The result's tab and its row in the outliner carry the same mark,
-since the three read one state, and a result never computed says what comes next in its
-caption instead.
+The buttons of the bars show icons, whose tooltips name them and their keys, where they
+have one: Show is an eye before the choice of view, and 3D a cube beside its check box.
+The k-space tab's path tools and the brush's value and radius keep their words. A result
+that is not simply current says so in a row above its plot, with the icon of its state:
+stale, with Run again; queued or running, with its progress and Cancel; failed, with the
+first line of the error (the whole message in the tooltip) and Run again, the earlier
+result staying drawn under it until a run succeeds. The three read one state, so the
+result's tab carries the same mark as a sign after its title (↻ stale, ✗ failed, the
+percentage while it runs) and its row in the outliner as an icon, and a result never
+computed says what comes next in its caption instead, drawn in the colours of the theme.
 
 ### The panels
 
@@ -153,7 +169,8 @@ The panels can be moved and closed but do not float, since a floating panel cann
 moved on a Wayland desktop. View > Panels shows or hides each one, View > Reset layout puts
 them back where they started, and the program keeps their arrangement and the window's
 size for the next start. View > Interface text makes the text of the menus, the panels
-and the forms larger, for a projector or a small screen, as View > Plot text does for the
+and the forms larger, the formulas and the fixed-width text of the console and of a Python
+node with it, for a projector or a small screen, as View > Plot text does for the
 drawings.
 
 ### The forms
@@ -288,12 +305,13 @@ Pan, Zoom, the pick tools, Overlay, Export, Save data, Detach (a window of its o
 Save image, and a readout of the point under the mouse. A result becomes stale when
 anything it depends on changes: its tab, its row in the outliner and the row above its
 plot say so, and Run again in that row, Run, or Run every stale result in the menu of
-Run's arrow computes it again. Run > Re-run cheap results automatically (Follow, on the
-toolbar) does that by itself for results estimated under three seconds. Before a run
-estimated above a minute, a bar asks, and the form's estimate line says beforehand that it
-will. Run > Run calculations at once, a setting kept like the theme and on by default,
-runs a calculation as soon as it is added or one of its parameters is set, from its form,
-a pick on a plot or a command, through the same bar; off, a calculation waits for Run.
+Run's arrow computes it again. Run > Re-run cheap results automatically (Follow, the two
+arrows on the toolbar) does that by itself for results estimated under three seconds.
+Before a run estimated above a minute, a bar asks, and the estimate beside the
+calculation's own Run, at the foot of Properties, says beforehand that it will. Run > Run
+calculations at once, a setting kept like the theme and on by default, runs a calculation
+as soon as it is added or one of its parameters is set, from its form, a pick on a plot or
+a command, through the same bar; off, a calculation waits for Run.
 
 An undo, or a value set back, makes the earlier result that matches the document current
 again, without a re-run.
@@ -523,10 +541,10 @@ protection.
 Edit > Undo and Redo say which step they take back; Edit > Undo history goes back several
 steps at once, and the selection follows. What is shown (the selection, the workspace,
 the sliders, the overlays, the theme) is not undone. View > Theme chooses light, dark or
-the desktop's scheme. View > Plot text chooses the size of the text of every drawing, the
-labels, the ticks and the titles of the plots, of the canvas, of the k-space tab and of the
-exported figures: small, normal or large, so that a projector or a small screen gets a
-readable size too; View > Interface text does the same for the text of the menus, the
+the desktop's scheme, and the icons, the drawings and an empty result follow it. View >
+Plot text chooses the size of the text of every drawing, the labels, the ticks and the
+titles of the plots, of the canvas, of the k-space tab and of the exported figures: small,
+normal or large, so that a projector or a small screen gets a readable size too; View > Interface text does the same for the text of the menus, the
 panels and the forms (normal or large). The settings (theme, plot text, interface text,
 recent files, always trust, remote control, run at once, the 3D drawing, and the
 arrangement of the panels with the window's size) are a file in the user configuration
@@ -618,7 +636,7 @@ functions only: the window loads the plugin too, and must start without pyqula.
 | window | Ctrl+1 | Geometry workspace |
 | window | Ctrl+2 | Hamiltonian (or Model) workspace |
 | window | Ctrl+3 | Calculate workspace |
-| window | Ctrl+F | search the palette of the workspace (ops, terms or calculations) |
+| window | Ctrl+F | the Add menu of the workspace, with its search line (ops, terms or calculations) |
 | window | Ctrl+0 | show the Structure tab |
 | window | Ctrl+W | close the result tab shown |
 | window | F5 | run the selected calculation |

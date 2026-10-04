@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 """Make the screenshots of README.md (docs/images/*.png) with tools/drive.py.
 
-Each image is the whole window: a preset opened offscreen, an entry
-selected (its form in the Properties dock), calculations run with the Run
-button (the last one's result in front), with the Log and Console docks
+Each image is the whole window: a preset opened offscreen, calculations
+run with the Run button, then an entry selected (its form in the
+Properties panel) with the last run's result in front, the Log and Console
 hidden to leave the room to the plot. Run it from the checkout after a
 change that shows in them:
 
@@ -30,7 +30,7 @@ TIDY = ("from PySide6.QtWidgets import QDockWidget\n"
         "from PySide6.QtTest import QTest\n"
         "for d in window.findChildren(QDockWidget):\n"
         "    if d.windowTitle() in ('Log', 'Console'): d.hide()\n"
-        "for _ in range(5):\n    app.processEvents(); QTest.qWait(100)\n")
+        "for _ in range(10):\n    app.processEvents(); QTest.qWait(100)\n")
 
 
 def do(**command):
@@ -39,10 +39,15 @@ def do(**command):
 
 def window(preset, select, *runs, commands=(), timeout=None):
     """Arguments of drive.py: the preset, commands, the entry selected, the
-    calculations run (the last one's result in front)."""
+    calculations run (the last one's result in front). --run selects the
+    calculation it runs, so the entry is selected again after the runs, and
+    the last result brought forward, which keeps a term's or an op's form
+    (PLAN.md phase 8, decision 122)."""
     arguments = [preset, *commands, *do(do="select", entry=select)]
     for calc in runs:
         arguments += ["--run", calc]
+    if runs:
+        arguments += ["--python", f"window.select({select!r}); window.show_result({runs[-1]!r})"]
     if timeout:
         arguments += ["--timeout", str(timeout)]
     return arguments + ["--size", SIZE, "--python", TIDY]
