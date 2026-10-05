@@ -31,8 +31,8 @@ packages, P1 to P9, and decisions 90 to 106, at the end of section 7; the
 maintainer answered 93, and the others stand as recommended) and built on
 2026-10-03 and 2026-10-04 on branch phase8, every package included; its
 report closes section 7, with decisions 107 to 145 for the maintainer to
-confirm, and section 4 draws the window as built. Nothing of phase 8 is
-pushed or merged into master yet.
+confirm, and section 4 draws the window as built. Phase 8 was merged into
+master and pushed on 2026-10-04.
 
 ## 1. Requirements (as stated by the maintainer)
 
