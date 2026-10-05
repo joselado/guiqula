@@ -193,15 +193,24 @@ def ui_points(app):
     return max(float(desktop), UI_POINTS["normal"]) + UI_POINTS[ui_text] - UI_POINTS["normal"]
 
 
+_icons_text = None       # the interface text the icons were last set for
+
+
 def apply_text(app):
     """Give the widgets the font of the active interface text size (and the
     style sheet, whose titles follow it); returns its points."""
+    global _icons_text
     points = ui_points(app)
     if points is not None and app.font().pointSizeF() != points:
         font = app.font()
         font.setPointSizeF(points)
         app.setFont(font)
     app.setStyleSheet(stylesheet(points))
+    if ui_text != _icons_text:            # the icons at the size of the new text
+        first, _icons_text = _icons_text is None, ui_text
+        if not first:
+            from guiqula.ui import icons  # here: icons reads this module's colours
+            icons.text_changed()
     return points
 
 

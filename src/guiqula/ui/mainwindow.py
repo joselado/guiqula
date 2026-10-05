@@ -394,6 +394,7 @@ class MainWindow(QMainWindow):
             button.setIconSize(icons.size())
         self.viewport.setTabIcon(STRUCTURE_TAB, icons.icon("structure"))
         self.viewport.setTabIcon(KSPACE_TAB, icons.icon("kspace"))
+        self.viewport.setIconSize(icons.size())
 
     def _set_menu_icons(self):
         """The icons of the menus' entries (icons.follow of each menu: at its

@@ -815,6 +815,7 @@ class EntryForm(Form):
                     "running in a worker, no progress reported yet"
                 button.setText("Cancel")
                 button.setIcon(icons.icon("cancel"))
+                button.setIconSize(icons.size())
                 button.setToolTip(("take this job out of the queue" if state == "queued" else
                                    "stop this job; its worker is restarted")
                                   + f" ({shortcuts.text('cancel')})")
@@ -833,6 +834,7 @@ class EntryForm(Form):
                         (", so Run asks first" if cost_of["seconds"] > cost.SLOW else "")
                 button.setText("Run again" if state == "stale" else "Run")
                 button.setIcon(icons.icon("run"))
+                button.setIconSize(icons.size())
                 button.setToolTip(
                     ("the model changed since this was computed: compute it again"
                      if state == "stale" else "compute it in a worker")

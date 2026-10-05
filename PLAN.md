@@ -3593,8 +3593,8 @@ program):
   and the warning ⚠ are text beside icons, an invalid entry's red triangle
   and a warning's ⚠ two triangles of different meaning; one icon for both
   system kinds;
-- `ui/icons.py` and the controls: the icons stay 16 px at large interface
-  text; `zoom_out`, `slider` and `settings` are vendored without a control;
+- `ui/icons.py` and the controls: `zoom_out`, `slider` and `settings` are
+  vendored without a control;
   the k-space path tools and Show all are words;
 - `ui/forms.py`, `ui/properties.py`: a sweep from the label of a system
   whose calculations give no number runs the first one and fails when run,
@@ -3885,6 +3885,16 @@ screened interaction", is drawn at about half its size. Looking for it, the
 section's name over the page turned out to widen the right column for good
 once a long one was shown (to about 460 px after "h.get_sxsx_mean_field
 _hamiltonian() / ..."), as the workers line did; it now wraps.
+The icons are `icons.size()` at the active interface text, 16 px or 20 px
+at large (`icons.LARGE`), drawn at that size (the 20 px renderings are made
+only while the text is large, so the normal start draws what it drew), and
+`theme.apply_text` calls `icons.text_changed` when the size changes, which
+sets every followed control's icons again as a change of theme does: the
+toolbars, the bars of the drawings, the status rows, the forms' buttons,
+the viewport's tabs and the outliner's marks. The start, measured
+alternately against master (ten rounds each, fresh data and settings, at a
+load of 3 to 5), took a median of 1.37 s against 1.32 s, within the noise
+of single rounds (1.17 to 2.09 s) and well within the 2.0 s budget.
 
 ### Where the section 13 items land
 

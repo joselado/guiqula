@@ -117,7 +117,9 @@ tests, `drive.py --widget` and the remote `widgets` and `screenshot` methods rel
   the active theme, grey when disabled, cached per theme and emptied by `theme.apply`;
   `follow(widget, method)` sets a widget's icons at its first show and again after every
   change of theme (`on_theme_change`), which is how a control gets its icon, so nothing out
-  of sight costs the start; pixmaps at 16 and 24 px, since a Python `QIconEngine` subclass
+  of sight costs the start, and again after a change of View > Interface text
+  (`text_changed`), `size()` being 16 px or 20 px at large text; pixmaps at 16 and 24 px
+  (and 20 px while the text is large), since a Python `QIconEngine` subclass
   crashes PySide6 6.11; a checkable menu entry gets no icon, which would hide its check
   box. `resources/icons/` holds the 51 Tabler Icons of the controls (SVG files drawn in
   `currentColor`, outline but the filled `cancel`, their MIT licence) and a README whose

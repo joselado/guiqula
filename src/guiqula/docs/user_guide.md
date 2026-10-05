@@ -175,9 +175,9 @@ The panels can be moved and closed but do not float, since a floating panel cann
 moved on a Wayland desktop. View > Panels shows or hides each one, View > Reset layout puts
 them back where they started, and the program keeps their arrangement and the window's
 size for the next start. View > Interface text makes the text of the menus, the panels
-and the forms larger, the formulas and the fixed-width text of the console and of a Python
-node with it, for a projector or a small screen, as View > Plot text does for the
-drawings.
+and the forms larger, the formulas, the fixed-width text of the console and of a Python
+node and the icons of the controls (20 pixels instead of 16) with it, for a projector or a
+small screen, as View > Plot text does for the drawings.
 
 ### The forms
 

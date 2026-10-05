@@ -424,7 +424,7 @@ class StatusRow(QFrame):
         self.setObjectName(f"plotStatus{suffix}")
         self.mark = QLabel()                 # the state's mark, as an icon (ui/icons.py)
         self.mark.setObjectName(f"plotStatusMark{suffix}")
-        self.mark.setFixedSize(icons.size())
+        self.mark.setFixedSize(icons.size())     # and again with the icons (_set_icons)
         self.text = _Elided()
         self.text.setObjectName(f"plotStatusText{suffix}")
         self.progress = QProgressBar()
@@ -466,6 +466,7 @@ class StatusRow(QFrame):
         self.cancel.setIcon(icons.icon("cancel"))
         for button in (self.run, self.cancel):
             button.setIconSize(icons.size())
+        self.mark.setFixedSize(icons.size())
         self._set_mark()
 
     def _set_mark(self):
