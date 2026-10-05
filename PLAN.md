@@ -3605,9 +3605,10 @@ program):
   the background's colour, so their bonds are lost and the central ones are
   faint (a choice between colourings: the scale shifted in the dark theme,
   so that phase zero is pale, or an outline on the faded bonds too);
-- `ui/forms.py`, `ui/properties.py`: the kind buttons of different scalar
-  rows do not line up; a sweep from the label of a system whose
-  calculations give no number runs the first one and fails when run;
+- `ui/forms.py`, `ui/properties.py`: a sweep from the label of a system
+  whose calculations give no number runs the first one and fails when run,
+  with the sweep's own message ("c1 gives no number to collect"), which is
+  decision 125 as built (a choice: refusing the sweep at once instead);
 - `ui/help.py`: a displayed equation wider than the panel (nine of the 281
   sections of the two guides at the default width, "The screened
   interaction" the widest at about 610 px) still gives its page a
@@ -3843,7 +3844,11 @@ gallery's group headings are the start page's `Title`, painted in the
 interface font at each paint, so that they follow View > Interface text
 while the gallery is open (a font set on a `QLabel` stayed at its size), and
 a closed gallery is deleted (`WA_DeleteOnClose`) rather than kept hidden
-with its pictures, each opening making one of its own as before.
+with its pictures, each opening making one of its own as before. The
+kind buttons of a form are as wide as the widest of the form
+(`forms.line_up`, called by every form after it sets its values), the rule
+a vector's components already followed, so that an expression's button over
+a number's f(r) no longer narrows that row's box.
 
 ### Where the section 13 items land
 

@@ -815,12 +815,22 @@ class VectorFieldEditor(Editor):
     def set_value(self, value):
         for editor, v in zip(self.components, value):
             editor.set_value(v)
-        # the kind buttons as wide as the widest, so that the components' boxes line up
-        # whatever kind each one shows ("f(r)" beside "expression")
-        buttons = [editor.button for editor in self.components if editor.button is not None]
-        width = max((button.sizeHint().width() for button in buttons), default=0)
-        for button in buttons:
-            button.setMinimumWidth(width)
+        line_up(self.components)
+
+
+def line_up(editors):
+    """Make the kind buttons of Field editors (a vector's components among
+    them) as wide as the widest, so that their boxes line up whatever kind
+    each one shows ("f(r)" beside "expression"); the form calls it on all
+    its editors after setting their values, a vector on its components."""
+    buttons = []
+    for editor in editors:
+        for one in getattr(editor, "components", [editor]):
+            if getattr(one, "button", None) is not None:
+                buttons.append(one.button)
+    width = max((button.sizeHint().width() for button in buttons), default=0)
+    for button in buttons:
+        button.setMinimumWidth(width)
 
 
 class IntEditor(Editor):

@@ -283,6 +283,25 @@ def test_the_kind_buttons_of_a_vector_line_up(still, qtbot):
     assert len(set(narrow)) == 1 and len(set(boxes)) == 1, (narrow, boxes)
 
 
+def test_the_kind_buttons_of_different_rows_line_up(still, qtbot):
+    """The rule of a vector's components holds across the rows of a form:
+    every kind button is as wide as the widest, so a number's f(r) under an
+    expression keeps its box as wide as the expression's."""
+    window, session = still
+    term = session.do("add_term", system="s1", kind="pairing", params={"delta": "0.1*x"})
+    try:
+        window.select(term)
+        form = window.properties.form
+        editors = [form.editors["delta"], *form.editors["d"].components]
+        assert editors[0].button.text() == "expression"
+        assert {e.button.text() for e in editors[1:]} == {"f(r)"}
+        qtbot.waitUntil(lambda: len({e.button.width() for e in editors}) == 1)
+        right = {e.edit.mapTo(form, e.edit.rect().topRight()).x() for e in editors}
+        assert len(right) == 1, right
+    finally:
+        session.undo()
+
+
 def test_the_numbers_of_a_sweep_are_neither_slid_nor_swept(still):
     """A sweep's own range is read by no calculation, so its label menu
     offers the lock only, and Form.sweep and attach_slider refuse."""

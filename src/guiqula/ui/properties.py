@@ -41,7 +41,7 @@ from guiqula.registry import base as registry
 from guiqula.registry import cost
 from guiqula.registry.params import FieldParam, VectorFieldParam
 from guiqula.ui import formulas, icons, marks, theme
-from guiqula.ui.forms import format_number, make_editor, result_sources
+from guiqula.ui.forms import format_number, line_up, make_editor, result_sources
 from guiqula.ui.outliner import system_of
 from guiqula.ui.sliders import range_from
 
@@ -215,6 +215,7 @@ class Form(QWidget):
             self.labels[param.name] = label
             self.editors[param.name] = editor
             self._label_says(param.name, [])
+        line_up(self.editors.values())        # the kind buttons of all rows, one width
 
     def add_enabled(self, send):
         """The enabled switch, in the title's row (check_enabled); send(bool)
@@ -568,6 +569,7 @@ class SystemForm(Form):
         for name, editor in self.editors.items():
             param = editor.param
             editor.set_value(system.geometry.base.params.get(name, param.default))
+        line_up(self.editors.values())
         if system.hamiltonian is not None:
             c = system.hamiltonian.construction
             _quiet(self.has_spin, self.has_spin.setCurrentIndex,
@@ -725,6 +727,7 @@ class EntryForm(Form):
         for name, editor in self.editors.items():
             if name in obj.params:
                 editor.set_value(obj.params[name])
+        line_up(self.editors.values())            # the kind buttons of all rows, one width
         self.update_reports()
 
     def update_reports(self):
@@ -1029,6 +1032,7 @@ class MeanFieldForm(Form):
         for name, editor in self.editors.items():
             if name in block.params:
                 editor.set_value(block.params[name])
+        line_up(self.editors.values())
         if self.further is not None and self._further_set(block.params):
             self._show_further(True)          # a value is never hidden
         self.update_reports()
@@ -1111,6 +1115,7 @@ class ModelForm(Form):
         for name, editor in self.editors.items():
             if name in model.params:
                 editor.set_value(model.params[name])
+        line_up(self.editors.values())
 
 
 class PropertiesPanel(QWidget):
