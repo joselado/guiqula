@@ -47,17 +47,21 @@ DIRECTORY = Path(__file__).resolve().parents[1] / "resources" / "icons"
 NAMES = (
     # the plan's list (PLAN.md section 7, P8)
     "new", "open", "save", "undo", "redo", "run", "cancel", "follow", "add", "search",
-    "fit", "pan", "zoom_in", "zoom_out", "pick", "box", "lasso", "select", "paint",
+    "fit", "pan", "zoom_in", "pick", "box", "lasso", "select", "paint",
     "image", "export", "data", "overlay", "detach", "help", "lattice", "op", "term",
     "calculation", "region", "meanfield", "python", "done", "stale", "failed", "locked",
     "log", "panels",
     # what the plan's controls need besides: Remove selected, Run every stale result,
-    # the k-space and Structure tabs, the settings, the theme, the 3D switch, Show,
-    # Attach a slider, and the marks of ui/marks.py the list leaves out
-    "remove", "run_stale", "kspace", "structure", "settings", "theme", "3d", "show",
+    # the k-space and Structure tabs, the theme, the 3D switch, Show, Attach a slider,
+    # and the marks of ui/marks.py the list leaves out
+    "remove", "run_stale", "kspace", "structure", "theme", "3d", "show",
     "slider", "invalid", "disabled", "running",
     # the View menu of the 3D scene (Blender's views, perspective and orthographic)
     "view",
+    # after phase 8: a warning apart from an invalid entry, a classical system, the k-path
+    # tools, the start page's Show all and Show fewer
+    "warning", "classical", "kpath_add", "kpath_remove", "kpath_default", "expand",
+    "collapse",
 )
 
 SIZE = 16                 # pixels of the icon of a control, in a bar, a row or a tree

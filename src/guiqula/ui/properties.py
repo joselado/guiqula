@@ -331,6 +331,8 @@ class Form(QWidget):
                     where.setObjectName(f"{'attachSlider' if what == 'slider' else 'sweepParam'}"
                                         f"Menu_{name}")
                     where.setToolTipsVisible(True)
+                    if what == "slider":
+                        where.setIcon(icons.icon("slider"))
                 for component, axis in components:
                     self._range_action(where, what, verb, name, component, axis)
         if self._previewable(name):
@@ -357,6 +359,8 @@ class Form(QWidget):
         span = None if value is None else range_from(value, getattr(param, "minimum", None),
                                                      getattr(param, "maximum", None))
         action = menu.addAction(text)
+        if what == "slider" and not axis:          # a vector's submenu carries the icon
+            action.setIcon(icons.icon("slider"))
         prefix = "attachSlider" if what == "slider" else "sweepParam"
         action.setObjectName(f"{prefix}_{name}" + (f"_{axis}" if axis else ""))
         label = param.label + (f" {axis}" if axis else "")
