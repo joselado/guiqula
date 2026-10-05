@@ -97,7 +97,10 @@ tests, `drive.py --widget` and the remote `widgets` and `screenshot` methods rel
   `exec()`; `pick` and `pick_to` take a calculation and a point, or `system` and `values`
   (the k-space tab's click, Calculate on selection).
 - `start.py`: the start page, `startPage`: the lattices, the examples and the recent files
-  as cards with the pictures of `resources/thumbnails/`, a filter, Show all; a card is made,
+  as cards with the pictures of `resources/thumbnails/`, a filter (where Ctrl+F puts the
+  focus while the page shows, `focus_search` returning "start"), Show all with its chevron
+  (`Band.set_more_icon`), the footer `startFooter` under the scroll area rather than in
+  it, so in sight at large text on 1200x800; a card is made,
   and its picture read, when it comes into sight, one row of each band at start, so a
   folded card is no widget for `findChild`, `drive.py --widget` or the remote methods
   until Show all, the `start` action's filter or `StartPage.card()` makes it, and
@@ -121,7 +124,7 @@ tests, `drive.py --widget` and the remote `widgets` and `screenshot` methods rel
   (`text_changed`), `size()` being 16 px or 20 px at large text; pixmaps at 16 and 24 px
   (and 20 px while the text is large), since a Python `QIconEngine` subclass
   crashes PySide6 6.11; a checkable menu entry gets no icon, which would hide its check
-  box. `resources/icons/` holds the 51 Tabler Icons of the controls (SVG files drawn in
+  box. `resources/icons/` holds the 56 Tabler Icons of the controls (SVG files drawn in
   `currentColor`, outline but the filled `cancel`, their MIT licence) and a README whose
   table of our names, Tabler's names and styles is what its fetch loop and
   `tests/ui/test_icons.py` read; a new icon is a row there, its file and its name in
@@ -136,15 +139,23 @@ tests, `drive.py --widget` and the remote `widgets` and `screenshot` methods rel
   `src/guiqula/docs/user_guide.md` is checked against it.
 - `outliner.py`: the tree: a "+" on each section row (`outlinerAdd_<system>_<section>`,
   `outlinerAdd_calculations`, `add_requested`); a label that says what the row is, after
-  the icon of its kind (`KIND_ROLE`); a Status column that holds the state only and is as
-  wide as its longest text (`status_width`), its marks drawn as icons at paint time
-  (`status_parts`, `MARK_ROLE`) while its text keeps `marks.py`'s Unicode, which the
+  the icon of its kind (`KIND_ROLE`, `structure` or `classical` for a system), wrapped at
+  its spaces onto further lines (a Unicode line separator, `LINE`, since Qt drops a
+  newline of an item's text) when wider than its room (`EntryDelegate.label_room`), and
+  elided only when a word is wider than that (`wraps`); a Status column that holds the
+  state only and is as wide as its longest text (`status_width`), its marks drawn as icons
+  at paint time (`status_parts`, `draw_parts`, `MARK_ROLE`), a warning the triangle and an
+  invalid entry the octagon, while its text keeps `marks.py`'s Unicode, which the
   tooltips and the tests read; the system and the mean field as detail rows across both
-  columns.
+  columns, their marks icons too (`leading_marks` when the status reads under the label);
+  a section row's "+" as high as its first line (`first_line`), so a wrapped label does not
+  widen the Status column. `tests/ui/test_outliner.py`'s `cut` checks the labels as well as
+  the statuses on every preset.
 - `gallery.py` (the presets, the start page's cards and `Title` headings, deleted when
   closed), `sliders.py` (the Sliders panel;
   `range_from`, the range a label's menu gives a slider or a sweep), `kspace.py` (the
-  Brillouin-zone canvas, its tab hidden for a system without a periodic direction),
+  Brillouin-zone canvas, its tab hidden for a system without a periodic direction, its
+  path tools `kpathAdd`, `kpathRemoveLast` and `kpathDefault` icons alone in its bar),
   `jobpanel.py`, `console.py` (the console panel), `bars.py` (recovery, error, cost and
   trust bars; `StatusMessage`, the last message in the status bar), `errors.py` (the
   exception hook), `formulas.py` (mathtext images; the rich tooltips of the Add menus).

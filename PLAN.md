@@ -3580,20 +3580,10 @@ starts, start page and icons included, in the time it took before phase
 program):
 
 - `ui/start.py`, `ui/gallery.py`: a folded card is not a widget until it
-  is made (decision 144); Ctrl+F opens New system while the page shows
-  (decision 113); at large text on 1200x800 the footer drops below the
-  fold;
-- `ui/outliner.py`, `ui/marks.py`: the entry labels are elided at 1200x800
-  (the whole text in the tooltip), and so is a long system name in its
-  detail row ("Hubbard model on the honeycomb la…"); the detail rows' marks
-  and the warning ⚠ are text beside icons, an invalid entry's red triangle
-  and a warning's ⚠ two triangles of different meaning; one icon for both
-  system kinds;
-- `ui/icons.py` and the controls: `zoom_out`, `slider` and `settings` are
-  vendored without a control; the k-space path tools and Show all are
-  words;
-- `tests/ui/test_startup.py`: the budget under load (decision 135), which
-  the base of the phase misses as well.
+  is made (decision 144), which is what keeps the start within its
+  budget; `StartPage.card()`, Show all and the `start` action's filter
+  make it. The other items of this list were built on branch rough-edges
+  (2026-10-05, "The rough edges of phase 8" at the end of this section).
 
 Decisions taken while building, for the maintainer to confirm; the first
 option of each is the one built:
@@ -3909,6 +3899,56 @@ the first option of each is the one built:
 150. the help's section name wraps over lines rather than widening the
      right column, and the help's text wraps four pixels inside its
      viewport; or the title elided with the whole name in its tooltip.
+
+**The rough edges of phase 8 (2026-10-05, branch rough-edges).** The
+maintainer asked for the items of "Still open" to be fixed; all of them
+were but the folded cards of the start page, which decision 144 keeps for
+the start time. In the outliner, a label wider than its column is wrapped
+at its spaces onto further lines, its row growing to hold them, where
+before it was elided at 1200x800 (four labels of the presets at normal
+text, "s1 Hubbard model on the honeycomb lattice" among them, and 31 at
+large text, measured on every preset); a section row's "+" is as high as
+its first line, since sized by the whole row it widened the Status column
+of a wrapped section row, which narrowed the labels further, a loop that
+an outliner squeezed to 140 px showed. The system's and the mean field's
+detail rows draw their marks as icons as the Status column does (a build
+error reads a cross before its message, wrapped beside the cross), a
+warning is the triangle and an invalid entry the octagon with an
+exclamation mark, and a classical system has its own icon, a magnet,
+beside the hexagons of a quantum one. On the start page the footer line
+sits under the scroll area, in sight at large text on 1200x800, Ctrl+F puts
+the focus in the filter while the page shows, and Show all carries a
+chevron. The k-space tab's path tools are icons alone, as every bar's
+controls are, Attach a slider carries the slider icon, and `zoom_out` and
+`settings`, which no control used, are dropped (56 icons, of which seven
+are new). The start-time test measures again, up to three starts, when a
+start misses the 2.0 s budget, and holds the fastest to it.
+
+Decisions taken while fixing them, for the maintainer to confirm; the first
+option of each is the one built:
+
+151. an outliner label wider than its room wraps at its spaces onto further
+     lines, and is elided only in an outliner narrower than one of its
+     words; or the elided label with the whole text in the tooltip (as
+     P7 built it), or a wider outliner by default at 1200x800;
+152. a classical system's row carries a magnet, a quantum system's the
+     hexagons, amending decisions 133 and 138; or one icon for both kinds;
+153. an invalid entry is Tabler's octagon with an exclamation mark, in the
+     error colour, and a warning the triangle in the text colour; or the
+     triangle for an invalid entry and another shape for a warning;
+154. Ctrl+F while the start page shows puts the focus in its filter, its
+     text selected, amending decision 113; or Ctrl+F opening New system;
+155. the start page's footer sits under the scroll area, always in sight;
+     or at the end of the bands, with smaller cards at large text;
+156. the k-space tab's path tools are icons alone (a pin with a plus, a
+     backspace key, a circular arrow), their names leading the tooltips,
+     and Show all keeps its words with a chevron before them, amending
+     decision 136; or the path tools with their text beside the icon;
+157. `zoom_out` and `settings` are dropped and `slider` goes on Attach a
+     slider; or a Zoom out button on every bar, beside Zoom;
+158. the start-time test measures up to three starts when one misses the
+     budget and holds the fastest to it, the budget staying at 2.0 s; or
+     one start as decision 135 left it, or the budget raised.
 
 ### Where the section 13 items land
 
