@@ -250,8 +250,9 @@ A term pyqula refuses is skipped and flagged with a cross in the error colour, w
 pyqula's message in the tooltip of its row; the rest of the stack still builds, and a
 result computed without it says so. The Hamiltonian view of the canvas (the Hamiltonian
 workspace, or Show: Hamiltonian) draws what the terms did: the atoms coloured by their
-onsite energy, every hopping with a width following its amplitude and a colour following
-its phase, exchange fields as arrows.
+onsite energy and outlined in grey, so that an onsite energy of zero, the pale middle of
+the scale, stays in sight on either background, every hopping with a width following its
+amplitude and a colour following its phase, exchange fields as arrows.
 
 ## Fields: parameters that depend on the position
 
