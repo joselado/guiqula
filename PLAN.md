@@ -3950,6 +3950,17 @@ option of each is the one built:
      budget and holds the fastest to it, the budget staying at 2.0 s; or
      one start as decision 135 left it, or the budget raised.
 
+Answers to decisions 146 to 158 (2026-10-05, delegated by the maintainer
+to a Claude Fable agent, which read the decisions, the ones they amend and
+the code, and looked at offscreen screenshots): every one stands as built.
+Two carry a note. On 148, at the 160x120 size of a card the cubic and
+diamond pictures carry many faded neighbouring sites around the supercell,
+so leaving the neighbours out of the pictures is worth one look by the
+maintainer, the angle itself being fine. On 158, three starts make the
+test weaker, since a start that meets the budget once in three passes,
+while a start that is slow every time still fails, which is what the
+budget guards.
+
 ### Where the section 13 items land
 
 | Phase | Items |
