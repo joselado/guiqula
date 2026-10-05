@@ -270,12 +270,15 @@ def test_ctrl_f_opens_the_add_menu_of_the_workspace(window, qtbot):
         assert window.focus_search() == family
         menu.hide()
     window.set_workspace("geometry")
-    # with no system, Add waits and Ctrl+F opens New system
+    # with no system, Add waits and Ctrl+F goes to the start page's filter
     window.session.act("new")
     assert not window.add_button.isEnabled()
     assert not window.outliner.add_button("calculations").isEnabled()
-    assert window.focus_search() == "lattice"
-    window.palette_menus["lattice"].hide()
+    window.start_page.search.setText("kagome")
+    assert window.focus_search() == "start"
+    assert window.start_page.search.selectedText() == "kagome"
+    assert not window.palette_menus["lattice"].isVisible()
+    window.start_page.search.clear()
 
 
 def test_the_first_row(window, qtbot):

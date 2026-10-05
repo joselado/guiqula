@@ -3472,8 +3472,13 @@ class MainWindow(QMainWindow):
 
     def focus_search(self):
         """Ctrl+F: the Add menu of the workspace with its search line
-        focused, or New system while the document has no system. Returns
-        the family it lists."""
+        focused, or the start page's filter while the page shows (the
+        document has no system). Returns the family it lists, "start" for
+        the page."""
+        if self.central_stack.currentWidget() is self.start_page:
+            self.start_page.search.setFocus(Qt.FocusReason.ShortcutFocusReason)
+            self.start_page.search.selectAll()
+            return "start"
         return self.open_add_menu()["menu"].removeprefix("paletteMenu_")
 
     def close_current_result(self):

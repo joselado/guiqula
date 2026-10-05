@@ -17,6 +17,11 @@ LATER = {"pyvista", "vtkmodules", "vtk"}
 # cards cost about 30 ms to build and their pictures are read after the
 # first paint (measured on 2026-10-03).
 BUDGET_SECONDS = 2.0
+# A start missing the budget is measured again, up to ATTEMPTS starts, and the fastest is
+# held to it: under the load of several suites at once a single start misses it with the
+# tree before phase 8 as well (decision 135), while a start that is slow for a reason of
+# its own misses it every time.
+ATTEMPTS = 3
 
 PROBE = """
 import json, sys, time
@@ -37,10 +42,16 @@ print(json.dumps({"seconds": seconds, "start_page": window.start_page.isVisible(
 def test_startup(run_python):
     # with the plugins on (the suite turns them off): listing them is part of the start,
     # 15 ms among 431 installed distributions on the development machine (2026-09-27)
-    result = run_python(PROBE, env_update={"GUIQULA_NO_PLUGINS": ""})
-    assert result.returncode == 0, result.stderr
-    out = json.loads(result.stdout.strip().splitlines()[-1])
-    assert HEAVY.isdisjoint(out["loaded"]), sorted(HEAVY & set(out["loaded"]))
-    assert LATER.isdisjoint(out["loaded"]), sorted(LATER & set(out["loaded"]))
-    assert out["start_page"]                    # the empty program shows it, within the budget
-    assert out["seconds"] < BUDGET_SECONDS, f"startup took {out['seconds']:.2f} s"
+    seconds = []
+    for _ in range(ATTEMPTS):
+        result = run_python(PROBE, env_update={"GUIQULA_NO_PLUGINS": ""})
+        assert result.returncode == 0, result.stderr
+        out = json.loads(result.stdout.strip().splitlines()[-1])
+        assert HEAVY.isdisjoint(out["loaded"]), sorted(HEAVY & set(out["loaded"]))
+        assert LATER.isdisjoint(out["loaded"]), sorted(LATER & set(out["loaded"]))
+        assert out["start_page"]                # the empty program shows it, within the budget
+        seconds.append(out["seconds"])
+        if out["seconds"] < BUDGET_SECONDS:
+            break
+    assert min(seconds) < BUDGET_SECONDS, \
+        f"startup took {', '.join(f'{s:.2f}' for s in seconds)} s in {len(seconds)} starts"

@@ -214,8 +214,9 @@ class KSpaceView(QWidget):
         self.default.clicked.connect(lambda: self._edited(None))
         self.bar.add("path", QLabel("path of"))
         self.bar.add("path", self.calc_box)
-        for widget in (self.add, self.remove_last, self.default):
-            self.bar.add("pathTools", widget)
+        for widget, icon in ((self.add, "kpath_add"), (self.remove_last, "kpath_remove"),
+                             (self.default, "kpath_default")):
+            self.bar.add("pathTools", widget, icon=icon)
         self.caption = QLabel("")
         self.caption.setObjectName("kspaceCaption")
         self.caption.setWordWrap(True)

@@ -44,14 +44,21 @@ label and its state in words, with the messages (why an entry is invalid,
 why a job failed, what a warning means).
 
 Icons (package P8, ui/icons.py): a row's kind is the icon before its label
-(KIND_ROLE: a system, the lattice, an op, a region, a term, the mean
-field, a calculation, Python code), and the marks of the Status column
-are drawn as icons, failed and invalid in the error colour, stale and
-disabled dimmed; the text of the column keeps the Unicode of ui/marks.py,
-which the tooltips and the tests read, and the state of its leading mark
-(MARK_ROLE) tells the icon of a failed job from that of an invalid entry,
-which share their sign.
+(KIND_ROLE: a quantum or a classical system, the lattice, an op, a region,
+a term, the mean field, a calculation, Python code), and the marks of the
+Status column and of the detail rows are drawn as icons, failed and
+invalid in the error colour, stale and disabled dimmed, a warning as the
+triangle and an invalid entry as the octagon; the text of the column keeps
+the Unicode of ui/marks.py, which the tooltips and the tests read, and the
+state of its leading mark (MARK_ROLE) tells the icon of a failed job from
+that of an invalid entry, which share their sign.
+
+A label wider than its column is wrapped onto further lines at its spaces
+(wrapped), the row growing to hold them, rather than elided, so that what
+a row is reads whole at 1200x800 and at large interface text; only in an
+outliner squeezed narrower than a word of the label is it elided (wraps).
 """
+import re
 import math
 
 from PySide6.QtCore import QEvent, QRect, QSize, Qt, QTimer, Signal
@@ -74,9 +81,10 @@ KIND_ROLE = Qt.ItemDataRole.UserRole + 3     # the icon of what a row is (column
 MARK_ROLE = Qt.ItemDataRole.UserRole + 4     # the state of a status's leading mark (column 1)
 # the marks of ui/marks.py drawn as icons (the sign ✗ is failed or invalid, by MARK_ROLE)
 MARK_ICONS = {marks.DONE: "done", marks.STALE: "stale", marks.DISABLED: "disabled",
-              marks.LOCKED: "locked"}
+              marks.LOCKED: "locked", marks.WARNING: "warning"}
 MARK_COLORS = {"failed": "ERROR", "invalid": "ERROR", "stale": "DISABLED",
                "disabled": "DISABLED"}
+LINE = "\u2028"               # a line separator: where a wrapped label breaks
 ICON_GAP = 3                 # pixels between an icon of the Status column and its text
 ICON_ROW = 4                 # pixels a row is higher than its icon (every row: Fusion's)
 INDENT = 14                  # pixels of indentation per level of the tree
@@ -237,12 +245,15 @@ def wrapped(font, text, width):
     """A detail row's status broken into lines of at most width pixels: at
     the spaces, and inside a word only when the word alone is wider than the
     line (large text in a narrow outliner), so that no word is cut at the
-    edge. The lines are joined by newlines, drawn and measured as they are."""
-    lines, line = [], ""
-    for word in text.split():
-        joined = f"{line} {word}" if line else word
+    edge. The spaces between two words of a line are kept as they are (the
+    two after an id). The lines are joined by newlines, drawn and measured
+    as they are."""
+    lines, line, gap = [], "", ""
+    for token in re.findall(r"\S+\s*", text):
+        word = token.rstrip()
+        joined = f"{line}{gap}{word}" if line else word
         if text_width(font, joined) <= width:
-            line = joined
+            line, gap = joined, token[len(word):]
             continue
         if line:
             lines.append(line)
@@ -252,7 +263,7 @@ def wrapped(font, text, width):
                 n -= 1
             lines.append(word[:n])
             word = word[n:]
-        line = word
+        line, gap = word, token[len(word):]
     return "\n".join(lines + ([line] if line else []))
 
 
@@ -294,6 +305,56 @@ def status_width(font, text, state=None):
     return math.ceil(width) + 1
 
 
+def wraps(font, text, room):
+    """Whether a label wider than its room is wrapped: when its longest word
+    fits in the room, so that it breaks at its spaces only; in an outliner
+    squeezed narrower than that, it is elided as before."""
+    return all(text_width(font, word) <= room for word in text.split())
+
+
+def leading_marks(text, state=None):
+    """(icon names, rest) of a status read under a detail row's label: the
+    marks that open it, drawn as icons on its first line, and the text after
+    them, wrapped beside them."""
+    parts = status_parts(text, state)
+    names = []
+    while parts and parts[0][0] and not parts[0][1]:
+        names.append(parts.pop(0)[0])
+    return names, " ".join(words for _, words in parts if words)
+
+
+def marks_width(font, names):
+    """The pixels of leading marks drawn as icons, with the space after
+    them."""
+    if not names:
+        return 0
+    space = QFontMetricsF(font).horizontalAdvance(" ")
+    return math.ceil(len(names) * (icons.pixels() + space))
+
+
+def draw_parts(painter, parts, rect, x, right, font, mode):
+    """Draw a status's parts (status_parts) on one line of rect from x:
+    each mark an icon in its colour (MARK_COLORS), the texts in the
+    painter's pen, elided at right."""
+    metrics = QFontMetricsF(font)
+    for i, (name, words) in enumerate(parts):
+        if i:
+            x += metrics.horizontalAdvance(" ")
+        if name:
+            icon = icons.icon(name, MARK_COLORS.get(name, "TEXT"))
+            top = rect.top() + (rect.height() - icons.pixels()) // 2
+            icon.paint(painter, QRect(round(x), top, icons.pixels(), icons.pixels()),
+                       Qt.AlignmentFlag.AlignCenter, mode)
+            x += icons.pixels() + (ICON_GAP if words else 0)
+        if words:
+            room = max(0, int(right - x))
+            painter.drawText(QRect(round(x), rect.top(), room, rect.height()),
+                             int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+                             metrics.elidedText(words, Qt.TextElideMode.ElideRight, room))
+            x += metrics.horizontalAdvance(words)
+    return x
+
+
 def add_room(height):
     """The pixels the "+" of a section row takes at the right of its status
     cell: the button is as wide as the row is high, plus 4."""
@@ -301,16 +362,18 @@ def add_room(height):
 
 
 class AddCell(QWidget):
-    """The status cell of a section row: its "+" at the right, and a mask
-    that leaves the rest of the cell's clicks to the row."""
+    """The status cell of a section row: its "+" at the right, as high as
+    the row's first line, and a mask that leaves the rest of the cell's
+    clicks to the row."""
 
-    def __init__(self, button):
+    def __init__(self, button, line):
         super().__init__()
         self.button = button
+        self.line = line              # the height of the row's first line, in pixels
         button.setParent(self)
 
     def resizeEvent(self, event):
-        side = max(self.height(), 1)
+        side = max(min(self.height(), self.line()), 1)
         self.button.setGeometry(self.width() - side - 4, 0, side + 4, side)
         self.setMask(QRegion(self.button.geometry()))
         super().resizeEvent(event)
@@ -326,7 +389,8 @@ class StatusDelegate(QStyledItemDelegate):
         super().initStyleOption(option, index)
         if index.data(ADD_ROLE) and not any(
                 name for name, _ in status_parts(option.text, index.data(MARK_ROLE))):
-            room = add_room(option.rect.height()) + text_margin(option.widget or self.parent())
+            view = option.widget or self.parent()
+            room = add_room(view.first_line(index)) + text_margin(view)
             option.text = option.fontMetrics.elidedText(
                 option.text, Qt.TextElideMode.ElideRight, max(0, option.rect.width() - room))
 
@@ -350,28 +414,12 @@ class StatusDelegate(QStyledItemDelegate):
             color = brush.color() if isinstance(brush, QBrush) else \
                 opt.palette.color(QPalette.ColorRole.Text)
         mode = QIcon.Mode.Selected if selected else QIcon.Mode.Normal
-        metrics = QFontMetricsF(opt.font)
         rect = opt.rect
-        right = rect.right() - (add_room(rect.height()) if index.data(ADD_ROLE) else 0)
-        x = rect.left() + text_margin(view)
+        right = rect.right() - (add_room(view.first_line(index)) if index.data(ADD_ROLE) else 0)
         painter.save()
         painter.setFont(opt.font)
         painter.setPen(color)
-        for i, (name, words) in enumerate(parts):
-            if i:
-                x += metrics.horizontalAdvance(" ")
-            if name:
-                icon = icons.icon(name, MARK_COLORS.get(name, "TEXT"))
-                top = rect.top() + (rect.height() - icons.pixels()) // 2
-                icon.paint(painter, QRect(round(x), top, icons.pixels(), icons.pixels()),
-                           Qt.AlignmentFlag.AlignCenter, mode)
-                x += icons.pixels() + (ICON_GAP if words else 0)
-            if words:
-                room = max(0, int(right - x))
-                painter.drawText(QRect(round(x), rect.top(), room, rect.height()),
-                                 int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
-                                 metrics.elidedText(words, Qt.TextElideMode.ElideRight, room))
-                x += metrics.horizontalAdvance(words)
+        draw_parts(painter, parts, rect, rect.left() + text_margin(view), right, opt.font, mode)
         painter.restore()
 
 
@@ -385,18 +433,56 @@ class EntryDelegate(QStyledItemDelegate):
         self.view = view
 
     def initStyleOption(self, option, index):
-        """The row's kind as its icon (KIND_ROLE), in the active theme."""
+        """The row's kind as its icon (KIND_ROLE), in the active theme, and
+        its label wrapped onto further lines when it is wider than the room
+        the row gives it (label_room)."""
         super().initStyleOption(option, index)
         name = index.data(KIND_ROLE)
         if name:
             option.icon = icons.icon(name)
             option.decorationSize = icons.size()
             option.features |= QStyleOptionViewItem.ViewItemFeature.HasDecoration
+        if option.text:
+            room = self.label_room(option, index)
+            if text_width(option.font, option.text) > room and wraps(option.font, option.text,
+                                                                     room):
+                # Qt drops a newline of an item's text; a line separator breaks the line
+                option.text = wrapped(option.font, option.text, room).replace("\n", LINE)
+                option.features |= QStyleOptionViewItem.ViewItemFeature.WrapText
 
-    def line_height(self, option, index):
-        """The height of the row's first line: a row of one line, as high
-        with an icon as without one (a section row has none)."""
-        return max(super().sizeHint(option, index).height(), icons.pixels() + ICON_ROW)
+    def label_room(self, option, index):
+        """The pixels a row's label has: the text rect of its cell (of its
+        span, for a detail row) once the check box and the icon are placed,
+        less the cell's margins."""
+        opt = QStyleOptionViewItem(option)
+        opt.rect = self.view.label_rect(index, max(option.rect.height(), 1))
+        text = self.view.style().subElementRect(QStyle.SubElement.SE_ItemViewItemText, opt,
+                                                self.view)
+        return max(1, text.width() - 2 * text_margin(self.view))
+
+    def line_height(self, option, index, first=False):
+        """The height of the row's first line: its label, on as many lines
+        as it was wrapped onto (on one, first), as high with an icon as
+        without one (a section row has none). A section row's "+" is as
+        high as the label's first line, so that a label wrapped in a narrow
+        outliner does not widen the Status column, which would narrow the
+        label further."""
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        lines = opt.text.count(LINE) + 1
+        height = super().sizeHint(option, index).height()
+        spacing = QFontMetrics(opt.font).lineSpacing()
+        if lines > 1 and first:
+            height -= (lines - 1) * spacing
+        elif lines > 1:
+            height = max(height, lines * spacing + ICON_ROW)
+        return max(height, icons.pixels() + ICON_ROW)
+
+    def status_text(self, index):
+        """(text, state) of a detail row's status: the Status column's text
+        and the state of its leading mark (MARK_ROLE)."""
+        sibling = index.siblingAtColumn(1)
+        return sibling.data() or "", sibling.data(MARK_ROLE)
 
     def layout(self, option, index):
         """(rect of the first line, rect of the status, on one line) of a
@@ -412,17 +498,22 @@ class EntryDelegate(QStyledItemDelegate):
                                                 self.view)
         margin = text_margin(self.view)
         right = first.right() - margin
-        status = index.siblingAtColumn(1).data() or ""
+        status, state = self.status_text(index)
         font = self.view.font()
-        width = text_width(font, status)
-        if text_width(opt.font, opt.text) + TEXT_GAP + width <= right - (text.left() + margin):
+        width = status_width(font, status, state)
+        if LINE not in opt.text and text_width(opt.font, opt.text) + TEXT_GAP + width \
+                <= right - (text.left() + margin):
             return first, QRect(right - width, first.y(), width + 1, first.height()), True
         left = first.left() + margin
         width = max(1, right - left)
+        names, rest = leading_marks(status, state)
+        indent = marks_width(font, names)
         flags = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
-        bound = QFontMetrics(font).boundingRect(QRect(0, 0, width, 1 << 16), int(flags),
-                                                wrapped(font, status, width))
-        return first, QRect(left, first.bottom() + 1, width, bound.height()), False
+        bound = QFontMetrics(font).boundingRect(QRect(0, 0, max(1, width - indent), 1 << 16),
+                                                int(flags),
+                                                wrapped(font, rest, max(1, width - indent)))
+        height = max(bound.height(), QFontMetrics(font).height() if names else 0)
+        return first, QRect(left, first.bottom() + 1, width, height), False
 
     def sizeHint(self, option, index):
         hint = super().sizeHint(option, index)
@@ -457,16 +548,26 @@ class EntryDelegate(QStyledItemDelegate):
         else:
             color = brush.color() if isinstance(brush, QBrush) else \
                 opt.palette.color(group, QPalette.ColorRole.Text)
-        status = index.siblingAtColumn(1).data() or ""
+        status, state = self.status_text(index)
+        font = self.view.font()
+        mode = QIcon.Mode.Selected if opt.state & QStyle.StateFlag.State_Selected \
+            else QIcon.Mode.Normal
         painter.save()
-        painter.setFont(self.view.font())
+        painter.setFont(font)
         painter.setPen(color)
-        if one_line:
-            flags = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-        else:
-            flags = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
-            status = wrapped(self.view.font(), status, status_rect.width())
-        painter.drawText(status_rect, int(flags), status)
+        if one_line:                  # the marks as icons, as the Status column draws them
+            draw_parts(painter, status_parts(status, state), status_rect, status_rect.left(),
+                       status_rect.right() + 1, font, mode)
+        else:                         # its marks on the first line, the text wrapped beside
+            names, rest = leading_marks(status, state)
+            indent = marks_width(font, names)
+            line = QRect(status_rect.left(), status_rect.top(), status_rect.width(),
+                         QFontMetrics(font).height())
+            draw_parts(painter, [(name, "") for name in names], line, line.left(),
+                       line.right(), font, mode)
+            painter.drawText(status_rect.adjusted(indent, 0, 0, 0),
+                             int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop),
+                             wrapped(font, rest, max(1, status_rect.width() - indent)))
         painter.restore()
 
     def editorEvent(self, event, model, option, index):
@@ -493,6 +594,8 @@ class Outliner(QTreeWidget):
         header.setStretchLastSection(False)
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        # a label wraps by the width of its column (EntryDelegate.label_room)
+        header.sectionResized.connect(self._column_resized)
         self.setUniformRowHeights(False)          # a detail row may read on two lines
         # a level indents by INDENT rather than Fusion's 20 px, which gives the labels of a
         # term (two levels down, after its check box and its icon) back the room of its icon
@@ -525,6 +628,10 @@ class Outliner(QTreeWidget):
             action = shortcuts.bind(QAction(text, self), shortcut)
             action.triggered.connect(slot)
             self.addAction(action)
+
+    def _column_resized(self, column, old, new):
+        if column == 0 and old != new:
+            self.scheduleDelayedItemsLayout()
 
     def _icons_changed(self):
         """The rows' icons are drawn from ui/icons.py at paint time (the
@@ -565,7 +672,8 @@ class Outliner(QTreeWidget):
         button.setEnabled(enabled)
         button.clicked.connect(lambda checked=False: self.add_requested.emit(path, button))
         item.setData(1, ADD_ROLE, path)
-        self.setItemWidget(item, 1, AddCell(button))
+        index = self.indexFromItem(item, 0)
+        self.setItemWidget(item, 1, AddCell(button, lambda: self.first_line(index)))
         self._add_buttons[path] = button
         return button
 
@@ -679,7 +787,7 @@ class Outliner(QTreeWidget):
             status = f"{marks.mark('failed')} {line}"
             details = [f"{kind}, which cannot be built: {error}"]
         top = self._add(None, system.id, _entry_text(system.id, system.name), status, details,
-                        kind="structure")
+                        kind="structure" if system.hamiltonian is not None else "classical")
         font = self.font()
         font.setBold(True)
         top.setFont(0, font)
@@ -946,7 +1054,8 @@ class Outliner(QTreeWidget):
             need = status_width(self.item_font(item, 1), text, item.data(1, MARK_ROLE)) \
                 + 2 * margin if text else 0
             if item.data(1, ADD_ROLE):
-                height = self._entry_delegate.line_height(option, self.indexFromItem(item, 0))
+                height = self._entry_delegate.line_height(option, self.indexFromItem(item, 0),
+                                                          first=True)
                 need = (need - margin if text else margin) + add_room(height)
             width = max(width, need)
         return width
@@ -957,6 +1066,24 @@ class Outliner(QTreeWidget):
         width = self.status_width()
         if self.header().sectionSize(1) != width:
             self.header().resizeSection(1, width)
+
+    def first_line(self, index):
+        """The height of a row's first line (EntryDelegate.line_height),
+        which a section row's "+" takes."""
+        option = QStyleOptionViewItem()
+        self.initViewItemOption(option)
+        return self._entry_delegate.line_height(option, index.siblingAtColumn(0), first=True)
+
+    def label_rect(self, index, height):
+        """Where a row's label is laid out: its cell in the Entry column from
+        its indentation, or its span for a detail row."""
+        if index.data(DETAIL_ROLE):
+            return self.span_rect(index, height)
+        depth, parent = 0, index.parent()
+        while parent.isValid():
+            depth, parent = depth + 1, parent.parent()
+        left = self.indentation() * (depth + (1 if self.rootIsDecorated() else 0))
+        return QRect(left, 0, max(1, self.columnWidth(0) - left), height)
 
     def span_rect(self, index, height):
         """Where a detail row spans: from its indentation to the right edge
@@ -976,13 +1103,12 @@ class Outliner(QTreeWidget):
         super().drawBranches(painter, rect, index)
 
     def resizeEvent(self, event):
-        """(the viewport's) A detail row reads on one line or two by the
-        width it is given."""
+        """(the viewport's) A detail row reads on one line or two, and a
+        label on as many as it needs, by the width it is given."""
         super().resizeEvent(event)
         if self.viewport().width() != self._viewport_width:
             self._viewport_width = self.viewport().width()
-            if any(item.data(0, DETAIL_ROLE) for item in self._items.values()):
-                self.scheduleDelayedItemsLayout()
+            self.scheduleDelayedItemsLayout()
 
     def changeEvent(self, event):
         super().changeEvent(event)

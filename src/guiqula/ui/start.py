@@ -4,8 +4,9 @@ program opens on something to do. Three bands of a scrolled page: "Start
 from a lattice" (the registry's lattices by group, then the classical
 systems), "Open an example" (the presets, the teaching ones marked) and
 "Recent files" (the settings' recent files and Open a project...), a filter
-box at the top that narrows every band, and a footer line saying what comes
-next, with a link to guiqula's guide.
+box at the top that narrows every band, and a footer line under the
+scrolled bands, always in sight, saying what comes next, with a link to
+guiqula's guide.
 
 A band shows one row of cards (the first ones, in the band's order) until
 its "Show all" is pressed or the filter has text, so that every band is in
@@ -454,6 +455,8 @@ class Band(QWidget):
         self.more = QToolButton()
         self.more.setObjectName(f"startMore_{key}")
         self.more.setAutoRaise(True)
+        self.more.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.icons_set = False          # the page sets them at its first show (set_more_icon)
         self.more.clicked.connect(lambda: self.set_expanded(not self.expanded))
         self.top = QHBoxLayout()
         self.top.setContentsMargins(0, 0, 0, 0)
@@ -612,9 +615,17 @@ class Band(QWidget):
         self.more.setText("Show fewer" if self.expanded else f"Show all {len(matching)}")
         self.more.setToolTip("show only the first row" if self.expanded else
                              f"show the {len(matching)} {self.noun}")
+        self.set_more_icon()
         self.empty.setText(self.empty_texts[1] if self.slots else self.empty_texts[0])
         self.empty.setVisible(not matching)
         return [slot.card.objectName() for slot in self.slots if id(slot) in visible]
+
+    def set_more_icon(self):
+        """Show all's chevron, down while folded and up for Show fewer, once
+        the page has set its icons (StartPage._set_icons)."""
+        if self.icons_set:
+            self.more.setIcon(icons.icon("collapse" if self.expanded else "expand"))
+            self.more.setIconSize(icons.size())
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -716,7 +727,7 @@ class StartPage(QWidget):
         self.recent.set_empty("Projects you save or open will be listed here.",
                               "No recent file matches the filter.")
         self.footer = QLabel(FOOTER.format(run=shortcuts.text("run"),
-                                           help=shortcuts.text("help")), content)
+                                           help=shortcuts.text("help")), self)
         self.footer.setObjectName("startFooter")
         self.footer.setWordWrap(True)
         self.footer.setToolTip("the guide opens in the Help panel")
@@ -726,17 +737,26 @@ class StartPage(QWidget):
         for band in (self.lattices, self.presets, self.recent):
             band.update_cards()            # folded before the first layout: fewer to place
             column.addWidget(band)
-        column.addWidget(self.footer)
         column.addStretch(1)
+        # under the scrolled bands rather than at their end, so that it is in sight at
+        # 1200x800 whatever the interface text
+        bottom = QHBoxLayout()
+        bottom.setContentsMargins(16, 6, 16, 8)
+        bottom.addWidget(self.footer)
+        layout.addLayout(bottom)
         self.set_recent([])
         icons.follow(self, self._set_icons)
 
     def _set_icons(self):
-        """The filter's search icon and Open a project's (icons.follow: at
-        the page's first show and after every change of theme)."""
+        """The filter's search icon, Open a project's and the chevrons of
+        Show all (icons.follow: at the page's first show and after every
+        change of theme)."""
         self.search_icon.setIcon(icons.icon("search"))
         self.open_button.setIcon(icons.icon("open"))
         self.open_button.setIconSize(icons.size())
+        for band in self.bands():
+            band.icons_set = True
+            band.set_more_icon()
 
     # ---- the cards, made as they come into sight
     def _lattice_card(self, spec):

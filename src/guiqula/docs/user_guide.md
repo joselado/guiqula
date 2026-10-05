@@ -19,11 +19,12 @@ the document has no system. It has three bands: the lattices (by dimension, the 
 systems last) and the examples (the shipped presets, the two teaching ones first) as cards
 with pictures, and the recent files, with Open a project... for the others; a filter box
 at the top, with the focus when the page first shows, narrows the three at once to what
-matches every word typed. The lattices and the examples show their first row, and the
-recent files their first three, until the band's Show all is pressed or the filter holds
-text. A lattice card makes a new system on that lattice, a classical card makes classical
+matches every word typed, and Ctrl+F brings the focus back to it. The lattices and the
+examples show their first row, and the recent files their first three, until the band's
+Show all (with a chevron down, up for Show fewer) is pressed or the filter holds text. A lattice card makes a new system on that lattice, a classical card makes classical
 spins, a lattice gas or an Ising model, and an example card opens that document; a line
-at the foot of the page says what comes next and links to this guide. Tab walks the
+under the bands, in sight however far they are scrolled, says what comes next and links
+to this guide. Tab walks the
 filter, each band's Show all and its cards in their order, Open a project... and the
 recent files, and Enter or Space presses the card that has the focus. File > New brings
 the page back, and File > Presets gallery shows the same examples in a dialog, with the
@@ -70,7 +71,7 @@ ends with Mean field (interactions), which turns the system's mean-field block o
 selects it, and the menu of the Regions row offers a region by expression and a region
 from the sites selected on the canvas. Add, on the toolbar, is the same menu for the
 workspace shown and the current system (Ctrl+F opens it with the search line ready, or
-New system while the document has no system), and New system lists the lattices by
+goes to the start page's filter while the document has no system), and New system lists the lattices by
 dimension with the classical systems in its last section. With several systems, the "+"
 of a system's section adds to that system, while Add and the "+" of Calculations add to
 the system of the selected entry (the first one when nothing is selected).
@@ -95,13 +96,14 @@ outliner.
 ### The outliner
 
 The outliner is the whole document as a tree, and each row says what it is and in what
-state. An icon before the label gives the kind of row: a system (the same icon for a
-quantum and a classical one), its lattice, an op, a region, a term (a sum sign), the mean
+state. An icon before the label gives the kind of row: a quantum system (hexagons) or a
+classical one (a magnet), its lattice, an op, a region, a term (a sum sign), the mean
 field, a calculation, Python code. A system's row gives its name in bold and a summary of
 what was built ("2D · 8 sites · spinful", or "0D · 40 sites · classical spins" for a
 classical one). The label of an entry carries its id, its kind and its name, then an op's
-parameters, a region's selection or the region a term acts in, and the Status column
-carries its state only, the marks drawn as icons:
+parameters, a region's selection or the region a term acts in, on further lines when it is
+wider than the column, so that it is never cut, and the Status column carries its state
+only, the marks drawn as icons (on the system's summary and the mean field's line too):
 
 - the Hilbert space after a term (spinless, spinful, Nambu), which is how one sees where
   a Zeeman field made the Hamiltonian spinful;
@@ -114,10 +116,10 @@ carries its state only, the marks drawn as icons:
   earlier result reads as that result does, and its error is in the Jobs panel), the word
   queued or cancelled, nothing when it was never run, and the value of a single number
   after its mark (a gap, a Chern number);
-- a warning triangle in the error colour for an entry that pyqula or the planner refuses,
-  a crossed-out circle for a disabled one (the row dimmed), the sign ⚠ for one that is
-  valid but worth a look (it reads a stale result), and a padlock on a locked entry (m and
-  a padlock when one of its parameters is).
+- an octagon with an exclamation mark, in the error colour, for an entry that pyqula or
+  the planner refuses, a crossed-out circle for a disabled one (the row dimmed), a warning
+  triangle for one that is valid but worth a look (it reads a stale result), and a padlock
+  on a locked entry (m and a padlock when one of its parameters is).
 
 The full label and the messages (why an entry is refused, why a run failed, how to lift a
 lock) are in the row's tooltip. A check box enables or disables an op or a term, a drag
@@ -147,7 +149,10 @@ rather than hiding a control:
 
 The buttons of the bars show icons, whose tooltips name them and their keys, where they
 have one: Show is an eye before the choice of view, and 3D a cube beside its check box.
-The k-space tab's path tools and the brush's value and radius keep their words. A result
+The k-space tab's path tools are icons too, a pin with a plus for Add points, a backspace
+key for Remove last and a circular arrow for Default path, and the brush's value and
+radius keep their words. Attach a slider, in a parameter's menu, carries the slider's
+icon. A result
 that is not simply current says so in a row above its plot, with the icon of its state:
 stale, with Run again; queued or running, with its progress and Cancel; failed, with the
 final exception of the error ("ValueError: no band here", where the engine wraps it in its
@@ -644,7 +649,7 @@ functions only: the window loads the plugin too, and must start without pyqula.
 | window | Ctrl+1 | Geometry workspace |
 | window | Ctrl+2 | Hamiltonian (or Model) workspace |
 | window | Ctrl+3 | Calculate workspace |
-| window | Ctrl+F | the Add menu of the workspace, with its search line (ops, terms or calculations) |
+| window | Ctrl+F | the Add menu of the workspace, with its search line (ops, terms or calculations); the filter of the start page |
 | window | Ctrl+0 | show the Structure tab |
 | window | Ctrl+W | close the result tab shown |
 | window | F5 | run the selected calculation |

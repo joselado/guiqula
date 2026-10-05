@@ -38,7 +38,8 @@ SHORTCUTS = (
     ("workspace_hamiltonian", ("Ctrl+2",), "window", "Hamiltonian (or Model) workspace"),
     ("workspace_calculate", ("Ctrl+3",), "window", "Calculate workspace"),
     ("find", ("Ctrl+F",), "window",
-     "the Add menu of the workspace, with its search line (ops, terms or calculations)"),
+     "the Add menu of the workspace, with its search line (ops, terms or calculations); "
+     "the filter of the start page"),
     ("structure_tab", ("Ctrl+0",), "window", "show the Structure tab"),
     ("close_result", ("Ctrl+W",), "window", "close the result tab shown"),
     ("run", ("F5",), "window", "run the selected calculation"),
