@@ -11,7 +11,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QButtonGroup, QDialog, QFrame, QHBoxLayout, QLabel, QPushButton,
                                QScrollArea, QVBoxLayout, QWidget)
 
-from guiqula.ui.start import FlowLayout, preset_card, preset_info, presets
+from guiqula.ui.start import FlowLayout, Title, preset_card, preset_info, presets
 
 GROUPS = (("teaching", "Teaching (some parameters locked)"), ("examples", "Examples"))
 
@@ -28,6 +28,8 @@ class Gallery(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("presetGallery")
+        # each opening makes a gallery of its own, so a closed one goes, pictures and all
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.setWindowTitle("Presets")
         self.resize(940, 600)
         infos = presets()
@@ -46,11 +48,8 @@ class Gallery(QDialog):
                              key=lambda i: i["title"].lower())
             if not members:
                 continue
-            label = QLabel(heading)
+            label = Title(heading)          # bold, in the font of the interface text
             label.setObjectName(f"galleryGroup_{group}")
-            font = label.font()
-            font.setBold(True)
-            label.setFont(font)
             column.addWidget(label)
             flow = FlowLayout()
             for info in members:

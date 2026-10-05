@@ -30,8 +30,9 @@ Inkscape on the flat drawings (section 7, after the look; decisions 80 to 87). P
 packages, P1 to P9, and decisions 90 to 106, at the end of section 7; the
 maintainer answered 93, and the others stand as recommended) and built on
 2026-10-03 and 2026-10-04 on branch phase8, every package included; its
-report closes section 7, with decisions 107 to 145 for the maintainer to
-confirm, and section 4 draws the window as built. Phase 8 was merged into
+report closes section 7, with decisions 107 to 145, which the maintainer
+answered on 2026-10-05 (all as recommended but 121, answered with its
+alternative), and section 4 draws the window as built. Phase 8 was merged into
 master and pushed on 2026-10-04.
 
 ## 1. Requirements (as stated by the maintainer)
@@ -3578,37 +3579,19 @@ starts, start page and icons included, in the time it took before phase
 *Still open* (by the file that would change; none blocks a use of the
 program):
 
-- `ui/plots.py`: the failure line of the status row begins with the
-  engine's exception chain, so at 1200 px the useful part is in the
-  tooltip;
 - `ui/start.py`, `ui/gallery.py`: a folded card is not a widget until it
-  is made (decision 144); the gallery's headings do not follow the
-  interface text while it is open, and closed galleries are kept alive with
-  their pictures; Ctrl+F opens New system while the page shows (decision
-  113); three 3D pictures (buckled honeycomb, cubic, diamond) show one dot
-  in their cell and texture_exchange's a thin ladder; at large text on
-  1200x800 the footer drops below the fold;
+  is made (decision 144); Ctrl+F opens New system while the page shows
+  (decision 113); at large text on 1200x800 the footer drops below the
+  fold;
 - `ui/outliner.py`, `ui/marks.py`: the entry labels are elided at 1200x800
   (the whole text in the tooltip), and so is a long system name in its
   detail row ("Hubbard model on the honeycomb la…"); the detail rows' marks
   and the warning ⚠ are text beside icons, an invalid entry's red triangle
   and a warning's ⚠ two triangles of different meaning; one icon for both
   system kinds;
-- `ui/icons.py` and the controls: the icons stay 16 px at large interface
-  text; `zoom_out`, `slider` and `settings` are vendored without a control;
-  the k-space path tools and Show all are words;
-- `ui/structure.py`: in the Hamiltonian view an onsite energy of zero is a
-  white disc, unseen on the light background and drawn, with the faded
-  neighbouring cells, as a grid of grey discs on the dark one (the same
-  whether the theme is set before the build or after it, so the drawing's
-  colours and not a redraw);
-- `ui/forms.py`, `ui/properties.py`: the kind buttons of different scalar
-  rows do not line up; a sweep from the label of a system whose
-  calculations give no number runs the first one and fails when run;
-- `ui/help.py`: the help browser's horizontal scroll bar;
-- the tests: three warnings of matplotlib, "constrained_layout not applied
-  because axes sizes collapsed to zero", two in `test_console_in_the_window`
-  and one in `test_the_scene_moves_as_in_blender`;
+- `ui/icons.py` and the controls: `zoom_out`, `slider` and `settings` are
+  vendored without a control; the k-space path tools and Show all are
+  words;
 - `tests/ui/test_startup.py`: the budget under load (decision 135), which
   the base of the phase misses as well.
 
@@ -3796,6 +3779,136 @@ option of each is the one built:
      change of theme (`icons.follow`), and the plugins are looked for in the
      `entry_points.txt` files before `importlib.metadata`; or the icons set
      as the window is built, about 70 ms of the start.
+
+Maintainer's answers to the phase-8 report (2026-10-05, asked one by one,
+in the order of the report): 107 to 115, 123 and 130 were answered as
+recommended, and the others stand as recommended at the maintainer's word,
+except 121, answered with its alternative: a run that fails while an
+earlier result of that calculation is kept reads stale, as `Session.status`
+says, in the tree, the tab and the status row alike (the row with Run
+again, the earlier result staying drawn under it), and the failure itself
+is read in the Jobs panel; a run that fails with no earlier result still
+reads failed. Built on branch still-open: `marks.calculation_state` gives
+`Session.status`'s state but for a job still queued or running, so the
+tree, the tab, the status row, the form's result line (decision 141) and
+the remote `plot` state (decision 134) read stale there together, a result
+that still matches the document reading done.
+
+**After the report: the items still open that needed no decision
+(2026-10-05, branch still-open).** The three warnings of matplotlib in the
+tests ("constrained_layout not applied because axes sizes collapsed to
+zero") were a defect of the window that the tests showed: the Jobs panel's
+line of the workers, one line of about 770 px once the console worker had
+started (interactive, batch and console, each with its pid and state), was
+the minimum width of the right column, which took it from the viewport, so
+the structure canvas was left about 180 px wide, too narrow for the axes
+and a colour bar. The line now wraps (`ui/jobpanel.py`), the column keeps
+the 340 px the window gives it (`resizeDocks`), where before it grew to
+about 430 px as soon as two workers had reported, which is the width of
+the screenshots of phase 8, and the warnings are gone, the one in
+`test_the_scene_moves_as_in_blender` included, since it was a pending draw
+of the previous module's window. In the Hamiltonian view, the Field
+preview and a result drawn on the atoms, an atom coloured by a value is
+outlined in the bonds' grey (`structure.atom_edge`), since its outline was
+the background's colour, white in the light theme, around the near-white
+middle of the diverging scale, so that an onsite energy of zero was a disc
+lost on the background; the sublattice colours of the structure view keep
+the background's outline, which separates them. The help browser's
+horizontal scroll bar came from the code blocks, whose lines Qt keeps
+whole, so that one line of pyqula's examples longer than the panel (the
+`add_zeeman` example of t1's help, about 560 px in a panel of 410) made
+the whole page scroll sideways; their lines now wrap at the panel's width
+as the prose does (`HelpBrowser._wrap_code`), and of the 281 sections of
+the two guides only the nine with a wider equation keep the bar. The
+gallery's group headings are the start page's `Title`, painted in the
+interface font at each paint, so that they follow View > Interface text
+while the gallery is open (a font set on a `QLabel` stayed at its size), and
+a closed gallery is deleted (`WA_DeleteOnClose`) rather than kept hidden
+with its pictures, each opening making one of its own as before. The
+kind buttons of a form are as wide as the widest of the form
+(`forms.line_up`, called by every form after it sets its values), the rule
+a vector's components already followed, so that an expression's button over
+a number's f(r) no longer narrows that row's box.
+
+Decisions taken while fixing them, for the maintainer to confirm; the first
+option of each is the one built:
+
+146. the lines of a code block in the help wrap at the panel's width, as
+     the prose does (a copied line stays whole); or the code kept on whole
+     lines, with the horizontal scroll bar for its pages;
+147. an atom coloured by a value is outlined in the bonds' grey in both
+     themes, the sublattice colours keeping the background's outline; or a
+     darker outline (the text's colour), or the outline only on the
+     light background.
+
+Maintainer's answers to the open items (2026-10-05, asked one by one):
+the right column keeps the 340 px the window gives, and the README's
+pictures are made again at that width; the hoppings of the Hamiltonian view
+are coloured with `twilight_shifted` in the dark theme, so that phase zero
+is light there, the light theme keeping `twilight`; the status row of a
+failed result shows the last line of the message, the final exception,
+the whole chain staying in the tooltip and in Jobs (amending decision
+120); the icons are drawn at 20 px at large interface text, set again when
+View > Interface text changes; a displayed equation wider than the help
+panel is scaled down to its width; the 3D pictures of the buckled
+honeycomb, cubic and diamond lattices are a small supercell (3x3x1, 2x2x2
+and 2x2x2) seen from an oblique angle with its bonds, and texture_exchange's
+picture is drawn without equal aspect; the sweep from a label stays as
+built (decision 125, confirmed).
+
+Built on branch still-open, one commit each. The hopping phases' scale is
+the theme's `PHASE_MAP` (`ui/theme.py`), which `theme.drawing` rebinds
+with the other colours, so an exported figure takes the scale of the
+theme it is drawn in.
+The failure is told by `marks.failure_line`: the last line of the message
+from its last exception name on, so that "CalculationError: Python:
+ValueError: no band here" reads "ValueError: no band here" in the status row
+and in the form's result line alike (decision 141 keeps them one), and a
+message without an exception name (a timeout, a worker that died) is its
+last line.
+A displayed equation wider than the help panel is drawn at the panel's
+width, its height in proportion (`HelpBrowser._fit_equations`, again at
+each change of the viewport's width, the vertical scroll bar's coming
+included), and the text wraps four pixels inside the viewport, since
+wrapped at its very width Qt's rounding left three sections a pixel wider,
+with a scroll bar for that pixel: none of the 281 sections of the two
+guides scrolls sideways at 1200x800 or at 1600x1000. The widest, in "The
+screened interaction", is drawn at about half its size. Looking for it, the
+section's name over the page turned out to widen the right column for good
+once a long one was shown (to about 460 px after "h.get_sxsx_mean_field
+_hamiltonian() / ..."), as the workers line did; it now wraps.
+The icons are `icons.size()` at the active interface text, 16 px or 20 px
+at large (`icons.LARGE`), drawn at that size (the 20 px renderings are made
+only while the text is large, so the normal start draws what it drew), and
+`theme.apply_text` calls `icons.text_changed` when the size changes, which
+sets every followed control's icons again as a change of theme does: the
+toolbars, the bars of the drawings, the status rows, the forms' buttons,
+the viewport's tabs and the outliner's marks. The start, measured
+alternately against master (ten rounds each, fresh data and settings, at a
+load of 3 to 5), took a median of 1.37 s against 1.32 s, within the noise
+of single rounds (1.17 to 2.09 s) and well within the 2.0 s budget.
+The pictures of the buckled honeycomb, cubic and diamond lattices are
+drawn by `tools/make_thumbnails.py` as a supercell (`SUPERCELLS`: 3x3x1,
+2x2x2, 2x2x2) from an oblique angle (`OBLIQUE`, 22 degrees of elevation and
+-38 of azimuth), where the bonds of the cell and its neighbours show, and
+texture_exchange's (`LOOSE`) without equal aspect, its height the sites'
+own spread with a margin, so that the chain's spins read as arrows rather
+than a thin ladder.
+
+Decisions taken while building the answers, for the maintainer to confirm;
+the first option of each is the one built:
+
+148. the 3D pictures' oblique angle is 22 degrees of elevation and -38 of
+     azimuth, the faded neighbouring cells kept as the canvas draws them;
+     or mplot3d's default angle, or the neighbours left out of the
+     pictures.
+149. the form's result line of a failed calculation shows the same final
+     exception as the status row (`marks.failure_line`), so that the two
+     read one message as decision 141 has them read one state; or the
+     form keeping the first line;
+150. the help's section name wraps over lines rather than widening the
+     right column, and the help's text wraps four pixels inside its
+     viewport; or the title elided with the whole name in its tooltip.
 
 ### Where the section 13 items land
 

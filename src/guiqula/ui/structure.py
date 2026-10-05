@@ -74,7 +74,6 @@ VIEWS = {"structure": "Sites and bonds", "hamiltonian": "Hamiltonian", "field": 
 SELECTION_ZORDER = 6
 VALUE_MAP = "coolwarm"       # site values, symmetric about zero
 SEQUENTIAL_MAP = "viridis"   # site values of one sign (a density, an LDOS)
-PHASE_MAP = "twilight"       # hopping phases, cyclic
 FLAT = 1e-6                  # heights spread less than this: a flat geometry
 PROJECTIONS = ("auto", "xy", "3d")   # auto: 3D when the geometry is not flat
 
@@ -188,6 +187,14 @@ def site_colors(build):
     if sublattice is None:
         return [theme.SUBLATTICE[None]] * n
     return [theme.SUBLATTICE[1.0] if s > 0 else theme.SUBLATTICE[-1.0] for s in sublattice]
+
+
+def atom_edge(site_values):
+    """The outline of the atoms: the background's colour between the
+    sublattice colours, which it separates, and the bonds' grey on atoms
+    coloured by a value, whose zero is the pale middle of a diverging scale
+    and would otherwise be lost on the light background."""
+    return theme.ATOM_EDGE if site_values is None else theme.BOND
 
 
 def bond_segments(build):
@@ -333,7 +340,8 @@ def draw_structure(ax, build, highlight=None, selected=None, removed=None, image
         central, amplitude, phase = hopping_segments(build, hoppings)
         top = float(amplitude.max()) if len(amplitude) else 1.0
         widths = 0.4 + 3.6 * amplitude / (top if top > 0 else 1.0)
-        phase_map = cm.ScalarMappable(norm=mcolors.Normalize(-np.pi, np.pi), cmap=PHASE_MAP)
+        phase_map = cm.ScalarMappable(norm=mcolors.Normalize(-np.pi, np.pi),
+                                      cmap=theme.PHASE_MAP)
         bond_colors = phase_map.to_rgba(phase)
         if len(phase) and np.any(np.abs(phase) > 1e-6):
             add_bar(phase_map, "hopping phase", horizontal=True)
@@ -359,7 +367,7 @@ def draw_structure(ax, build, highlight=None, selected=None, removed=None, image
                               autolim=False)
         ax.add_collection(LineCollection(central, colors=bond_colors, linewidths=widths,
                                          zorder=3), autolim=False)
-    circles(ax, xy, RADIUS, 4, autolim=True, facecolors=colors, edgecolors=theme.ATOM_EDGE,
+    circles(ax, xy, RADIUS, 4, autolim=True, facecolors=colors, edgecolors=atom_edge(site_values),
             linewidths=0.5)
     if arrows is not None:
         vectors = np.asarray(arrows["vectors"], dtype=float).reshape(-1, 3)
@@ -466,7 +474,8 @@ def draw_structure_3d(ax, build, highlight=None, selected=None, removed=None, im
         amplitude = np.asarray(hoppings["amplitude"])
         top = float(amplitude.max()) if len(amplitude) else 1.0
         widths = 0.4 + 3.6 * amplitude / (top if top > 0 else 1.0)
-        phase_map = cm.ScalarMappable(norm=mcolors.Normalize(-np.pi, np.pi), cmap=PHASE_MAP)
+        phase_map = cm.ScalarMappable(norm=mcolors.Normalize(-np.pi, np.pi),
+                                      cmap=theme.PHASE_MAP)
         bond_colors = phase_map.to_rgba(np.asarray(hoppings["phase"]))
     else:
         segments = bond_segments_3d(build)
@@ -478,7 +487,7 @@ def draw_structure_3d(ax, build, highlight=None, selected=None, removed=None, im
         ghosts = np.concatenate([r + c @ lattice for c in image_cells(build["dimensionality"])])
         ax.scatter(ghosts[:, 0], ghosts[:, 1], ghosts[:, 2], s=size * 0.5, c=theme.MUTED,
                    alpha=0.15, depthshade=False, linewidths=0)
-    ax.scatter(r[:, 0], r[:, 1], r[:, 2], s=size, c=colors, edgecolors=theme.ATOM_EDGE,
+    ax.scatter(r[:, 0], r[:, 1], r[:, 2], s=size, c=colors, edgecolors=atom_edge(site_values),
                linewidths=0.4, depthshade=True)
     edges = cell_edges_3d(build)
     if len(edges):

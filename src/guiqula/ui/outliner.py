@@ -288,7 +288,7 @@ def status_width(font, text, state=None):
         if i:
             width += space
         if name:
-            width += icons.SIZE + (ICON_GAP if words else 0)
+            width += icons.pixels() + (ICON_GAP if words else 0)
         if words:
             width += QFontMetricsF(font).horizontalAdvance(words)
     return math.ceil(width) + 1
@@ -362,10 +362,10 @@ class StatusDelegate(QStyledItemDelegate):
                 x += metrics.horizontalAdvance(" ")
             if name:
                 icon = icons.icon(name, MARK_COLORS.get(name, "TEXT"))
-                top = rect.top() + (rect.height() - icons.SIZE) // 2
-                icon.paint(painter, QRect(round(x), top, icons.SIZE, icons.SIZE),
+                top = rect.top() + (rect.height() - icons.pixels()) // 2
+                icon.paint(painter, QRect(round(x), top, icons.pixels(), icons.pixels()),
                            Qt.AlignmentFlag.AlignCenter, mode)
-                x += icons.SIZE + (ICON_GAP if words else 0)
+                x += icons.pixels() + (ICON_GAP if words else 0)
             if words:
                 room = max(0, int(right - x))
                 painter.drawText(QRect(round(x), rect.top(), room, rect.height()),
@@ -396,7 +396,7 @@ class EntryDelegate(QStyledItemDelegate):
     def line_height(self, option, index):
         """The height of the row's first line: a row of one line, as high
         with an icon as without one (a section row has none)."""
-        return max(super().sizeHint(option, index).height(), icons.SIZE + ICON_ROW)
+        return max(super().sizeHint(option, index).height(), icons.pixels() + ICON_ROW)
 
     def layout(self, option, index):
         """(rect of the first line, rect of the status, on one line) of a

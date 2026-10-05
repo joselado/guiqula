@@ -110,8 +110,10 @@ carries its state only, the marks drawn as icons:
   after a run, "U = 3, E = -1.68"; "off" when it is off);
 - a calculation's result: a check mark when it is current, a circular arrow, dimmed, when
   it is stale, an hourglass and the percentage while its job runs, a cross in the error
-  colour when its last run failed, the word queued or cancelled, nothing when it was never
-  run, and the value of a single number after its mark (a gap, a Chern number);
+  colour when its last run failed and no earlier result is kept (a run that fails over an
+  earlier result reads as that result does, and its error is in the Jobs panel), the word
+  queued or cancelled, nothing when it was never run, and the value of a single number
+  after its mark (a gap, a Chern number);
 - a warning triangle in the error colour for an entry that pyqula or the planner refuses,
   a crossed-out circle for a disabled one (the row dimmed), the sign ⚠ for one that is
   valid but worth a look (it reads a stale result), and a padlock on a locked entry (m and
@@ -148,11 +150,15 @@ have one: Show is an eye before the choice of view, and 3D a cube beside its che
 The k-space tab's path tools and the brush's value and radius keep their words. A result
 that is not simply current says so in a row above its plot, with the icon of its state:
 stale, with Run again; queued or running, with its progress and Cancel; failed, with the
-first line of the error (the whole message in the tooltip) and Run again, the earlier
-result staying drawn under it until a run succeeds. The three read one state, so the
-result's tab carries the same mark as a sign after its title (↻ stale, ✗ failed, the
-percentage while it runs) and its row in the outliner as an icon, and a result never
-computed says what comes next in its caption instead, drawn in the colours of the theme.
+final exception of the error ("ValueError: no band here", where the engine wraps it in its
+own) and Run again, the whole message in the tooltip and in Jobs. A run that fails
+while an earlier result is kept reads as that result does, stale (done when it still
+matches the document), meaning that the earlier result stays drawn, under the row with Run
+again when it is stale, and the error is read in the Jobs panel, in its status column and,
+with the whole traceback, in its tooltip. The three read one state, so the result's tab
+carries the same mark as a sign after its title (↻ stale, ✗ failed, the percentage while
+it runs) and its row in the outliner as an icon, and a result never computed says what
+comes next in its caption instead, drawn in the colours of the theme.
 
 ### The panels
 
@@ -169,9 +175,9 @@ The panels can be moved and closed but do not float, since a floating panel cann
 moved on a Wayland desktop. View > Panels shows or hides each one, View > Reset layout puts
 them back where they started, and the program keeps their arrangement and the window's
 size for the next start. View > Interface text makes the text of the menus, the panels
-and the forms larger, the formulas and the fixed-width text of the console and of a Python
-node with it, for a projector or a small screen, as View > Plot text does for the
-drawings.
+and the forms larger, the formulas, the fixed-width text of the console and of a Python
+node and the icons of the controls (20 pixels instead of 16) with it, for a projector or a
+small screen, as View > Plot text does for the drawings.
 
 ### The forms
 
@@ -245,8 +251,10 @@ A term pyqula refuses is skipped and flagged with a cross in the error colour, w
 pyqula's message in the tooltip of its row; the rest of the stack still builds, and a
 result computed without it says so. The Hamiltonian view of the canvas (the Hamiltonian
 workspace, or Show: Hamiltonian) draws what the terms did: the atoms coloured by their
-onsite energy, every hopping with a width following its amplitude and a colour following
-its phase, exchange fields as arrows.
+onsite energy and outlined in grey, so that an onsite energy of zero, the pale middle of
+the scale, stays in sight on either background, every hopping with a width following its
+amplitude and a colour following its phase (a plain hopping, of phase zero, is dark on the
+light background and light on the dark one), exchange fields as arrows.
 
 ## Fields: parameters that depend on the position
 
@@ -688,4 +696,6 @@ below the form: its formula and parameters, the pyqula code it runs with the cur
 values, the docstrings of the pyqula functions behind it, and the sections of pyqula's
 user guide about it. Help > pyqula user guide and Help > guiqula user guide open the whole
 texts, and so do the two buttons at the top of the panel; the link at the foot of the
-start page opens this guide.
+start page opens this guide. A page never scrolls sideways: the lines of code wrap at the
+panel's width, and an equation wider than the panel is drawn at its width, smaller, so
+that a wider panel shows it larger.

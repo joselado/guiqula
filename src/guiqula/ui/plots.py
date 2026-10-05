@@ -83,7 +83,7 @@ from guiqula.ui import structure as structure_tools
 from guiqula.ui import theme
 from guiqula.ui.canvas_navigation import CanvasNavigation, bind_keys
 from guiqula.ui.canvasbar import CanvasBar
-from guiqula.ui.marks import ERROR_STATES, mark
+from guiqula.ui.marks import ERROR_STATES, failure_line, mark
 from guiqula.ui.pyvista_view import SceneView
 
 READOUT_PIXELS = 12      # the readout names a data point this close to the mouse
@@ -412,7 +412,8 @@ class StatusRow(QFrame):
     """The row above a plot's canvas that says what its result is when it
     is not simply current (PLAN.md phase 8, package P3), with the marks of
     ui/marks.py: stale, with Run again; queued or running, with the job's
-    progress and Cancel; failed, with the message and Run again. Hidden
+    progress and Cancel; failed, with the final exception of the message
+    (marks.failure_line; the whole chain in the tooltip) and Run again. Hidden
     otherwise (done, or never computed: the caption says so)."""
 
     run_requested = Signal()
@@ -423,7 +424,7 @@ class StatusRow(QFrame):
         self.setObjectName(f"plotStatus{suffix}")
         self.mark = QLabel()                 # the state's mark, as an icon (ui/icons.py)
         self.mark.setObjectName(f"plotStatusMark{suffix}")
-        self.mark.setFixedSize(icons.size())
+        self.mark.setFixedSize(icons.size())     # and again with the icons (_set_icons)
         self.text = _Elided()
         self.text.setObjectName(f"plotStatusText{suffix}")
         self.progress = QProgressBar()
@@ -465,6 +466,7 @@ class StatusRow(QFrame):
         self.cancel.setIcon(icons.icon("cancel"))
         for button in (self.run, self.cancel):
             button.setIconSize(icons.size())
+        self.mark.setFixedSize(icons.size())
         self._set_mark()
 
     def _set_mark(self):
@@ -493,8 +495,11 @@ class StatusRow(QFrame):
         else:
             text = f"{mark('failed')} failed: {message or 'no message'}"
         sign = mark(state)                  # drawn as the icon beside, not in the line
-        self.text.set_full(text, text[len(sign):].lstrip()
-                           if state in ("stale", "failed") and text.startswith(sign) else text)
+        shown = text[len(sign):].lstrip() if state in ("stale", "failed") and \
+            text.startswith(sign) else text
+        if state == "failed" and message:   # the final exception; the chain in the tooltip
+            shown = f"failed: {failure_line(message)}"
+        self.text.set_full(text, shown)
         self._set_mark()
         running = state in ("queued", "running")
         if running and progress:

@@ -6,9 +6,10 @@ import subprocess
 import sys
 
 import pytest
-from PySide6.QtCore import QPoint, Qt, QTimer
+import shiboken6
+from PySide6.QtCore import QEvent, QPoint, Qt, QTimer
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QLabel, QMessageBox, QToolButton
+from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QToolButton
 
 from guiqula.io import autosave, project
 from guiqula.session import Session
@@ -466,7 +467,7 @@ def test_presets_gallery(window, qtbot, shot):
     its whole description, Open or a double click opens it."""
     from guiqula.io import project
     from guiqula.ui.gallery import GROUPS
-    from guiqula.ui.start import Card
+    from guiqula.ui.start import Card, Title
     gallery = window.show_gallery()
     names = gallery.names()
     assert sorted(names) == project.presets()                 # one card each
@@ -477,7 +478,15 @@ def test_presets_gallery(window, qtbot, shot):
     assert {"ssh_chain", "graphene_basics"} <= set(teaching)
     assert all(project.load(name).locks for name in teaching)
     for group, heading in GROUPS:
-        assert gallery.findChild(QLabel, f"galleryGroup_{group}").text() == heading
+        assert gallery.findChild(Title, f"galleryGroup_{group}").text() == heading
+    heading = gallery.findChild(Title, "galleryGroup_teaching")
+    normal = heading.title_font().pointSizeF()
+    try:                                       # the headings follow the interface text
+        window.set_ui_text("large", remember=False)
+        QApplication.processEvents()
+        assert heading.title_font().pointSizeF() > normal
+    finally:
+        window.set_ui_text("normal", remember=False)
     assert gallery.current() == names[0]
     gallery.select("ssh_chain")
     assert "locked for the exercise" in gallery.description.text()
@@ -490,6 +499,8 @@ def test_presets_gallery(window, qtbot, shot):
     gallery.open_button.click()
     assert window.session.document.notes.startswith("Majorana wire")
     assert not gallery.isVisible()
+    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)   # a closed one goes
+    assert not shiboken6.isValid(gallery)
     settle(qtbot, window)
     window.session.act("load", path="honeycomb_zeeman_rashba")
     settle(qtbot, window)

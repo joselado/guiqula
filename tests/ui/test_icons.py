@@ -433,6 +433,27 @@ def test_the_icons_change_with_the_theme(window, qtbot, qapp):
         window.set_theme("light")
 
 
+def test_the_icons_grow_with_the_interface_text(window, qtbot, qapp):
+    """At large interface text the controls' icons are 20 px, drawn at that
+    size, and 16 px again at normal text, set again as at a change of theme."""
+    shown_everything(window, qtbot)
+    view = window.plots["c1"]
+    controls = [window.run_button, window.structure.bar.fit_button, view.export,
+                view.status.run, window.properties.form.help_button]
+    try:
+        for name, side in (("large", icons.LARGE), ("normal", icons.SIZE)):
+            window.set_ui_text(name, remember=False)
+            qtbot.waitUntil(lambda: window.run_button.iconSize().width() == side)
+            controls[-1] = window.properties.form.help_button        # the form made again
+            for control in controls:
+                assert control.iconSize().width() == side, (name, control.objectName())
+            assert view.status.mark.width() == side
+            assert side in [s.width() for s in window.run_button.icon().availableSizes()]
+            assert ink(window.run_button.icon()) == theme.COLORS["light"]["TEXT"]
+    finally:
+        window.set_ui_text("normal", remember=False)
+
+
 def test_the_start_page_and_its_buttons(qapp):
     from guiqula.ui.app import build_main_window
     theme.apply(qapp, "light")

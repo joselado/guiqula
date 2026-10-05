@@ -10,12 +10,15 @@ before.
 """
 from urllib.parse import unquote
 
-from PySide6.QtCore import Signal
-from PySide6.QtGui import QImage
+from PySide6.QtCore import QEvent, QUrl, Signal
+from PySide6.QtGui import QImage, QTextBlockFormat, QTextCursor, QTextDocument
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QTextBrowser, QVBoxLayout, QWidget
 
 from guiqula.docs import entries, guide as guides
 from guiqula.ui import formulas
+
+
+WRAP_SLACK = 4       # pixels between the wrapped text and the viewport's right edge
 
 
 class HelpBrowser(QTextBrowser):
@@ -28,6 +31,9 @@ class HelpBrowser(QTextBrowser):
         self.anchorClicked.connect(self._clicked)
         self.equations = []
         self.markdown = ""
+        # the text wraps a little inside the viewport: wrapped at its very width, Qt's
+        # rounding left some pages a pixel wider than it, with a scroll bar for that pixel
+        self.setLineWrapMode(QTextBrowser.LineWrapMode.FixedPixelWidth)
 
     def show_markdown(self, text):
         """Draw Markdown with $...$ equations."""
@@ -40,6 +46,75 @@ class HelpBrowser(QTextBrowser):
         self.equations = equations
         self.markdown = text
         self.setMarkdown(text)
+        self._wrap_code()
+        self._fit_equations()
+
+    def _wrap_code(self):
+        """Let the lines of the code blocks wrap at the panel's width, as the
+        prose does: Qt keeps a code block's lines whole, and one line longer
+        than the panel gave the whole page a horizontal scroll bar."""
+        cursor = QTextCursor(self.document())
+        wrapping = QTextBlockFormat()
+        wrapping.setNonBreakableLines(False)
+        block = self.document().begin()
+        while block.isValid():
+            if block.blockFormat().nonBreakableLines():
+                cursor.setPosition(block.position())
+                cursor.mergeBlockFormat(wrapping)
+            block = block.next()
+
+    def _fit_equations(self):
+        """Scale an equation's image wider than the panel down to the
+        panel's width (its height in proportion), and give one that fits its
+        own size back, so that no page scrolls sideways; called after each
+        page and at each change of the panel's width."""
+        document = self.document()
+        room = self.viewport().width() - WRAP_SLACK - 2 * document.documentMargin()
+        if room <= 0:
+            return
+        changes = []
+        block = document.begin()
+        while block.isValid():
+            indent = block.blockFormat().leftMargin() + \
+                block.blockFormat().indent() * document.indentWidth()
+            fragments = block.begin()
+            while not fragments.atEnd():
+                fragment = fragments.fragment()
+                look = fragment.charFormat()
+                if look.isImageFormat() and look.toImageFormat().name().startswith("formula:"):
+                    changes.append((fragment.position(), fragment.length(),
+                                    look.toImageFormat(), room - indent))
+                fragments += 1
+            block = block.next()
+        cursor = QTextCursor(document)
+        for position, length, image, width in changes:
+            natural = self._natural_size(image.name())
+            if natural is None:
+                continue
+            scale = min(1.0, width / natural.width()) if natural.width() > 0 else 1.0
+            wanted = (natural.width() * scale, natural.height() * scale) if scale < 1.0 \
+                else (0.0, 0.0)                            # 0: the image's own size
+            if (image.width(), image.height()) == wanted:
+                continue
+            image.setWidth(wanted[0])
+            image.setHeight(wanted[1])
+            cursor.setPosition(position)
+            cursor.setPosition(position + length, QTextCursor.MoveMode.KeepAnchor)
+            cursor.setCharFormat(image)
+
+    def _natural_size(self, name):
+        """The size an equation's image is drawn at, or None."""
+        image = self.loadResource(QTextDocument.ResourceType.ImageResource.value, QUrl(name))
+        return image.size() / image.devicePixelRatio() if isinstance(image, QImage) and \
+            not image.isNull() else None
+
+    def viewportEvent(self, event):
+        # the viewport, not the browser: it narrows too when the vertical scroll bar appears
+        if event.type() == QEvent.Type.Resize and \
+                event.size().width() != event.oldSize().width():
+            self.setLineWrapColumnOrWidth(max(event.size().width() - WRAP_SLACK, 1))
+            self._fit_equations()
+        return super().viewportEvent(event)
 
     def loadResource(self, kind, url):
         if url.scheme() == "formula":
@@ -76,6 +151,7 @@ class HelpPanel(QWidget):
         own.clicked.connect(lambda: self.show_contents("guiqula"))
         self.title = QLabel("")
         self.title.setObjectName("helpTitle")
+        self.title.setWordWrap(True)         # a long section's name would widen the column
         row = QHBoxLayout()
         row.addWidget(self.back)
         row.addWidget(pyqula)

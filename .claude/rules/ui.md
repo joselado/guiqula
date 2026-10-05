@@ -117,7 +117,9 @@ tests, `drive.py --widget` and the remote `widgets` and `screenshot` methods rel
   the active theme, grey when disabled, cached per theme and emptied by `theme.apply`;
   `follow(widget, method)` sets a widget's icons at its first show and again after every
   change of theme (`on_theme_change`), which is how a control gets its icon, so nothing out
-  of sight costs the start; pixmaps at 16 and 24 px, since a Python `QIconEngine` subclass
+  of sight costs the start, and again after a change of View > Interface text
+  (`text_changed`), `size()` being 16 px or 20 px at large text; pixmaps at 16 and 24 px
+  (and 20 px while the text is large), since a Python `QIconEngine` subclass
   crashes PySide6 6.11; a checkable menu entry gets no icon, which would hide its check
   box. `resources/icons/` holds the 51 Tabler Icons of the controls (SVG files drawn in
   `currentColor`, outline but the filled `cancel`, their MIT licence) and a README whose
@@ -125,7 +127,10 @@ tests, `drive.py --widget` and the remote `widgets` and `screenshot` methods rel
   `tests/ui/test_icons.py` read; a new icon is a row there, its file and its name in
   `icons.NAMES`.
 - `help.py`: the Help panel, below Properties: F1, a form's ?, the guides; Markdown in a
-  QTextBrowser, whose `loadResource` serves the equations.
+  QTextBrowser, whose `loadResource` serves the equations; the lines of a code block wrap
+  at the panel's width (`_wrap_code`) and an equation wider than the panel is scaled down
+  to it (`_fit_equations`), so no page scrolls sideways; the section's name wraps, since a
+  label one line long sets the column's minimum width (as the Jobs panel's workers line did).
 - `shortcuts.py`: the one table of keyboard shortcuts (menus, the canvas and outliner keys,
   the dialog); a test refuses ambiguous keys, and the shortcut table of
   `src/guiqula/docs/user_guide.md` is checked against it.
@@ -136,7 +141,8 @@ tests, `drive.py --widget` and the remote `widgets` and `screenshot` methods rel
   (`status_parts`, `MARK_ROLE`) while its text keeps `marks.py`'s Unicode, which the
   tooltips and the tests read; the system and the mean field as detail rows across both
   columns.
-- `gallery.py` (the presets, the start page's cards), `sliders.py` (the Sliders panel;
+- `gallery.py` (the presets, the start page's cards and `Title` headings, deleted when
+  closed), `sliders.py` (the Sliders panel;
   `range_from`, the range a label's menu gives a slider or a sweep), `kspace.py` (the
   Brillouin-zone canvas, its tab hidden for a system without a periodic direction),
   `jobpanel.py`, `console.py` (the console panel), `bars.py` (recovery, error, cost and
@@ -149,7 +155,7 @@ tests, `drive.py --widget` and the remote `widgets` and `screenshot` methods rel
   (`propertiesScroll`; the panel `properties` is a QWidget since P8, and its
   `verticalScrollBar()` is the form's); the system form's spin, Nambu, hopping range and
   sparse; the Field editor, whose button shows the kind and opens the kind menu
-  `fieldKindMenu_<p>`.
+  `fieldKindMenu_<p>`, every kind button of a form as wide as the widest (`line_up`).
 - `structure.py`: the canvas (`structureView`), its three views (structure, Hamiltonian,
   field), its bar `structureBar` with the selection tools, and the mplot3d drawing of
   geometries that are not flat.

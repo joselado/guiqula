@@ -331,3 +331,18 @@ def test_f1_keeps_the_form_in_sight(qtbot, no_jobs, shot):
         assert edit.visibleRegion().boundingRect().height() == edit.height()
     shot(window, "f1_1200x800")
     window.session.close()
+
+
+def test_the_workers_line_does_not_widen_the_right_column(qtbot):
+    """The Jobs panel's line of the workers wraps: on one line, three workers
+    (interactive, batch, console) took about 770 px, which the column of
+    Properties, Help and Jobs took from the canvas, squeezing it to about 180
+    px, where matplotlib gave up its constrained layout."""
+    from guiqula.ui.jobpanel import JobPanel
+    panel = JobPanel()
+    qtbot.addWidget(panel)
+    panel.update_workers([{"role": role, "pid": 3207362, "alive": True, "job": None,
+                           "ready": True, "starts": 2}
+                          for role in ("interactive", "batch", "console")])
+    assert len(panel.workers.text()) > 120
+    assert panel.minimumSizeHint().width() < 300
