@@ -3607,7 +3607,11 @@ program):
 - `ui/forms.py`, `ui/properties.py`: the kind buttons of different scalar
   rows do not line up; a sweep from the label of a system whose
   calculations give no number runs the first one and fails when run;
-- `ui/help.py`: the help browser's horizontal scroll bar;
+- `ui/help.py`: a displayed equation wider than the panel (nine of the 281
+  sections of the two guides at the default width, "The screened
+  interaction" the widest at about 610 px) still gives its page a
+  horizontal scroll bar (a choice: the scroll bar for those pages, or the
+  equation's image scaled to the panel's width, smaller to read);
 - `tests/ui/test_startup.py`: the budget under load (decision 135), which
   the base of the phase misses as well.
 
@@ -3827,7 +3831,13 @@ outlined in the bonds' grey (`structure.atom_edge`), since its outline was
 the background's colour, white in the light theme, around the near-white
 middle of the diverging scale, so that an onsite energy of zero was a disc
 lost on the background; the sublattice colours of the structure view keep
-the background's outline, which separates them.
+the background's outline, which separates them. The help browser's
+horizontal scroll bar came from the code blocks, whose lines Qt keeps
+whole, so that one line of pyqula's examples longer than the panel (the
+`add_zeeman` example of t1's help, about 560 px in a panel of 410) made
+the whole page scroll sideways; their lines now wrap at the panel's width
+as the prose does (`HelpBrowser._wrap_code`), and of the 281 sections of
+the two guides only the nine with a wider equation keep the bar.
 
 ### Where the section 13 items land
 

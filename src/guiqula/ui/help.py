@@ -11,7 +11,7 @@ before.
 from urllib.parse import unquote
 
 from PySide6.QtCore import Signal
-from PySide6.QtGui import QImage
+from PySide6.QtGui import QImage, QTextBlockFormat, QTextCursor
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QTextBrowser, QVBoxLayout, QWidget
 
 from guiqula.docs import entries, guide as guides
@@ -40,6 +40,21 @@ class HelpBrowser(QTextBrowser):
         self.equations = equations
         self.markdown = text
         self.setMarkdown(text)
+        self._wrap_code()
+
+    def _wrap_code(self):
+        """Let the lines of the code blocks wrap at the panel's width, as the
+        prose does: Qt keeps a code block's lines whole, and one line longer
+        than the panel gave the whole page a horizontal scroll bar."""
+        cursor = QTextCursor(self.document())
+        wrapping = QTextBlockFormat()
+        wrapping.setNonBreakableLines(False)
+        block = self.document().begin()
+        while block.isValid():
+            if block.blockFormat().nonBreakableLines():
+                cursor.setPosition(block.position())
+                cursor.mergeBlockFormat(wrapping)
+            block = block.next()
 
     def loadResource(self, kind, url):
         if url.scheme() == "formula":

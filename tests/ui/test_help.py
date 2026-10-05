@@ -135,3 +135,20 @@ def test_the_plugins_page(window, qtbot):
     window.set_theme("light")
     panel.go_back()
     assert panel.page == ("item", "t1")
+
+
+def test_code_wraps_at_the_width_of_the_panel(window, qtbot):
+    """A line of code longer than the panel wraps, as the prose does, so the
+    page has no horizontal scroll bar (t1's help shows pyqula's example of
+    add_zeeman, whose comment made it about 560 px wide)."""
+    browser = window.help_panel.browser
+    window.help("t1")
+    window.docks["helpDock"].raise_()
+    qtbot.wait(50)
+    block, wide = browser.document().begin(), []
+    while block.isValid():
+        wide.append(block.blockFormat().nonBreakableLines())
+        block = block.next()
+    assert "# add the Zeeman field (modifies h in place)" in browser.toPlainText()
+    assert not any(wide)
+    assert browser.horizontalScrollBar().maximum() == 0
