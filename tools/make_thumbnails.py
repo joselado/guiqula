@@ -13,7 +13,11 @@ machinery, draws each picture as the program draws it:
   one when it names none) run with the Run button, the plot of the result.
 
 A geometry that is not flat is drawn by matplotlib in the 3D projection from
-mplot3d's default angle, whatever is installed, so the set is consistent.
+mplot3d's default angle, whatever is installed, so the set is consistent;
+the lattices of SUPERCELLS, whose one cell shows a single dot, are drawn as
+a small supercell from an oblique angle (OBLIQUE), so that their bonds
+show, and the presets of LOOSE are drawn without equal aspect (a chain's
+texture, a thin strip at equal aspect).
 The canvas is drawn at 480x360 without its axes for a lattice (the drawing
 cropped to its cell, its sites and bonds, and centred), with them for a
 plot, and scaled to 160x120 with Pillow, a palette of at most 128 colours
@@ -46,6 +50,11 @@ COLOURS = 128                  # the palette of the PNG files
 MARGIN = 0.06                  # around a lattice's drawing, of the picture's size
 STRONG = 60                    # a difference from the background (0 to 255) drawn opaque
 GROW = 0.15                    # of the opaque drawing's size, kept around it on each side
+# lattices whose cell alone is one dot from mplot3d's angle: drawn as this supercell
+SUPERCELLS = {"cubic_lattice": [2, 2, 2], "diamond_lattice": [2, 2, 2],
+              "buckled_honeycomb_lattice": [3, 3, 1]}
+OBLIQUE = (22, -38)            # elevation and azimuth of their view, in degrees
+LOOSE = {"texture_exchange"}   # presets drawn without equal aspect
 
 
 def load_drive():
@@ -117,6 +126,10 @@ def lattice_picture(app, window, drive, kind, classical=False, timeout=300):
         window.new_classical_system(kind)
     else:
         window.new_system(kind)
+    if kind in SUPERCELLS:
+        system = window.session.document.systems[0].id
+        window.session.do("add_geometry_op", system=system, kind="supercell",
+                          params={"n": SUPERCELLS[kind]})
     window.select("")
     drive.settle(app, window, window.session, timeout, builds_only=True)
     wait(app)
@@ -128,6 +141,8 @@ def lattice_picture(app, window, drive, kind, classical=False, timeout=300):
     wait(app)
     for ax in structure.figure.axes:
         ax.set_axis_off()
+        if kind in SUPERCELLS and getattr(ax, "name", "") == "3d":
+            ax.view_init(*OBLIQUE)
         for collection in ax.collections:     # the selection, empty: drawn at the corner
             if len(collection.get_offsets()) == 0:
                 collection.set_visible(False)
@@ -137,6 +152,7 @@ def lattice_picture(app, window, drive, kind, classical=False, timeout=300):
 
 
 def preset_picture(app, window, drive, name, timeout=900):
+    import numpy as np
     from PySide6.QtWidgets import QPushButton
     session = window.session
     session.act("load", path=name)
@@ -161,6 +177,15 @@ def preset_picture(app, window, drive, name, timeout=900):
     window.show_result(calc)
     view.canvas.setFixedSize(*CANVAS)
     wait(app, 1.0)
+    if name in LOOSE:                  # the sites' own height, not the width's at equal aspect
+        y = np.asarray(session.result(calc).structure["positions"])[:, 1]
+        pad = max(1.0, 0.5 * float(np.ptp(y)))
+        for ax in view.figure.axes:
+            if ax.get_label() != "<colorbar>":
+                ax.set_aspect("auto")
+                ax.set_ylim(float(y.min()) - pad, float(y.max()) + pad)
+        view.canvas.draw()
+        wait(app, 0.5)
     return to_image(view.canvas)
 
 

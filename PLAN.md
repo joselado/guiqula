@@ -3581,12 +3581,8 @@ program):
 
 - `ui/start.py`, `ui/gallery.py`: a folded card is not a widget until it
   is made (decision 144); Ctrl+F opens New system while the page shows
-  (decision 113); three 3D pictures (buckled honeycomb, cubic, diamond)
-  show one dot in their cell, which is what one cell of them holds from
-  mplot3d's angle (a choice: a supercell, another angle or stronger
-  neighbours), and texture_exchange's a thin ladder, its first calculation
-  being a chain drawn at equal aspect (a choice of calculation or of
-  aspect); at large text on 1200x800 the footer drops below the fold;
+  (decision 113); at large text on 1200x800 the footer drops below the
+  fold;
 - `ui/outliner.py`, `ui/marks.py`: the entry labels are elided at 1200x800
   (the whole text in the tooltip), and so is a long system name in its
   detail row ("Hubbard model on the honeycomb la…"); the detail rows' marks
@@ -3848,6 +3844,10 @@ option of each is the one built:
      themes, the sublattice colours keeping the background's outline; or a
      darker outline (the text's colour), or the outline only on the
      light background.
+148. the 3D pictures' oblique angle is 22 degrees of elevation and -38 of
+     azimuth, the faded neighbouring cells kept as the canvas draws them;
+     or mplot3d's default angle, or the neighbours left out of the
+     pictures.
 
 Maintainer's answers to the open items (2026-10-05, asked one by one):
 the right column keeps the 340 px the window gives, and the README's
@@ -3895,6 +3895,13 @@ the viewport's tabs and the outliner's marks. The start, measured
 alternately against master (ten rounds each, fresh data and settings, at a
 load of 3 to 5), took a median of 1.37 s against 1.32 s, within the noise
 of single rounds (1.17 to 2.09 s) and well within the 2.0 s budget.
+The pictures of the buckled honeycomb, cubic and diamond lattices are
+drawn by `tools/make_thumbnails.py` as a supercell (`SUPERCELLS`: 3x3x1,
+2x2x2, 2x2x2) from an oblique angle (`OBLIQUE`, 22 degrees of elevation and
+-38 of azimuth), where the bonds of the cell and its neighbours show, and
+texture_exchange's (`LOOSE`) without equal aspect, its height the sites'
+own spread with a margin, so that the chain's spins read as arrows rather
+than a thin ladder.
 
 ### Where the section 13 items land
 
