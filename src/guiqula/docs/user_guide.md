@@ -70,7 +70,7 @@ ends with Mean field (interactions), which turns the system's mean-field block o
 selects it, and the menu of the Regions row offers a region by expression and a region
 from the sites selected on the canvas. Add, on the toolbar, is the same menu for the
 workspace shown and the current system (Ctrl+F opens it with the search line ready, or
-New system while the document has no system), and New system lists the lattices by
+goes to the start page's filter while the document has no system), and New system lists the lattices by
 dimension with the classical systems in its last section. With several systems, the "+"
 of a system's section adds to that system, while Add and the "+" of Calculations add to
 the system of the selected entry (the first one when nothing is selected).
@@ -644,7 +644,7 @@ functions only: the window loads the plugin too, and must start without pyqula.
 | window | Ctrl+1 | Geometry workspace |
 | window | Ctrl+2 | Hamiltonian (or Model) workspace |
 | window | Ctrl+3 | Calculate workspace |
-| window | Ctrl+F | the Add menu of the workspace, with its search line (ops, terms or calculations) |
+| window | Ctrl+F | the Add menu of the workspace, with its search line (ops, terms or calculations); the filter of the start page |
 | window | Ctrl+0 | show the Structure tab |
 | window | Ctrl+W | close the result tab shown |
 | window | F5 | run the selected calculation |
