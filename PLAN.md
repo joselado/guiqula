@@ -3590,12 +3590,8 @@ program):
   and a warning's ⚠ two triangles of different meaning; one icon for both
   system kinds;
 - `ui/icons.py` and the controls: `zoom_out`, `slider` and `settings` are
-  vendored without a control;
-  the k-space path tools and Show all are words;
-- `ui/forms.py`, `ui/properties.py`: a sweep from the label of a system
-  whose calculations give no number runs the first one and fails when run,
-  with the sweep's own message ("c1 gives no number to collect"), which is
-  decision 125 as built (a choice: refusing the sweep at once instead);
+  vendored without a control; the k-space path tools and Show all are
+  words;
 - `tests/ui/test_startup.py`: the budget under load (decision 135), which
   the base of the phase misses as well.
 

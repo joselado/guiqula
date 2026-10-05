@@ -253,7 +253,8 @@ result computed without it says so. The Hamiltonian view of the canvas (the Hami
 workspace, or Show: Hamiltonian) draws what the terms did: the atoms coloured by their
 onsite energy and outlined in grey, so that an onsite energy of zero, the pale middle of
 the scale, stays in sight on either background, every hopping with a width following its
-amplitude and a colour following its phase, exchange fields as arrows.
+amplitude and a colour following its phase (a plain hopping, of phase zero, is dark on the
+light background and light on the dark one), exchange fields as arrows.
 
 ## Fields: parameters that depend on the position
 
@@ -695,4 +696,6 @@ below the form: its formula and parameters, the pyqula code it runs with the cur
 values, the docstrings of the pyqula functions behind it, and the sections of pyqula's
 user guide about it. Help > pyqula user guide and Help > guiqula user guide open the whole
 texts, and so do the two buttons at the top of the panel; the link at the foot of the
-start page opens this guide.
+start page opens this guide. A page never scrolls sideways: the lines of code wrap at the
+panel's width, and an equation wider than the panel is drawn at its width, smaller, so
+that a wider panel shows it larger.
