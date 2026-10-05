@@ -3825,7 +3825,9 @@ started (interactive, batch and console, each with its pid and state), was
 the minimum width of the right column, which took it from the viewport, so
 the structure canvas was left about 180 px wide, too narrow for the axes
 and a colour bar. The line now wraps (`ui/jobpanel.py`), the column keeps
-its width, and the warnings are gone, the one in
+the 340 px the window gives it (`resizeDocks`), where before it grew to
+about 430 px as soon as two workers had reported, which is the width of
+the screenshots of phase 8, and the warnings are gone, the one in
 `test_the_scene_moves_as_in_blender` included, since it was a pending draw
 of the previous module's window. In the Hamiltonian view, the Field
 preview and a result drawn on the atoms, an atom coloured by a value is

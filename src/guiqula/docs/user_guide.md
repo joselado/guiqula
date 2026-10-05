@@ -111,9 +111,9 @@ carries its state only, the marks drawn as icons:
 - a calculation's result: a check mark when it is current, a circular arrow, dimmed, when
   it is stale, an hourglass and the percentage while its job runs, a cross in the error
   colour when its last run failed and no earlier result is kept (a run that fails over an
-  earlier result reads stale, and its error is in the Jobs panel), the word queued or
-  cancelled, nothing when it was never run, and the value of a single number after its
-  mark (a gap, a Chern number);
+  earlier result reads as that result does, and its error is in the Jobs panel), the word
+  queued or cancelled, nothing when it was never run, and the value of a single number
+  after its mark (a gap, a Chern number);
 - a warning triangle in the error colour for an entry that pyqula or the planner refuses,
   a crossed-out circle for a disabled one (the row dimmed), the sign ⚠ for one that is
   valid but worth a look (it reads a stale result), and a padlock on a locked entry (m and
