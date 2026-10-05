@@ -3850,6 +3850,17 @@ kind buttons of a form are as wide as the widest of the form
 a vector's components already followed, so that an expression's button over
 a number's f(r) no longer narrows that row's box.
 
+Decisions taken while fixing them, for the maintainer to confirm; the first
+option of each is the one built:
+
+146. the lines of a code block in the help wrap at the panel's width, as
+     the prose does (a copied line stays whole); or the code kept on whole
+     lines, with the horizontal scroll bar for its pages;
+147. an atom coloured by a value is outlined in the bonds' grey in both
+     themes, the sublattice colours keeping the background's outline; or a
+     darker outline (the text's colour), or the outline only on the
+     light background.
+
 ### Where the section 13 items land
 
 | Phase | Items |
