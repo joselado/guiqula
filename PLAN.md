@@ -30,8 +30,9 @@ Inkscape on the flat drawings (section 7, after the look; decisions 80 to 87). P
 packages, P1 to P9, and decisions 90 to 106, at the end of section 7; the
 maintainer answered 93, and the others stand as recommended) and built on
 2026-10-03 and 2026-10-04 on branch phase8, every package included; its
-report closes section 7, with decisions 107 to 145 for the maintainer to
-confirm, and section 4 draws the window as built. Phase 8 was merged into
+report closes section 7, with decisions 107 to 145, which the maintainer
+answered on 2026-10-05 (all as recommended but 121, answered with its
+alternative), and section 4 draws the window as built. Phase 8 was merged into
 master and pushed on 2026-10-04.
 
 ## 1. Requirements (as stated by the maintainer)
@@ -3796,6 +3797,16 @@ option of each is the one built:
      change of theme (`icons.follow`), and the plugins are looked for in the
      `entry_points.txt` files before `importlib.metadata`; or the icons set
      as the window is built, about 70 ms of the start.
+
+Maintainer's answers to the phase-8 report (2026-10-05, asked one by one,
+in the order of the report): 107 to 115, 123 and 130 were answered as
+recommended, and the others stand as recommended at the maintainer's word,
+except 121, answered with its alternative: a run that fails while an
+earlier result of that calculation is kept reads stale, as `Session.status`
+says, in the tree, the tab and the status row alike (the row with Run
+again, the earlier result staying drawn under it), and the failure itself
+is read in the Jobs panel; a run that fails with no earlier result still
+reads failed.
 
 ### Where the section 13 items land
 
