@@ -3840,10 +3840,6 @@ option of each is the one built:
      themes, the sublattice colours keeping the background's outline; or a
      darker outline (the text's colour), or the outline only on the
      light background.
-148. the 3D pictures' oblique angle is 22 degrees of elevation and -38 of
-     azimuth, the faded neighbouring cells kept as the canvas draws them;
-     or mplot3d's default angle, or the neighbours left out of the
-     pictures.
 
 Maintainer's answers to the open items (2026-10-05, asked one by one):
 the right column keeps the 340 px the window gives, and the README's
@@ -3898,6 +3894,21 @@ drawn by `tools/make_thumbnails.py` as a supercell (`SUPERCELLS`: 3x3x1,
 texture_exchange's (`LOOSE`) without equal aspect, its height the sites'
 own spread with a margin, so that the chain's spins read as arrows rather
 than a thin ladder.
+
+Decisions taken while building the answers, for the maintainer to confirm;
+the first option of each is the one built:
+
+148. the 3D pictures' oblique angle is 22 degrees of elevation and -38 of
+     azimuth, the faded neighbouring cells kept as the canvas draws them;
+     or mplot3d's default angle, or the neighbours left out of the
+     pictures.
+149. the form's result line of a failed calculation shows the same final
+     exception as the status row (`marks.failure_line`), so that the two
+     read one message as decision 141 has them read one state; or the
+     form keeping the first line;
+150. the help's section name wraps over lines rather than widening the
+     right column, and the help's text wraps four pixels inside its
+     viewport; or the title elided with the whole name in its tooltip.
 
 ### Where the section 13 items land
 
