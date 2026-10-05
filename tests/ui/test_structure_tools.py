@@ -209,3 +209,32 @@ def test_the_zoom_is_kept_only_for_the_same_geometry(view):
     view.canvas.draw()
     (x0, x1), (y0, y1) = view.ax.get_xlim(), view.ax.get_ylim()
     assert x0 < 30.0 and x1 > 33.0 and y0 < 0.0 and y1 > 3.0
+
+
+def test_a_zero_value_on_the_atoms_is_outlined_in_both_themes():
+    """Atoms coloured by a value (an onsite energy of zero is the pale middle
+    of the diverging scale) get the bonds' grey as their outline, which the
+    light background does not swallow; the sublattice colours keep the
+    background's, which separates them."""
+    from matplotlib import colors as mcolors
+    from matplotlib.figure import Figure
+
+    from guiqula.ui import theme
+    build = grid_build(2)
+    zeros = {"values": np.zeros(len(build["positions"])), "label": "onsite energy"}
+
+    def outlines(name, site_values):
+        figure = Figure()
+        with theme.drawing(figure, name):
+            ax = figure.add_subplot()
+            st.draw_structure(ax, build, site_values=site_values)
+            atoms = [c for c in ax.collections if isinstance(c, st.DataCircles)
+                     and c.get_zorder() == 4]
+            return ({mcolors.to_hex(e) for e in atoms[0].get_edgecolor()},
+                    theme.BOND, theme.ATOM_EDGE, theme.AXES)
+
+    for name in ("light", "dark"):
+        edges, bond, atom_edge, background = outlines(name, zeros)
+        assert edges == {bond} and bond != background
+        edges, bond, atom_edge, background = outlines(name, None)
+        assert edges == {atom_edge}

@@ -3598,11 +3598,12 @@ program):
 - `ui/icons.py` and the controls: the icons stay 16 px at large interface
   text; `zoom_out`, `slider` and `settings` are vendored without a control;
   the k-space path tools and Show all are words;
-- `ui/structure.py`: in the Hamiltonian view an onsite energy of zero is a
-  white disc, unseen on the light background and drawn, with the faded
-  neighbouring cells, as a grid of grey discs on the dark one (the same
-  whether the theme is set before the build or after it, so the drawing's
-  colours and not a redraw);
+- `ui/structure.py`: in the Hamiltonian view on the dark background the
+  faded neighbouring cells read as a grid of grey discs, since a hopping of
+  phase zero is the dark middle of the cyclic scale (`twilight`), nearly
+  the background's colour, so their bonds are lost and the central ones are
+  faint (a choice between colourings: the scale shifted in the dark theme,
+  so that phase zero is pale, or an outline on the faded bonds too);
 - `ui/forms.py`, `ui/properties.py`: the kind buttons of different scalar
   rows do not line up; a sweep from the label of a system whose
   calculations give no number runs the first one and fails when run;
@@ -3820,7 +3821,13 @@ the structure canvas was left about 180 px wide, too narrow for the axes
 and a colour bar. The line now wraps (`ui/jobpanel.py`), the column keeps
 its width, and the warnings are gone, the one in
 `test_the_scene_moves_as_in_blender` included, since it was a pending draw
-of the previous module's window.
+of the previous module's window. In the Hamiltonian view, the Field
+preview and a result drawn on the atoms, an atom coloured by a value is
+outlined in the bonds' grey (`structure.atom_edge`), since its outline was
+the background's colour, white in the light theme, around the near-white
+middle of the diverging scale, so that an onsite energy of zero was a disc
+lost on the background; the sublattice colours of the structure view keep
+the background's outline, which separates them.
 
 ### Where the section 13 items land
 

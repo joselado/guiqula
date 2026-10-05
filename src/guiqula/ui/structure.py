@@ -190,6 +190,14 @@ def site_colors(build):
     return [theme.SUBLATTICE[1.0] if s > 0 else theme.SUBLATTICE[-1.0] for s in sublattice]
 
 
+def atom_edge(site_values):
+    """The outline of the atoms: the background's colour between the
+    sublattice colours, which it separates, and the bonds' grey on atoms
+    coloured by a value, whose zero is the pale middle of a diverging scale
+    and would otherwise be lost on the light background."""
+    return theme.ATOM_EDGE if site_values is None else theme.BOND
+
+
 def bond_segments(build):
     """Segments (K, 2, 2) of the bonds touching the central cell."""
     r = np.asarray(build["positions"])[:, :2]
@@ -359,7 +367,7 @@ def draw_structure(ax, build, highlight=None, selected=None, removed=None, image
                               autolim=False)
         ax.add_collection(LineCollection(central, colors=bond_colors, linewidths=widths,
                                          zorder=3), autolim=False)
-    circles(ax, xy, RADIUS, 4, autolim=True, facecolors=colors, edgecolors=theme.ATOM_EDGE,
+    circles(ax, xy, RADIUS, 4, autolim=True, facecolors=colors, edgecolors=atom_edge(site_values),
             linewidths=0.5)
     if arrows is not None:
         vectors = np.asarray(arrows["vectors"], dtype=float).reshape(-1, 3)
@@ -478,7 +486,7 @@ def draw_structure_3d(ax, build, highlight=None, selected=None, removed=None, im
         ghosts = np.concatenate([r + c @ lattice for c in image_cells(build["dimensionality"])])
         ax.scatter(ghosts[:, 0], ghosts[:, 1], ghosts[:, 2], s=size * 0.5, c=theme.MUTED,
                    alpha=0.15, depthshade=False, linewidths=0)
-    ax.scatter(r[:, 0], r[:, 1], r[:, 2], s=size, c=colors, edgecolors=theme.ATOM_EDGE,
+    ax.scatter(r[:, 0], r[:, 1], r[:, 2], s=size, c=colors, edgecolors=atom_edge(site_values),
                linewidths=0.4, depthshade=True)
     edges = cell_edges_3d(build)
     if len(edges):
