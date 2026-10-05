@@ -1,8 +1,9 @@
 """The outliner says what each row is and in what state, and nothing is cut
 off (PLAN.md phase 8, package P7): the Status column sized to its longest
 text and the Entry column taking the rest, the marks of ui/marks.py, the
-system's summary and the mean field read across their rows, the full text
-in every row's tooltip."""
+system's summary and the mean field read across their rows, a label wider
+than its column wrapped onto further lines, the full text in every row's
+tooltip."""
 from types import SimpleNamespace
 
 import pytest
@@ -14,8 +15,9 @@ from PySide6.QtWidgets import QApplication, QStyle, QStyleOptionViewItem
 from guiqula.io import project
 from guiqula.ui import marks, theme
 from guiqula.ui.app import build_main_window
-from guiqula.ui.outliner import (ADD_ROLE, MARK_ROLE, _summary, text_margin, text_width,
-                                 wrapped)
+from guiqula.ui.outliner import (ADD_ROLE, LINE, MARK_ROLE, _summary, leading_marks,
+                                 marks_width, text_margin, text_width, wrapped,
+                                 wraps)
 from guiqula.ui.outliner import status_width as drawn_width
 
 
@@ -48,13 +50,28 @@ def load(qtbot, window, preset):
 
 
 def cut(outliner):
-    """The rows whose status is not wholly in sight, with why: a status
-    elided in its column or under its "+", a "+" past the right edge, the
-    status of a detail row outside its row."""
+    """The rows whose label or status is not wholly in sight, with why: a
+    label line wider than its room or a label whose lines are not its text,
+    a status elided in its column or under its "+", a "+" past the right
+    edge, the status of a detail row outside its row."""
     view = outliner.viewport()
     margin = text_margin(outliner)
     out = []
     for item_id, item in outliner._items.items():
+        index = outliner.indexFromItem(item, 0)
+        option = QStyleOptionViewItem()
+        outliner.initViewItemOption(option)
+        option.rect = outliner.visualRect(index)
+        delegate = outliner.itemDelegateForColumn(0)
+        delegate.initStyleOption(option, index)
+        room = delegate.label_room(option, index)
+        lines = option.text.split(LINE)
+        if not wraps(option.font, item.text(0), room):
+            pass                      # squeezed narrower than a word: elided, by design
+        elif "".join(lines).replace(" ", "") != item.text(0).replace(" ", "") or any(
+                text_width(option.font, line) > room for line in lines) or \
+                option.rect.height() < len(lines) * QFontMetrics(option.font).lineSpacing():
+            out.append((item_id, item.text(0), "label"))
         text = item.text(1)
         if outliner.is_detail(item_id):
             index = outliner.indexFromItem(item, 0)
@@ -64,15 +81,19 @@ def cut(outliner):
             delegate = outliner.itemDelegateForColumn(0)
             _, status, one_line = delegate.layout(option, index)
             font = outliner.font()
-            if one_line:
-                fits = QFontMetricsF(font).horizontalAdvance(text) <= status.width()
-            else:
-                lines = wrapped(font, text, status.width())
+            state = item.data(1, MARK_ROLE)
+            if one_line:              # as it is drawn: the marks as icons
+                fits = drawn_width(font, text, state) <= status.width() + 1
+            else:                     # the leading marks on the first line, the rest beside
+                names, rest = leading_marks(text, state)
+                width = status.width() - marks_width(font, names)
+                lines = wrapped(font, rest, width)
                 bound = QFontMetrics(font).boundingRect(
-                    status, int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop), lines)
-                fits = bound.height() <= status.height() and bound.width() <= status.width() \
-                    and lines.replace("\n", "").replace(" ", "") == text.replace(" ", "") \
-                    and all(QFontMetricsF(font).horizontalAdvance(line) <= status.width()
+                    QRect(0, 0, width, status.height()),
+                    int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop), lines)
+                fits = bound.height() <= status.height() and bound.width() <= width \
+                    and lines.replace("\n", "").replace(" ", "") == rest.replace(" ", "") \
+                    and all(QFontMetricsF(font).horizontalAdvance(line) <= width
                             for line in lines.splitlines())
             if not fits or not option.rect.contains(status) or status.right() >= view.width():
                 out.append((item_id, text, "detail"))
@@ -295,7 +316,7 @@ def test_the_mean_field_reads_unclipped(window, qtbot, shot):
         option.rect = outliner.visualRect(index)
         _, status, one_line = outliner.itemDelegateForColumn(0).layout(option, index)
         assert not one_line and text_width(outliner.font(), "calculations") > status.width()
-        assert cut(outliner) == []
+        assert cut(outliner) == [], cut(outliner)
         lines = wrapped(outliner.font(), item.text(1), status.width()).splitlines()
         pieces = [w for line in lines for w in line.split() if w not in item.text(1).split()]
         assert pieces and all(piece in "calculations" for piece in pieces)   # that word only
