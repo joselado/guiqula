@@ -148,7 +148,7 @@ def draw_scene(plotter, build, highlight=None, selected=None, removed=None, imag
             lines = _lines(pv, np.stack([r[ij[:, 0]], r[ij[:, 1]] + shift[chosen]], axis=1))
             lines.cell_data["phase"] = phase[chosen]
             plotter.add_mesh(lines, name=f"hoppings{k}", scalars="phase",
-                             cmap=structure_tools.PHASE_MAP, clim=(-np.pi, np.pi),
+                             cmap=theme.PHASE_MAP, clim=(-np.pi, np.pi),
                              line_width=float(width), show_scalar_bar=False)
     else:
         segments = structure_tools.bond_segments_3d(build)

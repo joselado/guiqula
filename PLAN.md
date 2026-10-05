@@ -3599,12 +3599,6 @@ program):
 - `ui/icons.py` and the controls: the icons stay 16 px at large interface
   text; `zoom_out`, `slider` and `settings` are vendored without a control;
   the k-space path tools and Show all are words;
-- `ui/structure.py`: in the Hamiltonian view on the dark background the
-  faded neighbouring cells read as a grid of grey discs, since a hopping of
-  phase zero is the dark middle of the cyclic scale (`twilight`), nearly
-  the background's colour, so their bonds are lost and the central ones are
-  faint (a choice between colourings: the scale shifted in the dark theme,
-  so that phase zero is pale, or an outline on the faded bonds too);
 - `ui/forms.py`, `ui/properties.py`: a sweep from the label of a system
   whose calculations give no number runs the first one and fails when run,
   with the sweep's own message ("c1 gives no number to collect"), which is
@@ -3862,6 +3856,26 @@ option of each is the one built:
      themes, the sublattice colours keeping the background's outline; or a
      darker outline (the text's colour), or the outline only on the
      light background.
+
+Maintainer's answers to the open items (2026-10-05, asked one by one):
+the right column keeps the 340 px the window gives, and the README's
+pictures are made again at that width; the hoppings of the Hamiltonian view
+are coloured with `twilight_shifted` in the dark theme, so that phase zero
+is light there, the light theme keeping `twilight`; the status row of a
+failed result shows the last line of the message, the final exception,
+the whole chain staying in the tooltip and in Jobs (amending decision
+120); the icons are drawn at 20 px at large interface text, set again when
+View > Interface text changes; a displayed equation wider than the help
+panel is scaled down to its width; the 3D pictures of the buckled
+honeycomb, cubic and diamond lattices are a small supercell (3x3x1, 2x2x2
+and 2x2x2) seen from an oblique angle with its bonds, and texture_exchange's
+picture is drawn without equal aspect; the sweep from a label stays as
+built (decision 125, confirmed).
+
+Built on branch still-open, one commit each. The hopping phases' scale is
+the theme's `PHASE_MAP` (`ui/theme.py`), which `theme.drawing` rebinds
+with the other colours, so an exported figure takes the scale of the
+theme it is drawn in.
 
 ### Where the section 13 items land
 

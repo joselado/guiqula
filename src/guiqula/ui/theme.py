@@ -68,6 +68,9 @@ COLORS = {
         "SUBLATTICE": {1.0: "#2f6db3", -1.0: "#d9822b", None: "#4a4a4a"},
         "ATOM_EDGE": "#ffffff", "ARROW": "#1e1e1e", "SELECTED": "#e0218a",
         "REGION": "#2e9e5b", "REMOVED": "#b3261e", "BOND": "#9a9a9a", "CELL": "#5b8fd0",
+        # the colour scale of the hopping phases: cyclic, phase zero (a plain hopping) its
+        # dark middle on the light background and its light ends on the dark one
+        "PHASE_MAP": "twilight",
     },
     "dark": {
         "TEXT": "#e3e3e3", "MUTED": "#8c8c8c", "DOC": "#b4b4b4", "POINT": "#c8c8c8",
@@ -78,6 +81,7 @@ COLORS = {
         "SUBLATTICE": {1.0: "#6aa6ee", -1.0: "#f0a24e", None: "#b8b8b8"},
         "ATOM_EDGE": "#1f1f1f", "ARROW": "#f0f0f0", "SELECTED": "#ff5cb4",
         "REGION": "#52c987", "REMOVED": "#ff6b61", "BOND": "#8a8a8a", "CELL": "#79a7e6",
+        "PHASE_MAP": "twilight_shifted",
     },
 }
 

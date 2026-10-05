@@ -72,8 +72,8 @@ def icon(name, color="TEXT"):
     if name not in NAMES:
         raise KeyError(f"unknown icon {name!r}; the icons are {', '.join(NAMES)}")
     colors = theme.COLORS[theme.name]
-    if not isinstance(colors.get(color), str):
-        known = ", ".join(key for key, value in colors.items() if isinstance(value, str))
+    if not str(colors.get(color, "")).startswith("#"):         # a colour, not a colour map
+        known = ", ".join(key for key, value in colors.items() if str(value).startswith("#"))
         raise ValueError(f"unknown icon colour {color!r}; the theme's colours are {known}")
     key = (theme.name, name, color)
     if key not in _cache:

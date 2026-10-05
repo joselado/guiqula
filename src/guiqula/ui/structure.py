@@ -74,7 +74,6 @@ VIEWS = {"structure": "Sites and bonds", "hamiltonian": "Hamiltonian", "field": 
 SELECTION_ZORDER = 6
 VALUE_MAP = "coolwarm"       # site values, symmetric about zero
 SEQUENTIAL_MAP = "viridis"   # site values of one sign (a density, an LDOS)
-PHASE_MAP = "twilight"       # hopping phases, cyclic
 FLAT = 1e-6                  # heights spread less than this: a flat geometry
 PROJECTIONS = ("auto", "xy", "3d")   # auto: 3D when the geometry is not flat
 
@@ -341,7 +340,8 @@ def draw_structure(ax, build, highlight=None, selected=None, removed=None, image
         central, amplitude, phase = hopping_segments(build, hoppings)
         top = float(amplitude.max()) if len(amplitude) else 1.0
         widths = 0.4 + 3.6 * amplitude / (top if top > 0 else 1.0)
-        phase_map = cm.ScalarMappable(norm=mcolors.Normalize(-np.pi, np.pi), cmap=PHASE_MAP)
+        phase_map = cm.ScalarMappable(norm=mcolors.Normalize(-np.pi, np.pi),
+                                      cmap=theme.PHASE_MAP)
         bond_colors = phase_map.to_rgba(phase)
         if len(phase) and np.any(np.abs(phase) > 1e-6):
             add_bar(phase_map, "hopping phase", horizontal=True)
@@ -474,7 +474,8 @@ def draw_structure_3d(ax, build, highlight=None, selected=None, removed=None, im
         amplitude = np.asarray(hoppings["amplitude"])
         top = float(amplitude.max()) if len(amplitude) else 1.0
         widths = 0.4 + 3.6 * amplitude / (top if top > 0 else 1.0)
-        phase_map = cm.ScalarMappable(norm=mcolors.Normalize(-np.pi, np.pi), cmap=PHASE_MAP)
+        phase_map = cm.ScalarMappable(norm=mcolors.Normalize(-np.pi, np.pi),
+                                      cmap=theme.PHASE_MAP)
         bond_colors = phase_map.to_rgba(np.asarray(hoppings["phase"]))
     else:
         segments = bond_segments_3d(build)
