@@ -29,14 +29,16 @@ def test_the_states_the_tree_needs_too():
 def test_the_state_of_a_calculation_in_a_session():
     """The state is the session's, the progress a running job's only, once
     it has reported one; a job an event is about counts before the session
-    holds it, and a failed last run reads failed over an earlier result."""
+    holds it, and a failed last run over an earlier result reads as that
+    result does (decision 121's alternative)."""
     def job(status, progress=0.0, done=False):
         return SimpleNamespace(status=status, progress=progress, done=done)
 
-    statuses = {"c1": "running", "c2": "done", "c4": "stale", "c5": "done"}
+    statuses = {"c1": "running", "c2": "done", "c4": "stale", "c5": "done", "c6": "failed"}
     session = SimpleNamespace(status=lambda calc: statuses.get(calc, "none"), calc_jobs={
         "c1": job("running", 0.7), "c2": job("done", 1.0, True),
-        "c4": job("failed", done=True), "c5": job("failed", done=True)})
+        "c4": job("failed", done=True), "c5": job("failed", done=True),
+        "c6": job("failed", done=True)})
     assert marks.calculation_state(session, "c1") == ("running", 0.7)
     assert marks.mark(*marks.calculation_state(session, "c1")) == "70%"
     assert marks.calculation_state(session, "c2") == ("done", None)
@@ -46,6 +48,8 @@ def test_the_state_of_a_calculation_in_a_session():
     assert marks.mark(*marks.calculation_state(session, "c1")) == "running"
     # the job of an event, which the session does not hold yet
     assert marks.calculation_state(session, "c3", job("queued")) == ("queued", None)
-    # a failed run over an earlier result, kept stale, reads failed; a current one does not
-    assert marks.calculation_state(session, "c4") == ("failed", None)
+    # a failed run over an earlier result reads as the result does, stale or done, and
+    # failed only when no result is kept
+    assert marks.calculation_state(session, "c4") == ("stale", None)
     assert marks.calculation_state(session, "c5") == ("done", None)
+    assert marks.calculation_state(session, "c6") == ("failed", None)

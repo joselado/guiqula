@@ -2242,10 +2242,10 @@ class MainWindow(QMainWindow):
         """(state, progress, message) of a calculation's result, for the marks
         of its tab and the status row above its plot: queued or running while
         a job of it runs (job: the one an event is about, which the session
-        may not hold yet), failed when its last run failed and no current
-        result is there (an earlier one may be kept, stale), else stale, done
-        or none: a current result has no row, even after a failed run of a
-        model that an undo took back."""
+        may not hold yet), failed when its last run failed and no result is
+        kept, else stale, done or none, as Session.status says: a run that
+        failed over an earlier result reads stale, the failure being in the
+        Jobs panel, and a current result has no row."""
         state, progress = calculation_state(self.session, calc, job)
         if job is None or job.done:
             job = self.session.calc_jobs.get(calc)

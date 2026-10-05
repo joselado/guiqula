@@ -110,8 +110,10 @@ carries its state only, the marks drawn as icons:
   after a run, "U = 3, E = -1.68"; "off" when it is off);
 - a calculation's result: a check mark when it is current, a circular arrow, dimmed, when
   it is stale, an hourglass and the percentage while its job runs, a cross in the error
-  colour when its last run failed, the word queued or cancelled, nothing when it was never
-  run, and the value of a single number after its mark (a gap, a Chern number);
+  colour when its last run failed and no earlier result is kept (a run that fails over an
+  earlier result reads stale, and its error is in the Jobs panel), the word queued or
+  cancelled, nothing when it was never run, and the value of a single number after its
+  mark (a gap, a Chern number);
 - a warning triangle in the error colour for an entry that pyqula or the planner refuses,
   a crossed-out circle for a disabled one (the row dimmed), the sign ⚠ for one that is
   valid but worth a look (it reads a stale result), and a padlock on a locked entry (m and
@@ -148,11 +150,14 @@ have one: Show is an eye before the choice of view, and 3D a cube beside its che
 The k-space tab's path tools and the brush's value and radius keep their words. A result
 that is not simply current says so in a row above its plot, with the icon of its state:
 stale, with Run again; queued or running, with its progress and Cancel; failed, with the
-first line of the error (the whole message in the tooltip) and Run again, the earlier
-result staying drawn under it until a run succeeds. The three read one state, so the
-result's tab carries the same mark as a sign after its title (↻ stale, ✗ failed, the
-percentage while it runs) and its row in the outliner as an icon, and a result never
-computed says what comes next in its caption instead, drawn in the colours of the theme.
+first line of the error (the whole message in the tooltip) and Run again. A run that fails
+while an earlier result is kept reads as that result does, stale (done when it still
+matches the document), meaning that the earlier result stays drawn, under the row with Run
+again when it is stale, and the error is read in the Jobs panel, in its status column and,
+with the whole traceback, in its tooltip. The three read one state, so the result's tab
+carries the same mark as a sign after its title (↻ stale, ✗ failed, the percentage while
+it runs) and its row in the outliner as an icon, and a result never computed says what
+comes next in its caption instead, drawn in the colours of the theme.
 
 ### The panels
 

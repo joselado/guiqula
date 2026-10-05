@@ -47,16 +47,15 @@ def calculation_state(session, calculation, job=None):
     mark(*calculation_state(session, c)) reads the same in the outliner, the
     result tab and the status row above the plot. The state is
     Session.status's (none, queued, running, done, stale, failed or
-    cancelled) with two exceptions: a job still queued or running gives its
-    own state (job: the one an event is about, which the session may not
-    hold yet), and a last run that failed reads failed while no current
-    result is there, even with an earlier result kept, stale. The progress
-    is a running job's fraction once it has reported one, else None."""
+    cancelled), but for a job still queued or running, which gives its own
+    state (job: the one an event is about, which the session may not hold
+    yet). A run that failed over an earlier result thus reads as that
+    result does, stale, and failed only when no result is kept (decision
+    121, answered with its alternative); the failure is in the Jobs panel.
+    The progress is a running job's fraction once it has reported one, else
+    None."""
     if job is None or job.done:
         job = session.calc_jobs.get(calculation)
     if job is not None and not job.done:
         return job.status, (job.progress or None) if job.status == "running" else None
-    state = session.status(calculation)
-    if job is not None and job.status == "failed" and state != "done":
-        state = "failed"
-    return state, None
+    return session.status(calculation), None

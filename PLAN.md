@@ -3806,7 +3806,11 @@ earlier result of that calculation is kept reads stale, as `Session.status`
 says, in the tree, the tab and the status row alike (the row with Run
 again, the earlier result staying drawn under it), and the failure itself
 is read in the Jobs panel; a run that fails with no earlier result still
-reads failed.
+reads failed. Built on branch still-open: `marks.calculation_state` gives
+`Session.status`'s state but for a job still queued or running, so the
+tree, the tab, the status row, the form's result line (decision 141) and
+the remote `plot` state (decision 134) read stale there together, a result
+that still matches the document reading done.
 
 ### Where the section 13 items land
 

@@ -198,43 +198,60 @@ def test_the_status_row_shows_progress_and_cancel_stops_the_job(window, qtbot):
     assert window.viewport.tabText(index) == f"{slow} python"
 
 
-def test_a_failed_run_says_why_even_over_an_earlier_result(window, qtbot):
+def test_a_failed_run_says_why_and_over_an_earlier_result_reads_stale(window, qtbot):
+    """A run that fails with no result kept reads failed, with the first line
+    of the error, in the row, the tab, the tree and the form; one that fails
+    over an earlier result reads stale there, as Session.status says, with
+    Run again and the earlier result drawn, and the failure is in the Jobs
+    panel (decision 121, answered with its alternative)."""
     session = window.session
     load(qtbot, window, "graphene_island")
-    calc = session.do("add_calculation", system="s1", kind="python", params={"code": QUICK})
+    calc = session.do("add_calculation", system="s1", kind="python", params={"code": FAIL})
     window.show_result(calc)
     view = window.plots[calc]
     row, index = view.status, window.viewport.indexOf(view)
-    first = session.run_calculation(calc, wait=True, timeout=300)
-    assert first.status == "done", first.error
-    qtbot.waitUntil(lambda: view.result is first.value, timeout=10_000)
-    session.do("set_param", entry=calc, name="code", value=FAIL)
     job = session.run_calculation(calc, wait=True, timeout=300)
-    assert job.status == "failed" and session.status(calc) == "stale"   # the earlier result
+    assert job.status == "failed" and session.status(calc) == "failed"     # nothing kept
     qtbot.waitUntil(lambda: row.state == "failed", timeout=5000)
     assert row.isVisibleTo(view) and row.text.full.startswith(f"{marks.FAILED} failed: ")
     assert "no band here" in row.text.toolTip()
     assert view.findChild(QToolButton, f"plotRun_{calc}").isVisibleTo(view)
     assert window.viewport.tabText(index) == f"{calc} python {marks.FAILED}"
     assert window.viewport.tabBar().tabTextColor(index).name() == theme.ERROR
+    assert "no band here" in window.viewport.tabToolTip(index)
     assert window.outliner.item(calc).text(1) == marks.FAILED   # the tree reads it the same
     window.select(calc)                                  # and the form (P8)
     assert window.properties.form.status.text().startswith("result: failed, ") and \
         "no band here" in window.properties.form.status.text()
-    assert view.result is first.value                    # the earlier result stays drawn
     window.toggle_detached(calc)                         # its window's title says it too
     assert window.plot_windows[calc].windowTitle() == f"Result {calc} python {marks.FAILED}"
-    window.toggle_detached(calc)                         # and the tab, back, in its colour
+    window.toggle_detached(calc)
     index = window.viewport.indexOf(view)
-    assert window.viewport.tabText(index) == f"{calc} python {marks.FAILED}"
-    assert window.viewport.tabBar().tabTextColor(index).name() == theme.ERROR
-    assert "no band here" in window.viewport.tabToolTip(index)
+    session.do("set_param", entry=calc, name="code", value=QUICK)
+    first = session.run_calculation(calc, wait=True, timeout=300)
+    assert first.status == "done", first.error
+    qtbot.waitUntil(lambda: view.result is first.value, timeout=10_000)
+    session.do("set_param", entry=calc, name="code", value=FAIL)
+    job = session.run_calculation(calc, wait=True, timeout=300)
+    assert job.status == "failed" and session.status(calc) == "stale"   # the earlier result
+    qtbot.waitUntil(lambda: row.state == "stale", timeout=5000)
+    assert row.isVisibleTo(view) and row.text.full.startswith(f"{marks.STALE} stale")
+    assert view.findChild(QToolButton, f"plotRun_{calc}").isVisibleTo(view)
+    assert window.viewport.tabText(index) == f"{calc} python {marks.STALE}"
+    assert window.viewport.tabBar().tabTextColor(index).name() != theme.ERROR
+    assert window.outliner.item(calc).text(1) == marks.STALE
+    window.select(calc)
+    assert window.properties.form.status.text() == "result: stale"
+    assert view.result is first.value                    # the earlier result stays drawn
+    table = window.jobs.table                            # the failure is in the Jobs panel
+    status = table.item(window.jobs.rows[job.id], 2)
+    assert status.text().startswith("failed: ") and "no band here" in status.text()
     session.undo()                       # the code that ran: the earlier result is current
     assert session.status(calc) == "done"
-    assert not row.isVisibleTo(view) and window.viewport.tabText(index) == f"{calc} python"
+    qtbot.waitUntil(lambda: not row.isVisibleTo(view), timeout=5000)
+    assert window.viewport.tabText(index) == f"{calc} python"
     assert window.outliner.item(calc).text(1) == marks.DONE
     assert window.properties.form.status.text() == "result: done"
-    assert window.viewport.tabBar().tabTextColor(index).name() != theme.ERROR
     assert window.viewport.tabToolTip(index) == ""
 
 
