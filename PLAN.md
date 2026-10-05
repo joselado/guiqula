@@ -3607,9 +3607,6 @@ program):
   rows do not line up; a sweep from the label of a system whose
   calculations give no number runs the first one and fails when run;
 - `ui/help.py`: the help browser's horizontal scroll bar;
-- the tests: three warnings of matplotlib, "constrained_layout not applied
-  because axes sizes collapsed to zero", two in `test_console_in_the_window`
-  and one in `test_the_scene_moves_as_in_blender`;
 - `tests/ui/test_startup.py`: the budget under load (decision 135), which
   the base of the phase misses as well.
 
@@ -3811,6 +3808,19 @@ reads failed. Built on branch still-open: `marks.calculation_state` gives
 tree, the tab, the status row, the form's result line (decision 141) and
 the remote `plot` state (decision 134) read stale there together, a result
 that still matches the document reading done.
+
+**After the report: the items still open that needed no decision
+(2026-10-05, branch still-open).** The three warnings of matplotlib in the
+tests ("constrained_layout not applied because axes sizes collapsed to
+zero") were a defect of the window that the tests showed: the Jobs panel's
+line of the workers, one line of about 770 px once the console worker had
+started (interactive, batch and console, each with its pid and state), was
+the minimum width of the right column, which took it from the viewport, so
+the structure canvas was left about 180 px wide, too narrow for the axes
+and a colour bar. The line now wraps (`ui/jobpanel.py`), the column keeps
+its width, and the warnings are gone, the one in
+`test_the_scene_moves_as_in_blender` included, since it was a pending draw
+of the previous module's window.
 
 ### Where the section 13 items land
 

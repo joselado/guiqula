@@ -32,6 +32,9 @@ class JobPanel(QWidget):
         self.table.setColumnWidth(3, 70)
         self.workers = QLabel("workers: starting")
         self.workers.setObjectName("workerStatus")
+        # wrapped, since one line of three workers is about 770 px, which the column of
+        # Properties, Help and Jobs would otherwise take from the canvas
+        self.workers.setWordWrap(True)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.addWidget(self.table)
