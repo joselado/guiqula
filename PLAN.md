@@ -3583,12 +3583,13 @@ program):
   engine's exception chain, so at 1200 px the useful part is in the
   tooltip;
 - `ui/start.py`, `ui/gallery.py`: a folded card is not a widget until it
-  is made (decision 144); the gallery's headings do not follow the
-  interface text while it is open, and closed galleries are kept alive with
-  their pictures; Ctrl+F opens New system while the page shows (decision
-  113); three 3D pictures (buckled honeycomb, cubic, diamond) show one dot
-  in their cell and texture_exchange's a thin ladder; at large text on
-  1200x800 the footer drops below the fold;
+  is made (decision 144); Ctrl+F opens New system while the page shows
+  (decision 113); three 3D pictures (buckled honeycomb, cubic, diamond)
+  show one dot in their cell, which is what one cell of them holds from
+  mplot3d's angle (a choice: a supercell, another angle or stronger
+  neighbours), and texture_exchange's a thin ladder, its first calculation
+  being a chain drawn at equal aspect (a choice of calculation or of
+  aspect); at large text on 1200x800 the footer drops below the fold;
 - `ui/outliner.py`, `ui/marks.py`: the entry labels are elided at 1200x800
   (the whole text in the tooltip), and so is a long system name in its
   detail row ("Hubbard model on the honeycomb la…"); the detail rows' marks
@@ -3837,7 +3838,12 @@ whole, so that one line of pyqula's examples longer than the panel (the
 `add_zeeman` example of t1's help, about 560 px in a panel of 410) made
 the whole page scroll sideways; their lines now wrap at the panel's width
 as the prose does (`HelpBrowser._wrap_code`), and of the 281 sections of
-the two guides only the nine with a wider equation keep the bar.
+the two guides only the nine with a wider equation keep the bar. The
+gallery's group headings are the start page's `Title`, painted in the
+interface font at each paint, so that they follow View > Interface text
+while the gallery is open (a font set on a `QLabel` stayed at its size), and
+a closed gallery is deleted (`WA_DeleteOnClose`) rather than kept hidden
+with its pictures, each opening making one of its own as before.
 
 ### Where the section 13 items land
 

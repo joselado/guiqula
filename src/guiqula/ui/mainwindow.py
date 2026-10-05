@@ -3095,7 +3095,6 @@ class MainWindow(QMainWindow):
         gallery = Gallery(self)
         gallery.opened.connect(self.open_document)
         gallery.show()
-        self.gallery = gallery
         return gallery
 
     def open_dialog(self):
