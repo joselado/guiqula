@@ -150,7 +150,8 @@ have one: Show is an eye before the choice of view, and 3D a cube beside its che
 The k-space tab's path tools and the brush's value and radius keep their words. A result
 that is not simply current says so in a row above its plot, with the icon of its state:
 stale, with Run again; queued or running, with its progress and Cancel; failed, with the
-first line of the error (the whole message in the tooltip) and Run again. A run that fails
+final exception of the error ("ValueError: no band here", where the engine wraps it in its
+own) and Run again, the whole message in the tooltip and in Jobs. A run that fails
 while an earlier result is kept reads as that result does, stale (done when it still
 matches the document), meaning that the earlier result stays drawn, under the row with Run
 again when it is stale, and the error is read in the Jobs panel, in its status column and,

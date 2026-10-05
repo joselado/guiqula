@@ -1,10 +1,12 @@
 """The marks of a state, one set for the outliner's rows, the result tabs and
 the status row above a plot (PLAN.md section 7, phase 8, P7): Unicode until
-the icons of P8 draw them.
+the icons of P8 draw them; and the line a failure is told by.
 
 No Qt here, so that the outliner, the window and the tests read the same
 strings. A state without a mark ("none", a calculation never run) reads as
 nothing at all; a queued or cancelled job, rarer, keeps its word."""
+
+import re
 
 DONE = "✓"       # check mark
 STALE = "↻"      # clockwise open circle arrow
@@ -59,3 +61,23 @@ def calculation_state(session, calculation, job=None):
     if job is not None and not job.done:
         return job.status, (job.progress or None) if job.status == "running" else None
     return session.status(calculation), None
+
+
+# an exception's name where the engine chains them ("CalculationError: Sweep: SweepError: ...")
+_EXCEPTION = re.compile(r"\b[A-Z]\w*(?:Error|Exception|Exit|Interrupt|Warning): ")
+
+
+def failure_line(message):
+    """The line a failure is told by in the status row and the form: the
+    final exception, meaning the last line of the message from the last
+    exception name in it on ("SweepError: c1 gives no number..." of
+    "CalculationError: Sweep: SweepError: c1 gives no number..."), the
+    whole message staying in the tooltip and in Jobs (decision 120, as the
+    maintainer amended it). A message without an exception name is its
+    last line."""
+    lines = [line.strip() for line in str(message or "").splitlines() if line.strip()]
+    if not lines:
+        return ""
+    last = lines[-1]
+    found = list(_EXCEPTION.finditer(last))
+    return last[found[-1].start():] if found else last

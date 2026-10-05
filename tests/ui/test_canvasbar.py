@@ -214,6 +214,9 @@ def test_a_failed_run_says_why_and_over_an_earlier_result_reads_stale(window, qt
     assert job.status == "failed" and session.status(calc) == "failed"     # nothing kept
     qtbot.waitUntil(lambda: row.state == "failed", timeout=5000)
     assert row.isVisibleTo(view) and row.text.full.startswith(f"{marks.FAILED} failed: ")
+    # the line shows the final exception, the engine's chain staying in the tooltip
+    assert row.text.shown == "failed: ValueError: no band here (line 1 of the code)"
+    assert row.text.toolTip().startswith(f"{marks.FAILED} failed: CalculationError")
     assert "no band here" in row.text.toolTip()
     assert view.findChild(QToolButton, f"plotRun_{calc}").isVisibleTo(view)
     assert window.viewport.tabText(index) == f"{calc} python {marks.FAILED}"
@@ -221,8 +224,8 @@ def test_a_failed_run_says_why_and_over_an_earlier_result_reads_stale(window, qt
     assert "no band here" in window.viewport.tabToolTip(index)
     assert window.outliner.item(calc).text(1) == marks.FAILED   # the tree reads it the same
     window.select(calc)                                  # and the form (P8)
-    assert window.properties.form.status.text().startswith("result: failed, ") and \
-        "no band here" in window.properties.form.status.text()
+    assert window.properties.form.status.text() == \
+        "result: failed, ValueError: no band here (line 1 of the code)"
     window.toggle_detached(calc)                         # its window's title says it too
     assert window.plot_windows[calc].windowTitle() == f"Result {calc} python {marks.FAILED}"
     window.toggle_detached(calc)

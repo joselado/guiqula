@@ -53,3 +53,15 @@ def test_the_state_of_a_calculation_in_a_session():
     assert marks.calculation_state(session, "c4") == ("stale", None)
     assert marks.calculation_state(session, "c5") == ("done", None)
     assert marks.calculation_state(session, "c6") == ("failed", None)
+
+
+def test_a_failure_is_told_by_its_final_exception():
+    """The engine chains the exceptions on one line; the status row and the
+    form show the last one, and a message without one its last line."""
+    assert marks.failure_line("CalculationError: Sweep: SweepError: c1 gives no number") == \
+        "SweepError: c1 gives no number"
+    assert marks.failure_line("CalculationError: Python: ValueError: no band here") == \
+        "ValueError: no band here"
+    assert marks.failure_line("Traceback\n  File x\n\nKeyError: 'k'\n") == "KeyError: 'k'"
+    assert marks.failure_line("timed out after 3 s") == "timed out after 3 s"
+    assert marks.failure_line(None) == marks.failure_line("") == ""

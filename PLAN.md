@@ -3579,9 +3579,6 @@ starts, start page and icons included, in the time it took before phase
 *Still open* (by the file that would change; none blocks a use of the
 program):
 
-- `ui/plots.py`: the failure line of the status row begins with the
-  engine's exception chain, so at 1200 px the useful part is in the
-  tooltip;
 - `ui/start.py`, `ui/gallery.py`: a folded card is not a widget until it
   is made (decision 144); Ctrl+F opens New system while the page shows
   (decision 113); three 3D pictures (buckled honeycomb, cubic, diamond)
@@ -3876,6 +3873,12 @@ Built on branch still-open, one commit each. The hopping phases' scale is
 the theme's `PHASE_MAP` (`ui/theme.py`), which `theme.drawing` rebinds
 with the other colours, so an exported figure takes the scale of the
 theme it is drawn in.
+The failure is told by `marks.failure_line`: the last line of the message
+from its last exception name on, so that "CalculationError: Python:
+ValueError: no band here" reads "ValueError: no band here" in the status row
+and in the form's result line alike (decision 141 keeps them one), and a
+message without an exception name (a timeout, a worker that died) is its
+last line.
 
 ### Where the section 13 items land
 

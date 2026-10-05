@@ -740,8 +740,7 @@ class EntryForm(Form):
             state, _ = marks.calculation_state(session, self.item_id)
             job = session.calc_jobs.get(self.item_id)
             if state == "failed" and job is not None and job.error:
-                line = next((line for line in str(job.error).splitlines() if line.strip()), "")
-                return f"result: failed, {line}"
+                return f"result: failed, {marks.failure_line(job.error)}"
             return f"result: {state}"
         try:
             stage = session.plan_system(self.system_id).stage(self.item_id)
