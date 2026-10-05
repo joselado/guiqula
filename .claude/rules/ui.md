@@ -126,7 +126,9 @@ tests, `drive.py --widget` and the remote `widgets` and `screenshot` methods rel
   `icons.NAMES`.
 - `help.py`: the Help panel, below Properties: F1, a form's ?, the guides; Markdown in a
   QTextBrowser, whose `loadResource` serves the equations; the lines of a code block wrap
-  at the panel's width (`_wrap_code`), so only an equation wider than the panel scrolls.
+  at the panel's width (`_wrap_code`) and an equation wider than the panel is scaled down
+  to it (`_fit_equations`), so no page scrolls sideways; the section's name wraps, since a
+  label one line long sets the column's minimum width (as the Jobs panel's workers line did).
 - `shortcuts.py`: the one table of keyboard shortcuts (menus, the canvas and outliner keys,
   the dialog); a test refuses ambiguous keys, and the shortcut table of
   `src/guiqula/docs/user_guide.md` is checked against it.

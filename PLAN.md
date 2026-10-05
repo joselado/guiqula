@@ -3600,11 +3600,6 @@ program):
   whose calculations give no number runs the first one and fails when run,
   with the sweep's own message ("c1 gives no number to collect"), which is
   decision 125 as built (a choice: refusing the sweep at once instead);
-- `ui/help.py`: a displayed equation wider than the panel (nine of the 281
-  sections of the two guides at the default width, "The screened
-  interaction" the widest at about 610 px) still gives its page a
-  horizontal scroll bar (a choice: the scroll bar for those pages, or the
-  equation's image scaled to the panel's width, smaller to read);
 - `tests/ui/test_startup.py`: the budget under load (decision 135), which
   the base of the phase misses as well.
 
@@ -3879,6 +3874,17 @@ ValueError: no band here" reads "ValueError: no band here" in the status row
 and in the form's result line alike (decision 141 keeps them one), and a
 message without an exception name (a timeout, a worker that died) is its
 last line.
+A displayed equation wider than the help panel is drawn at the panel's
+width, its height in proportion (`HelpBrowser._fit_equations`, again at
+each change of the viewport's width, the vertical scroll bar's coming
+included), and the text wraps four pixels inside the viewport, since
+wrapped at its very width Qt's rounding left three sections a pixel wider,
+with a scroll bar for that pixel: none of the 281 sections of the two
+guides scrolls sideways at 1200x800 or at 1600x1000. The widest, in "The
+screened interaction", is drawn at about half its size. Looking for it, the
+section's name over the page turned out to widen the right column for good
+once a long one was shown (to about 460 px after "h.get_sxsx_mean_field
+_hamiltonian() / ..."), as the workers line did; it now wraps.
 
 ### Where the section 13 items land
 

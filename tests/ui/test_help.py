@@ -152,3 +152,37 @@ def test_code_wraps_at_the_width_of_the_panel(window, qtbot):
     assert "# add the Zeeman field (modifies h in place)" in browser.toPlainText()
     assert not any(wide)
     assert browser.horizontalScrollBar().maximum() == 0
+
+
+def test_a_wide_equation_is_scaled_to_the_panel(window, qtbot):
+    """A displayed equation wider than the panel is drawn at the panel's
+    width, its height in proportion, so the section does not scroll
+    sideways; the long section name wraps instead of widening the column."""
+    panel = window.help_panel
+    browser = panel.browser
+    window.docks["helpDock"].raise_()
+    width = window.docks["helpDock"].width()
+    panel.show_section("pyqula", "The screened interaction")
+    qtbot.wait(50)
+    scaled = []
+    block = browser.document().begin()
+    while block.isValid():
+        fragments = block.begin()
+        while not fragments.atEnd():
+            look = fragments.fragment().charFormat()
+            if look.isImageFormat() and look.toImageFormat().width() > 0:
+                image = look.toImageFormat()
+                natural = browser._natural_size(image.name())
+                scaled.append((image.width(), natural.width(), image.height(),
+                               natural.height()))
+            fragments += 1
+        block = block.next()
+    assert scaled, "no equation of that section is wider than the panel"
+    for shown, natural, high, natural_high in scaled:
+        assert shown < natural and shown <= browser.viewport().width()
+        assert abs(high / natural_high - shown / natural) < 0.01
+    assert browser.horizontalScrollBar().maximum() == 0
+    panel.show_section("pyqula", "Abrikosov-pseudofermion (Read-Newns) mean field for the "
+                       "Kondo lattice")                   # a long name: it wraps
+    qtbot.wait(50)
+    assert window.docks["helpDock"].width() == width
