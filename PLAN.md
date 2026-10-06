@@ -4120,6 +4120,29 @@ Decisions taken; the first option of each is the one built:
      in the View menu, with Tabler's layout-grid icon, and a cell's × is
      Tabler's x; or a menu entry alone.
 
+**The drag into a grid, fixed (2026-10-06, branch grid-drag).** The
+maintainer could not move a plot into a grid. Pressing a result's tab shows
+that tab, which hides the grid, and Qt's switch of the current tab under a
+held drag (`setChangeCurrentOnDrag`) did not bring the grid back, so the
+cells were out of sight and a drop on the Grid tab was taken as "back to
+its tab". A drag held over a Grid tab now shows it at once, a drop on the
+Grid tab fills its first free cell, and an empty cell offers the results in
+a menu; the cells are placed by hand at equal shares, since the grid's
+layout gave a row holding a view that view's minimum height. The offscreen
+platform runs no drag, so this was found by reading the events, not by
+replaying the gesture.
+
+181. a drag held over a Grid tab shows that grid at once; or after Qt's
+     delay, which did not happen;
+182. a result dropped on a Grid tab goes into its first free cell, refused
+     with a message when the grid is full, and `grid_place` without a row
+     and a column does the same; or a drop there ignored;
+183. an empty cell has Choose a result, a menu of the calculations; or the
+     drag alone;
+184. the cells are placed by hand at equal shares of the grid, a view
+     squeezed below its minimum size when the grid is small; or a layout,
+     a taken row taking the room an empty one needs.
+
 ### Where the section 13 items land
 
 | Phase | Items |

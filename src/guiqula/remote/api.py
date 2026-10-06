@@ -136,7 +136,8 @@ WINDOW_ACTIONS = {
             "col, calculation], ...]}",
     "grid_place": "calculation, grid, row, col (from 0): show its result in that cell, a "
                   "result already there going to the cell this one left (or to its tab); "
-                  "grid left out: the result back into its tab",
+                  "row and col left out: the first free cell; grid left out: the result back "
+                  "into its tab",
 }
 
 

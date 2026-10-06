@@ -253,9 +253,12 @@ class MainWindow(QMainWindow):
         self.viewport.setObjectName("viewport")
         # a result's tab is dragged onto a cell of a grid, and a cell's title dropped on the
         # bar gives the result back to its tab (ui/grid.py)
-        self.viewport.setTabBar(ResultTabBar(self._result_tab))
+        self.viewport.setTabBar(ResultTabBar(self._result_tab, self._grid_tab))
         self.viewport.tabBar().dropped.connect(
             lambda calc: QTimer.singleShot(0, lambda: self._act("grid_place", calculation=calc)))
+        self.viewport.tabBar().dropped_on_grid.connect(
+            lambda calc, grid: QTimer.singleShot(0, lambda: self._act(
+                "grid_place", calculation=calc, grid=grid)))
         self.viewport.setTabsClosable(True)
         self.new_grid_button = QToolButton()
         self.new_grid_button.setObjectName("newGridButton")
@@ -2318,6 +2321,11 @@ class MainWindow(QMainWindow):
         widget = self.viewport.widget(index)
         return widget.calc_id if isinstance(widget, PlotView) else None
 
+    def _grid_tab(self, index):
+        """The grid whose tab is at a viewport index, or None."""
+        widget = self.viewport.widget(index)
+        return widget.grid_id if isinstance(widget, GridView) else None
+
     def _cell_of(self, calc):
         """(grid id, row, column) of the cell showing calc's result, or None."""
         for grid_id, grid in self.grids.items():
@@ -2356,6 +2364,7 @@ class MainWindow(QMainWindow):
 
     def _make_grid(self, grid_id, rows, cols):
         grid = GridView(grid_id, rows, cols)
+        grid.offer = lambda: [(calc, self._tab_text(calc)) for calc in self._calculation_ids()]
         grid.shape_requested.connect(lambda g, r, c: self._act("grid", grid=g, rows=r, cols=c))
         # after the drag has returned, since the drop may take a tab from the bar dragging it
         grid.drop_requested.connect(lambda calc, g, r, c: QTimer.singleShot(
@@ -2429,12 +2438,15 @@ class MainWindow(QMainWindow):
         grid.hide()
         grid.deleteLater()                # may run inside a signal of its own tab bar
 
-    def place_result(self, calculation, grid=None, row=0, col=0):
+    def place_result(self, calculation, grid=None, row=None, col=None):
         """Show a calculation's result in a cell of a grid (made as a tab if
         it had no view yet); a result already in that cell's place swaps
         with it when it came from another cell, else goes back to its tab.
-        grid left out: the result back into its tab (from a cell or a
-        window of its own). Returns where it is: the grid's state, or "tab"."""
+        row and col left out: the first free cell (a ValueError when the
+        grid is full), the one it is in when it is in that grid already;
+        one of them left out counts as 0. grid left out: the result back
+        into its tab (from a cell or a window of its own). Returns where it
+        is: the grid's state, or "tab"."""
         if calculation not in self._calculation_ids():
             raise KeyError(f"no calculation {calculation!r}")
         view = self.result_view(calculation)
@@ -2448,7 +2460,16 @@ class MainWindow(QMainWindow):
         if grid not in self.grids:
             raise KeyError(f"no grid {grid!r}; the grids are {', '.join(self.grids) or 'none'}")
         target = self.grids[grid]
-        row, col = int(row), int(col)
+        if row is None and col is None:
+            free = [key for key in sorted(target.cells) if target.cells[key].calc is None]
+            mine = target.where(calculation)
+            if mine is not None:
+                free = [mine]
+            if not free:
+                raise ValueError(f"grid {grid} is full: drop the result on a cell to swap it "
+                                 f"with the one there, or add a row or a column")
+            row, col = free[0]
+        row, col = int(row or 0), int(col or 0)
         if (row, col) not in target.cells:
             raise ValueError(f"grid {grid} has {target.rows} rows and {target.cols} columns "
                              f"(counted from 0), not a cell at row {row}, column {col}")

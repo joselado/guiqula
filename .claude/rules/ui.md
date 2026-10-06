@@ -209,9 +209,15 @@ tests, `drive.py --widget` and the remote `widgets` and `screenshot` methods rel
 - `grid.py`: the grids of result views (decisions 170 to 180): `GridView` (`grid_<id>`, its
   bar `gridBar_<id>` with `gridRows_<id>`, `gridCols_<id>` and `gridSave_<id>`), its cells
   `gridCell_<id>_<row>_<col>` with the title `gridCellTitle_<id>_<row>_<col>`, the ×
-  `gridRelease_<id>_<row>_<col>` and the empty state `gridEmpty_<id>_<row>_<col>`, each cell
-  an equal share of the grid (an `Ignored` size policy); `ResultTabBar`, the viewport's tab
-  bar, from which a result's tab is dragged and onto which a title is dropped. A drag
+  `gridRelease_<id>_<row>_<col>` and the empty state `gridEmpty_<id>_<row>_<col>` with its
+  menu button `gridChoose_<id>_<row>_<col>` (Choose a result, `gridChooseMenu_...`), each
+  cell placed by hand at an equal share of the grid (`CellArea`: a layout gave a row holding
+  a view the view's minimum height, and the cell's own layout has no size constraint, since
+  `setGeometry` would grow it back); `ResultTabBar`, the viewport's tab bar, from which a
+  result's tab is dragged and onto which a title is dropped: pressing a tab shows that tab,
+  hiding the grid, so a drag held over a Grid tab shows it at once (`grid_at`), and a drop
+  on a Grid tab fills its first free cell (`dropped_on_grid`). The offscreen platform runs
+  no `QDrag` (`exec` returns at once), so a drag is tested by its events alone. A drag
   carries the calculation id as `MIME`; a drop only asks the window, which places the view
   through the `grid_place` action after the drag has returned (a `QTimer.singleShot`, since
   the drop may take a tab from the very bar dragging it). A test sends a `QDragEnterEvent`

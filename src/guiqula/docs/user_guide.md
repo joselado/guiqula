@@ -509,8 +509,11 @@ Let us now see how several results are looked at together. A grid is a tab of th
 viewport split into rows and columns of cells, made by the button at the right end of the
 tab bar or by View > New grid of results, two by two at first; its bar sets the number of
 rows and of columns, from 1 to 4 each. A result goes into a cell by dragging its tab from
-the tab bar onto the cell, and while the drag passes over the Grid tab that tab is shown,
-so a grid in the back is reached in one gesture. What sits in the cell is the result's
+the tab bar onto the cell. Pressing the tab shows the result and so hides the grid, which
+is why the grid comes back as soon as the drag passes over its tab, and the drag goes on
+into a cell; a result dropped on the Grid tab itself goes into the first free cell. An
+empty cell also has Choose a result, a menu of the calculations, for who would rather not
+drag. What sits in the cell is the result's
 view itself, not a copy, meaning that it keeps its bar, its status row, its picks and its
 style, and a run draws into it as it drew into the tab; its tab leaves the bar meanwhile,
 and the title of the cell carries the marks the tab carried. A click on that title selects
@@ -526,7 +529,8 @@ of each result. The grids and what each cell holds are saved with the project, w
 rest of the view. Headless, the `grid` action makes a grid (`rows`, `cols`) or changes the
 one named by `grid` (`g1`, ...: `rows`, `cols`, `close`, or `image`, the path of the PNG),
 and `grid_place` puts a `calculation` in the cell at `row` and `col` of a `grid`, counted
-from 0, or back into its tab when `grid` is left out.
+from 0, in the first free cell when both are left out, or back into its tab when `grid`
+is left out.
 
 ## Overlays and exports
 
