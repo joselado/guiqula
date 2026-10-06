@@ -4,7 +4,7 @@ coming back to its cell, a result removed from the Document leaving its
 cell, the view state, and the drops that a drag ends with."""
 import pytest
 from PySide6.QtCore import QPointF, Qt
-from PySide6.QtGui import QDragEnterEvent, QDropEvent
+from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent
 from PySide6.QtWidgets import QApplication
 
 from guiqula.ui import grid as gridmod
@@ -170,3 +170,51 @@ def test_a_drop_on_a_cell_and_on_the_tab_bar(window, qtbot):
     bar = window.viewport.tabBar()
     assert bar.calc_at(window.viewport.indexOf(window.plots["c1"])) == "c1"
     assert bar.calc_at(0) is None and bar.calc_at(window.viewport.indexOf(grid)) is None
+
+
+def test_a_drag_held_over_a_grid_tab_shows_it_and_a_drop_there_fills_it(window, qtbot):
+    """Pressing a result's tab shows the result, hiding the grid: a drag
+    held over the Grid tab shows the grid at once, and a drop on the Grid
+    tab itself puts the result in the first free cell."""
+    session = window.session
+    session.act("grid", rows=1, cols=2)
+    grid = window.grids["g1"]
+    window.show_result("c1")                     # what pressing its tab does
+    bar = window.viewport.tabBar()
+    at = QPointF(bar.tabRect(window.viewport.indexOf(grid)).center())
+    mime = gridmod.mime_of("c1")
+    QApplication.sendEvent(bar, QDragEnterEvent(at.toPoint(), Qt.DropAction.MoveAction, mime,
+                                                Qt.MouseButton.LeftButton,
+                                                Qt.KeyboardModifier.NoModifier))
+    QApplication.sendEvent(bar, QDragMoveEvent(at.toPoint(), Qt.DropAction.MoveAction, mime,
+                                               Qt.MouseButton.LeftButton,
+                                               Qt.KeyboardModifier.NoModifier))
+    assert window.viewport.currentWidget() is grid and grid.cell(0, 0).isVisible()
+    QApplication.sendEvent(bar, QDropEvent(at, Qt.DropAction.MoveAction, mime,
+                                           Qt.MouseButton.LeftButton,
+                                           Qt.KeyboardModifier.NoModifier))
+    qtbot.waitUntil(lambda: grid.placed() == {(0, 0): "c1"}, timeout=5_000)
+    # the action alike: the first free cell, the one it is in already, refused when full
+    assert session.act("grid_place", calculation="c2", grid="g1")["cells"] == \
+        [[0, 0, "c1"], [0, 1, "c2"]]
+    assert session.act("grid_place", calculation="c1", grid="g1")["cells"] == \
+        [[0, 0, "c1"], [0, 1, "c2"]]
+    session.act("grid")
+    session.act("grid", grid="g2", rows=1, cols=1)
+    session.act("grid_place", calculation="c1", grid="g2")
+    with pytest.raises(Exception, match="grid g2 is full"):
+        session.act("grid_place", calculation="c2", grid="g2")
+
+
+def test_an_empty_cell_offers_the_results(window, qtbot):
+    session = window.session
+    session.act("grid", rows=1, cols=1)
+    cell = window.grids["g1"].cell(0, 0)
+    assert cell.choose.objectName() == "gridChoose_g1_0_0" and cell.choose.isVisible()
+    menu = cell.choose.menu()
+    menu.aboutToShow.emit()
+    texts = [action.text() for action in menu.actions()]
+    assert texts == [window._tab_text("c1"), window._tab_text("c2")]
+    menu.actions()[1].trigger()
+    qtbot.waitUntil(lambda: window.grids["g1"].placed() == {(0, 0): "c2"}, timeout=5_000)
+    assert not cell.choose.isVisible()

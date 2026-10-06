@@ -14,15 +14,15 @@ which the tests call directly, since a real QDrag does not run offscreen.
 """
 from PySide6.QtCore import QMimeData, QPoint, Qt, Signal
 from PySide6.QtGui import QColor, QDrag, QPainter, QPalette, QPen
-from PySide6.QtWidgets import (QApplication, QFrame, QGridLayout, QHBoxLayout, QLabel,
-                               QSizePolicy, QSpinBox, QTabBar, QToolButton, QVBoxLayout,
+from PySide6.QtWidgets import (QApplication, QFrame, QHBoxLayout, QLabel,
+                               QMenu, QSizePolicy, QSpinBox, QTabBar, QToolButton, QVBoxLayout,
                                QWidget)
 
 from guiqula.ui import icons, theme
 
 MIME = "application/x-guiqula-result"       # the calculation id, as UTF-8
 MAX_SIDE = 4                                # rows or columns of a grid at most
-EMPTY_TEXT = "Drag a result's tab here"
+EMPTY_TEXT = "Drag a result's tab here, or"
 SAVE_TIP = "save the whole grid as an image (PNG), as it is shown"
 
 
@@ -48,19 +48,22 @@ def start_drag(source, calc):
 
 class ResultTabBar(QTabBar):
     """The viewport's tab bar: a result's tab can be dragged out onto a cell
-    of a grid (`calc_at(index)` says which tabs are results), and a result
-    dropped on the bar goes back to its tab (`dropped`). Hovering a tab while
-    dragging shows it, so a tab is dragged onto the Grid tab and then into a
-    cell in one gesture."""
+    of a grid (`calc_at(index)` says which tabs are results). Pressing the
+    tab shows the result, which hides the grid, so a drag held over a Grid
+    tab shows that grid at once (`grid_at(index)` says which tabs are
+    grids), and the drag goes on into a cell; a result dropped on a Grid
+    tab goes into that grid's first free cell (`dropped_on_grid`), and one
+    dropped anywhere else on the bar back to its tab (`dropped`)."""
 
-    dropped = Signal(str)          # calculation id
+    dropped = Signal(str)                   # calculation id
+    dropped_on_grid = Signal(str, str)      # calculation id, grid id
 
-    def __init__(self, calc_at, parent=None):
+    def __init__(self, calc_at, grid_at=lambda index: None, parent=None):
         super().__init__(parent)
         self.calc_at = calc_at
+        self.grid_at = grid_at
         self._press = None
         self.setAcceptDrops(True)
-        self.setChangeCurrentOnDrag(True)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -90,16 +93,23 @@ class ResultTabBar(QTabBar):
             super().dragEnterEvent(event)
 
     def dragMoveEvent(self, event):
-        if calc_of(event.mimeData()) is not None:
-            event.acceptProposedAction()
-        super().dragMoveEvent(event)
+        if calc_of(event.mimeData()) is None:
+            return super().dragMoveEvent(event)
+        event.acceptProposedAction()
+        index = self.tabAt(event.position().toPoint())
+        if index >= 0 and self.grid_at(index) is not None and index != self.currentIndex():
+            self.setCurrentIndex(index)         # the grid's cells in sight under the drag
 
     def dropEvent(self, event):
         calc = calc_of(event.mimeData())
         if calc is None:
             return super().dropEvent(event)
         event.acceptProposedAction()
-        self.dropped.emit(calc)
+        grid_id = self.grid_at(self.tabAt(event.position().toPoint()))
+        if grid_id is not None:
+            self.dropped_on_grid.emit(calc, grid_id)
+        else:
+            self.dropped.emit(calc)
 
 
 class CellTitle(QWidget):
@@ -157,9 +167,10 @@ class GridCell(QFrame):
     chosen = Signal(str)                # calculation id: its title was clicked
     release_requested = Signal(str)     # calculation id
 
-    def __init__(self, grid_id, row, col, parent=None):
+    def __init__(self, grid_id, row, col, offer=lambda: [], parent=None):
         super().__init__(parent)
         name = f"{grid_id}_{row}_{col}"
+        self.offer = offer          # () -> [(calculation id, its text)] the Choose menu lists
         self.setObjectName(f"gridCell_{name}")
         self.row, self.col = row, col
         self.view = None
@@ -173,12 +184,30 @@ class GridCell(QFrame):
         self.title.release.clicked.connect(
             lambda: self.calc and self.release_requested.emit(self.calc))
         self.title.hide()
-        self.empty = QLabel(EMPTY_TEXT)
+        # the empty state: the drag, and a menu of the results for who does not drag
+        self.empty = QWidget()
         self.empty.setObjectName(f"gridEmpty_{name}")
-        self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty.setWordWrap(True)
-        self.empty.setEnabled(False)               # drawn in the muted text colour
+        hint = QLabel(EMPTY_TEXT)
+        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hint.setWordWrap(True)
+        hint.setEnabled(False)                     # drawn in the muted text colour
+        self.choose = QToolButton()
+        self.choose.setObjectName(f"gridChoose_{name}")
+        self.choose.setText("Choose a result")
+        self.choose.setToolTip("show a calculation's result in this cell")
+        self.choose.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.choose.setMenu(QMenu(self.choose))
+        self.choose.menu().setObjectName(f"gridChooseMenu_{name}")
+        self.choose.menu().aboutToShow.connect(self._fill_choose)
+        column = QVBoxLayout(self.empty)
+        column.addStretch(1)
+        column.addWidget(hint)
+        column.addWidget(self.choose, 0, Qt.AlignmentFlag.AlignHCenter)
+        column.addStretch(1)
         self.body = QVBoxLayout(self)
+        # the view's minimum size is not the cell's: CellArea gives it its share, and
+        # setGeometry would otherwise grow it back to what the view asks
+        self.body.setSizeConstraint(QVBoxLayout.SizeConstraint.SetNoConstraint)
         self.body.setContentsMargins(2, 2, 2, 2)
         self.body.setSpacing(0)
         self.body.addWidget(self.title)
@@ -203,6 +232,15 @@ class GridCell(QFrame):
         self.title.hide()
         self.empty.show()
         return view
+
+    def _fill_choose(self):
+        menu = self.choose.menu()
+        menu.clear()
+        offered = self.offer()
+        for calc, text in offered:
+            menu.addAction(text, lambda c=calc: self.dropped.emit(c))
+        if not offered:
+            menu.addAction("no calculation yet").setEnabled(False)
 
     def set_title(self, text, error=False, tip=""):
         self.title.label.setText(text)
@@ -241,6 +279,35 @@ class GridCell(QFrame):
         painter.setPen(pen)
         painter.drawRect(self.rect().adjusted(0, 0, -1, -1))
         painter.end()
+
+
+class CellArea(QWidget):
+    """Where the cells sit, each placed by hand at an equal share of the
+    area: a layout would give a row holding a view the view's minimum
+    height, and leave an empty row a sliver."""
+
+    MARGIN = 4
+    SPACING = 4
+
+    def __init__(self, grid):
+        super().__init__()
+        self.grid = grid
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+    def place(self):
+        rows, cols = max(self.grid.rows, 1), max(self.grid.cols, 1)
+        width = self.width() - 2 * self.MARGIN - (cols - 1) * self.SPACING
+        height = self.height() - 2 * self.MARGIN - (rows - 1) * self.SPACING
+        for (row, col), cell in self.grid.cells.items():
+            x0 = self.MARGIN + col * self.SPACING + col * width // cols
+            x1 = self.MARGIN + col * self.SPACING + (col + 1) * width // cols
+            y0 = self.MARGIN + row * self.SPACING + row * height // rows
+            y1 = self.MARGIN + row * self.SPACING + (row + 1) * height // rows
+            cell.setGeometry(x0, y0, max(x1 - x0, 0), max(y1 - y0, 0))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.place()
 
 
 class GridView(QWidget):
@@ -285,13 +352,12 @@ class GridView(QWidget):
         self.save.clicked.connect(lambda: self.save_requested.emit(self.grid_id))
         icons.follow(self.save, lambda: self.save.setIcon(icons.icon("image")))
         line.addWidget(self.save)
-        self.table = QGridLayout()
-        self.table.setContentsMargins(4, 4, 4, 4)
-        self.table.setSpacing(4)
+        self.area = CellArea(self)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.bar)
-        layout.addLayout(self.table, 1)
+        layout.addWidget(self.area, 1)
+        self.offer = lambda: []           # what an empty cell's Choose menu lists (the window)
         self.cells = {}                   # (row, column) -> GridCell
         self.rows = self.cols = 0
         self.set_shape(rows, cols)
@@ -305,21 +371,19 @@ class GridView(QWidget):
         for key in [k for k in self.cells if k[0] >= rows or k[1] >= cols]:
             cell = self.cells.pop(key)
             assert cell.view is None, "a cell that goes away holds a view"
-            self.table.removeWidget(cell)
             cell.deleteLater()
         for row in range(rows):
             for col in range(cols):
                 if (row, col) not in self.cells:
-                    cell = GridCell(self.grid_id, row, col)
+                    cell = GridCell(self.grid_id, row, col, lambda: self.offer())
                     cell.dropped.connect(lambda calc, r=row, c=col: self.accept(calc, r, c))
                     cell.chosen.connect(self.chosen)
                     cell.release_requested.connect(self.release_requested)
                     self.cells[row, col] = cell
-                    self.table.addWidget(cell, row, col)
-        for index in range(MAX_SIDE):         # equal rows and columns, the gone ones none
-            self.table.setRowStretch(index, 1 if index < rows else 0)
-            self.table.setColumnStretch(index, 1 if index < cols else 0)
+                    cell.setParent(self.area)
+                    cell.show()
         self.rows, self.cols = rows, cols
+        self.area.place()
         for key, value in (("rows", rows), ("cols", cols)):
             spin = self.spins[key]
             spin.blockSignals(True)
