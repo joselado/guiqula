@@ -129,6 +129,14 @@ WINDOW_ACTIONS = {
     "run": "calculation (left out: the selected one, as the Run button and F5): run it "
            "through the cost guard; returns its job at once, or null when the cost bar asks "
            "first (the run method skips the cost guard and waits for the result)",
+    "grid": "rows=2, cols=2 (1 to 4): a new grid of result views, a tab of the viewport; or "
+            "grid (its id, g1, ...) and rows, cols (the results of the cells taken away go "
+            "back to their tabs), close=true (every result back to its tab) or image (the "
+            "path of a PNG of the grid as shown); returns {grid, rows, cols, cells: [[row, "
+            "col, calculation], ...]}",
+    "grid_place": "calculation, grid, row, col (from 0): show its result in that cell, a "
+                  "result already there going to the cell this one left (or to its tab); "
+                  "grid left out: the result back into its tab",
 }
 
 

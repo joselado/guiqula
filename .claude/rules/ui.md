@@ -95,7 +95,12 @@ tests, `drive.py --widget` and the remote `widgets` and `screenshot` methods rel
   control starts the server, polled from the window's timer; a pick emits ordinary
   commands, and the pick menu is built by `pick_menu` and shown with `popup()`, never
   `exec()`; `pick` and `pick_to` take a calculation and a point, or `system` and `values`
-  (the k-space tab's click, Calculate on selection).
+  (the k-space tab's click, Calculate on selection); the viewport's tab bar is a
+  `ResultTabBar` (`ui/grid.py`), the New grid button `newGridButton` its corner widget and
+  View > New grid of results `newGridAction`; a result view is in one place at a time, its
+  tab, its `ResultWindow` or a cell of a grid (`grids`), moved by `place_result` (the
+  `grid_place` action), `_unplace` and `_to_tab`, and `current_tab()` reads `grid:<id>`
+  while a grid is shown.
 - `start.py`: the start page, `startPage`: the lattices, the examples and the recent files
   as cards with the pictures of `resources/thumbnails/`, a filter (where Ctrl+F puts the
   focus while the page shows, `focus_search` returning "start"), Show all with its chevron
@@ -124,7 +129,7 @@ tests, `drive.py --widget` and the remote `widgets` and `screenshot` methods rel
   (`text_changed`), `size()` being 16 px or 20 px at large text; pixmaps at 16 and 24 px
   (and 20 px while the text is large), since a Python `QIconEngine` subclass
   crashes PySide6 6.11; a checkable menu entry gets no icon, which would hide its check
-  box. `resources/icons/` holds the 57 Tabler Icons of the controls (SVG files drawn in
+  box. `resources/icons/` holds the 59 Tabler Icons of the controls (SVG files drawn in
   `currentColor`, outline but the filled `cancel`, their MIT licence) and a README whose
   table of our names, Tabler's names and styles is what its fetch loop and
   `tests/ui/test_icons.py` read; a new icon is a row there, its file and its name in
@@ -201,6 +206,17 @@ tests, `drive.py --widget` and the remote `widgets` and `screenshot` methods rel
   `style_<option>_<id>`, and `styleReset_<id>`; a change is reported (`style_changed`) and
   the window dispatches `plot_style`, which calls `restyle`, the same result drawn again
   with its limits kept. `draw(..., style=)` takes the style, so the export does too.
+- `grid.py`: the grids of result views (decisions 170 to 180): `GridView` (`grid_<id>`, its
+  bar `gridBar_<id>` with `gridRows_<id>`, `gridCols_<id>` and `gridSave_<id>`), its cells
+  `gridCell_<id>_<row>_<col>` with the title `gridCellTitle_<id>_<row>_<col>`, the ×
+  `gridRelease_<id>_<row>_<col>` and the empty state `gridEmpty_<id>_<row>_<col>`, each cell
+  an equal share of the grid (an `Ignored` size policy); `ResultTabBar`, the viewport's tab
+  bar, from which a result's tab is dragged and onto which a title is dropped. A drag
+  carries the calculation id as `MIME`; a drop only asks the window, which places the view
+  through the `grid_place` action after the drag has returned (a `QTimer.singleShot`, since
+  the drop may take a tab from the very bar dragging it). A test sends a `QDragEnterEvent`
+  before the `QDropEvent`: Qt delivers no drop to a widget a drag did not enter, and a real
+  `QDrag` does not run offscreen.
 - `plotstyle.py`: the catalogue of the cosmetics per plot kind (`OPTIONS`, decisions 164
   to 169: name, label, type, default, range or choices, tip), `clean` (what differs from
   the defaults, strict or not), `resolve` (every option with its value), and `StylePopup`;
@@ -276,6 +292,12 @@ python tools/drive.py honeycomb_zeeman_rashba --run c2 --python "session.act('pl
     calculation='c2', linewidth=3, color='#d62728', fill=True); \
     window.plots['c2'].open_style()" --widget stylePopup_c2 --shot style.png
                                                    # the style of a plot (decisions 164 to 169)
+python tools/drive.py honeycomb_zeeman_rashba --size 1600x1000 --run c1 --run c2 \
+    --do '{"do": "grid"}' --python "session.act('grid_place', calculation='c1', grid='g1', \
+    row=0, col=1); session.act('grid_place', calculation='c2', grid='g1', row=1, col=1)
+from PySide6.QtTest import QTest
+for _ in range(10): QTest.qWait(100)" --widget viewport --shot grid.png
+                                                   # a grid of results (decisions 170 to 180)
 python tools/drive.py honeycomb_zeeman_rashba --run c1 --python "session.act('run_at_once'); \
     p = session.act('pick', calculation='c1', x=20, y=0.5); print(p['label'], \
     [t['label'] for t in p['targets']]); session.act('pick_to', calculation='c1', x=20, \

@@ -57,7 +57,12 @@ GATE = do(do="add_term", system="s1", kind="onsite", params={"mu": "0.5*exp(-(x*
 
 IMAGES = {       # name: driver arguments
     "hero": window("kane_mele_ribbon", "t1", "c1"),
-    "kagome": window("kagome_flat_band", "c1", "c2", "c1"),
+    # the bands and the density of states side by side, in a grid of one row and two columns
+    "kagome": window("kagome_flat_band", "c1", "c2", "c1") + [
+        "--python", "session.act('grid', rows=1, cols=2); "
+                    "session.act('grid_place', calculation='c1', grid='g1', col=0); "
+                    "session.act('grid_place', calculation='c2', grid='g1', col=1)",
+        "--python", TIDY],
     "haldane": window("haldane_chern", "c4", "c4", timeout=1800),
     "kane_mele": window("kane_mele_ribbon", "c2", "c2"),
     "hofstadter": window("hofstadter_ribbon", "t1", "c1"),
