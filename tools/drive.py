@@ -24,7 +24,8 @@ term's Field on the structure), auto_rerun, run_at_once (enabled: a
 calculation runs as soon as it is added or one of its parameters is set),
 theme (system, light, dark), export_bundle (calculation, path: figure, data
 and script in one folder), help (entry, or guide and anchor: the Help
-panel), projection (auto, xy, 3d), renderer_3d (matplotlib, pyvista: the 3D
+panel; or search, a question: the entries and sections that answer it),
+projection (auto, xy, 3d), renderer_3d (matplotlib, pyvista: the 3D
 drawing, whose widgets are structureScene and plotScene_<calculation id>),
 view_3d (name: front, back, right, left, top, bottom, perspective,
 orthographic, flip, all, selected, reset; calculation: a result's scene

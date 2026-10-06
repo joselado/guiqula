@@ -84,8 +84,9 @@ WINDOW_ACTIONS = {
     "remove_slider": "index",
     "theme": "name: system, light or dark",
     "export_bundle": "calculation, path: figure, data and script in one folder",
-    "help": "entry, or guide (pyqula, guiqula, plugins) and anchor: show help in the Help "
-            "dock",
+    "help": "entry, or guide (pyqula, guiqula, plugins) and anchor, or search (a question "
+            "in words): show help in the Help dock; search lists the entries and guide "
+            "sections that answer it",
     "remote": "enabled: remote control on or off",
     "pick": "calculation, and x, y (data coordinates of its plot) or box=[x0, y0, x1, y1] or "
             "polygon (atoms of a result drawn on them): what the point stands for (an energy, "
@@ -543,12 +544,31 @@ class RemoteAPI:
         return self._window("the widget list").widget_names()
 
     # ---- help, console, journal
-    def help(self, item=None, kind=None, family=None, guide=None, anchor=None):
+    def help(self, item=None, kind=None, family=None, guide=None, anchor=None, search=None,
+             limit=None):
         """An outliner item's help (item: an entry id, s1/base...), a registry
         entry's (kind, and family when the kind is ambiguous), a section of
         a guide (guide "pyqula" or "guiqula", anchor), a guide's contents,
-        or the plugins (guide "plugins")."""
+        the plugins (guide "plugins"), or the entries and sections that
+        answer a question (search, at most limit of them; decision 159),
+        each with the item, kind and family, or guide and anchor, that
+        shows it in full."""
         from guiqula.docs import entries as helptexts
+        if search is not None:
+            from guiqula.docs import search as helpsearch
+            limit = int(limit) if limit is not None else helpsearch.LIMIT
+            title, text = helpsearch.page(search, limit)
+            hits = []
+            for hit in helpsearch.search(search, limit):
+                found = {"title": hit.title, "where": hit.where, "snippet": hit.snippet,
+                         "score": hit.score}
+                if hit.guide == "entry":
+                    family_of, kind_of = hit.anchor.split(":", 1)
+                    found.update(kind=kind_of, family=family_of)
+                else:
+                    found.update(guide=hit.guide, anchor=hit.anchor)
+                hits.append(found)
+            return {"title": title, "markdown": text, "hits": hits}
         if item is not None:
             try:
                 title, text = helptexts.item_help(self.session, item)

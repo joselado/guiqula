@@ -211,6 +211,8 @@ def test_mcp_with_its_own_session():
         shot = mcp.tool("screenshot")
         assert shot["isError"] and "window" in text_of(shot)
         assert "add_haldane" in text_of(mcp.tool("help", kind="haldane"))
+        found = text_of(mcp.tool("help", search="rashba", limit=2))
+        assert "help(kind='rashba', family='term')" in found
         assert "get_bands" in text_of(mcp.tool("script", calculation="c1"))
         out = mcp.tool("console", code="print('from the console', h.intra.shape)")
         assert "from the console (16, 16)" in text_of(out) and not out["isError"]

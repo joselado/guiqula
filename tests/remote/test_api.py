@@ -168,6 +168,11 @@ def test_help(api):
     assert "help:" in contents["markdown"]
     with pytest.raises(RemoteError):
         call(api, "help", kind="nonsense")
+    found = call(api, "help", search="how do I add Rashba spin-orbit coupling", limit=3)
+    assert len(found["hits"]) == 3 and found["title"].startswith("Search:")
+    assert found["hits"][0]["kind"] == "rashba" and found["hits"][0]["family"] == "term"
+    reference = next(h for h in found["hits"] if "anchor" in h)
+    assert call(api, "help", guide=reference["guide"], anchor=reference["anchor"])["markdown"]
 
 
 def test_console_and_journal(api):

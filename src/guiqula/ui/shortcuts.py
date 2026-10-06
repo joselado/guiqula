@@ -46,6 +46,8 @@ SHORTCUTS = (
     ("cancel", ("Esc",), "window", "cancel the selected calculation's job"),
     ("shortcuts", ("Ctrl+/",), "window", "this list of shortcuts"),
     ("help", ("F1",), "window", "help on the selected entry"),
+    ("help_search", ("Shift+F1",), "window",
+     "the Help panel's search line: the entries and guide sections that answer a question"),
     ("delete", ("Del",), "outliner", "delete the selected entry"),
     ("rename", ("F2",), "outliner", "rename the selected entry"),
     ("duplicate", ("Ctrl+D",), "outliner", "duplicate the selected entry"),

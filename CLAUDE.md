@@ -95,7 +95,8 @@ not carry.
   entry is declared, tested and exported is in `engine.md`.
 - `docs/`: the in-app help, without pyqula imports: `guide.py` (pyqula's guide in sections,
   an anchor being a heading's text), `docstrings.py` (pyqula's docstrings read with `ast`),
-  `entries.py` (an item's help), `user_guide.md` (guiqula's own guide: the program, never
+  `entries.py` (an item's help), `search.py` (the Help panel's search line: BM25 over the
+  entries and both guides, decision 159), `user_guide.md` (guiqula's own guide: the program, never
   pyqula's physics; its shortcut table is checked against `ui/shortcuts.py`).
   `tests/test_help.py` checks every anchor an entry names, `tests/engine/test_help_docstrings.py`
   every docstring.

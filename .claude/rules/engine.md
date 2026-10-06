@@ -95,6 +95,11 @@ and exported, what the plan and the build do, and what the refresh of `vendor/` 
 - `docs/entries.py`: an item's help: formula, parameters, the pyqula code with its values,
   docstrings, the guide sections it names and the reference section of each call. Nothing
   in `docs/` imports pyqula.
+- `docs/search.py` (decision 159): BM25 over the registry entries and the sections of both
+  guides, a word the index lacks read as its close or longer words; the index is built at
+  the first search (about 0.6 s) and kept per registry and guide. `tests/test_help.py`
+  holds questions with the entry or section each must return first; a change of the
+  weights is checked against them.
 
 ## The vendored copy
 
