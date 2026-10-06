@@ -114,3 +114,37 @@ def test_a_chapter_is_its_introduction_and_links():
     assert "more" in entries.section_text("pyqula", guide, "Alpha")       # level 2: in full
     assert entries.section_text("pyqula", guide, "Top").endswith(
         "Its sections: [Alpha](help:pyqula/Alpha), [Beta](help:pyqula/Beta).\n")
+
+
+# the search of the help (decision 159): a question in words, the entries and
+# sections that answer it, best first
+@pytest.mark.parametrize("question, first", [
+    ("how do I add Rashba spin-orbit coupling", ("entry", "term:rashba")),
+    ("rasba", ("entry", "term:rashba")),                        # a typo (no text of the
+                                                                # help may spell it)
+    ("superconducting pairing", ("entry", "term:pairing")),
+    ("chern number", ("entry", "calculation:chern")),
+    ("topological invariants", ("pyqula", "Topological invariants")),
+    ("keyboard shortcuts", ("guiqula", "Keyboard shortcuts")),
+    ("export the script", ("guiqula", "Overlays and exports")),
+    ("undo", ("guiqula", "Undo, themes and settings")),
+])
+def test_the_search_finds_the_section_first(question, first):
+    from guiqula.docs import search
+    hit = search.search(question)[0]
+    assert (hit.guide, hit.anchor) == first, search.search(question)[:3]
+
+
+def test_the_search_page_links_what_it_finds():
+    from guiqula.docs import search
+    hits = search.search("rashba")
+    assert {("entry", "term:rashba"), ("pyqula", "h.add_rashba()")} <= \
+        {(h.guide, h.anchor) for h in hits[:3]}
+    assert all(h.score >= hits[i + 1].score for i, h in enumerate(hits[:-1]))
+    assert "Rashba" in hits[0].snippet or "rashba" in hits[0].snippet.lower()
+    title, page = search.page("rashba")
+    assert title == "Search: rashba"
+    assert "(help:entry/term%3Arashba)" in page and "(help:pyqula/h.add_rashba%28%29)" in page
+    assert "Nothing in the help matches" in search.page("qwxzv")[1]
+    assert search.search("the of and") == []                  # nothing but common words
+    assert search.words("Bands and band_structure") == ["band", "band", "structure"]

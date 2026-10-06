@@ -3961,6 +3961,50 @@ test weaker, since a start that meets the budget once in three passes,
 while a start that is slow every time still fails, which is what the
 budget guards.
 
+**The search of the help (2026-10-06, branch help-search).** The maintainer
+asked whether a small local chatbot could find the part of the help that
+explains something (how to add Rashba spin-orbit coupling, for
+concreteness), and chose the first of three sizes: a lexical search with no
+new dependency, over a model of embeddings (torch or ONNX in a worker, an
+optional extra) and over a local language model (a backend the user
+installs, the generation half that the Claude add-on already is). The
+corpus is already sectioned, so the search is an index over it:
+`docs/search.py` ranks with BM25 the registry entries (their label, kind,
+doc, parameters and the docstrings of their pyqula calls) and the sections
+of both guides (their own text, up to the first subsection), and a word
+the index lacks stands for the words close to it (a typo, "rasba") or
+starting with it (a word cut short). It runs in the UI process, imports no
+pyqula, builds its index at the first search in about 0.6 s and answers in
+a few milliseconds. The Help panel has a search line, `helpSearch`, which
+Shift+F1 focuses; Enter lists the results with a line of each, a link opens
+an entry's help (with its default values) or a section, and Back returns to
+the list. The window's `help` action and the remote `help` method take
+`search`, the remote one returning each hit with the arguments that open
+it, so the add-on finds sections the same way. What it does not do: a
+question that shares no word with the help (a dictated "rush fingerprint
+coupling") finds nothing useful, which is the case the embeddings would
+cover.
+
+Decisions taken, for the maintainer to confirm; the first option of each is
+the one built:
+
+159. the help is searched lexically, by BM25 over the registry entries and
+     the sections of both guides, in the UI process; or embeddings as an
+     optional extra in a worker, or a local language model behind it;
+160. an entry is weighted by its label and kind three times over its doc,
+     parameters and docstrings, and a section by its heading three times
+     over its text, so that the entry and its reference section come before
+     the sections that only mention it; or one weight for every word;
+161. a word the index lacks stands for at most three words, those within a
+     difflib ratio of 0.8 or starting with it (four letters at least); or
+     no correction of typos;
+162. the search line sits in the Help panel under its buttons, focused by
+     Shift+F1 and Help > Search the help; or in the main toolbar, or Ctrl+F
+     searching the help when the Add menu has no workspace;
+163. a result names a registry entry, whose help opens with its default
+     values, rather than the outliner item that uses it; or the document's
+     items first when one uses the entry.
+
 ### Where the section 13 items land
 
 | Phase | Items |

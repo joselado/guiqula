@@ -129,7 +129,10 @@ tests, `drive.py --widget` and the remote `widgets` and `screenshot` methods rel
   table of our names, Tabler's names and styles is what its fetch loop and
   `tests/ui/test_icons.py` read; a new icon is a row there, its file and its name in
   `icons.NAMES`.
-- `help.py`: the Help panel, below Properties: F1, a form's ?, the guides; Markdown in a
+- `help.py`: the Help panel, below Properties: F1, a form's ?, the guides, the search line
+  `helpSearch` (Shift+F1, decision 159), whose results page links entries
+  (`help:entry/<family>:<kind>`, `show_entry`) and sections; a page is a tuple
+  (`page`) that `show_page` shows again for Back and a redraw; Markdown in a
   QTextBrowser, whose `loadResource` serves the equations; the lines of a code block wrap
   at the panel's width (`_wrap_code`) and an equation wider than the panel is scaled down
   to it (`_fit_equations`), so no page scrolls sideways; the section's name wraps, since a
@@ -253,6 +256,8 @@ python tools/drive.py preset --do '{"do": "set_param", ...}' --do '{"do": "undo"
                                                    # undo, redo (steps), history
 python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "select", "entry": "t1"}' \
     --do '{"do": "help"}' --widget helpDock --shot help.png   # an entry's help (13.13)
+python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "help", "search": "rashba spin orbit"}' \
+    --widget helpDock --shot search.png            # the search of the help (decision 159)
 python tools/drive.py honeycomb_zeeman_rashba --run c1 \
     --python "session.act('export_bundle', calculation='c1', path='out/c1_bands')"
                                                    # figure, data, script in one folder

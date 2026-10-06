@@ -5,7 +5,7 @@ shortcuts of the table."""
 import re
 
 import pytest
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import Qt, QUrl
 
 from guiqula.docs import entries
 from guiqula.docs.guide import math_images
@@ -186,3 +186,34 @@ def test_a_wide_equation_is_scaled_to_the_panel(window, qtbot):
                        "Kondo lattice")                   # a long name: it wraps
     qtbot.wait(50)
     assert window.docks["helpDock"].width() == width
+
+
+def test_the_search_line_lists_what_answers_a_question(window, qtbot, shot):
+    """The Help panel's search line (decision 159): Enter lists the entries
+    and sections, a link opens one, Back returns to the list; Shift+F1 puts
+    the focus in the line, and the help action searches too."""
+    panel = window.help_panel
+    action = window.findChild(type(window.undo_action), "helpSearchAction")
+    assert action.shortcut().toString() == "Shift+F1"
+    action.trigger()
+    assert in_front(window, "helpDock") and panel.search.hasFocus()
+    qtbot.keyClicks(panel.search, "rashba spin orbit")
+    qtbot.keyClick(panel.search, Qt.Key.Key_Return)
+    assert panel.page == ("search", "rashba spin orbit")
+    assert panel.title.text() == "Search: rashba spin orbit"
+    text = panel.browser.toPlainText()
+    assert text.index("Rashba spin-orbit coupling") < text.index("h.add_rashba()")
+    shot(window.docks["helpDock"], "search")
+    panel.browser.anchorClicked.emit(QUrl("help:entry/term%3Arashba"))
+    assert panel.page == ("entry", "term", "rashba")
+    assert panel.title.text() == "Rashba spin-orbit coupling" and "add_rashba" in \
+        panel.browser.toPlainText()
+    window.set_theme("dark")                                    # drawn again, the same page
+    assert panel.page == ("entry", "term", "rashba")
+    window.set_theme("light")
+    panel.go_back()
+    assert panel.page == ("search", "rashba spin orbit")
+    panel.browser.anchorClicked.emit(QUrl("help:pyqula/"))         # a guide's contents
+    assert panel.page == ("contents", "pyqula")
+    assert window._act("help", search="kane mele") == "Search: kane mele"
+    assert panel.search.text() == "kane mele" and "Kane-Mele" in panel.browser.toPlainText()

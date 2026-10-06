@@ -656,6 +656,7 @@ functions only: the window loads the plugin too, and must start without pyqula.
 | window | Esc | cancel the selected calculation's job |
 | window | Ctrl+/ | this list of shortcuts |
 | window | F1 | help on the selected entry |
+| window | Shift+F1 | the Help panel's search line: the entries and guide sections that answer a question |
 | outliner | Del | delete the selected entry |
 | outliner | F2 | rename the selected entry |
 | outliner | Ctrl+D | duplicate the selected entry |
@@ -704,3 +705,14 @@ texts, and so do the two buttons at the top of the panel; the link at the foot o
 start page opens this guide. A page never scrolls sideways: the lines of code wrap at the
 panel's width, and an equation wider than the panel is drawn at its width, smaller, so
 that a wider panel shows it larger.
+
+When you know what you want but not where it is, the search line at the top of the panel
+(Shift+F1, or Help > Search the help) takes a question in words, "how do I add Rashba
+spin-orbit coupling", and Enter lists the entries and the sections of both guides that
+answer it, best first, each with the line of its text that holds the most of your words;
+a link opens the entry's help, with its default values, or the section, and Back returns
+to the list. The search is by words, not by meaning: it counts how often the words of the
+question appear in each entry and section, an entry's name and a section's heading
+counting three times, and a word it does not know is read as the closest words it does
+know, so a name typed with a letter missing still finds its entry, while a question that
+shares no word with the help finds nothing useful. The add-on's help tool searches the same way (`search`).

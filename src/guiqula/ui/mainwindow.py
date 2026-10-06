@@ -968,6 +968,8 @@ class MainWindow(QMainWindow):
                                       lambda: self.show_help(), "help", "helpAction")] = "help"
         for menu in (file_menu, edit, view, run, help_menu):
             icons.follow(menu, self._set_menu_icons)
+        self._action(help_menu, "&Search the help", self.focus_help_search, "help_search",
+                     "helpSearchAction")
         self._action(help_menu, "&pyqula user guide", lambda: self._act("help", guide="pyqula"),
                      name="pyqulaGuideAction")
         self._action(help_menu, "&guiqula user guide",
@@ -3212,15 +3214,18 @@ class MainWindow(QMainWindow):
         """F1, a form's ?: the help of an item (the selected one) in the Help dock."""
         return self._act("help", entry=self.selected if item is None else item)
 
-    def help(self, entry=None, guide=None, anchor=None):
+    def help(self, entry=None, guide=None, anchor=None, search=None):
         """Show help in the Help dock: an outliner item's (entry, by default
         the selected one; "" for guiqula's guide), a section
         of a guide (guide "pyqula" or "guiqula" and anchor), a guide's
-        contents (guide alone), or the plugins (guide "plugins"); returns
-        the title shown."""
+        contents (guide alone), the plugins (guide "plugins"), or the
+        entries and sections that answer a question (search, decision 159);
+        returns the title shown."""
         dock = self.docks["helpDock"]
         dock.show()
         dock.raise_()
+        if search is not None:
+            return self.help_panel.show_search(search)
         if guide == "plugins":
             return self.help_panel.show_plugins()
         if guide is not None and anchor is not None:
@@ -3230,6 +3235,15 @@ class MainWindow(QMainWindow):
                 raise ValueError(f"guide is pyqula or guiqula, not {guide!r}")
             return self.help_panel.show_contents(guide)
         return self.help_panel.show_item(self.selected if entry is None else entry)
+
+    def focus_help_search(self):
+        """Shift+F1: the Help panel in front, its search line focused."""
+        dock = self.docks["helpDock"]
+        dock.show()
+        dock.raise_()
+        self.help_panel.search.setFocus(Qt.FocusReason.ShortcutFocusReason)
+        self.help_panel.search.selectAll()
+        return "helpSearch"
 
     def _help_follows(self, entry):
         """While the Help dock shows an item's help, it follows the selection."""
@@ -3263,11 +3277,7 @@ class MainWindow(QMainWindow):
         text colour and the interface text's size)."""
         page = self.help_panel.page
         if page is not None:
-            {"item": lambda: self.help_panel.show_item(page[1], remember=False),
-             "section": lambda: self.help_panel.show_section(*page[1:], remember=False),
-             "contents": lambda: self.help_panel.show_contents(page[1], remember=False),
-             "plugins": lambda: self.help_panel.show_plugins(remember=False)
-             }[page[0]]()
+            self.help_panel.show_page(page)
 
     def set_plot_text(self, name="normal", remember=True):
         """The size of the text of every drawing (ui/theme.py: small,

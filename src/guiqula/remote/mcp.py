@@ -179,11 +179,14 @@ def tools():
         ("help", "Help as Markdown: of a document item (item: t1, c1, s1/base...), of a "
                  "registry entry (kind, with family if ambiguous), or of a section of a "
                  'guide (guide: "pyqula" or "guiqula", anchor: a heading); a guide alone '
-                 'gives its contents; guide "plugins" lists the installed plugins.',
+                 'gives its contents; guide "plugins" lists the installed plugins; search '
+                 "(a question in words) lists the entries and guide sections that answer "
+                 "it, best first, each with the arguments that show it in full.",
          _schema({"item": {"type": "string"}, "kind": {"type": "string"},
                   "family": {"type": "string"}, "guide": {"type": "string", "enum": [
                       "pyqula", "guiqula", "plugins"]},
-                  "anchor": {"type": "string"}}), True),
+                  "anchor": {"type": "string"}, "search": {"type": "string"},
+                  "limit": {"type": "integer", "minimum": 1}}), True),
         ("script", "The standalone pyqula script that computes a calculation.",
          _schema(CALC, ("calculation",)), True),
         ("console", "Run Python in guiqula's console worker: g and h (the geometry and "
@@ -371,10 +374,19 @@ class Bridge:
     def tool_widgets(self):
         return [_text("\n".join(self._call("widgets")))]
 
-    def tool_help(self, item=None, kind=None, family=None, guide=None, anchor=None):
+    def tool_help(self, item=None, kind=None, family=None, guide=None, anchor=None,
+                  search=None, limit=None):
         value = self._call("help", item=item, kind=kind, family=family, guide=guide,
-                           anchor=anchor)
-        return [_text(value["markdown"])]
+                           anchor=anchor, search=search, limit=limit)
+        if search is None:
+            return [_text(value["markdown"])]
+        lines = []
+        for hit in value["hits"]:
+            show = (f"kind={hit['kind']!r}, family={hit['family']!r}" if "kind" in hit else
+                    f"guide={hit['guide']!r}, anchor={hit['anchor']!r}")
+            lines.append(f"- {hit['title']} ({hit['where']}): help({show})"
+                         + (f"\n  {hit['snippet']}" if hit["snippet"] else ""))
+        return [_text("\n".join(lines) or f"nothing in the help matches {search!r}")]
 
     def tool_script(self, calculation):
         return [_text(self._call("script", calculation=calculation))]

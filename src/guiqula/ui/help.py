@@ -5,16 +5,20 @@ docs package puts them together (pyqula's own text, never written again).
 The Markdown is drawn by Qt's QTextBrowser; its equations become images
 drawn with mathtext (ui/formulas.py), served under formula:N by
 loadResource, and one mathtext cannot draw is shown as its LaTeX source.
-Links help:<guide>/<anchor> open a section; Back returns to the page
-before.
+Links help:<guide>/<anchor> open a section (an empty anchor: the guide's
+contents), help:entry/<family>:<kind> a registry entry's help; the search
+line (decision 159) shows the entries and sections that answer a question,
+as docs/search.py ranks them; Back returns to the page before.
 """
 from urllib.parse import unquote
 
 from PySide6.QtCore import QEvent, QUrl, Signal
 from PySide6.QtGui import QImage, QTextBlockFormat, QTextCursor, QTextDocument
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QTextBrowser, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (QHBoxLayout, QLabel, QLineEdit, QPushButton, QTextBrowser,
+                               QVBoxLayout, QWidget)
 
-from guiqula.docs import entries, guide as guides
+from guiqula.docs import entries, guide as guides, search
+from guiqula.registry import base as registry
 from guiqula.ui import formulas
 
 
@@ -137,7 +141,7 @@ class HelpPanel(QWidget):
         super().__init__(parent)
         self.setObjectName("helpPanel")
         self.browser = HelpBrowser()
-        self.browser.link_activated.connect(self.show_section)
+        self.browser.link_activated.connect(self.open_link)
         self.back = QPushButton("Back")
         self.back.setObjectName("helpBack")
         self.back.clicked.connect(self.go_back)
@@ -149,6 +153,13 @@ class HelpPanel(QWidget):
         own.setObjectName("helpGuiqulaGuide")
         own.setToolTip("the contents of guiqula's user guide")
         own.clicked.connect(lambda: self.show_contents("guiqula"))
+        self.search = QLineEdit()
+        self.search.setObjectName("helpSearch")
+        self.search.setPlaceholderText("Search the help")
+        self.search.setClearButtonEnabled(True)
+        self.search.setToolTip("the entries and the sections of both guides that answer a "
+                               "question, best first (Enter)")
+        self.search.returnPressed.connect(lambda: self.show_search(self.search.text()))
         self.title = QLabel("")
         self.title.setObjectName("helpTitle")
         self.title.setWordWrap(True)         # a long section's name would widen the column
@@ -160,12 +171,13 @@ class HelpPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(2, 2, 2, 2)
         layout.addLayout(row)
+        layout.addWidget(self.search)
         layout.addWidget(self.title)
         layout.addWidget(self.browser, 1)
         self.session = None     # the window's, for the help of outliner items
         self.history = []       # pages shown before
         self.page = None        # ("item", id) | ("section", which, anchor) | ("contents", which)
-                                # | ("plugins",)
+                                # | ("plugins",) | ("entry", family, kind) | ("search", text)
         self._update_back()
 
     def _show(self, page, title, text, remember=True):
@@ -188,6 +200,37 @@ class HelpPanel(QWidget):
             title, text = item_id, f"No help for {item_id}: {error}\n"
         return self._show(("item", item_id), title, text, remember)
 
+    def open_link(self, which, anchor):
+        """A help: link: a registry entry, a guide's contents or a section."""
+        if which == "entry":
+            return self.show_entry(*anchor.split(":", 1))
+        if not anchor:
+            return self.show_contents(which)
+        return self.show_section(which, anchor)
+
+    def show_entry(self, family, kind, remember=True):
+        """The help of a registry entry, with its default values."""
+        spec = registry.get(family, kind)
+        return self._show(("entry", family, kind), spec.label, entries.entry_help(spec),
+                          remember)
+
+    def show_search(self, text, remember=True):
+        """The entries and the guide sections that answer a question, as links."""
+        if not text.strip():
+            return None
+        if self.search.text() != text:
+            self.search.setText(text)
+        title, markdown = search.page(text)
+        return self._show(("search", text), title, markdown, remember)
+
+    def show_page(self, page, remember=False):
+        """Show a page as self.page names it (Back, a redraw)."""
+        kind, args = page[0], page[1:]
+        return {"section": self.show_section, "contents": self.show_contents,
+                "plugins": self.show_plugins, "entry": self.show_entry,
+                "search": self.show_search, "item": self.show_item}[kind](
+                    *args, remember=remember)
+
     def show_section(self, which, anchor, remember=True):
         try:
             text = entries.section_page(which, anchor)
@@ -209,13 +252,6 @@ class HelpPanel(QWidget):
         if not self.history:
             return None
         page = self.history.pop()
-        if page[0] == "section":
-            self.show_section(page[1], page[2], remember=False)
-        elif page[0] == "contents":
-            self.show_contents(page[1], remember=False)
-        elif page[0] == "plugins":
-            self.show_plugins(remember=False)
-        else:
-            self.show_item(page[1], remember=False)
+        self.show_page(page)
         self._update_back()
         return page
