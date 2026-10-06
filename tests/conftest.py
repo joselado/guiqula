@@ -12,6 +12,10 @@
   checks that need a clean process (startup cost, import side effects);
   ``run_python.src`` is that directory.
 - Installed guiqula plugins are not loaded ($GUIQULA_NO_PLUGINS).
+- After each module the top-level widgets are deleted: a closed window is
+  only hidden, and the stale widgets of earlier modules made every
+  application-wide restyle (theme, interface text) walk tens of thousands
+  of them, which doubled the time of tests/ui.
 """
 import atexit
 import os
@@ -46,6 +50,27 @@ os.environ["GUIQULA_NO_PLUGINS"] = "1"
 @pytest.fixture(autouse=True)
 def _scratch_cwd(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _delete_windows():
+    """Set up before a module's own fixtures, so torn down after them."""
+    yield
+    if "PySide6.QtWidgets" not in sys.modules:   # a module without Qt imports none
+        return
+    import gc
+    from PySide6.QtCore import QCoreApplication, QEvent
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance()
+    if app is None:
+        return
+    for widget in app.topLevelWidgets():
+        widget.close()
+        widget.deleteLater()
+    for _ in range(3):
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        app.processEvents()
+    gc.collect()
 
 
 @pytest.fixture

@@ -203,7 +203,7 @@ that shows each feature.
 
 ```bash
 python -m pytest                       # everything (offscreen Qt, worker processes; about
-                                       # 30 min on this machine since phase 8)
+                                       # 17 min on this machine)
 python -m pytest -m "not slow"         # skip the wheel build
 python -m pytest tests/core            # pure Python, under a second
 python -m pytest tests/engine -k zeeman  # one area / one test
