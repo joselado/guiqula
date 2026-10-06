@@ -232,12 +232,21 @@ class ColorButton(QToolButton):
                            f"color: {'#000000' if light else '#ffffff'}; }}")
 
     def choose(self):
+        """The colour dialog; the popup holding the button closes when the
+        dialog takes the focus (a popup closes on any click outside it), so
+        it is shown again where it was once the dialog is done."""
         from matplotlib.colors import to_hex
         start = QColor(to_hex(self.value)) if self.value is not None else QColor("#1f77b4")
+        popup = self.window()
+        was_popup = bool(popup.windowFlags() & Qt.WindowType.Popup) and popup.isVisible()
+        position = popup.pos()
         color = QColorDialog.getColor(start, self, "Choose a colour")
         if color.isValid():
             self.set_value(color.name())
             self.changed.emit(self.value)
+        if was_popup and not popup.isVisible():
+            popup.move(position)
+            popup.show()
 
 
 class StylePopup(QFrame):

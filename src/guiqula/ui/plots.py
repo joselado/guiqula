@@ -277,8 +277,7 @@ def _structure_scalar(ax, result, style):
         size = style["atom_size"]           # the dots and the line grow together
         ax.plot(x[order], values[order], color=theme.MUTED, linewidth=1.0 * size, zorder=1)
         ax.scatter(x, values, c=values, s=18 * size ** 2, zorder=2,
-                   cmap=style["cmap"] or (structure_tools.VALUE_MAP if plot.get("symmetric")
-                                          else structure_tools.SEQUENTIAL_MAP))
+                   cmap=style["cmap"] or structure_tools.SEQUENTIAL_MAP)
         ax.set_ylabel(plot.get("clabel", plot["values"]))
         return x, values, values
     _draw_on(ax)(ax, build, **overlays)
@@ -731,6 +730,7 @@ class PlotView(QWidget):
         self.overlays = []
         self.style = {}                    # the style drawn (ui/plotstyle.py), what differs
         self.title = ""                    # of the result drawn (restyle draws it again)
+        self.caption_text = ""             # as given, before what a failure adds to it
         self._press = None                 # (x, y, button) of a press on the canvas, in pixels
         self._selector = None
         self.markers = []                  # [{index, kind, value, label}] (set_markers)
@@ -829,6 +829,7 @@ class PlotView(QWidget):
         self.overlays = list(overlays)
         self.style = plotstyle.clean(result.plot["kind"], style, strict=False)
         self.title = title
+        self.caption_text = caption
         if self.style_popup.isVisible():
             self.style_popup.set_kind(result.plot["kind"], self.style)
         if self.renderer_3d == "pyvista" and in_3d(result, self.projection):
@@ -876,7 +877,7 @@ class PlotView(QWidget):
         plot_style action), keeping the zoom; nothing without a result."""
         if self.result is None:
             return
-        self.show_result(self.result, self.title, self.caption.text(), stale=self.stale,
+        self.show_result(self.result, self.title, self.caption_text, stale=self.stale,
                          overlays=self.overlays, style=style, keep_limits=True)
 
     def open_style(self):
@@ -908,7 +909,7 @@ class PlotView(QWidget):
         self.result = self.ax = self.points = None
         self.stale = False
         self.style = {}
-        self.title = ""
+        self.title = self.caption_text = ""
         self.style_popup.hide()
         self.figure.clear()
         theme.set_figure(self.figure)
