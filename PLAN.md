@@ -4005,6 +4005,56 @@ the one built:
      values, rather than the outliner item that uses it; or the document's
      items first when one uses the entry.
 
+**The style of a plot (2026-10-06, branch plot-style).** The maintainer
+asked for the cosmetics of the plots to be changed from the interface, the
+size and colour of the points of a scatter plot or of the lines of a curve,
+with a set chosen per plot kind rather than one set for all. `ui/plotstyle.py`
+holds the catalogue, one list of options per plot kind, each with its label
+in the words of the physics, its type (a number with a range, a choice, a
+colour, a switch), its default and its tooltip in the engine's words: a
+curve's width and colour, dots on its points and a fill under it; the size
+of coloured points, their colour map and where the scale saturates; a map's
+colour map, saturation and smoothing; the size of the atoms, their colour
+map and whether the bonds are drawn; the length, width and colour of the
+arrows besides. A style holds only what differs from the defaults, and an
+option whose default is None takes it from the result's spec or from the
+theme when drawn, so a style never bakes a theme's colour in. The Style
+button of a result's bar, beside Overlay, opens a popup of its kind's
+options with Reset; every change goes through the `plot_style` action
+(`WINDOW_ACTIONS`, `drive.py`), which draws the result again keeping its
+zoom, and the style is kept per result view in the Document's `ui` block,
+next to the overlays, and used by Export, so the figure of the bundle is
+the one in the window. `tests/ui/test_plot_style.py` checks the catalogue,
+each kind drawn in a style, the popup, the action, the view state and the
+export.
+
+Decisions taken; the first option of each is the one built:
+
+164. a style is per result view, kept with the project and used by its
+     export (the maintainer's answer, asked before building); or the
+     default of every plot of that kind, in the settings like Plot text; or
+     per view with a button making it the kind's default;
+165. the options are chosen per plot kind (lines: width, colour, dots,
+     fill; colored_scatter: point size, colour map, saturation; heatmap:
+     colour map, saturation, smoothing; structure_scalar: atom size, colour
+     map, bonds; structure_vector: arrow length, width and colour, atom
+     size, the colour map of the z part, bonds; scalar: none, its button
+     disabled); or one set of width, colour and colour map for every kind;
+166. the Style button sits in the result's bar beside Overlay and opens a
+     popup of the kind's options, each change drawn at once through the
+     plot_style action (journaled, not an undo step, as overlay is); or a
+     Style section under the calculation's form in Properties;
+167. the overlays of a curve take its width and keep their cycle colours,
+     the result's own curves alone taking the colour chosen; or the
+     overlays unchanged by the style;
+168. the pyvista scene takes the atom size, the bonds and the arrows' length,
+     width and colour as the matplotlib drawing does; or the scene keeps
+     its own look;
+169. the colour maps offered are fourteen of matplotlib's (sequential,
+     diverging, cyclic and grey), a colour is picked in the colour dialog
+     and kept as hex, and the action takes any colour matplotlib reads; or
+     every colour map matplotlib has, in a long list.
+
 ### Where the section 13 items land
 
 | Phase | Items |

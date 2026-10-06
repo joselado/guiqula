@@ -140,8 +140,8 @@ rather than hiding a control:
   Calculate on selection and Remove selected (enabled while sites are selected), Show (the
   sites and bonds, the Hamiltonian, a Field) and the 3D box, and the brush while a Field is
   shown;
-- a result: Pick, Box and Lasso (see Picking from a plot), Overlay, Export, Save data and
-  Detach;
+- a result: Pick, Box and Lasso (see Picking from a plot), Overlay, Style (see The style
+  of a plot), Export, Save data and Detach;
 - the k-space tab: the calculation whose path is drawn, Add points, Remove last and
   Default path;
 - the 3D scene drawn with pyvista: Reset view and the View menu in place of Fit, Pan and
@@ -477,6 +477,30 @@ range), or named in the Sliders panel with its entry, parameter and range: dragg
 changes the parameter (one undo step per drag), and with the automatic re-run on, cheap
 results follow. A locked parameter takes no slider. A marker is a slider drawn on a plot
 (see Picking from a plot).
+
+## The style of a plot
+
+The Style button of a result, the brush beside Overlay, opens the cosmetics of that plot,
+which are the ones that make sense for its kind: a curve (a density of states, bands
+without an operator, a sweep) has a line width, a line colour, dots on its data points and
+a fill under it; coloured points (bands with an operator) have a point size, a colour map
+and the fraction of the largest value at which the colour scale saturates, so that a small
+expectation value still shows; a map (a Fermi surface, a spectral function, a Berry
+curvature) has a colour map, the same saturation and a smooth shading between its grid
+points; a result on the atoms (an LDOS, a density) has the size of the atoms, a colour map
+and whether the bonds are drawn; a vector per site (a magnetization) has besides the
+length, the width and the colour of its arrows and the colour map of the z component,
+drawn as a dot on each atom. A table of numbers (a Chern number, a gap) has no style.
+Every change is drawn at once, keeping the zoom, and Reset puts the plot back as it is by
+default. The style belongs to that result's view: it is saved with the project, it is
+kept when the result is computed again, and Export draws the figure with it, so the
+figure of the bundle is the one in the window. A colour map or a colour left at its
+default follows the result (a diverging map for a quantity symmetric about zero) and the
+theme (the first colour of the cycle, the arrows' colour), so the same project reads in
+both themes. Headless, the `plot_style` action takes the calculation and the options by
+name (`linewidth`, `color`, `dots`, `fill`, `size`, `cmap`, `saturate`, `smooth`,
+`atom_size`, `bonds`, `arrow_length`, `arrow_width`, `arrow_color`), `reset` clearing
+them first.
 
 ## Overlays and exports
 

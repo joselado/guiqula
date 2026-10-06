@@ -109,7 +109,8 @@ def test_the_bars_wrap_and_never_overflow_at_1200_px(window, qtbot):
     assert view.bar.objectName() == "plotBar_c1" and view.toolbar.isHidden()
     assert view.canvas.toolbar is view.toolbar
     assert view.bar.controls() == ["fit_c1", "pan_c1", "zoom_c1", "pickTool_c1", "overlay_c1",
-                                   "export_c1", "saveData_c1", "detach_c1", "saveImage_c1"]
+                                   "style_c1", "export_c1", "saveData_c1", "detach_c1",
+                                   "saveImage_c1"]
     assert_fits(view.bar)
 
 

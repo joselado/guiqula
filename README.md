@@ -90,8 +90,9 @@ cached.
   the model says so above its plot, with Run again beside it.
 - Every plot is interactive; a slider or a sweep is attached from the menu of a
   parameter's name, and with the automatic re-run on (Follow) cheap results are computed
-  again as a slider moves; overlays compare results; the k-path is edited on the
-  Brillouin zone.
+  again as a slider moves; overlays compare results; a Style button sets the widths,
+  sizes, colours and colour maps that make sense for each plot kind; the k-path is
+  edited on the Brillouin zone.
 - Every result exports its figure, its data and the pyqula script that reproduces it. A
   Python console sees the live Hamiltonian.
 - Projects keep their results; autosave, crash recovery, and undo for everything.
