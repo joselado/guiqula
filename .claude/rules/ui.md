@@ -124,7 +124,7 @@ tests, `drive.py --widget` and the remote `widgets` and `screenshot` methods rel
   (`text_changed`), `size()` being 16 px or 20 px at large text; pixmaps at 16 and 24 px
   (and 20 px while the text is large), since a Python `QIconEngine` subclass
   crashes PySide6 6.11; a checkable menu entry gets no icon, which would hide its check
-  box. `resources/icons/` holds the 56 Tabler Icons of the controls (SVG files drawn in
+  box. `resources/icons/` holds the 57 Tabler Icons of the controls (SVG files drawn in
   `currentColor`, outline but the filled `cancel`, their MIT licence) and a README whose
   table of our names, Tabler's names and styles is what its fetch loop and
   `tests/ui/test_icons.py` read; a new icon is a row there, its file and its name in
@@ -196,7 +196,18 @@ tests, `drive.py --widget` and the remote `widgets` and `screenshot` methods rel
   cannot move; the plot kinds lines, colored_scatter, heatmap, structure_scalar,
   structure_vector, scalar; the right click, the Pick, Box and Lasso toggles
   (`pick_requested`); the markers, sliders with `on` drawn by `set_markers` and dragged
-  through `marker_moved`.
+  through `marker_moved`; the Style button `style_<id>` (the brush, beside Overlay),
+  whose popup `stylePopup_<id>` holds one control per option of the kind,
+  `style_<option>_<id>`, and `styleReset_<id>`; a change is reported (`style_changed`) and
+  the window dispatches `plot_style`, which calls `restyle`, the same result drawn again
+  with its limits kept. `draw(..., style=)` takes the style, so the export does too.
+- `plotstyle.py`: the catalogue of the cosmetics per plot kind (`OPTIONS`, decisions 164
+  to 169: name, label, type, default, range or choices, tip), `clean` (what differs from
+  the defaults, strict or not), `resolve` (every option with its value), and `StylePopup`;
+  a default of None is decided when drawing (the spec's colour map, the theme's colour).
+  The structure drawings take the style as keywords (`atom_size`, `bonds`, the `cmap` of
+  `site_values`, the `length`, `width`, `color` and `cmap` of `arrows`), `on_atoms(result,
+  style)` making them, and so does pyvista's `draw_scene`.
 - `theme.py`: light and dark (the colour names are the active theme's, rebound by `apply`);
   every figure is drawn inside `theme.drawing(figure)`, whose rc carries the plot text size
   (`text_size`, View > Plot text); the interface text (`UI_POINTS`, `set_ui_text`, View >
@@ -261,6 +272,10 @@ python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "help", "search": "ra
 python tools/drive.py honeycomb_zeeman_rashba --run c1 \
     --python "session.act('export_bundle', calculation='c1', path='out/c1_bands')"
                                                    # figure, data, script in one folder
+python tools/drive.py honeycomb_zeeman_rashba --run c2 --python "session.act('plot_style', \
+    calculation='c2', linewidth=3, color='#d62728', fill=True); \
+    window.plots['c2'].open_style()" --widget stylePopup_c2 --shot style.png
+                                                   # the style of a plot (decisions 164 to 169)
 python tools/drive.py honeycomb_zeeman_rashba --run c1 --python "session.act('run_at_once'); \
     p = session.act('pick', calculation='c1', x=20, y=0.5); print(p['label'], \
     [t['label'] for t in p['targets']]); session.act('pick_to', calculation='c1', x=20, \

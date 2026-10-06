@@ -88,7 +88,7 @@ from guiqula.ui.properties import PropertiesPanel
 from guiqula.ui.start import StartPage
 from guiqula.ui import structure as structure_tools
 from guiqula.ui.structure import StructureView
-from guiqula.ui import icons, pyvista_view, shortcuts, theme
+from guiqula.ui import icons, plotstyle, pyvista_view, shortcuts, theme
 
 POLL_MS = 30
 BUILD_DELAY_MS = 150
@@ -97,10 +97,10 @@ WORKSPACES = ("geometry", "hamiltonian", "calculate")
 # actions of the window itself: they change what is shown, not the Document
 WINDOW_ACTIONS = ("select", "workspace", "tool", "select_sites", "region_from_selection",
                   "remove_selected", "canvas_view", "preview", "auto_rerun", "projection",
-                  "overlay", "slider", "set_slider", "remove_slider", "paint", "theme",
-                  "export_bundle", "help", "remote", "pick", "pick_to", "run_at_once",
-                  "renderer_3d", "view_3d", "plot_text", "ui_text", "reset_layout", "log",
-                  "panel", "add_menu", "run_stale", "start", "run")
+                  "overlay", "plot_style", "slider", "set_slider", "remove_slider", "paint",
+                  "theme", "export_bundle", "help", "remote", "pick", "pick_to",
+                  "run_at_once", "renderer_3d", "view_3d", "plot_text", "ui_text",
+                  "reset_layout", "log", "panel", "add_menu", "run_stale", "start", "run")
 STRUCTURE_TAB = 0
 KSPACE_TAB = 1
 # a new classical system: its lattice, and a supercell the usual orders fit in
@@ -199,6 +199,7 @@ class MainWindow(QMainWindow):
         self._pending_sites = None     # (system, positions) to select once it is built
         self.plots = {}                # calculation id -> PlotView (a tab or a window)
         self.overlays = {}             # calculation id -> [(other calculation, mode)] drawn over it
+        self.plot_styles = {}          # calculation id -> the style of its plot (ui/plotstyle.py)
         self.plot_windows = {}         # calculation id -> ResultWindow of a detached view
         self.canvas_view = "structure"
         self.field_preview = None      # (entry, parameter) the field view draws
@@ -1031,6 +1032,7 @@ class MainWindow(QMainWindow):
         dispatcher.register_action("auto_rerun", lambda enabled=True: self.set_auto_rerun(enabled))
         dispatcher.register_action("projection", lambda name: self.set_projection(name))
         dispatcher.register_action("overlay", self.overlay)
+        dispatcher.register_action("plot_style", self.plot_style)
         dispatcher.register_action("paint", self.paint)
         dispatcher.register_action("slider", self.add_slider)
         dispatcher.register_action("set_slider", self.set_slider)
@@ -1609,6 +1611,8 @@ class MainWindow(QMainWindow):
         if self.overlays:
             state["overlays"] = {calc: [list(o) for o in chosen]
                                  for calc, chosen in self.overlays.items()}
+        if self.plot_styles:
+            state["styles"] = {calc: dict(style) for calc, style in self.plot_styles.items()}
         if self.sliders:
             state["sliders"] = [dict(s) for s in self.sliders]
         if self.field_preview is not None:
@@ -1679,6 +1683,11 @@ class MainWindow(QMainWindow):
                                                              "difference")]
             if calc in calculations and present:
                 self.overlays[calc] = present
+        self.plot_styles = {}
+        styles = ui.get("styles") if isinstance(ui.get("styles"), dict) else {}
+        for calc, style in styles.items():       # checked against the plot kind when drawn
+            if calc in calculations and isinstance(style, dict) and style:
+                self.plot_styles[calc] = dict(style)
         for calc in ui.get("results", []) if isinstance(ui.get("results"), list) else []:
             if isinstance(calc, str) and calc in calculations:
                 self.result_view(calc)
@@ -2173,6 +2182,7 @@ class MainWindow(QMainWindow):
             view.export_requested.connect(self.export_bundle_dialog)
             view.detach_requested.connect(self.toggle_detached)
             view.overlay_menu_requested.connect(self._fill_overlay_menu)
+            view.style_changed.connect(self._style_changed)
             view.pick_requested.connect(self._pick_requested)
             view.marker_moved.connect(self._marker_moved)
             view.run_requested.connect(self.run_guarded)            # the status row
@@ -2319,7 +2329,11 @@ class MainWindow(QMainWindow):
         overlays = [(other, self.session.result(other), mode)
                     for other, mode in self.overlays.get(calc, [])
                     if self.session.result(other) is not None]
-        if not force and view.result is result and \
+        # as the view keeps it: an option of another kind (a style saved for a result that
+        # now draws otherwise) is dropped, so it never asks for a redraw at every call
+        style = plotstyle.clean(result.plot["kind"], self.plot_styles.get(calc, {}),
+                                strict=False)
+        if not force and view.result is result and style == view.style and \
                 [(o, id(r), m) for o, r, m in overlays] == \
                 [(o, id(r), m) for o, r, m in view.overlays]:
             view.stale = stale
@@ -2334,7 +2348,41 @@ class MainWindow(QMainWindow):
             notes.append("skipped: " + ", ".join(f"{r['id']} ({r['message']})"
                                                  for r in result.skipped))
         view.markers = self._markers_of(calc, result)      # drawn with the plot
-        view.show_result(result, title, " · ".join(notes), stale=stale, overlays=overlays)
+        view.show_result(result, title, " · ".join(notes), stale=stale, overlays=overlays,
+                         style=style)
+
+    def plot_style(self, calculation, reset=False, **options):
+        """Draw a calculation's result in a style (ui/plotstyle.py): the
+        options given join the style kept for its view (an option set to
+        None goes back to its default), or reset clears it; checked against
+        the result's plot kind, so the calculation must have a result.
+        Kept with the project (the ui block) and used by Export. Returns the
+        style (what differs from the defaults)."""
+        self.session.document.calculation(calculation)
+        result = self.session.result(calculation)
+        if result is None:
+            raise ValueError(f"{calculation} has no result to style yet: run it first")
+        kind = result.plot["kind"]
+        if not plotstyle.options(kind):
+            raise ValueError(f"a {kind} result has no style to change")
+        style = {} if reset else dict(self.plot_styles.get(calculation, {}))
+        style.update(options)
+        style = plotstyle.clean(kind, style)       # ValueError for what the kind refuses
+        if style:
+            self.plot_styles[calculation] = style
+        else:
+            self.plot_styles.pop(calculation, None)
+        view = self.plots.get(calculation)
+        if view is not None and view.result is result:
+            view.restyle(style)             # the same result, drawn again, its zoom kept
+        elif view is not None:
+            self._draw_result(calculation)
+        return dict(style)
+
+    def _style_changed(self, calc, style):
+        """The Style popup of a result view changed: the whole style it
+        holds, through the plot_style action (journaled, as a driver's)."""
+        self._act("plot_style", calculation=calc, reset=True, **style)
 
     def overlay(self, calc, other=None, mode="overlay"):
         """Draw the result of other over calc's (mode overlay), or their
@@ -2698,7 +2746,8 @@ class MainWindow(QMainWindow):
             canvas = FigureCanvasAgg(fig)
             ax, _ = plot_tools.draw(fig, result, f"{calculation} · {result.kind} · "
                                     f"{result.mode}", overlays, theme_name="light",
-                                    projection=self.structure.projection)
+                                    projection=self.structure.projection,
+                                    style=self.plot_styles.get(calculation))
             canvas.draw()
             theme.centre(fig, ax)          # the axes in the middle, as in the window
             fig.savefig(png, dpi=200)

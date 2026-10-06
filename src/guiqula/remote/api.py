@@ -76,6 +76,12 @@ WINDOW_ACTIONS = {
     "projection": "name: auto, xy or 3d (how the canvas and the results on the atoms draw "
                   "the geometry)",
     "overlay": "calc, other (None clears), mode=overlay|difference: two results on one axes",
+    "plot_style": "calculation, reset=false and the options of its plot kind (lines: "
+                  "linewidth, color, dots, fill; colored_scatter: size, cmap, saturate; "
+                  "heatmap: cmap, saturate, smooth; structure_scalar: atom_size, cmap, "
+                  "bonds; structure_vector: arrow_length, arrow_width, arrow_color, "
+                  "atom_size, cmap, bonds): how the result is drawn, kept with the project "
+                  "and used by export_bundle; returns what differs from the defaults",
     "paint": "value, indices or point=[x, y] and radius, entry, param, component: paint a "
              "Field on sites",
     "slider": "entry, param, component, minimum, maximum, on (a calculation: drawn on its "

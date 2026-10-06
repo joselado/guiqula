@@ -56,6 +56,8 @@ NAMES = (
     # and the marks of ui/marks.py the list leaves out
     "remove", "run_stale", "kspace", "structure", "theme", "3d", "show",
     "slider", "invalid", "disabled", "running",
+    # the Style button of a result's bar (decision 164)
+    "brush",
     # the View menu of the 3D scene (Blender's views, perspective and orthographic)
     "view",
     # after phase 8: a warning apart from an invalid entry, a classical system, the k-path

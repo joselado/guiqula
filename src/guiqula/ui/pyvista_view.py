@@ -110,7 +110,8 @@ def _sites(plotter, pv, r, name, radius, arrays=None, **style):
 
 
 def draw_scene(plotter, build, highlight=None, selected=None, removed=None, images=True,
-               site_values=None, arrows=None, hoppings=None, title="", pixel_ratio=1.0):
+               site_values=None, arrows=None, hoppings=None, title="", pixel_ratio=1.0,
+               atom_size=1.0, bonds=True):
     """draw_structure_3d (ui/structure.py) with pyvista, overlay for overlay:
     the sites coloured by sublattice (or by site_values, with a colour bar
     when they vary), the bonds (or the hoppings of the Hamiltonian view,
@@ -121,14 +122,17 @@ def draw_scene(plotter, build, highlight=None, selected=None, removed=None, imag
     fits (xmin, xmax, ymin, ymax, zmin, zmax): the sites and the unit cell,
     as mplot3d's limits, not the faded cells around them. The title and
     the colour bar's text take the plot text size (ui/theme.py), as
-    matplotlib draws it at 100 dpi, times the screen's pixel ratio."""
+    matplotlib draws it at 100 dpi, times the screen's pixel ratio.
+    atom_size, bonds, and the cmap of site_values and the length, width,
+    color and cmap of arrows are a plot's style (ui/plotstyle.py), as
+    draw_structure takes them."""
     import pyvista as pv
     plotter.clear()
     plotter.set_background(theme.AXES)
     r = np.asarray(build["positions"], dtype=float).reshape(-1, 3)
     n = len(r)
     # smaller atoms under arrows, which are centred on them and would be hidden
-    radius = structure_tools.RADIUS * (0.6 if arrows is not None else 1.0)
+    radius = structure_tools.RADIUS * (0.6 if arrows is not None else 1.0) * float(atom_size)
     lattice = np.asarray(build["lattice"], dtype=float).reshape(-1, 3)
     def pixels(relative):
         return theme.font_points(relative) * pixel_ratio * 100 / 72
@@ -150,7 +154,7 @@ def draw_scene(plotter, build, highlight=None, selected=None, removed=None, imag
             plotter.add_mesh(lines, name=f"hoppings{k}", scalars="phase",
                              cmap=theme.PHASE_MAP, clim=(-np.pi, np.pi),
                              line_width=float(width), show_scalar_bar=False)
-    else:
+    elif bonds:
         segments = structure_tools.bond_segments_3d(build)
         if len(segments):
             plotter.add_mesh(_lines(pv, segments), name="bonds", color=theme.BOND,
@@ -164,7 +168,7 @@ def draw_scene(plotter, build, highlight=None, selected=None, removed=None, imag
         if site_values is not None:
             values = np.asarray(site_values["values"], dtype=float).ravel()
             symmetric = site_values.get("symmetric", True)
-            cmap = structure_tools.VALUE_MAP if symmetric else structure_tools.SEQUENTIAL_MAP
+            cmap = structure_tools.value_map(site_values)
             _, mappable = structure_tools.value_colors(values, symmetric=symmetric, cmap=cmap)
             _sites(plotter, pv, r, "sites", radius, {"values": values}, scalars="values",
                    cmap=cmap, clim=(mappable.norm.vmin, mappable.norm.vmax),
@@ -184,13 +188,14 @@ def draw_scene(plotter, build, highlight=None, selected=None, removed=None, imag
         lengths = np.linalg.norm(vectors[shown], axis=1)
         longest = float(lengths.max()) if len(lengths) else 0.0
         if longest > 1e-12:
-            v = vectors[shown] * (0.9 / longest)
+            length, width, color, _ = structure_tools.arrow_style(arrows)
+            v = vectors[shown] * (0.9 * length / longest)
             tails = pv.PolyData(r[shown] - v / 2)
             tails["v"] = v
             glyphs = tails.glyph(orient="v", scale="v", factor=1.0,
-                                 geom=pv.Arrow(tip_length=0.3, tip_radius=0.12,
-                                               shaft_radius=0.045))
-            plotter.add_mesh(glyphs, name="arrows", color=theme.ARROW, smooth_shading=True)
+                                 geom=pv.Arrow(tip_length=0.3, tip_radius=0.12 * width,
+                                               shaft_radius=0.045 * width))
+            plotter.add_mesh(glyphs, name="arrows", color=color, smooth_shading=True)
     if highlight is not None and np.any(highlight):
         plotter.add_mesh(_spheres(pv, r[np.asarray(highlight, dtype=bool)], radius * 1.6),
                          name="highlight", color=theme.REGION, opacity=0.35)

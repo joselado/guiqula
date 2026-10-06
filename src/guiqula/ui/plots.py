@@ -60,6 +60,14 @@ Save image; a result drawn in 3D has no readout,
 picks or markers. The exported figure (io/bundle.py) is matplotlib's,
 drawn with the same projection.
 
+Style (decisions 164 to 169): the Style button of the bar opens the popup
+of ui/plotstyle.py, the cosmetics of the result's plot kind (the width and
+colour of a curve, the size of the points, a colour map and its saturation,
+the atoms and the arrows); the view reports each change (style_changed),
+the window keeps the style per result view, in the project's ui block, and
+hands it to show_result, so that the exported figure takes it too; restyle
+draws the same result again in a new style without losing the zoom.
+
 Overlays (decision 13.11): the curves of other results drawn on the same
 axes, each in its colour with a legend, or the difference of this result
 and another one with the same x (two densities of states on one energy
@@ -78,12 +86,13 @@ from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QMenu, QProgressBar,
 
 from guiqula.core import picks as pick_tools
 from guiqula.core.results import PLOT_KINDS as KINDS  # noqa: F401 (the kinds drawn here)
-from guiqula.ui import icons, shortcuts
+from guiqula.ui import icons, plotstyle, shortcuts
 from guiqula.ui import structure as structure_tools
 from guiqula.ui import theme
 from guiqula.ui.canvas_navigation import CanvasNavigation, bind_keys
 from guiqula.ui.canvasbar import CanvasBar
 from guiqula.ui.marks import ERROR_STATES, failure_line, mark
+from guiqula.ui.plotstyle import StylePopup
 from guiqula.ui.pyvista_view import SceneView
 
 READOUT_PIXELS = 12      # the readout names a data point this close to the mouse
@@ -102,13 +111,21 @@ DETACH_TIPS = {False: "Detach: show this result in a window of its own, to compa
                True: "Attach: put this result back in its tab of the viewport"}
 
 
-def _lines(ax, result):
-    """y against x, or against its index when the spec names no x."""
+def _lines(ax, result, style):
+    """y against x, or against its index when the spec names no x; the
+    style's width, colour (the theme's first cycle colour by default), dots
+    on the points and fill under the curves (ui/plotstyle.py)."""
     arrays, plot = result.arrays, result.plot
     y = np.asarray(arrays[plot["y"]])
     x = np.asarray(arrays[plot["x"]]) if plot.get("x") else np.arange(len(y))
     y = y.reshape(len(x), -1)
-    ax.plot(x, y, color="C0", linewidth=1.2)
+    width = style["linewidth"]
+    color = style["color"] or "C0"
+    ax.plot(x, y, color=color, linewidth=width, marker="o" if style["dots"] else None,
+            markersize=3 * width)
+    if style["fill"]:
+        for column in y.T:
+            ax.fill_between(x, 0.0, column, color=color, alpha=0.25, linewidth=0)
     return np.repeat(x[:, None], y.shape[1], axis=1).ravel(), y.ravel(), None
 
 
@@ -120,7 +137,10 @@ def _limit(c):
     return float(c.max()) if len(c) else 0.0
 
 
-def _colored_scatter(ax, result):
+def _colored_scatter(ax, result, style):
+    """Points coloured by c on a scale centred at zero; the style's point
+    size, colour map and saturation (the fraction of the largest |c| at
+    which the scale saturates)."""
     arrays, plot = result.arrays, result.plot
     x = np.asarray(arrays[plot["x"]])
     y = np.asarray(arrays[plot["y"]]).reshape(len(x), -1)
@@ -129,8 +149,9 @@ def _colored_scatter(ax, result):
     limit = _limit(c)
     if limit < 1e-8:          # all zero up to rounding: do not stretch the noise
         limit = 1.0
-    points = ax.scatter(xs.ravel(), y.ravel(), c=c.ravel(), s=6, cmap="coolwarm",
-                        vmin=-limit, vmax=limit)
+    limit *= style["saturate"]
+    points = ax.scatter(xs.ravel(), y.ravel(), c=c.ravel(), s=style["size"],
+                        cmap=style["cmap"], vmin=-limit, vmax=limit)
     structure_tools.colorbar(ax, points, plot.get("clabel", plot["c"]))
     return xs.ravel(), y.ravel(), c.ravel()
 
@@ -154,21 +175,34 @@ def grid_of(x, y, c):
     return xs, ys, grid
 
 
-def _heatmap(ax, result):
+def _heatmap(ax, result, style):
+    """c on the grid (x, y), or as square points when the points are not a
+    grid; the style's colour map (the spec's by default: coolwarm about
+    zero, else inferno), the saturation of the scale (a fraction of the
+    largest value, both ends of a symmetric scale) and Gouraud shading on
+    a grid instead of one flat cell per point."""
     arrays, plot = result.arrays, result.plot
     x, y, c = (np.asarray(arrays[plot[k]], dtype=float) for k in ("x", "y", "c"))
     if c.ndim == 2:                          # c[i, j] at (x[i], y[j])
         xs, ys = np.meshgrid(x, y, indexing="ij")
         x, y, c = xs.ravel(), ys.ravel(), c.ravel()
-    style = {"cmap": plot.get("cmap", "coolwarm" if plot.get("symmetric") else "inferno")}
+    scale = {"cmap": style["cmap"] or plot.get("cmap", "coolwarm" if plot.get("symmetric")
+                                                else "inferno")}
+    saturate = style["saturate"]
     if plot.get("symmetric"):
-        limit = _limit(c)
-        style.update(vmin=-(limit or 1.0), vmax=limit or 1.0)
+        limit = (_limit(c) or 1.0) * saturate
+        scale.update(vmin=-limit, vmax=limit)
+    elif saturate < 1.0:
+        finite = c[np.isfinite(c)]
+        if len(finite):
+            low, high = float(finite.min()), float(finite.max())
+            scale.update(vmin=low, vmax=low + saturate * (high - low))
     grid = grid_of(x, y, c)
     if grid is not None:
-        mesh = ax.pcolormesh(grid[0], grid[1], grid[2].T, shading="nearest", **style)
+        mesh = ax.pcolormesh(grid[0], grid[1], grid[2].T,
+                             shading="gouraud" if style["smooth"] else "nearest", **scale)
     else:
-        mesh = ax.scatter(x, y, c=c, s=12, marker="s", linewidths=0, **style)
+        mesh = ax.scatter(x, y, c=c, s=12, marker="s", linewidths=0, **scale)
     structure_tools.colorbar(ax, mesh, plot.get("clabel", plot["c"]))
     if plot.get("equal"):
         ax.set_aspect("equal", adjustable="box")
@@ -211,37 +245,47 @@ def in_3d(result, projection="auto"):
     return projection == "3d"
 
 
-def on_atoms(result):
+def on_atoms(result, style=None):
     """What a result on the atoms draws on its geometry: the keywords of
-    draw_structure (site_values, or arrows)."""
+    draw_structure (site_values, or arrows, and the style's atom size,
+    bonds, colour map, and arrow length, width and colour; ui/plotstyle.py)."""
     plot = result.plot
+    style = plotstyle.resolve(plot["kind"], style)
+    overlays = {"atom_size": style.get("atom_size", 1.0), "bonds": style.get("bonds", True)}
     if plot["kind"] == "structure_scalar":
-        return {"site_values": {
+        overlays["site_values"] = {
             "values": np.asarray(result.arrays[plot["values"]], dtype=float).ravel(),
             "label": plot.get("clabel", plot["values"]),
-            "symmetric": plot.get("symmetric", False)}}
-    return {"arrows": {"vectors": np.asarray(result.arrays[plot["vectors"]],
-                                             dtype=float).reshape(-1, 3),
-                       "label": plot.get("clabel", plot["vectors"])}}
+            "symmetric": plot.get("symmetric", False), "cmap": style.get("cmap")}
+        return overlays
+    overlays["arrows"] = {"vectors": np.asarray(result.arrays[plot["vectors"]],
+                                                dtype=float).reshape(-1, 3),
+                          "label": plot.get("clabel", plot["vectors"]),
+                          "cmap": style.get("cmap"), "length": style.get("arrow_length", 1.0),
+                          "width": style.get("arrow_width", 1.0),
+                          "color": style.get("arrow_color")}
+    return overlays
 
 
-def _structure_scalar(ax, result):
+def _structure_scalar(ax, result, style):
     build, plot = _on_structure(result), result.plot
-    overlays = on_atoms(result)
+    overlays = on_atoms(result, style)
     values = overlays["site_values"]["values"]
     if along_a_line(result) and getattr(ax, "name", "") != "3d":
         x = np.asarray(build["positions"])[:, 0]
         order = np.argsort(x)
-        ax.plot(x[order], values[order], color=theme.MUTED, linewidth=1.0, zorder=1)
-        ax.scatter(x, values, c=values, cmap=structure_tools.SEQUENTIAL_MAP, s=18, zorder=2)
+        size = style["atom_size"]           # the dots and the line grow together
+        ax.plot(x[order], values[order], color=theme.MUTED, linewidth=1.0 * size, zorder=1)
+        ax.scatter(x, values, c=values, s=18 * size ** 2, zorder=2,
+                   cmap=style["cmap"] or structure_tools.SEQUENTIAL_MAP)
         ax.set_ylabel(plot.get("clabel", plot["values"]))
         return x, values, values
     _draw_on(ax)(ax, build, **overlays)
     return _site_points(ax, build, values)
 
 
-def _structure_vector(ax, result):
-    build, overlays = _on_structure(result), on_atoms(result)
+def _structure_vector(ax, result, style):
+    build, overlays = _on_structure(result), on_atoms(result, style)
     _draw_on(ax)(ax, build, **overlays)
     return _site_points(ax, build, np.linalg.norm(overlays["arrows"]["vectors"], axis=1))
 
@@ -260,7 +304,7 @@ def scalar_rows(result):
     return rows
 
 
-def _scalar(ax, result):
+def _scalar(ax, result, style):
     ax.set_axis_off()
     rows = scalar_rows(result)
     for i, (label, text) in enumerate(rows):
@@ -300,17 +344,17 @@ def can_overlay(result, other, mode="overlay"):
     return x1.shape == x2.shape and y1.shape == y2.shape and np.allclose(x1, x2)
 
 
-def _draw_difference(ax, result, label, other):
+def _draw_difference(ax, result, label, other, width=1.2):
     """The curves of result minus those of other (the same x), drawn
     instead of result's own drawing; returns the points of the readout."""
     (x, y), (_, y_other) = curves(result), curves(other)
-    lines = ax.plot(x, y - y_other, color="C3", linewidth=1.2)
+    lines = ax.plot(x, y - y_other, color="C3", linewidth=width)
     lines[0].set_label(f"{result.calculation} − {label}")
     ax.legend()
     return np.repeat(x[:, None], y.shape[1], axis=1).ravel(), (y - y_other).ravel(), None
 
 
-def _draw_overlays(ax, result, overlays):
+def _draw_overlays(ax, result, overlays, width=1.0):
     """overlays: [(label, Result, mode)] drawn over result's curves, each
     in its colour, with a legend."""
     handles = [ax.lines[0]] if ax.lines else []
@@ -318,35 +362,40 @@ def _draw_overlays(ax, result, overlays):
         handles[0].set_label(result.calculation)
     for i, (label, other, _) in enumerate(overlays):
         x, y = curves(other)
-        lines = ax.plot(x, y, color=f"C{i + 1}", linewidth=1.0, alpha=0.85)
+        lines = ax.plot(x, y, color=f"C{i + 1}", linewidth=width, alpha=0.85)
         lines[0].set_label(label)
         handles.append(lines[0])
     if handles:
         ax.legend(handles=handles)
 
 
-def draw(figure, result, title="", overlays=(), theme_name=None, projection="auto"):
+def draw(figure, result, title="", overlays=(), theme_name=None, projection="auto",
+         style=None):
     """Draw a Result, with the overlays [(label, Result, mode)], in a theme
-    (the active one by default) and, on the atoms, in 3D as the projection
-    says (in_3d); returns the Axes and the points (x, y, c or None) the
-    readout looks up."""
+    (the active one by default), on the atoms in 3D as the projection says
+    (in_3d), and in a style (ui/plotstyle.py: a dict of the kind's options,
+    the defaults where it says nothing; an option of another kind is
+    ignored); returns the Axes and the points (x, y, c or None) the readout
+    looks up."""
     with theme.drawing(figure, theme_name):
-        return _draw(figure, result, title, overlays, projection)
+        return _draw(figure, result, title, overlays, projection, style)
 
 
-def _draw(figure, result, title, overlays, projection="auto"):
+def _draw(figure, result, title, overlays, projection="auto", style=None):
     figure.clear()
     plot = result.plot
+    style = plotstyle.resolve(plot["kind"], style)
     three_d = in_3d(result, projection)
     ax = figure.add_subplot(111, projection="3d" if three_d else None)
     overlays = [o for o in overlays if can_overlay(result, o[1], o[2])]
     difference = [(label, other) for label, other, mode in overlays if mode == "difference"]
+    width = style.get("linewidth", 1.2)         # the curves of a lines plot and its overlays
     if difference:          # instead of the result's own drawing, and its colour bar
-        points = _draw_difference(ax, result, *difference[0])
+        points = _draw_difference(ax, result, *difference[0], width=width)
     else:
-        points = DRAW[plot["kind"]](ax, result)
+        points = DRAW[plot["kind"]](ax, result, style)
         if overlays:
-            _draw_overlays(ax, result, overlays)
+            _draw_overlays(ax, result, overlays, width=width / 1.2)
     if along_a_line(result) and not three_d:
         ax.set_xlabel("x")
     elif plot["kind"] in ON_STRUCTURE and not three_d:
@@ -568,6 +617,7 @@ class PlotView(QWidget):
     marker_moved = Signal(int, float, float, bool)     # slider index, x, y, still dragging
     run_requested = Signal(str)           # calculation id: the status row's Run again
     cancel_requested = Signal(str)        # calculation id: the status row's Cancel
+    style_changed = Signal(str, object)   # calculation id, the style (ui/plotstyle.py)
 
     def __init__(self, calc_id="", parent=None):
         super().__init__(parent)
@@ -617,6 +667,17 @@ class PlotView(QWidget):
         self.overlay.setMenu(QMenu(self.overlay))
         self.overlay.menu().aboutToShow.connect(
             lambda: self.overlay_menu_requested.emit(self.calc_id))
+        self.style_button = QToolButton()
+        self.style_button.setText("Style")
+        self.style_button.setObjectName(f"style{suffix}")
+        self.style_button.setToolTip("how this plot is drawn: the width and colour of the "
+                                     "curves, the size of the points or the atoms, the "
+                                     "colour map, the arrows (kept with the project, and "
+                                     "used by Export)")
+        self.style_button.clicked.connect(lambda: self.open_style())
+        self.style_popup = StylePopup(suffix, self)
+        self.style_popup.changed.connect(lambda style: self.style_changed.emit(self.calc_id,
+                                                                               style))
         self.export = QToolButton()
         self.export.setText("Export")
         self.export.setObjectName(f"export{suffix}")
@@ -634,8 +695,9 @@ class PlotView(QWidget):
         self.detach.setObjectName(f"detach{suffix}")
         self.detach.setToolTip(DETACH_TIPS[False])
         self.detach.clicked.connect(lambda: self.detach_requested.emit(self.calc_id))
-        for widget, icon in ((self.overlay, "overlay"), (self.export, "export"),
-                             (self.save_data, "data"), (self.detach, "detach")):
+        for widget, icon in ((self.overlay, "overlay"), (self.style_button, "brush"),
+                             (self.export, "export"), (self.save_data, "data"),
+                             (self.detach, "detach")):
             self.bar.add("result", widget, icon)
         self.status = StatusRow(suffix)
         self.status.run_requested.connect(lambda: self.run_requested.emit(self.calc_id))
@@ -666,6 +728,9 @@ class PlotView(QWidget):
         self.points = None
         self.stale = False
         self.overlays = []
+        self.style = {}                    # the style drawn (ui/plotstyle.py), what differs
+        self.title = ""                    # of the result drawn (restyle draws it again)
+        self.caption_text = ""             # as given, before what a failure adds to it
         self._press = None                 # (x, y, button) of a press on the canvas, in pixels
         self._selector = None
         self.markers = []                  # [{index, kind, value, label}] (set_markers)
@@ -731,6 +796,10 @@ class PlotView(QWidget):
         self._shown_by[self.overlay].setVisible(bool(self.calc_id))
         self.overlay.setEnabled(self.result is not None and self.ax is not None
                                 and self.result.plot["kind"] in CURVES)
+        self._shown_by[self.style_button].setVisible(bool(self.calc_id))
+        self.style_button.setEnabled(self.result is not None and (
+            self.ax is not None or self.in_scene) and
+            bool(plotstyle.options(self.result.plot["kind"])))
         pickable = bool(self.calc_id) and self.result is not None and self.ax is not None \
             and bool(pick_tools.spec_of(self.result))
         on_atoms = pickable and self.result.plot["kind"] in ON_STRUCTURE \
@@ -741,21 +810,32 @@ class PlotView(QWidget):
             if button.isChecked() and not shown:
                 button.setChecked(False)
 
-    def show_result(self, result, title="", caption="", stale=False, overlays=()):
-        """Draw a result; one that cannot be drawn (arrays a plugin or a
-        Python calculation shaped otherwise than its plot kind) says why in
-        the caption, and its data can still be saved."""
+    def show_result(self, result, title="", caption="", stale=False, overlays=(),
+                    style=None, keep_limits=False):
+        """Draw a result in a style (ui/plotstyle.py; the defaults when
+        None); one that cannot be drawn (arrays a plugin or a Python
+        calculation shaped otherwise than its plot kind) says why in the
+        caption, and its data can still be saved. keep_limits: the axes
+        keep the limits they had (the same result drawn again in another
+        style, restyle)."""
         was_scene = self.in_scene and self.result is not None and \
             _same_sites(self.result, result)
+        limits = (self.ax.get_xlim(), self.ax.get_ylim()) if keep_limits and \
+            self.ax is not None and getattr(self.ax, "name", "") != "3d" else None
         self.navigation.history.clear()            # drawn again: the earlier zooms are gone
         self.bar.reset_history()                   # and matplotlib's, on the old axes
         self.result = result
         self.stale = stale
         self.overlays = list(overlays)
+        self.style = plotstyle.clean(result.plot["kind"], style, strict=False)
+        self.title = title
+        self.caption_text = caption
+        if self.style_popup.isVisible():
+            self.style_popup.set_kind(result.plot["kind"], self.style)
         if self.renderer_3d == "pyvista" and in_3d(result, self.projection):
             try:
                 self.scene.show_scene(_on_structure(result), keep=was_scene, fit=False,
-                                      title=title, **on_atoms(result))
+                                      title=title, **on_atoms(result, self.style))
             except Exception as error:
                 self.scene.forget()
                 caption = " · ".join(filter(None, [
@@ -773,7 +853,10 @@ class PlotView(QWidget):
         self._show_canvas(True)
         try:
             self.ax, self.points = draw(self.figure, result, title, overlays,
-                                        projection=self.projection)
+                                        projection=self.projection, style=self.style)
+            if limits is not None:
+                self.ax.set_xlim(limits[0])
+                self.ax.set_ylim(limits[1])
             self._marker_artists = []
             self._draw_markers()
             self.centring.settle()   # now: the limits and the layout are final for the readout
@@ -788,6 +871,25 @@ class PlotView(QWidget):
         self.readout.setText("")
         self._update_buttons()
         self._install_selector()
+
+    def restyle(self, style):
+        """Draw the result shown again in a style (the Style popup, the
+        plot_style action), keeping the zoom; nothing without a result."""
+        if self.result is None:
+            return
+        self.show_result(self.result, self.title, self.caption_text, stale=self.stale,
+                         overlays=self.overlays, style=style, keep_limits=True)
+
+    def open_style(self):
+        """Open the Style popup under its button, with the kind's options
+        and the style drawn."""
+        if self.result is None:
+            return
+        self.style_popup.set_kind(self.result.plot["kind"], self.style)
+        self.style_popup.adjustSize()
+        self.style_popup.move(self.style_button.mapToGlobal(
+            self.style_button.rect().bottomLeft()))
+        self.style_popup.show()
 
     def _show_canvas(self, canvas):
         """The matplotlib figure and the bar's Fit, Pan, Zoom and Save image,
@@ -806,6 +908,9 @@ class PlotView(QWidget):
         self._dragging = None
         self.result = self.ax = self.points = None
         self.stale = False
+        self.style = {}
+        self.title = self.caption_text = ""
+        self.style_popup.hide()
         self.figure.clear()
         theme.set_figure(self.figure)
         self.caption.setText(caption)

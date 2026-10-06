@@ -34,7 +34,11 @@ large: the text of the menus, panels and forms), log (enabled: the bottom
 area, Log and Console, hidden by default), panel (name: a dock, helpDock or
 Help, ...; shown: false hides it), reset_layout (the default arrangement of
 the panels), overlay (calc, other, mode overlay or difference: two results
-on one axes; other left out clears them), slider (entry, param, component,
+on one axes; other left out clears them), plot_style (calculation, reset,
+and the options of its plot kind, linewidth, color, dots, fill, size, cmap,
+saturate, smooth, atom_size, bonds, arrow_length, arrow_width, arrow_color:
+how the result is drawn, its Style button; kept with the project), slider
+(entry, param, component,
 minimum, maximum, on: a slider of the Sliders panel, drawn as a marker on
 the plot of the calculation on), set_slider (index, value), remove_slider
 (index), paint (value, indices or point and radius, entry, param,

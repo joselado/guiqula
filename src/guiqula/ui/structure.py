@@ -302,21 +302,42 @@ def colorbar(ax, mappable, label, **style):
     return bar
 
 
+def value_map(site_values):
+    """The colour map of site values: the one they name (a plot's style),
+    else diverging about zero when symmetric, sequential otherwise."""
+    if site_values.get("cmap"):
+        return site_values["cmap"]
+    return VALUE_MAP if site_values.get("symmetric", True) else SEQUENTIAL_MAP
+
+
+def arrow_style(arrows):
+    """(length, width, colour, colour map) of a vector per site: the
+    multiples of the usual length and width and the colour the arrows
+    name (a plot's style, ui/plotstyle.py), else 1, 1, the theme's arrow
+    colour and the diverging map."""
+    return (float(arrows.get("length") or 1.0), float(arrows.get("width") or 1.0),
+            arrows.get("color") or theme.ARROW, arrows.get("cmap") or VALUE_MAP)
+
+
 def draw_structure(ax, build, highlight=None, selected=None, removed=None, images=True,
-                   site_values=None, arrows=None, hoppings=None):
+                   site_values=None, arrows=None, hoppings=None, atom_size=1.0, bonds=True):
     """Draw a build summary on a matplotlib Axes. highlight: boolean mask of
     sites (a region), selected: site indices, removed: (M, 3) positions;
-    site_values: {"values": (N,), "label", "symmetric"} colours the atoms
-    (symmetric, the default: a diverging scale centred at zero; else a
-    sequential one from the smallest to the largest value); arrows:
-    {"vectors": (N, 3), "label"} draws the in-plane part at the sites,
-    coloured by the z part; hoppings: a Hamiltonian view, whose hoppings
-    replace the first-neighbour bonds. Only the central cell sets the view
-    (at least MIN_SPAN wide); the neighbouring cells show at its border.
+    site_values: {"values": (N,), "label", "symmetric", "cmap"} colours the
+    atoms (symmetric, the default: a diverging scale centred at zero; else
+    a sequential one from the smallest to the largest value; cmap, a map
+    of its own); arrows: {"vectors": (N, 3), "label", "length", "width",
+    "color", "cmap"} draws the in-plane part at the sites, coloured by the
+    z part (arrow_style); hoppings: a Hamiltonian view, whose hoppings
+    replace the first-neighbour bonds; atom_size: a multiple of RADIUS;
+    bonds: whether the first-neighbour bonds are drawn (the hoppings of a
+    Hamiltonian view always are). Only the central cell sets the view (at
+    least MIN_SPAN wide); the neighbouring cells show at its border.
     Returns the collection of the selection rings."""
     r = np.asarray(build["positions"])
     xy = r[:, :2]
     n = len(r)
+    radius = RADIUS * float(atom_size)
     colors = site_colors(build)
     bars = []
 
@@ -331,8 +352,7 @@ def draw_structure(ax, build, highlight=None, selected=None, removed=None, image
     if site_values is not None:
         colors, mappable = value_colors(site_values["values"],
                                         symmetric=site_values.get("symmetric", True),
-                                        cmap=VALUE_MAP if site_values.get("symmetric", True)
-                                        else SEQUENTIAL_MAP)
+                                        cmap=value_map(site_values))
         if varies(site_values["values"]):
             add_bar(mappable, site_values.get("label", ""))
     lattice = np.asarray(build["lattice"])[:, :2]
@@ -346,7 +366,7 @@ def draw_structure(ax, build, highlight=None, selected=None, removed=None, image
         if len(phase) and np.any(np.abs(phase) > 1e-6):
             add_bar(phase_map, "hopping phase", horizontal=True)
     else:
-        central = bond_segments(build)
+        central = bond_segments(build) if bonds else np.zeros((0, 2, 2))
         widths, bond_colors = 1.2, theme.BOND
     cells = image_cells(build["dimensionality"]) if images and n <= IMAGE_LIMIT else []
     if cells:
@@ -358,7 +378,7 @@ def draw_structure(ax, build, highlight=None, selected=None, removed=None, image
         ax.add_collection(LineCollection(faded, colors=faded_colors, linewidths=faded_widths,
                                          alpha=0.25, zorder=1), autolim=False)
         ghosts = (xy[None, :, :] + shifts[:, None, :]).reshape(-1, 2)
-        circles(ax, ghosts, RADIUS, 2, facecolors=colors * len(cells), alpha=0.2,
+        circles(ax, ghosts, radius, 2, facecolors=colors * len(cells), alpha=0.2,
                 linewidths=0)
     if len(central):
         if hoppings is not None:        # an outline, so that pale phase colours stay visible
@@ -367,13 +387,14 @@ def draw_structure(ax, build, highlight=None, selected=None, removed=None, image
                               autolim=False)
         ax.add_collection(LineCollection(central, colors=bond_colors, linewidths=widths,
                                          zorder=3), autolim=False)
-    circles(ax, xy, RADIUS, 4, autolim=True, facecolors=colors, edgecolors=atom_edge(site_values),
+    circles(ax, xy, radius, 4, autolim=True, facecolors=colors, edgecolors=atom_edge(site_values),
             linewidths=0.5)
     if arrows is not None:
         vectors = np.asarray(arrows["vectors"], dtype=float).reshape(-1, 3)
+        length, width, color, cmap = arrow_style(arrows)
         if varies(vectors[:, 2]) or np.any(np.abs(vectors[:, 2]) > 1e-12):
-            dots, mappable = value_colors(vectors[:, 2])
-            circles(ax, xy, 0.5 * RADIUS, 5, facecolors=dots, edgecolors=theme.ARROW,
+            dots, mappable = value_colors(vectors[:, 2], cmap=cmap)
+            circles(ax, xy, 0.5 * radius, 5, facecolors=dots, edgecolors=color,
                     linewidths=0.4)
             add_bar(mappable, f"{arrows.get('label', '')}, z (dots)")
         shown = finite_vectors(vectors)
@@ -381,17 +402,17 @@ def draw_structure(ax, build, highlight=None, selected=None, removed=None, image
         longest = float(lengths.max()) if len(lengths) else 0.0
         if longest > 1e-12:
             ax.quiver(xy[shown, 0], xy[shown, 1], vectors[shown, 0], vectors[shown, 1],
-                      angles="xy", scale_units="xy", scale=longest / 0.8, pivot="middle",
-                      width=0.006, color=theme.ARROW, zorder=8)
+                      angles="xy", scale_units="xy", scale=longest / (0.8 * length),
+                      pivot="middle", width=0.006 * width, color=color, zorder=8)
     outline = cell_outline(build)
     if outline is not None:
         ax.add_patch(Polygon(outline, closed=True, fill=False, edgecolor=theme.CELL,
                              linestyle="--", linewidth=1.0, zorder=0))
     if highlight is not None and np.any(highlight):
-        circles(ax, xy[np.asarray(highlight, dtype=bool)], 1.7 * RADIUS, 5, facecolors="none",
+        circles(ax, xy[np.asarray(highlight, dtype=bool)], 1.7 * radius, 5, facecolors="none",
                 edgecolors=theme.REGION, linewidths=1.8)
     idx = np.asarray(selected if selected is not None else [], dtype=int)
-    selection = circles(ax, xy[idx], 1.45 * RADIUS, SELECTION_ZORDER, facecolors="none",
+    selection = circles(ax, xy[idx], 1.45 * radius, SELECTION_ZORDER, facecolors="none",
                         edgecolors=theme.SELECTED, linewidths=2.0)
     if removed is not None and len(removed):
         p = np.asarray(removed, dtype=float).reshape(-1, 3)[:, :2]
@@ -452,17 +473,18 @@ def cell_edges_3d(build):
 
 
 def draw_structure_3d(ax, build, highlight=None, selected=None, removed=None, images=True,
-                      site_values=None, arrows=None, hoppings=None):
-    """draw_structure for a geometry that is not flat, on an mplot3d Axes;
+                      site_values=None, arrows=None, hoppings=None, atom_size=1.0, bonds=True):
+    """draw_structure for a geometry that is not flat, on an mplot3d Axes
+    (atom_size scales the area of the points, which is in points squared);
     returns the scatter of the selected sites (its _offsets3d moves them)."""
     r = np.asarray(build["positions"], dtype=float).reshape(-1, 3)
     n = len(r)
-    size = float(np.clip(4000 / max(n, 1), 12, 120))
+    size = float(np.clip(4000 / max(n, 1), 12, 120)) * float(atom_size) ** 2
     colors = site_colors(build)
     if site_values is not None:
         symmetric = site_values.get("symmetric", True)
         colors, mappable = value_colors(site_values["values"], symmetric=symmetric,
-                                        cmap=VALUE_MAP if symmetric else SEQUENTIAL_MAP)
+                                        cmap=value_map(site_values))
         if varies(site_values["values"]):
             colorbar(ax, mappable, site_values.get("label", ""), shrink=0.6)
     if hoppings is not None:
@@ -478,7 +500,7 @@ def draw_structure_3d(ax, build, highlight=None, selected=None, removed=None, im
                                       cmap=theme.PHASE_MAP)
         bond_colors = phase_map.to_rgba(np.asarray(hoppings["phase"]))
     else:
-        segments = bond_segments_3d(build)
+        segments = bond_segments_3d(build) if bonds else np.zeros((0, 2, 3))
         widths, bond_colors = 1.2, theme.BOND
     if len(segments):
         ax.add_collection3d(Line3DCollection(segments, colors=bond_colors, linewidths=widths))
@@ -499,9 +521,10 @@ def draw_structure_3d(ax, build, highlight=None, selected=None, removed=None, im
         lengths = np.linalg.norm(vectors[shown], axis=1)
         longest = float(lengths.max()) if len(lengths) else 0.0
         if longest > 1e-12:
-            v, at = vectors[shown] * (0.8 / longest), r[shown]
+            length, width, color, _ = arrow_style(arrows)
+            v, at = vectors[shown] * (0.8 * length / longest), r[shown]
             ax.quiver(at[:, 0] - v[:, 0] / 2, at[:, 1] - v[:, 1] / 2, at[:, 2] - v[:, 2] / 2,
-                      v[:, 0], v[:, 1], v[:, 2], color=theme.ARROW, linewidth=1.2,
+                      v[:, 0], v[:, 1], v[:, 2], color=color, linewidth=1.2 * width,
                       arrow_length_ratio=0.3)
     if highlight is not None and np.any(highlight):
         h = r[np.asarray(highlight, dtype=bool)]
