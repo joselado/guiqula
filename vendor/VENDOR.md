@@ -5,8 +5,8 @@ during development. Never edit anything under `vendor/pyqula/`; refresh
 the whole copy instead.
 
 - Source: a local checkout of https://github.com/joselado/pyqula (working tree, not git HEAD)
-- Upstream HEAD at copy time: `08a817936aa28c70dc65e388119c5d1fbb1b0ba6` (2026-09-27 16:21:22 +0300)
-- Copied on: 2026-09-27
+- Upstream HEAD at copy time: `0cdb0632e03929f0144e396e3be43b8943b17bec` (2026-10-06 12:53:33 +0300)
+- Copied on: 2026-10-06
 - Uncommitted upstream changes that were included in this copy:
     (none)
 

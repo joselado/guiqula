@@ -60,7 +60,18 @@ def _build_v(h, J1=0.0, J2=0.0, J3=0.0, Jr=None, nd=None, rcut=None):
     rcut: range of the Jr tail, with the same meaning as for Vr (every
     pair up to rcut, whole distance shells; None keeps every pair of a 0d
     system and means 5.0 for a periodic one), see
-    specialhopping.distance_cut_interaction."""
+    specialhopping.distance_cut_interaction. The pair of a site with
+    itself is one of them, as it is for Vr: both enter as half the sum
+    over ordered pairs, H = 1/2 sum_ij [Vr(r_ij) n_i n_j + Jr(r_ij) S_i.S_j],
+    so Jr(0) is an onsite (Jr(0)/2) S_i.S_i, which at the mean-field level
+    is a Hubbard U = -3 Jr(0)/4 (the three channels each give -Jr(0)/4
+    n_up n_dn, and the same-spin entries drop out of Hartree-Fock), the
+    way Vr(0) is a Hubbard U = Vr(0). Measured: Jr(0)=-4 alone converges
+    to the Hamiltonian of U=3 to 2e-16 (tests/scf/test_vr_per_pair.py),
+    and the kernel built from it agrees with a brute-force reference
+    written with the same diagonal (tests/magnon/test_exchange_rung.py).
+    A Jr meant as a bond coupling only has to return zero at zero
+    distance."""
     if nd is None: nd = h.geometry.neighbor_distances() # distances to the neighbor shells
     mgenerator = specialhopping.distance_hopping_matrix(
             [J1/2., J2/2., J3/2.], nd[0:3])
@@ -383,14 +394,18 @@ def VJinteraction(h0, V1=0.0, V2=0.0, V3=0.0, U=0.0, Vr=None,
         mf=None, filling=0.5, mu=None, mix=None, nk=8, maxerror=1e-5,
         maxite=_MAXITE_UNSET, T=_T_UNSET, verbose=0, constrains=[],
         integration="ed", scale=None, npol=None, ne=None, cores=None,
-        use_jax=False, solver=None, gmres_tol=None, gmres_restart=None,
-        kick_steps=None, rcut=None, write=None):
+        kpm_prec=None, use_jax=False, solver=None, gmres_tol=None,
+        gmres_restart=None, kick_steps=None, rcut=None, write=None):
     """Self-consistent mean field combining density-density interactions
     (U onsite Hubbard, V1/V2/V3/Vr neighbor-shell -- same convention as
     Vinteraction) with spin-spin exchange in a single SCF loop. rcut is
     the range of Vr and Jr: every pair of sites up to rcut interacts and none
     beyond it; None keeps every pair of a finite (0d) system and means 5.0
-    for a periodic one, see specialhopping.distance_cut_interaction.
+    for a periodic one, see specialhopping.distance_cut_interaction. The
+    pair of a site with itself is one of those pairs, so Vr(0) is an
+    onsite Hubbard U = Vr(0) and Jr(0) an onsite (Jr(0)/2) S_i.S_i, a
+    Hubbard U = -3 Jr(0)/4 at the mean-field level; a function meant as a
+    bond coupling only has to return zero at zero distance (see _build_v).
 
     J1/J2/J3 (+ Jr, a general distance-dependent function) are isotropic
     Heisenberg-like exchange, J*(Sx_i Sx_j + Sy_i Sy_j + Sz_i Sz_j), for the
@@ -486,35 +501,14 @@ def VJinteraction(h0, V1=0.0, V2=0.0, V3=0.0, U=0.0, Vr=None,
     mu=None) the same diagonalization-free way via
     kpmtk.densitymatrix_kpm.get_fermi4filling_kpm.
 
-    PERFORMANCE CAVEAT (measured 2026-07-27, not just a theoretical
-    concern): despite kpmtk.densitymatrix_kpm._dm_kpm_from_needed batching
-    its Chebyshev-moment-to-density-matrix reconstruction across every
-    needed (row,col) pair at a given k (a ~3x speedup over the original
-    per-pair implementation, verified against "ed" to ~1e-7), this backend
-    is currently far SLOWER than integration="ed" at small/moderate system
-    sizes, not faster -- measured ~50-60x slower per SCF iteration on a
-    98-site (196-orbital) honeycomb Hubbard system (nk=4, npol=200): ED
-    ~0.05-0.16s/iteration vs KPM ~7-9s/iteration. The reason is that ED's
-    per-k diagonalization goes through highly-tuned dense LAPACK routines,
-    which are extremely fast for a small-to-moderate matrix regardless of
-    algorithmic complexity, while this KPM implementation still pays real
-    per-element and per-orbital overhead that ED simply doesn't have: a
-    separate Chebyshev VECTOR recursion per needed (row,col,k) triple
-    (kpm_moments_vivj -- not yet batched across pairs sharing a starting
-    vector/column, unlike the profile-reconstruction step, which is), and
-    get_fermi4filling_kpm's own O(n_orb) separate per-orbital moment
-    calculation (a deterministic trace, not a stochastic few-random-vector
-    estimate) when mu=None, which was not touched by this round of fixes
-    and is now a comparable-or-larger fraction of the per-iteration cost
-    than the density-matrix step. Neither of those remaining costs scales
-    down with system size the way ED's O(n^3) diagonalization eventually
-    becomes the bottleneck at -- so while this backend should in principle
-    win for a large enough (or sparse enough) system, that crossover was
-    not reached in the sizes tested here (up to ~200 sites), and further
-    batching work (grouping needed pairs by shared starting column,
-    stochastic-trace Fermi search) would very likely be needed first to
-    reach it in practice. Use integration="ed" unless you have confirmed
-    "kpm" is actually faster for your specific system size/sparsity.
+    Performance: integration="kpm" shares Vinteraction_kpm's engine, one
+    block Chebyshev recursion over every orbital and k-point
+    (kpmtk/pairmomentsjax.py), on the GPU when pyqula.gpu.set_gpu(True)
+    and in single precision there unless kpm_prec says otherwise; see
+    Vinteraction_kpm's docstring for the measured crossover with
+    integration="ed", which sits at a few thousand orbitals on the CPU and
+    below a thousand on a consumer card. For a small cell on a k-mesh,
+    integration="ed" stays the faster choice.
     Only supported for a normal-state Hamiltonian, for the
     same reason the sparse ED path is restricted that way (see
     _run_anisotropic_scf's docstring): a BdG/Nambu VJinteraction call
@@ -527,8 +521,10 @@ def VJinteraction(h0, V1=0.0, V2=0.0, V3=0.0, U=0.0, Vr=None,
     estimated automatically when None; npol: number of Chebyshev moments,
     defaulting to kpmtk.densitymatrix_kpm.DEFAULT_NPOL when None; ne:
     number of energies sampled in the occupied window; cores: number of
-    parallel workers across k-points); all four are unused when
-    integration="ed".
+    parallel workers of the Fermi search on the CPU); kpm_prec is the
+    precision of the Chebyshev recursion, None for single on the GPU and
+    double on the CPU (kpmtk.densitymatrix_kpm.resolve_kpm_prec); all five
+    are unused when integration="ed".
 
     NOTE: unlike the "ed" path, scf.dm after convergence under
     integration="kpm" only holds the sparse subset of entries the SCF loop
@@ -628,7 +624,8 @@ def VJinteraction(h0, V1=0.0, V2=0.0, V3=0.0, U=0.0, Vr=None,
                     "not support a per-site (array) filling, got %r; use "
                     "the default (numpy) engine, use_jax=False, for a "
                     "per-site filling target" % (filling,))
-        kpm_only = {"scale": scale, "npol": npol, "ne": ne, "cores": cores}
+        kpm_only = {"scale": scale, "npol": npol, "ne": ne, "cores": cores,
+                "kpm_prec": kpm_prec}
         kpm_only_set = {k: v for k, v in kpm_only.items() if v is not None}
         if kpm_only_set:
             raise NotImplementedError("VJinteraction's use_jax=True only "
@@ -688,7 +685,7 @@ def VJinteraction(h0, V1=0.0, V2=0.0, V3=0.0, U=0.0, Vr=None,
             maxerror, maxite, T, verbose, constrains, vd=vd,
             vz_exchange=vz_exchange, vd_reference=vd_reference,
             integration=integration, scale=scale, npol=npol, ne=ne,
-            cores=cores)
+            cores=cores, kpm_prec=kpm_prec)
 
 
 def _site_resolved(x):
@@ -870,7 +867,8 @@ def _rot_dm(dd, R):
 
 def _run_anisotropic_scf(h1, vx, vy, vz, mf, filling, mu, mix, nk,
         maxerror, maxite, T, verbose, constrains, vd=None, vz_exchange=None,
-        vd_reference=None, integration="ed", scale=None, npol=None, ne=None, cores=None):
+        vd_reference=None, integration="ed", scale=None, npol=None, ne=None, cores=None,
+        kpm_prec=None):
     """Shared SCF core for Jinteraction/VJinteraction: decouples the
     z-channel matrix `vz` directly (Hartree-Fock density-density in the
     lab/computational spin basis) and the x/y-channel matrices `vx`/`vy`
@@ -1137,7 +1135,7 @@ def _run_anisotropic_scf(h1, vx, vy, vz, mf, filling, mu, mix, nk,
             # one, so this is intentionally NOT deduplicated with
             # get_fermi4filling_kpm's call despite the shared formula.
             dm = _dm_kpm_from_needed(h, kpm_needed, nk=nk, scale=scale,
-                    npol=npol, ne=ne, cores=cores, T=T)
+                    npol=npol, ne=ne, cores=cores, T=T, kpm_prec=kpm_prec)
             for d in v_dirs: # every requested direction must have a key,
                 if d not in dm: # even one contributing no needed entries
                     dm[d] = np.zeros((n_dm, n_dm), dtype=np.complex128)
@@ -1268,7 +1266,7 @@ def _run_anisotropic_scf(h1, vx, vy, vz, mf, filling, mu, mix, nk,
                 # Fermi-Dirac weight at this same T -- see the identical
                 # comment in densitydensity_kpm.densitydensity_kpm
                 fermi = get_fermi4filling_kpm(h, filling, nk=nk, scale=scale,
-                        npol=npol, ne=ne, cores=cores, T=T)
+                        npol=npol, ne=ne, cores=cores, T=T, kpm_prec=kpm_prec)
                 h.fermi = fermi
                 h.shift_fermi(-fermi)
             else:
@@ -1515,7 +1513,7 @@ def _run_anisotropic_scf(h1, vx, vy, vz, mf, filling, mu, mix, nk,
         # default forces a dense diagonalization regardless of use_kpm --
         # see get_total_energy_kpm's docstring
         etot = get_total_energy_kpm(h, fermi=0.0, nk=nk, scale=scale,
-                npol=npol, ne=ne, cores=cores)
+                npol=npol, ne=ne, cores=cores, kpm_prec=kpm_prec)
     else:
         etot = h.get_total_energy(nk=h.nk)
     if mu is None:
