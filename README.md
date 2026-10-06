@@ -91,7 +91,8 @@ cached.
 - Every plot is interactive; a slider or a sweep is attached from the menu of a
   parameter's name, and with the automatic re-run on (Follow) cheap results are computed
   again as a slider moves; overlays compare results; a Style button sets the widths,
-  sizes, colours and colour maps that make sense for each plot kind; the k-path is
+  sizes, colours and colour maps that make sense for each plot kind; a grid shows
+  several results side by side, each dragged into its cell by its tab; the k-path is
   edited on the Brillouin zone.
 - Every result exports its figure, its data and the pyqula script that reproduces it. A
   Python console sees the live Hamiltonian.
@@ -115,9 +116,10 @@ model and run again.
 `guiqula kagome_flat_band`. Nearest-neighbour hopping on the kagome lattice gives two
 dispersive bands touching at Dirac points, and a band that does not disperse at all:
 destructive interference traps the electrons on the hexagons, and the density of states
-shows it as a sharp peak.
+shows it as a sharp peak; the two results are shown here side by side, in a grid of one
+row and two columns (View > New grid of results), each dragged there by its tab.
 
-![guiqula with the kagome bands: two dispersive bands with Dirac points and a flat band](https://raw.githubusercontent.com/joselado/guiqula/master/docs/images/kagome.png)
+![guiqula with the kagome bands and density of states side by side in a grid: two dispersive bands with Dirac points, a flat band and its peak](https://raw.githubusercontent.com/joselado/guiqula/master/docs/images/kagome.png)
 
 Try: add a Zeeman field, or a Haldane-like coupling, and see what happens to the flat
 band.

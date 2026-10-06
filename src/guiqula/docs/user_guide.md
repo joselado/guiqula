@@ -131,7 +131,8 @@ moves or deletes.
 The centre holds the Structure tab (the geometry, the Hamiltonian or a Field, drawn on the
 atoms), the k-space tab (the Brillouin zone and the k-path, there only while the selected
 system has a periodic direction) and one tab per calculation's result, which can be
-closed (Ctrl+W) or detached into a window of its own. Each drawing has a bar above it
+closed (Ctrl+W), detached into a window of its own, or dragged into a grid (see Grids of
+results). Each drawing has a bar above it
 with what that drawing needs, and on a narrow window the bar wraps onto further lines
 rather than hiding a control:
 
@@ -502,6 +503,31 @@ name (`linewidth`, `color`, `dots`, `fill`, `size`, `cmap`, `saturate`, `smooth`
 `atom_size`, `bonds`, `arrow_length`, `arrow_width`, `arrow_color`), `reset` clearing
 them first.
 
+## Grids of results
+
+Let us now see how several results are looked at together. A grid is a tab of the
+viewport split into rows and columns of cells, made by the button at the right end of the
+tab bar or by View > New grid of results, two by two at first; its bar sets the number of
+rows and of columns, from 1 to 4 each. A result goes into a cell by dragging its tab from
+the tab bar onto the cell, and while the drag passes over the Grid tab that tab is shown,
+so a grid in the back is reached in one gesture. What sits in the cell is the result's
+view itself, not a copy, meaning that it keeps its bar, its status row, its picks and its
+style, and a run draws into it as it drew into the tab; its tab leaves the bar meanwhile,
+and the title of the cell carries the marks the tab carried. A click on that title selects
+the calculation, so that Run names it. Dragging the title onto another cell moves the
+result there, and the two swap when that cell is taken; a result dragged from its tab onto
+a taken cell sends the one there back to its tab instead. The × of the title, or dragging
+the title onto the tab bar, gives the result back to its tab; so does a smaller grid for
+the cells it leaves out, and closing the grid (its ×, or Ctrl+W while it is shown) for
+all of them, so that a result is never closed by a grid. Detach works from a cell too, and
+Attach brings the view back to the cell it left while that cell is free. Save image, in
+the grid's bar, writes the tab as shown to a PNG; a figure for a paper is still the Export
+of each result. The grids and what each cell holds are saved with the project, with the
+rest of the view. Headless, the `grid` action makes a grid (`rows`, `cols`) or changes the
+one named by `grid` (`g1`, ...: `rows`, `cols`, `close`, or `image`, the path of the PNG),
+and `grid_place` puts a `calculation` in the cell at `row` and `col` of a `grid`, counted
+from 0, or back into its tab when `grid` is left out.
+
 ## Overlays and exports
 
 The Overlay menu of a result draws another result on the same axes, or the difference of
@@ -675,7 +701,7 @@ functions only: the window loads the plugin too, and must start without pyqula.
 | window | Ctrl+3 | Calculate workspace |
 | window | Ctrl+F | the Add menu of the workspace, with its search line (ops, terms or calculations); the filter of the start page |
 | window | Ctrl+0 | show the Structure tab |
-| window | Ctrl+W | close the result tab shown |
+| window | Ctrl+W | close the result tab or the grid shown |
 | window | F5 | run the selected calculation |
 | window | Esc | cancel the selected calculation's job |
 | window | Ctrl+/ | this list of shortcuts |

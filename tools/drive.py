@@ -54,7 +54,12 @@ is startPage, shown while the document has no system; its cards are
 startLattice_<kind>, startPreset_<name>, ..., made as they come into sight,
 so that a folded card is a widget only after Show all, a search or
 window.start_page.card(kind, name)), run (calculation, or the
-selected one: as the Run button does, through the cost guard); the
+selected one: as the Run button does, through the cost guard), grid (a
+new grid of result views, rows and cols, 2 x 2 by default, its widget
+grid_<id> and its cells gridCell_<id>_<row>_<col>; or grid: g1 and rows,
+cols, close or image, a PNG of it), grid_place (calculation, grid, row,
+col counted from 0: its result shown in that cell; grid left out: back
+into its tab); the
 session's undo, redo (with "steps") and history; lock and unlock are
 mutations. The driven window never reads or writes the settings file.
 Every calculation's result has its own view, plot_<calculation id>, with

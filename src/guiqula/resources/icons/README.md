@@ -82,3 +82,5 @@ every icon in both themes.
 | `expand` | `chevron-down` | 3.35.0 |
 | `collapse` | `chevron-up` | 3.35.0 |
 | `brush` | `brush` | 3.35.0 |
+| `grid` | `layout-grid` | 3.35.0 |
+| `close` | `x` | 3.35.0 |

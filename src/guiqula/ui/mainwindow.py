@@ -83,6 +83,7 @@ from guiqula.ui.jobpanel import JobPanel
 from guiqula.ui.outliner import Outliner, pseudo_ids, system_of
 from guiqula.ui.palette import FAMILIES as PALETTE_FAMILIES, MenuButton, PaletteMenu
 from guiqula.ui.marks import ERROR_STATES, calculation_state, mark
+from guiqula.ui.grid import MAX_SIDE as GRID_MAX_SIDE, GridView, ResultTabBar
 from guiqula.ui.plots import ROW_STATES, PlotView, ResultWindow, in_3d as plot_in_3d
 from guiqula.ui.properties import PropertiesPanel
 from guiqula.ui.start import StartPage
@@ -100,7 +101,8 @@ WINDOW_ACTIONS = ("select", "workspace", "tool", "select_sites", "region_from_se
                   "overlay", "plot_style", "slider", "set_slider", "remove_slider", "paint",
                   "theme", "export_bundle", "help", "remote", "pick", "pick_to",
                   "run_at_once", "renderer_3d", "view_3d", "plot_text", "ui_text",
-                  "reset_layout", "log", "panel", "add_menu", "run_stale", "start", "run")
+                  "reset_layout", "log", "panel", "add_menu", "run_stale", "start", "run",
+                  "grid", "grid_place")
 STRUCTURE_TAB = 0
 KSPACE_TAB = 1
 # a new classical system: its lattice, and a supercell the usual orders fit in
@@ -201,6 +203,8 @@ class MainWindow(QMainWindow):
         self.overlays = {}             # calculation id -> [(other calculation, mode)] drawn over it
         self.plot_styles = {}          # calculation id -> the style of its plot (ui/plotstyle.py)
         self.plot_windows = {}         # calculation id -> ResultWindow of a detached view
+        self.grids = {}                # grid id -> GridView, a tab of result views (ui/grid.py)
+        self._detached_from = {}       # calculation id -> the cell it was detached from
         self.canvas_view = "structure"
         self.field_preview = None      # (entry, parameter) the field view draws
         self.auto_rerun = False
@@ -247,7 +251,20 @@ class MainWindow(QMainWindow):
         self.central_stack.addWidget(self.start_page)
         self.viewport = QTabWidget()
         self.viewport.setObjectName("viewport")
+        # a result's tab is dragged onto a cell of a grid, and a cell's title dropped on the
+        # bar gives the result back to its tab (ui/grid.py)
+        self.viewport.setTabBar(ResultTabBar(self._result_tab))
+        self.viewport.tabBar().dropped.connect(
+            lambda calc: QTimer.singleShot(0, lambda: self._act("grid_place", calculation=calc)))
         self.viewport.setTabsClosable(True)
+        self.new_grid_button = QToolButton()
+        self.new_grid_button.setObjectName("newGridButton")
+        self.new_grid_button.setAutoRaise(True)
+        self.new_grid_button.setToolTip("a new grid of results: a tab of rows and columns of "
+                                        "cells, each showing one result, dragged there by its "
+                                        "tab")
+        self.new_grid_button.clicked.connect(lambda: self._act("grid"))
+        self.viewport.setCornerWidget(self.new_grid_button, Qt.Corner.TopRightCorner)
         self.central_stack.addWidget(self.viewport)
         self.structure = StructureView()
         self.structure.selection_changed.connect(self._selection_changed)
@@ -395,6 +412,10 @@ class MainWindow(QMainWindow):
             button.setIconSize(icons.size())
         self.viewport.setTabIcon(STRUCTURE_TAB, icons.icon("structure"))
         self.viewport.setTabIcon(KSPACE_TAB, icons.icon("kspace"))
+        for grid in self.grids.values():
+            self.viewport.setTabIcon(self.viewport.indexOf(grid), icons.icon("grid"))
+        self.new_grid_button.setIcon(icons.icon("grid"))
+        self.new_grid_button.setIconSize(icons.size())
         self.viewport.setIconSize(icons.size())
 
     def _set_menu_icons(self):
@@ -854,7 +875,9 @@ class MainWindow(QMainWindow):
                          lambda checked=False, n=name: self.set_workspace(n), f"workspace_{name}")
         self._action(view, "&Structure tab", lambda: self.viewport.setCurrentIndex(STRUCTURE_TAB),
                      "structure_tab")
-        self._action(view, "&Close result tab", self.close_current_result, "close_result")
+        self._action(view, "&Close result tab or grid", self.close_current_result, "close_result")
+        self._menu_icons[self._action(view, "New &grid of results", lambda: self._act("grid"),
+                                      name="newGridAction")] = "grid"
         self._menu_icons[self._action(view, "&Find in the Add menu", self.focus_search, "find")] = \
             "search"
         view.addSeparator()
@@ -1052,6 +1075,8 @@ class MainWindow(QMainWindow):
         dispatcher.register_action("ui_text", lambda name="normal": self.set_ui_text(name))
         dispatcher.register_action("reset_layout", self.reset_layout)
         dispatcher.register_action("log", lambda enabled=True: self.set_log(enabled))
+        dispatcher.register_action("grid", self.grid)
+        dispatcher.register_action("grid_place", self.place_result)
         dispatcher.register_action("panel", self.show_panel)
         dispatcher.register_action("view_3d", self.set_view_3d)
         dispatcher.register_action("add_menu", self.open_add_menu)
@@ -1613,6 +1638,8 @@ class MainWindow(QMainWindow):
                                  for calc, chosen in self.overlays.items()}
         if self.plot_styles:
             state["styles"] = {calc: dict(style) for calc, style in self.plot_styles.items()}
+        if self.grids:
+            state["grids"] = [self.grid_state(grid_id) for grid_id in self.grids]
         if self.sliders:
             state["sliders"] = [dict(s) for s in self.sliders]
         if self.field_preview is not None:
@@ -1634,6 +1661,8 @@ class MainWindow(QMainWindow):
         self._pending_sites = None
         for calc in list(self.plots):
             self.close_result(calc)
+        for grid_id in list(self.grids):
+            self.close_grid(grid_id)
         self.field_preview = None
         preview = ui.get("preview")
         if isinstance(preview, list) and len(preview) == 2 and all(isinstance(p, str)
@@ -1691,6 +1720,19 @@ class MainWindow(QMainWindow):
         for calc in ui.get("results", []) if isinstance(ui.get("results"), list) else []:
             if isinstance(calc, str) and calc in calculations:
                 self.result_view(calc)
+        for spec in ui.get("grids", []) if isinstance(ui.get("grids"), list) else []:
+            try:
+                grid_id = spec["grid"]
+                if not (isinstance(grid_id, str) and grid_id.startswith("g")) or \
+                        grid_id in self.grids:
+                    continue
+                self._make_grid(grid_id, min(max(int(spec["rows"]), 1), GRID_MAX_SIDE),
+                                min(max(int(spec["cols"]), 1), GRID_MAX_SIDE))
+                for row, col, calc in spec.get("cells", []):
+                    if calc in calculations and self._cell_of(calc) is None:
+                        self.place_result(calc, grid_id, row, col)
+            except Exception:
+                pass
         tab = ui.get("tab")
         if tab == "result" and self.selected_calculation():           # before phase 3
             tab = ui.get("calculation") or self.selected_calculation()
@@ -1698,6 +1740,9 @@ class MainWindow(QMainWindow):
             self.viewport.setCurrentIndex(STRUCTURE_TAB)
         elif tab == "kspace":
             self.viewport.setCurrentIndex(KSPACE_TAB)
+        elif isinstance(tab, str) and tab.startswith("grid:") and \
+                tab.removeprefix("grid:") in self.grids:
+            self.viewport.setCurrentWidget(self.grids[tab.removeprefix("grid:")])
         elif isinstance(tab, str) and tab in calculations:
             self.show_result(tab)
         sites = ui.get("sites")
@@ -2114,7 +2159,10 @@ class MainWindow(QMainWindow):
         in the viewport's bar and visible."""
         if tab == "structure":
             return True
-        widget = self.kspace_view if tab == "kspace" else self.plots.get(tab)
+        if tab.startswith("grid:"):
+            widget = self.grids.get(tab.removeprefix("grid:"))
+        else:
+            widget = self.kspace_view if tab == "kspace" else self.plots.get(tab)
         index = self.viewport.indexOf(widget) if widget is not None else -1
         return index >= 0 and self.viewport.isTabVisible(index)
 
@@ -2168,6 +2216,8 @@ class MainWindow(QMainWindow):
         widget = self.viewport.currentWidget()
         if widget is self.kspace_view:
             return "kspace"
+        if isinstance(widget, GridView):
+            return f"grid:{widget.grid_id}"
         return widget.calc_id if isinstance(widget, PlotView) else "structure"
 
     def result_view(self, calc):
@@ -2196,14 +2246,21 @@ class MainWindow(QMainWindow):
         """Bring a calculation's result view forward (its tab, or its window)."""
         view = self.result_view(calc)
         window = self.plot_windows.get(calc)
+        cell = self._cell_of(calc)
         if window is not None:
             window.show()
             window.raise_()
+        elif cell is not None:
+            self.viewport.setCurrentWidget(self.grids[cell[0]])
         else:
             self.viewport.setCurrentWidget(view)
         return calc
 
     def close_result(self, calc):
+        cell = self._cell_of(calc)
+        if cell is not None:
+            self.grids[cell[0]].cell(*cell[1:]).take()
+        self._detached_from.pop(calc, None)
         view = self.plots.pop(calc, None)
         window = self.plot_windows.pop(calc, None)
         if view is None:
@@ -2224,23 +2281,27 @@ class MainWindow(QMainWindow):
         widget = self.viewport.widget(index)
         if isinstance(widget, PlotView):
             self.close_result(widget.calc_id)
+        elif isinstance(widget, GridView):
+            self.close_grid(widget.grid_id)
 
     def toggle_detached(self, calc):
         """Move a result view into a window of its own (a plain window, not a
         floating dock, so that it can be moved on Wayland too: see
         ResultWindow), or back into its tab."""
         view = self.plots[calc]
-        window = self.plot_windows.pop(calc, None)
-        if window is not None:
-            window.release()
-            window.hide()
-            window.deleteLater()
-            self.viewport.addTab(view, self._tab_text(calc))
-            self.viewport.setCurrentWidget(view)
-            view.set_detached(False)
-            self._show_state(calc)          # the tab's mark, colour and tooltip
+        if calc in self.plot_windows:      # back where it came from: its cell, if still free
+            home = self._detached_from.pop(calc, None)
+            if home is not None and home[0] in self.grids and \
+                    self.grids[home[0]].cells.get(home[1:]) is not None and \
+                    self.grids[home[0]].cell(*home[1:]).calc is None:
+                self.place_result(calc, *home)
+            else:
+                self._to_tab(calc)
             return False
-        self.viewport.removeTab(self.viewport.indexOf(view))
+        cell = self._cell_of(calc)
+        self._unplace(calc)
+        if cell is not None:
+            self._detached_from[calc] = cell
         window = ResultWindow(calc, view, self)
         window.setWindowTitle(f"Result {calc}")
         window.resize(640, 480)
@@ -2250,6 +2311,171 @@ class MainWindow(QMainWindow):
         self.plot_windows[calc] = window
         self._show_state(calc)              # the window's title carries the mark
         return True
+
+    # ---- grids of result views (ui/grid.py, decisions 170 to 180)
+    def _result_tab(self, index):
+        """The calculation whose result tab is at a viewport index, or None."""
+        widget = self.viewport.widget(index)
+        return widget.calc_id if isinstance(widget, PlotView) else None
+
+    def _cell_of(self, calc):
+        """(grid id, row, column) of the cell showing calc's result, or None."""
+        for grid_id, grid in self.grids.items():
+            key = grid.where(calc)
+            if key is not None:
+                return (grid_id, *key)
+        return None
+
+    def _unplace(self, calc):
+        """Take a result view out of wherever it is (its tab, its window or a
+        cell), unparented, to be placed again."""
+        view = self.plots[calc]
+        cell = self._cell_of(calc)
+        if cell is not None:
+            self.grids[cell[0]].cell(*cell[1:]).take()
+            return view
+        window = self.plot_windows.pop(calc, None)
+        if window is not None:
+            window.release()
+            window.hide()
+            window.deleteLater()
+            return view
+        index = self.viewport.indexOf(view)
+        if index >= 0:
+            self.viewport.removeTab(index)
+        return view
+
+    def _to_tab(self, calc, show=True):
+        """A result view back into its tab of the viewport."""
+        view = self._unplace(calc)
+        self.viewport.addTab(view, self._tab_text(calc))
+        view.set_detached(False)
+        if show:
+            self.viewport.setCurrentWidget(view)
+        self._show_state(calc)              # the tab's mark, colour and tooltip
+
+    def _make_grid(self, grid_id, rows, cols):
+        grid = GridView(grid_id, rows, cols)
+        grid.shape_requested.connect(lambda g, r, c: self._act("grid", grid=g, rows=r, cols=c))
+        # after the drag has returned, since the drop may take a tab from the bar dragging it
+        grid.drop_requested.connect(lambda calc, g, r, c: QTimer.singleShot(
+            0, lambda: self._act("grid_place", calculation=calc, grid=g, row=r, col=c)))
+        grid.release_requested.connect(lambda calc: self._act("grid_place", calculation=calc))
+        grid.chosen.connect(self.select)
+        grid.save_requested.connect(self.save_grid_dialog)
+        self.grids[grid_id] = grid
+        index = self.viewport.addTab(grid, f"Grid {grid_id.removeprefix('g')}")
+        self.viewport.setTabIcon(index, icons.icon("grid"))
+        self.viewport.setTabToolTip(index, "a grid of results: drag a result's tab onto a "
+                                           "cell")
+        return grid
+
+    def grid_state(self, grid_id):
+        """A grid as the grid action returns it and the view state keeps it."""
+        grid = self.grids[grid_id]
+        return {"grid": grid_id, "rows": grid.rows, "cols": grid.cols,
+                "cells": [[row, col, calc] for (row, col), calc in sorted(grid.placed().items())]}
+
+    def grid(self, grid=None, rows=None, cols=None, close=False, image=None):
+        """A grid of result views, a tab of the viewport: a new one when grid
+        is left out (2 x 2 unless rows and cols say otherwise), shown; else
+        that grid reshaped (the results of the cells taken away go back to
+        their tabs), closed (every result back to its tab), or saved as an
+        image (a PNG at the path image, as it is shown). Returns the grid as
+        grid_state says it, None once closed."""
+        def side(value, default):
+            value = default if value is None else int(value)
+            if not 1 <= value <= GRID_MAX_SIDE:
+                raise ValueError(f"a grid has 1 to {GRID_MAX_SIDE} rows and columns, "
+                                 f"not {value}")
+            return value
+        if grid is None:
+            if close or image:
+                raise ValueError("close and image name a grid")
+            number = 1
+            while f"g{number}" in self.grids:
+                number += 1
+            made = self._make_grid(f"g{number}", side(rows, 2), side(cols, 2))
+            self.viewport.setCurrentWidget(made)
+            return self.grid_state(made.grid_id)
+        if grid not in self.grids:
+            raise KeyError(f"no grid {grid!r}; the grids are {', '.join(self.grids) or 'none'}")
+        if close:
+            self.close_grid(grid)
+            return None
+        view = self.grids[grid]
+        if rows is not None or cols is not None:
+            rows, cols = side(rows, view.rows), side(cols, view.cols)
+            for calc in view.outside(rows, cols):
+                self._to_tab(calc, show=False)
+            view.set_shape(rows, cols)
+        if image:
+            if not view.grab().save(str(image)):
+                raise OSError(f"could not write {image}")
+        return self.grid_state(grid)
+
+    def close_grid(self, grid_id):
+        """Close a grid's tab; its results go back to their tabs."""
+        grid = self.grids.get(grid_id)
+        if grid is None:
+            return
+        for calc in grid.placed().values():
+            self._to_tab(calc, show=False)
+        for calc, home in list(self._detached_from.items()):
+            if home[0] == grid_id:
+                del self._detached_from[calc]
+        del self.grids[grid_id]
+        self.viewport.removeTab(self.viewport.indexOf(grid))
+        grid.hide()
+        grid.deleteLater()                # may run inside a signal of its own tab bar
+
+    def place_result(self, calculation, grid=None, row=0, col=0):
+        """Show a calculation's result in a cell of a grid (made as a tab if
+        it had no view yet); a result already in that cell's place swaps
+        with it when it came from another cell, else goes back to its tab.
+        grid left out: the result back into its tab (from a cell or a
+        window of its own). Returns where it is: the grid's state, or "tab"."""
+        if calculation not in self._calculation_ids():
+            raise KeyError(f"no calculation {calculation!r}")
+        view = self.result_view(calculation)
+        if grid is None:
+            if calculation in self.plot_windows or self._cell_of(calculation) is not None:
+                self._detached_from.pop(calculation, None)
+                self._to_tab(calculation)
+            else:
+                self.show_result(calculation)
+            return "tab"
+        if grid not in self.grids:
+            raise KeyError(f"no grid {grid!r}; the grids are {', '.join(self.grids) or 'none'}")
+        target = self.grids[grid]
+        row, col = int(row), int(col)
+        if (row, col) not in target.cells:
+            raise ValueError(f"grid {grid} has {target.rows} rows and {target.cols} columns "
+                             f"(counted from 0), not a cell at row {row}, column {col}")
+        source = self._cell_of(calculation)
+        if source != (grid, row, col):
+            occupant = target.cell(row, col).calc
+            self._unplace(calculation)
+            self._detached_from.pop(calculation, None)
+            if occupant is not None:
+                other = target.cell(row, col).take()
+                if source is not None:
+                    self.grids[source[0]].cell(*source[1:]).put(other, occupant)
+                else:
+                    self.viewport.addTab(other, self._tab_text(occupant))
+            target.cell(row, col).put(view, calculation)
+            view.set_detached(False)
+            self._show_state(calculation)
+            if occupant is not None:
+                self._show_state(occupant)
+        self.viewport.setCurrentWidget(target)
+        return self.grid_state(grid)
+
+    def save_grid_dialog(self, grid_id):
+        path, _ = QFileDialog.getSaveFileName(self, "Save the grid as an image",
+                                              f"grid_{grid_id}.png", "PNG image (*.png)")
+        if path:
+            self._act("grid", grid=grid_id, image=path)
 
     def _result_state(self, calc, job=None):
         """(state, progress, message) of a calculation's result, for the marks
@@ -2302,6 +2528,11 @@ class MainWindow(QMainWindow):
         window = self.plot_windows.get(calc)
         if window is not None:
             window.setWindowTitle(f"Result {text}")
+        cell = self._cell_of(calc)
+        if cell is not None:
+            self.grids[cell[0]].cell(*cell[1:]).set_title(
+                text, state[0] in ERROR_STATES,
+                view.status.text.full if state[0] in ROW_STATES else "")
 
     def _cancel_result(self, calc):
         """The status row's Cancel: stop the job computing calc's result."""
@@ -3542,7 +3773,9 @@ class MainWindow(QMainWindow):
 
     def close_current_result(self):
         tab = self.current_tab()
-        if tab not in ("structure", "kspace"):
+        if tab.startswith("grid:"):
+            self.close_grid(tab.removeprefix("grid:"))
+        elif tab not in ("structure", "kspace"):
             self.close_result(tab)
 
     def show_shortcuts(self):

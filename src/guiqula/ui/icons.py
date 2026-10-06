@@ -64,6 +64,8 @@ NAMES = (
     # tools, the start page's Show all and Show fewer
     "warning", "classical", "kpath_add", "kpath_remove", "kpath_default", "expand",
     "collapse",
+    # the Grid tab of result views and the button of a cell giving its result back to its tab
+    "grid", "close",
 )
 
 SIZE = 16                 # pixels of the icon of a control, in a bar, a row or a tree

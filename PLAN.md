@@ -628,7 +628,8 @@ Show all, and a line saying what comes next, with a link to the guide.
   unit cell and neighbour cells, 3D view for 3D lattices), a k-space tab
   for a system with a periodic direction, plus one closable tab per result.
   A tab can be detached into a window of its own to compare plots side by
-  side. Each drawing has a bar of its own (Fit, Pan, Zoom, the tools of that
+  side, or dragged into a cell of a grid, a tab of rows and columns of live
+  result views (decisions 170 to 180). Each drawing has a bar of its own (Fit, Pan, Zoom, the tools of that
   drawing, Save image) over a hidden matplotlib toolbar, wrapping onto
   further lines on a narrow window; a result that is not current has a
   status row above its plot (stale with Run again, running with its
@@ -4054,6 +4055,70 @@ Decisions taken; the first option of each is the one built:
      diverging, cyclic and grey), a colour is picked in the colour dialog
      and kept as hex, and the action takes any colour matplotlib reads; or
      every colour map matplotlib has, in a long list.
+
+**Grids of results (2026-10-06, branch plot-grid).** The maintainer asked
+for grids holding several plots, with a plot dragged by drag and drop to
+any place of the grid. A grid is a tab of the viewport (`ui/grid.py`,
+`GridView`) split into rows and columns of cells, and a cell holds the very
+view the result's tab held, so that it stays live: its bar, its status row,
+its picks, its stale mark and its style come with it, and a run draws in
+it as it drew in the tab. The view is in one place at a time, a tab, a
+window of its own or a cell, and the window moves it (`place_result`,
+`_unplace`, `_to_tab` in `ui/mainwindow.py`). The viewport's tab bar is
+`ResultTabBar`, from which a result's tab is dragged onto a cell; a cell's
+title is dragged onto another cell or back onto the tab bar, and its ×
+gives the result back to its tab. A new grid comes from the button at the
+right end of the tab bar or View > New grid of results; its bar sets the
+rows and the columns and saves the tab as an image. Every move is one of
+two window actions, `grid` and `grid_place` (`WINDOW_ACTIONS`,
+`drive.py`), so that a drop only dispatches the action, and the grids are
+kept in the Document's `ui` block (`grids`, and the tab shown as
+`grid:<id>`). `tests/ui/test_grid.py` checks the actions, the swaps, a
+shrink, a close, a detached view coming back to its cell, a removed
+calculation leaving its cell, the view state, and the drops, sent as a
+drag enter and a drop since Qt delivers no drop to a widget that a drag
+did not enter; the gesture itself, a real drag with the mouse, cannot run
+offscreen.
+
+Decisions taken; the first option of each is the one built:
+
+170. a grid is a tab of the viewport holding the live result views (the
+     maintainer's answer, asked before building); or the viewport split
+     into areas, each with its tab bar, as Blender and VS Code do; or a
+     multi-panel matplotlib figure for a paper, its panels redrawn copies;
+     or the live grid and its export as one figure;
+171. only results go into cells, the Structure and k-space tabs stay
+     where they are; or every tab;
+172. a result is placed by dragging its tab onto a cell, or its cell's
+     title onto another cell, and given back by the title's ×, by
+     dragging the title onto the tab bar, or by closing the grid; hovering
+     a tab while dragging shows it, so a result's tab reaches a grid that
+     is not shown in one gesture; or a drag from the outliner's rows too,
+     whose drag already reorders the entries;
+173. a result dropped on a taken cell swaps with the one there when it
+     came from another cell, and sends that one back to its tab otherwise;
+     or the drop refused on a taken cell;
+174. a smaller grid or a closed one never closes a result: the results of
+     the cells taken away go back to their tabs; or they are closed;
+175. Attach, for a view detached from a cell, puts it back in that cell
+     while the cell is free, in its tab otherwise; or always in its tab;
+176. two window actions, `grid` (a new grid, a new shape, close, a PNG of
+     it) and `grid_place` (a cell, or back to the tab); or one action per
+     operation;
+177. a cell keeps the view's whole bar, on two lines at 1200x800, and each
+     cell gets an equal share of the grid whatever its view asks for; or a
+     compact bar in a cell;
+178. Save image of a grid is a picture of the tab as shown (PNG), and the
+     figure for a paper stays the Export of each result; or a matplotlib
+     figure of panels;
+179. a grid has 1 to 4 rows and columns, 2 x 2 when new; the grids are g1,
+     g2, ... in the view state (`grids` in the `ui` block, not the
+     Document, so not an undo step, as the overlays and the styles), the
+     tab shown being `grid:g1`; or grids in the Document, undone;
+180. Ctrl+W closes the grid shown as it closes the result tab shown; the
+     New grid button sits at the right end of the viewport's tab bar and
+     in the View menu, with Tabler's layout-grid icon, and a cell's × is
+     Tabler's x; or a menu entry alone.
 
 ### Where the section 13 items land
 
