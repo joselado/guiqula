@@ -22,7 +22,8 @@ Kinds (the ``kind`` of a Result's plot spec, which also names the arrays):
 Every calculation gets its own PlotView (a tab of the viewport, which can
 be detached into a window of its own): its bar (ui/canvasbar.py, PLAN.md
 phase 8, package P3: Fit, Pan, Zoom; Pick, Box, Lasso; Overlay, Export,
-Save data, Detach and Save image), a status row above the canvas when the
+Blender (a result on the atoms, io/blender.py), Save data, Detach and Save
+image), a status row above the canvas when the
 result is not simply current (stale, with Run again; its job's progress
 and Cancel while it runs; failed, and why), and a readout of the data
 point under the mouse, which also says what a pick there would take.
@@ -609,6 +610,7 @@ class PlotView(QWidget):
 
     save_requested = Signal(str)          # calculation id
     export_requested = Signal(str)        # figure, data and script (io/bundle.py)
+    blender_requested = Signal(str)       # the atoms with the result, to Blender (io/blender.py)
     detach_requested = Signal(str)
     overlay_menu_requested = Signal(str)      # the window fills the Overlay menu
     # calculation id, where ({"x", "y"} in data coordinates, {"box"} or {"polygon"}), the
@@ -685,6 +687,14 @@ class PlotView(QWidget):
                                "the pyqula script reproducing them, in one folder "
                                f"({shortcuts.text('export_bundle')})")
         self.export.clicked.connect(lambda: self.export_requested.emit(self.calc_id))
+        self.blender = QToolButton()
+        self.blender.setText("Blender")
+        self.blender.setObjectName(f"blender{suffix}")
+        self.blender.setToolTip("export the atoms with this result on them to Blender: a "
+                                ".blend file, with the atoms as spheres coloured by the "
+                                "value and the vectors as arrows (or the Python script "
+                                "that builds it)")
+        self.blender.clicked.connect(lambda: self.blender_requested.emit(self.calc_id))
         self.save_data = QToolButton()
         self.save_data.setText("Save data")
         self.save_data.setObjectName(f"saveData{suffix}")
@@ -696,7 +706,8 @@ class PlotView(QWidget):
         self.detach.setToolTip(DETACH_TIPS[False])
         self.detach.clicked.connect(lambda: self.detach_requested.emit(self.calc_id))
         for widget, icon in ((self.overlay, "overlay"), (self.style_button, "brush"),
-                             (self.export, "export"), (self.save_data, "data"),
+                             (self.export, "export"), (self.blender, "blender"),
+                             (self.save_data, "data"),
                              (self.detach, "detach")):
             self.bar.add("result", widget, icon)
         self.status = StatusRow(suffix)
@@ -792,6 +803,9 @@ class PlotView(QWidget):
     def _update_buttons(self):
         self.save_data.setEnabled(self.result is not None and bool(self.calc_id))
         self.export.setEnabled(self.result is not None and bool(self.calc_id))
+        self._shown_by[self.blender].setVisible(
+            bool(self.calc_id) and self.result is not None and
+            self.result.plot["kind"] in ON_STRUCTURE and self.result.structure is not None)
         self._shown_by[self.detach].setVisible(bool(self.calc_id))
         self._shown_by[self.overlay].setVisible(bool(self.calc_id))
         self.overlay.setEnabled(self.result is not None and self.ax is not None

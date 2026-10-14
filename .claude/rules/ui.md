@@ -176,8 +176,12 @@ tests, `drive.py --widget` and the remote `widgets` and `screenshot` methods rel
   sparse; the Field editor, whose button shows the kind and opens the kind menu
   `fieldKindMenu_<p>`, every kind button of a form as wide as the widest (`line_up`).
 - `structure.py`: the canvas (`structureView`), its three views (structure, Hamiltonian,
-  field), its bar `structureBar` with the selection tools, and the mplot3d drawing of
-  geometries that are not flat.
+  field), its bar `structureBar` with the selection tools, the mplot3d drawing of
+  geometries that are not flat, and `blender_scene`, the arrays io/blender.py exports
+  (decisions 185 to 191): the canvas's `structureBlender` and a result's `blender_<id>`
+  (shown for a result drawn on the atoms) go through the `export_blender` action, whose
+  `wait=false` run the window polls (`blender_runs`); the Blender group and Save image are
+  both end groups, right-aligned together by `FlowLayout`.
 - `pyvista_view.py`: the 3D drawing with pyvista (View > 3D drawing, the `renderer_3d`
   action and setting; pyvista unless matplotlib was chosen or pyvista is missing): rendered
   off-screen and painted as an image, since a `QVTKRenderWindowInteractor` embedded in Qt
@@ -294,6 +298,10 @@ python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "help", "search": "ra
 python tools/drive.py honeycomb_zeeman_rashba --run c1 \
     --python "session.act('export_bundle', calculation='c1', path='out/c1_bands')"
                                                    # figure, data, script in one folder
+python tools/drive.py graphene_island --run c2 --python "session.act('export_blender', \
+    calculation='c2', path='out/ldos.blend')" --widget plotBar_c2 --shot blender.png
+                                                   # a result to Blender (decisions 185 to 191;
+                                                   # $GUIQULA_BLENDER names a Blender >= 2.80)
 python tools/drive.py honeycomb_zeeman_rashba --run c2 --python "session.act('plot_style', \
     calculation='c2', linewidth=3, color='#d62728', fill=True); \
     window.plots['c2'].open_style()" --widget stylePopup_c2 --shot style.png

@@ -22,7 +22,8 @@ scrolls, ctrl and the wheel zooms, the middle button or Space and the left
 button drag it; the bar's Pan and Zoom still pan and zoom (while they do,
 the tools are off). The bar (ui/canvasbar.py, PLAN.md phase 8, package P3)
 holds Fit, Pan, Zoom, the selection tools and what acts on the selection,
-what the canvas shows, the brush and Save image, over matplotlib's toolbar,
+what the canvas shows, the brush, Blender (the drawing exported to
+Blender, io/blender.py) and Save image, over matplotlib's toolbar,
 which is kept hidden for its modes.
 The selection is kept as positions, so it survives a rebuild of the same
 geometry. The window turns it into a region or a removal op; the pure
@@ -553,6 +554,63 @@ def draw_structure_3d(ax, build, highlight=None, selected=None, removed=None, im
     return selection
 
 
+def blender_scene(build, site_values=None, arrows=None, atom_size=1.0, bonds=True, title=""):
+    """What io/blender.py exports of a drawing, as plain arrays in the
+    light theme's colours (RGB from 0 to 1): the atoms as pyvista draws
+    them (coloured by sublattice or by site_values, smaller under arrows),
+    the bonds, the unit cell, the arrows of a vector per site centred on
+    their sites and scaled as drawn, and the bounds of the sites and the
+    cell. The keywords are those of draw_structure_3d, the style's
+    included; the selection, a region and the Hamiltonian view's hoppings
+    are the window's, not the drawing's, and are not exported."""
+    light = theme.COLORS["light"]
+    r = np.asarray(build["positions"], dtype=float).reshape(-1, 3)
+    rgb = lambda colors: [list(mcolors.to_rgb(c)) for c in colors]
+    atoms = {"positions": r, "radius": RADIUS * (0.6 if arrows is not None else 1.0)
+             * float(atom_size)}
+    if site_values is not None:
+        values = np.asarray(site_values["values"], dtype=float).ravel()
+        colors, mappable = value_colors(values, symmetric=site_values.get("symmetric", True),
+                                        cmap=value_map(site_values))
+        finite = np.isfinite(values)
+        atoms.update(colors=rgb([c if ok else light["MUTED"] for c, ok in zip(colors, finite)]),
+                     values=[float(v) if ok else None for v, ok in zip(values, finite)],
+                     label=site_values.get("label", "") or "value",
+                     range=[float(mappable.norm.vmin), float(mappable.norm.vmax)],
+                     colormap=str(getattr(mappable.cmap, "name", mappable.cmap)))
+    else:
+        sublattice = build.get("sublattice")
+        palette = light["SUBLATTICE"]
+        atoms["colors"] = rgb([palette[None]] * len(r) if sublattice is None else
+                              [palette[1.0] if s > 0 else palette[-1.0] for s in sublattice])
+    scene = {"title": title, "atoms": atoms}
+    if bonds:
+        scene["bonds"] = {"segments": bond_segments_3d(build), "radius": 0.05,
+                          "color": list(mcolors.to_rgb(light["BOND"]))}
+    edges = cell_edges_3d(build)
+    scene["cell"] = {"segments": edges, "radius": 0.02,
+                     "color": list(mcolors.to_rgb(light["CELL"]))}
+    if arrows is not None:
+        vectors = np.asarray(arrows["vectors"], dtype=float).reshape(-1, 3)
+        shown = finite_vectors(vectors)
+        lengths = np.linalg.norm(vectors[shown], axis=1)
+        longest = float(lengths.max()) if len(lengths) else 0.0
+        length, width, color, _ = arrow_style(arrows)
+        # the arrows drawn: finite and not of zero length (none when every vector vanishes)
+        keep = np.flatnonzero(shown)[lengths > 1e-9 * longest] if longest > 1e-12 else \
+            np.zeros(0, dtype=int)
+        v = vectors[keep] * (0.9 * length / longest) if len(keep) else np.zeros((0, 3))
+        scene["arrows"] = {"sites": keep, "tails": r[keep] - v / 2, "vectors": v,
+                           "original": vectors[keep], "width": width,
+                           "color": list(mcolors.to_rgb(arrows.get("color") or light["ARROW"])),
+                           "label": arrows.get("label", "")}
+    points = np.concatenate([r, edges.reshape(-1, 3)]) if len(edges) else r
+    if not len(points):
+        points = np.zeros((1, 3))
+    scene["bounds"] = [points.min(axis=0), points.max(axis=0)]
+    return scene
+
+
 def _same(a, b):
     """Equality of overlay values (dicts, lists, numpy arrays, numbers)."""
     if isinstance(a, dict) and isinstance(b, dict):
@@ -580,6 +638,7 @@ class StructureView(QWidget):
     region_requested = Signal()
     calculate_requested = Signal()
     remove_requested = Signal()
+    blender_requested = Signal()             # what the canvas draws, to Blender (io/blender.py)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -701,6 +760,13 @@ class StructureView(QWidget):
         from guiqula.ui.pyvista_view import SceneView     # it imports this module
         self.scene = SceneView("structureScene")          # pyvista loads at its first drawing
         self.bar.adopt_scene(self.scene)      # its Reset view, View and Save image, in the bar
+        self.bar.group("blender", end=True)       # before either Save image
+        self.blender = self.bar.button(
+            "blender", "blender", "Blender",
+            "export what the canvas draws to Blender: a .blend file, with the atoms as "
+            "spheres, the bonds, the unit cell and the Field previewed (or the Python script "
+            "that builds it)", self.blender_requested.emit, icon="blender")
+        self.blender.setEnabled(False)               # until there are sites
         self.stack = QStackedWidget()
         self.stack.addWidget(self.canvas)
         self.stack.addWidget(self.scene)
@@ -799,6 +865,7 @@ class StructureView(QWidget):
         still there. Drawn in the active theme. When nothing drawn changed
         (an edit whose rebuild is on its way: only the caption says
         "updating…"), only the caption is updated."""
+        self.blender.setEnabled(build is not None and len(build["positions"]) > 0)
         drawing = (system_id, id(build), self.in_3d(build), self.renderer_3d, theme.name,
                    theme.text_size)
         if (self.ax is not None or self.in_scene) and drawing == self._drawn and \
@@ -884,6 +951,7 @@ class StructureView(QWidget):
 
     def clear(self, caption=""):
         self._drawn, self._overlays = None, None
+        self.blender.setEnabled(False)
         self.navigation.history.clear()
         self.scene.forget()
         self._show_canvas(True)

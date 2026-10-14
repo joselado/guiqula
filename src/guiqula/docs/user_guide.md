@@ -139,10 +139,10 @@ rather than hiding a control:
 - every drawing: Fit, Pan and Zoom first and Save image last;
 - the Structure tab: Pick, Box, Lasso and the Select menu, Region from selection,
   Calculate on selection and Remove selected (enabled while sites are selected), Show (the
-  sites and bonds, the Hamiltonian, a Field) and the 3D box, and the brush while a Field is
-  shown;
+  sites and bonds, the Hamiltonian, a Field) and the 3D box, the brush while a Field is
+  shown, and Blender (see Exporting to Blender);
 - a result: Pick, Box and Lasso (see Picking from a plot), Overlay, Style (see The style
-  of a plot), Export, Save data and Detach;
+  of a plot), Export, Blender for a result drawn on the atoms, Save data and Detach;
 - the k-space tab: the calculation whose path is drawn, Add points, Remove last and
   Default path;
 - the 3D scene drawn with pyvista: Reset view and the View menu in place of Fit, Pan and
@@ -350,6 +350,31 @@ change of theme. The choice is kept with the settings. pyvista is an optional de
 (`pip install "guiqula[3d]"`), and without it the entry is greyed out; if pyvista cannot draw
 at all (no OpenGL), the drawing is left to matplotlib and the caption says why. Note that
 Export writes matplotlib's figure in both cases, in the same projection.
+
+## Exporting to Blender
+
+The Blender button, the Blender logo before Save image, writes what a drawing shows as a
+Blender scene, for a figure rendered with real light and materials: on a result drawn on
+the atoms (a local density of states, a magnetization, a density) it exports the atoms
+coloured by the value and the vectors as arrows, in the plot's style, and on the Structure
+tab the geometry, with the Field previewed when one is shown. The scene is the same however
+the drawing is made, flat, with matplotlib or with pyvista, since it is made from the
+data: each atom is a sphere object of its own, coloured by its object colour, with the
+value on its site kept as its custom property `value` (an arrow keeps `vector`), so that
+you can recolour, hide or select atoms one by one; the bonds and the unit cell are one
+object each, and a camera, a sun and a pale background come with it. Lengths are pyqula's,
+in which first neighbours are at a distance 1. The selection, a region and the hoppings
+of the Hamiltonian view are not exported.
+
+The dialog saves a .blend, which Blender opens, or a .py, the Python script that builds
+the scene. A .blend is written by Blender itself: guiqula runs a Blender of version 2.80
+or later in the background, and the status bar says when the file is there, which takes
+a few seconds for a few hundred atoms and roughly half a minute for twenty thousand. The
+Blender used is the one in `$GUIQULA_BLENDER`, else `blender` on the PATH, else the usual
+places of an installation; an older one is refused with its version said, and when none
+is found the window asks for the program once and keeps it with the settings. The script
+needs no Blender on the computer that writes it: open it in Blender's Scripting workspace
+and press Run Script, or run `blender --python scene.py`.
 
 ## Moving in space
 
@@ -613,8 +638,8 @@ Plot text chooses the size of the text of every drawing, the labels, the ticks a
 titles of the plots, of the canvas, of the k-space tab and of the exported figures: small,
 normal or large, so that a projector or a small screen gets a readable size too; View > Interface text does the same for the text of the menus, the
 panels and the forms (normal or large). The settings (theme, plot text, interface text,
-recent files, always trust, remote control, run at once, the 3D drawing, and the
-arrangement of the panels with the window's size) are a file in the user configuration
+recent files, always trust, remote control, run at once, the 3D drawing, the Blender
+program, and the arrangement of the panels with the window's size) are a file in the user configuration
 directory.
 
 ## Headless use

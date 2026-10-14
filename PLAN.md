@@ -4143,6 +4143,66 @@ replaying the gesture.
      squeezed below its minimum size when the grid is small; or a layout,
      a taken row taking the room an empty one needs.
 
+**The export to Blender (2026-10-14, branch blender-export).** The
+maintainer asked for a button exporting the 3D drawings of structures, of
+the LDOS and of magnetizations to Blender, a button in each plot where it
+applies, and then for a file that Blender opens, a .blend. Asked before
+building (one question): what the button writes; the maintainer picked a
+Python script building the scene with Blender's own API over a .glb, which
+bakes the atoms into one mesh. Since a .blend is written by Blender alone,
+the two answers meet in `io/blender.py`: guiqula writes the script, with the
+scene embedded, and runs it in a Blender found on this computer, in the
+background, which saves the .blend; the script alone is the .py choice of
+the same dialog, for a computer without Blender. The scene is what the
+drawing shows, as arrays made in the window (`blender_scene` in
+`ui/structure.py`): the atoms as spheres coloured by sublattice or by the
+value on the site, the bonds, the unit cell, the arrows of a vector per
+site, scaled as pyvista draws them. The button, Blender, sits before Save
+image in the bar of every result drawn on the atoms (`blender_<id>`) and of
+the canvas (`structureBlender`); the window action is `export_blender`.
+Verified with tests (a fake Blender for the run, and Blender 5.2.2 building
+the scene and read back), and by rendering the exported magnetization of
+`honeycomb_hubbard` and LDOS of `graphene_island` with Cycles: the
+antiferromagnetic moments and the zigzag edge states read as in the window.
+The `blender` on this machine's PATH is 2.79, which the search refuses.
+
+185. the .blend is written by a Blender found on this computer, run in the
+     background on the script guiqula writes, and the .py is that script
+     alone; or the script only, the maintainer running it by hand;
+186. the Blender is the one chosen, else `$GUIQULA_BLENDER`, else
+     `blender` on the PATH, else the usual places of an installation, the
+     first of 2.80 or later (the 2.80 Python API), an older one refused
+     with its version said; when none is found the window asks for the
+     program once and keeps it in the settings (`blender`); or a field in
+     a preferences dialog, which guiqula does not have;
+187. an atom is an object of its own sharing one sphere mesh, coloured by
+     its object colour through one material (an Object Info node), so
+     that a colour is changed atom by atom, with the value on the site as
+     its custom property `value`; an arrow likewise, with `vector`; the
+     bonds and the cell are one mesh each; or one material per colour,
+     a few thousand of them for a value per site;
+188. the window does not wait for Blender (about 3 s for a hundred sites,
+     28 s for 20000 atoms with their arrows): the status bar says when the
+     file is there, or why it is not, and a run still going when the
+     window closes is stopped; the action waits unless told not to
+     (`wait=false`), for scripts and tests; or a modal wait;
+189. the button is on every result drawn on the atoms (the LDOS, the
+     magnetization, any structure_scalar or structure_vector), however it
+     is drawn, flat, by mplot3d or by pyvista, since the export reads the
+     data and not the drawing; on the canvas it exports the geometry with
+     the Field previewed on it, and the selection, a region and the
+     hoppings of the Hamiltonian view stay out; or only on a result drawn
+     in 3D;
+190. the colours are the light theme's and the plot's style (atom size,
+     colour map, arrow length, width and colour, bonds), converted to
+     Blender's linear space; the scene has a camera seeing the sites from
+     the front and above, a sun and a pale background, and its 3D
+     viewports show the objects' colours and look at the sites;
+191. the button's icon is Tabler's brand-blender, not the cube of the 3D
+     box beside it on the canvas; the bar's groups kept at the right
+     edge (the Blender one and Save image) are right-aligned together
+     (`FlowLayout` in `ui/canvasbar.py`), where only one was before.
+
 ### Where the section 13 items land
 
 | Phase | Items |

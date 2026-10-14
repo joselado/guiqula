@@ -66,6 +66,8 @@ NAMES = (
     "collapse",
     # the Grid tab of result views and the button of a cell giving its result back to its tab
     "grid", "close",
+    # the export to Blender of a result on the atoms and of the canvas
+    "blender",
 )
 
 SIZE = 16                 # pixels of the icon of a control, in a bar, a row or a tree

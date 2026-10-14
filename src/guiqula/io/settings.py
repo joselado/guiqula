@@ -31,6 +31,10 @@ tools/drive.py unless asked) never depend on what a user chose.
   "geometry": QMainWindow.saveGeometry()}, both in base64. Empty until the
   program's window is first closed; View > Reset layout gives the default
   arrangement back. The Document's ui block never holds it.
+- ``blender``: the Blender program that writes the .blend files of the
+  export to Blender (io/blender.py), as the user chose it when none of
+  2.80 or later was found; "" until then, when io/blender.py looks for
+  one.
 
 A missing, unreadable or malformed file gives the defaults (a broken
 settings file must not stop the program); unknown keys are kept, so an
@@ -48,7 +52,7 @@ FILE = "settings.json"
 RECENT_LIMIT = 10
 DEFAULTS = {"theme": "system", "always_trust": False, "recent": [], "remote": False,
             "run_at_once": True, "renderer_3d": "pyvista", "plot_text": "normal",
-            "ui_text": "normal", "layout": {}}
+            "ui_text": "normal", "layout": {}, "blender": ""}
 SWITCHES = ("always_trust", "remote", "run_at_once")       # true or false
 CHOICES = {"theme": ("system", "light", "dark"), "renderer_3d": ("matplotlib", "pyvista"),
            "plot_text": ("small", "normal", "large"), "ui_text": ("normal", "large")}
@@ -86,6 +90,8 @@ def load():
     values["recent"] = [p for p in recent if isinstance(p, str)][:RECENT_LIMIT]
     if not _is_layout(values["layout"]):
         values["layout"] = {}
+    if not isinstance(values["blender"], str):
+        values["blender"] = ""
     return values
 
 
@@ -122,6 +128,8 @@ def put(name, value):
         raise SettingsError(f"{name} must be one of {CHOICES[name]}, not {value!r}")
     if name in SWITCHES and not isinstance(value, bool):
         raise SettingsError(f"{name} must be true or false")
+    if name == "blender" and not isinstance(value, str):
+        raise SettingsError("blender must be the path of a program, as text")
     if name == "layout" and not _is_layout(value):
         raise SettingsError(f"layout must be {{}} or a dict of {LAYOUT_KEYS} as text")
     stored = _stored()              # only what was set is written, so that `chosen` can tell
