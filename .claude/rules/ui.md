@@ -301,7 +301,7 @@ python tools/drive.py honeycomb_zeeman_rashba --run c1 \
 python tools/drive.py graphene_island --run c2 --python "session.act('export_blender', \
     calculation='c2', path='out/ldos.blend')" --widget plotBar_c2 --shot blender.png
                                                    # a result to Blender (decisions 185 to 191;
-                                                   # $GUIQULA_BLENDER names a Blender >= 2.80)
+                                                   # $GUIQULA_BLENDER names a Blender >= 3.0)
 python tools/drive.py honeycomb_zeeman_rashba --run c2 --python "session.act('plot_style', \
     calculation='c2', linewidth=3, color='#d62728', fill=True); \
     window.plots['c2'].open_style()" --widget stylePopup_c2 --shot style.png

@@ -33,7 +33,7 @@ tools/drive.py unless asked) never depend on what a user chose.
   arrangement back. The Document's ui block never holds it.
 - ``blender``: the Blender program that writes the .blend files of the
   export to Blender (io/blender.py), as the user chose it when none of
-  2.80 or later was found; "" until then, when io/blender.py looks for
+  3.0 or later was found; "" until then, when io/blender.py looks for
   one.
 
 A missing, unreadable or malformed file gives the defaults (a broken

@@ -18,7 +18,8 @@ in ui/structure.py makes them from a build and its overlays):
 - a sun, a camera framing the sites, a pale background, and the 3D
   viewports showing the objects' colours and looking at the sites.
 
-The script needs Blender 2.80 or later (collections, the 2.80 Python API);
+The script needs Blender 3.0 or later (its bmesh operators take a radius, which
+they called diameter before 3.0; it was run on 5.2.2);
 ``find`` looks for one: the program given, $GUIQULA_BLENDER, ``blender`` on
 the PATH, and the usual places of an installation, and refuses an older
 one, saying which it found. No Qt and no pyqula here.
@@ -33,7 +34,7 @@ import tempfile
 import time
 from pathlib import Path
 
-MINIMUM = (2, 80)
+MINIMUM = (3, 0)
 TIMEOUT = 600              # seconds write() waits for a Blender run
 ENV = "GUIQULA_BLENDER"
 PLACES = ("/Applications/Blender.app/Contents/MacOS/Blender", "/snap/bin/blender",
@@ -90,7 +91,7 @@ def find(program=None):
 
 # ---- the script
 def script(scene):
-    """The Python script that builds a scene in Blender (2.80 or later),
+    """The Python script that builds a scene in Blender (3.0 or later),
     and saves it as the .blend named after a "--" on Blender's command
     line, if any. The scene is embedded, so the script stands alone: it
     can also be run from Blender's Scripting workspace."""
@@ -149,10 +150,15 @@ class Export:
         (folder / "scene.py").write_text(text, encoding="utf-8")
         self.target = folder / "scene.blend"
         self.log = open(folder / "blender.log", "w+", encoding="utf-8")
-        self.process = subprocess.Popen(
-            [blender, "--background", "--factory-startup", "--python-exit-code", "1",
-             "--python", str(folder / "scene.py"), "--", str(self.target)],
-            cwd=folder, stdout=self.log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+        try:
+            self.process = subprocess.Popen(
+                [blender, "--background", "--factory-startup", "--python-exit-code", "1",
+                 "--python", str(folder / "scene.py"), "--", str(self.target)],
+                cwd=folder, stdout=self.log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+        except OSError as error:          # a program that is there but does not run
+            self.log.close()
+            self.scratch.cleanup()
+            raise BlenderError(f"{blender} does not run: {error}") from None
 
     def poll(self):
         """Whether the run is over: then the file is in place, or error
@@ -197,7 +203,7 @@ class Export:
         return self.path
 
 
-TEMPLATE = r'''"""@TITLE@: a scene exported by guiqula, built in Blender (2.80 or later).
+TEMPLATE = r'''"""@TITLE@: a scene exported by guiqula, built in Blender (3.0 or later).
 
 Open it in Blender's Scripting workspace and press Run Script, or run
     blender --python scene.py

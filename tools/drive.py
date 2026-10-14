@@ -25,7 +25,7 @@ calculation runs as soon as it is added or one of its parameters is set),
 theme (system, light, dark), export_bundle (calculation, path: figure, data
 and script in one folder), export_blender (path, a .blend or the .py script
 building it, calculation or the canvas when left out, blender: the program,
-else $GUIQULA_BLENDER or blender on the PATH, of 2.80 or later; the
+else $GUIQULA_BLENDER or blender on the PATH, of 3.0 or later; the
 buttons blender_<calculation id> and structureBlender), help (entry, or guide and anchor: the Help
 panel; or search, a question: the entries and sections that answer it),
 projection (auto, xy, 3d), renderer_3d (matplotlib, pyvista: the 3D

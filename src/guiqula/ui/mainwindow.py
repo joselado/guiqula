@@ -3054,7 +3054,7 @@ class MainWindow(QMainWindow):
 
     def export_blender_dialog(self, calc=None):
         """Choose a .blend (or the script alone, a .py) for a result's atoms
-        or (calc None) the canvas; a .blend needs a Blender of 2.80 or
+        or (calc None) the canvas; a .blend needs a Blender of 3.0 or
         later, asked for once when none is found."""
         try:
             self._blender_scene(calc)
@@ -3082,7 +3082,7 @@ class MainWindow(QMainWindow):
 
     def _choose_blender(self, why):
         """Ask for the Blender program (kept in the settings); whether one
-        of 2.80 or later was chosen."""
+        of 3.0 or later was chosen."""
         QMessageBox.information(self, "Blender", f"{why}.\n\nA .blend file is written by "
                                 "Blender itself: choose the Blender program, or save a .py "
                                 "script instead, which Blender runs.")
@@ -3091,7 +3091,7 @@ class MainWindow(QMainWindow):
             return False
         found = blender_export.version(program)
         if found is None or found < blender_export.MINIMUM:
-            self.message(f"{program} is not Blender 2.80 or later "
+            self.message(f"{program} is not Blender 3.0 or later "
                          f"({'Blender %d.%d' % found if found else 'it does not say'})",
                          error=True)
             return False

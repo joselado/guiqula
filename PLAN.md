@@ -4171,7 +4171,8 @@ The `blender` on this machine's PATH is 2.79, which the search refuses.
      alone; or the script only, the maintainer running it by hand;
 186. the Blender is the one chosen, else `$GUIQULA_BLENDER`, else
      `blender` on the PATH, else the usual places of an installation, the
-     first of 2.80 or later (the 2.80 Python API), an older one refused
+     first of 3.0 or later (the bmesh operators took a diameter before
+     3.0; only 5.2.2 was run), an older one refused
      with its version said; when none is found the window asks for the
      program once and keeps it in the settings (`blender`); or a field in
      a preferences dialog, which guiqula does not have;
@@ -4181,8 +4182,9 @@ The `blender` on this machine's PATH is 2.79, which the search refuses.
      its custom property `value`; an arrow likewise, with `vector`; the
      bonds and the cell are one mesh each; or one material per colour,
      a few thousand of them for a value per site;
-188. the window does not wait for Blender (about 3 s for a hundred sites,
-     28 s for 20000 atoms with their arrows): the status bar says when the
+188. the window does not wait for Blender (its run took about 1 s for the
+     96 sites of `graphene_island` and 28 s for 20000 atoms with their
+     arrows, Blender 5.2.2 on this machine): the status bar says when the
      file is there, or why it is not, and a run still going when the
      window closes is stopped; the action waits unless told not to
      (`wait=false`), for scripts and tests; or a modal wait;

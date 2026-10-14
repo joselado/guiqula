@@ -1,5 +1,5 @@
 """The export to Blender (io/blender.py): the script that builds the scene,
-the search for a Blender of 2.80 or later, the background run saving the
+the search for a Blender of 3.0 or later, the background run saving the
 .blend. A fake Blender stands in for the program; the run of a real one is
 tested when one is found ($GUIQULA_BLENDER, or blender on the PATH)."""
 import ast
@@ -80,6 +80,9 @@ def test_an_old_blender_is_refused_saying_which(fake, monkeypatch):
     old = fake("blender279", "2.79 (sub 0)")
     with pytest.raises(blender.BlenderError, match=r"2\.79"):
         blender.find(old)
+    before = fake("blender293", "2.93.1")          # its bmesh operators take a diameter
+    with pytest.raises(blender.BlenderError, match=r"2\.93"):
+        blender.find(before)
     new = fake("blender52", "5.2.2 LTS")
     monkeypatch.setenv(blender.ENV, new)
     assert blender.find(old) == new                 # the old one given, the variable's next

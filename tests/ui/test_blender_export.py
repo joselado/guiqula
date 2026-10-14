@@ -100,5 +100,5 @@ def test_no_blender_is_an_error_saying_so(window, tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", str(tmp_path))
     monkeypatch.delenv(blender.ENV, raising=False)
     monkeypatch.setattr(blender, "PLACES", ())
-    with pytest.raises(blender.BlenderError, match="2.80 or later"):
+    with pytest.raises(blender.BlenderError, match="3.0 or later"):
         window.export_blender(str(tmp_path / "x.blend"), calculation="c2")

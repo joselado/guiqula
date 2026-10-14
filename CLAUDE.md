@@ -134,7 +134,7 @@ not carry.
   those with locks, `ssh_chain` and `graphene_basics`, are the gallery's teaching group),
   `script.py` (the script export; a sweep exports a loop), `results.py` (result files),
   `blender.py` (the export to Blender: the script building the scene, the search for a
-  Blender of 2.80 or later, `$GUIQULA_BLENDER`, and its run in the background saving the
+  Blender of 3.0 or later, `$GUIQULA_BLENDER`, and its run in the background saving the
   .blend; the window makes the scene's arrays, `blender_scene` in `ui/structure.py`),
   `autosave.py` (autosave and recovery), `crashreport.py`, `bundle.py` (Export figure,
   data and script, one folder per result), `settings.py` (only what was set,

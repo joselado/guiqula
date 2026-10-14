@@ -90,7 +90,7 @@ WINDOW_ACTIONS = {
     "remove_slider": "index",
     "theme": "name: system, light or dark",
     "export_bundle": "calculation, path: figure, data and script in one folder",
-    "export_blender": "path (.blend, written by Blender 2.80 or later, or .py, the script "
+    "export_blender": "path (.blend, written by Blender 3.0 or later, or .py, the script "
                       "that builds it), calculation (a result on the atoms; left out: what "
                       "the canvas draws), wait=true, blender (the program; left out: the one "
                       "chosen, $GUIQULA_BLENDER, blender on the PATH): the atoms, bonds, "

@@ -367,9 +367,10 @@ in which first neighbours are at a distance 1. The selection, a region and the h
 of the Hamiltonian view are not exported.
 
 The dialog saves a .blend, which Blender opens, or a .py, the Python script that builds
-the scene. A .blend is written by Blender itself: guiqula runs a Blender of version 2.80
+the scene. A .blend is written by Blender itself: guiqula runs a Blender of version 3.0
 or later in the background, and the status bar says when the file is there, which takes
-a few seconds for a few hundred atoms and roughly half a minute for twenty thousand. The
+about a second for a hundred atoms and roughly half a minute for twenty thousand with
+their arrows. The
 Blender used is the one in `$GUIQULA_BLENDER`, else `blender` on the PATH, else the usual
 places of an installation; an older one is refused with its version said, and when none
 is found the window asks for the program once and keeps it with the settings. The script
