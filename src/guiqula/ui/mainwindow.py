@@ -69,6 +69,7 @@ from guiqula import vendoring
 from guiqula.core import fields
 from guiqula.core import picks as pick_tools
 from guiqula.core import regions as region_tools
+from guiqula.io import blender as blender_export
 from guiqula.io import bundle, crashreport, project, settings
 from guiqula.registry import base as registry
 from guiqula.registry import cost, pipeline
@@ -99,7 +100,7 @@ WORKSPACES = ("geometry", "hamiltonian", "calculate")
 WINDOW_ACTIONS = ("select", "workspace", "tool", "select_sites", "region_from_selection",
                   "remove_selected", "canvas_view", "preview", "auto_rerun", "projection",
                   "overlay", "plot_style", "slider", "set_slider", "remove_slider", "paint",
-                  "theme", "export_bundle", "help", "remote", "pick", "pick_to",
+                  "theme", "export_bundle", "export_blender", "help", "remote", "pick", "pick_to",
                   "run_at_once", "renderer_3d", "view_3d", "plot_text", "ui_text",
                   "reset_layout", "log", "panel", "add_menu", "run_stale", "start", "run",
                   "grid", "grid_place")
@@ -201,6 +202,8 @@ class MainWindow(QMainWindow):
         self._pending_sites = None     # (system, positions) to select once it is built
         self.plots = {}                # calculation id -> PlotView (a tab or a window)
         self.overlays = {}             # calculation id -> [(other calculation, mode)] drawn over it
+        self.blender_program = ""      # the Blender chosen this session (io/blender.py's find)
+        self.blender_runs = []         # the exports to Blender still running (io/blender.Export)
         self.plot_styles = {}          # calculation id -> the style of its plot (ui/plotstyle.py)
         self.plot_windows = {}         # calculation id -> ResultWindow of a detached view
         self.grids = {}                # grid id -> GridView, a tab of result views (ui/grid.py)
@@ -607,6 +610,7 @@ class MainWindow(QMainWindow):
         structure.region_requested.connect(lambda: self._act("region_from_selection"))
         structure.calculate_requested.connect(self._selection_menu)
         structure.remove_requested.connect(lambda: self._act("remove_selected"))
+        structure.blender_requested.connect(lambda: self.export_blender_dialog(None))
 
     # ---- the Add menus (PLAN.md phase 8, package P2)
     def palette_menu(self, family, system=None):
@@ -1065,6 +1069,7 @@ class MainWindow(QMainWindow):
         dispatcher.register_action("remove_slider", self.remove_slider)
         dispatcher.register_action("theme", lambda name="system": self.set_theme(name))
         dispatcher.register_action("export_bundle", self.export_bundle)
+        dispatcher.register_action("export_blender", self.export_blender)
         dispatcher.register_action("help", self.help)
         dispatcher.register_action("remote", lambda enabled=True: self.set_remote(
             enabled, remember=False))
@@ -1105,6 +1110,9 @@ class MainWindow(QMainWindow):
             self._save_layout()           # the arrangement and the size, for the next start
         self.timer.stop()
         self.build_timer.stop()
+        for export in self.blender_runs:      # a .blend half made is not left behind
+            export.cancel()
+        self.blender_runs = []
         self._stop_remote()
         if self._unsubscribe:
             self._unsubscribe()
@@ -1140,6 +1148,7 @@ class MainWindow(QMainWindow):
                 self._stop_remote()
                 self._update_remote_label()
         self._update_autosave_label()
+        self._poll_blender()
 
     def _on_session_event(self, kind, payload):
         if kind == "document":
@@ -2233,6 +2242,7 @@ class MainWindow(QMainWindow):
             view.renderer_3d = self.structure.renderer_3d
             view.save_requested.connect(self.save_result_dialog)
             view.export_requested.connect(self.export_bundle_dialog)
+            view.blender_requested.connect(self.export_blender_dialog)
             view.detach_requested.connect(self.toggle_detached)
             view.overlay_menu_requested.connect(self._fill_overlay_menu)
             view.style_changed.connect(self._style_changed)
@@ -3009,6 +3019,111 @@ class MainWindow(QMainWindow):
                              results=self.session.result_refs(), stale=stale)
         self.message(f"exported {calculation} to {path}")
         return [str(f) for f in files]
+
+    # ---- Blender (io/blender.py)
+    def _blender_choice(self):
+        """The Blender program chosen (this session, else the settings), or
+        "" to let io/blender.py's find look for one."""
+        if self.blender_program:
+            return self.blender_program
+        return settings.get("blender") if self.use_settings else ""
+
+    def _blender_scene(self, calculation=None):
+        """The arrays io/blender.py exports: a result on the atoms in its
+        style, or (calculation None) the canvas's geometry with the Field
+        previewed on it."""
+        if calculation is None:
+            build = self.structure.build
+            if build is None or not len(build["positions"]):
+                raise ValueError("the canvas shows no sites to export")
+            overlays = self.structure._overlays or {}
+            keep = {key: overlays[key] for key in ("site_values", "arrows") if
+                    overlays.get(key) is not None}
+            return structure_tools.blender_scene(build, title=self.structure.system_id or "",
+                                                 **keep)
+        from guiqula.ui import plots as plot_tools
+        result = self.session.result(calculation)
+        if result is None:
+            raise ValueError(f"{calculation} has no result yet")
+        if result.plot["kind"] not in plot_tools.ON_STRUCTURE or result.structure is None:
+            raise ValueError(f"{calculation} is not drawn on the atoms, so there is nothing "
+                             f"to export to Blender")
+        return structure_tools.blender_scene(
+            plot_tools._on_structure(result), title=f"{calculation} {result.kind}",
+            **plot_tools.on_atoms(result, self.plot_styles.get(calculation)))
+
+    def export_blender_dialog(self, calc=None):
+        """Choose a .blend (or the script alone, a .py) for a result's atoms
+        or (calc None) the canvas; a .blend needs a Blender of 3.0 or
+        later, asked for once when none is found."""
+        try:
+            self._blender_scene(calc)
+        except ValueError as error:
+            self.message(str(error), error=True)
+            return None
+        if calc is None:
+            stem, what = self.structure.system_id or "structure", "the structure"
+        else:
+            stem, what = f"{calc}_{self.session.document.calculation(calc).kind}", calc
+        path, chosen = QFileDialog.getSaveFileName(
+            self, f"Export {what} to Blender", f"{stem}.blend",
+            "Blender file (*.blend);;Blender script (*.py)")
+        if not path:
+            return None
+        if Path(path).suffix not in blender_export.SUFFIXES:
+            path += ".py" if "*.py" in chosen else ".blend"
+        if path.endswith(".blend"):
+            try:
+                blender_export.find(self._blender_choice())
+            except blender_export.BlenderError as error:
+                if not self._choose_blender(str(error)):
+                    return None
+        return self._act("export_blender", calculation=calc, path=path, wait=False)
+
+    def _choose_blender(self, why):
+        """Ask for the Blender program (kept in the settings); whether one
+        of 3.0 or later was chosen."""
+        QMessageBox.information(self, "Blender", f"{why}.\n\nA .blend file is written by "
+                                "Blender itself: choose the Blender program, or save a .py "
+                                "script instead, which Blender runs.")
+        program, _ = QFileDialog.getOpenFileName(self, "Choose the Blender program")
+        if not program:
+            return False
+        found = blender_export.version(program)
+        if found is None or found < blender_export.MINIMUM:
+            self.message(f"{program} is not Blender 3.0 or later "
+                         f"({'Blender %d.%d' % found if found else 'it does not say'})",
+                         error=True)
+            return False
+        self.blender_program = program
+        if self.use_settings:
+            settings.put("blender", program)
+        return True
+
+    def export_blender(self, path, calculation=None, wait=True, blender=None):
+        """Export a result on the atoms (or, calculation left out, what the
+        canvas draws) to Blender: a .blend, which a Blender found on this
+        computer writes (blender: its program), or a .py, the script that
+        builds it. wait false: Blender runs while the window goes on, and
+        the status bar says when the file is there. Returns the path."""
+        scene = self._blender_scene(calculation)
+        export = blender_export.start(path, scene, blender or self._blender_choice() or None)
+        if wait or export.done:
+            written = export.wait()
+            self.message(f"exported to Blender: {written}")
+            return str(written)
+        self.blender_runs.append(export)
+        self.message(f"Blender is writing {path}…")
+        return str(path)
+
+    def _poll_blender(self):
+        for export in [e for e in self.blender_runs if e.poll()]:
+            self.blender_runs.remove(export)
+            if export.error:
+                self.message(f"the export to {export.path} failed: {export.error}", error=True)
+            else:
+                self.message(f"exported to Blender: {export.path} "
+                             f"({time.monotonic() - export.started:.0f} s)")
 
     def save_result_dialog(self, calc):
         path, _ = QFileDialog.getSaveFileName(self, f"Save the data of {calc}", f"{calc}.npz",

@@ -84,3 +84,4 @@ every icon in both themes.
 | `brush` | `brush` | 3.35.0 |
 | `grid` | `layout-grid` | 3.35.0 |
 | `close` | `x` | 3.35.0 |
+| `blender` | `brand-blender` | 3.35.0 |

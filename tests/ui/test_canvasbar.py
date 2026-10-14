@@ -71,7 +71,7 @@ def test_the_bars_wrap_and_never_overflow_at_1200_px(window, qtbot):
                                      "tool_pick", "tool_box", "tool_lasso",
                                      "selectSitesButton", "regionFromSelectionButton",
                                      "calculateOnSelectionButton", "removeSelectedButton",
-                                     "structureSaveImage"]
+                                     "structureBlender", "structureSaveImage"]
     for name in project.presets():
         load(qtbot, window, name)
         window.viewport.setCurrentIndex(STRUCTURE_TAB)
@@ -96,7 +96,8 @@ def test_the_bars_wrap_and_never_overflow_at_1200_px(window, qtbot):
         if structure.in_scene:                           # pyvista could draw here
             controls = structure.bar.controls()
             assert controls[:2] == ["structureSceneReset", "structureSceneView"]
-            assert controls[-1] == "structureSceneSave" and "structureFit" not in controls
+            assert controls[-2:] == ["structureBlender", "structureSceneSave"]
+            assert "structureFit" not in controls
             assert_fits(structure.bar)
         window.session.act("projection", name="auto")
         window.session.act("renderer_3d", name="matplotlib")

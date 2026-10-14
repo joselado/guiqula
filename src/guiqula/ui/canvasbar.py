@@ -66,7 +66,8 @@ class FlowLayout(QLayout):
     """Items left to right, a new line when the next one does not fit; an
     item wider than the line is cut to it (a toolbar then shows its
     chevron). An item's widget may carry the properties "joined" (no
-    separator before it) and "end" (at the right of its line). separators
+    separator before it) and "end" (at the right of its line, with the items
+after it). separators
     holds the rectangles between sections, which the owner paints."""
 
     def __init__(self, parent=None):
@@ -173,8 +174,9 @@ class FlowLayout(QLayout):
                 gap = self._gap(item) if i else 0
                 x += gap
                 widget = item.widget()
-                if widget is not None and widget.property("end"):
-                    x = max(x, left + room - wide)
+                if widget is not None and widget.property("end"):   # with the items after it
+                    tail = wide + sum(self._gap(after) + width for after, width in line[i + 1:])
+                    x = max(x, left + room - tail)
                 if gap == SECTION_GAP:          # in the middle of the gap, just before it
                     separators.append(QRect(x - gap // 2 - 1, y, 2, height))
                 if apply:

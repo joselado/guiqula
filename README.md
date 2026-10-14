@@ -104,7 +104,9 @@ kernels the first time and then keeps them in a cache.
   and you put each result in its cell by dragging its tab. You edit the k-path directly on
   the Brillouin zone.
 - Every result can export its figure, its data and the pyqula script that reproduces it. A
-  Python console has access to the live Hamiltonian.
+  structure, a local density of states or a magnetization can also be exported to
+  Blender, as a .blend file, to render it. A Python console has access to the live
+  Hamiltonian.
 - Projects save their results too. There is autosave, crash recovery, and undo for every
   action.
 - The help of every entry is the documentation of pyqula itself, with its formula and the
