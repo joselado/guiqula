@@ -5,9 +5,9 @@ user guide share.
 A shortcut's context says where it works: "window" anywhere in the main
 window; "outliner", "canvas" only while that widget has the focus (so that
 single keys never fire while typing into a box); "console", "code editor",
-"2D canvas" and "3D canvas" are keys those widgets handle themselves (the
-last two are how the drawings are moved, ui/canvas_navigation.py and the
-numpad of ui/pyvista_view.py), listed here so the dialog shows them. A key
+"2D canvas", "3D canvas" and "node view" are keys those widgets handle
+themselves (the drawings are moved by ui/canvas_navigation.py and the numpad
+of ui/pyvista_view.py, the node view's keys are ui/nodes.py's), listed here so the dialog shows them. A key
 of the window context may not be used by any other shortcut (Qt would find
 it ambiguous when both are live); keys of widget contexts may repeat across
 widgets. tests/ui/test_polish.py checks both, and that every shortcut of
@@ -18,7 +18,7 @@ from PySide6.QtGui import QKeySequence
 
 WIDGET_CONTEXTS = ("outliner", "canvas")      # QAction shortcuts on one widget
 # keys the widget handles itself
-HANDLED_CONTEXTS = ("console", "code editor", "2D canvas", "3D canvas")
+HANDLED_CONTEXTS = ("console", "code editor", "2D canvas", "3D canvas", "node view")
 
 # (id, keys, context, what it does)
 SHORTCUTS = (
@@ -86,6 +86,9 @@ SHORTCUTS = (
     ("view_flip", ("Num+9",), "3D canvas", "the opposite side of the view"),
     ("view_zoom", ("Num++", "Num+-"), "3D canvas", "zoom in and out"),
     ("view_selected", ("Num+.",), "3D canvas", "the selected sites in sight"),
+    ("node_add", ("Shift+A",), "node view", "the Add menu at the cursor"),
+    ("node_delete", ("Del", "Backspace"), "node view", "remove the selected node"),
+    ("node_frame", ("Home",), "node view", "show the whole graph"),
     ("console_run", ("Return",), "console", "run the input"),
     ("console_newline", ("Shift+Return",), "console", "a new line in the input"),
     ("console_history", ("Up", "Down"), "console", "walk the history"),

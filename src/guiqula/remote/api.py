@@ -335,6 +335,11 @@ class RemoteAPI:
                **({"embeddings": [{"id": e.id, "name": e.name, "pristine": e.pristine,
                                    "defect": e.defect} for e in document.embeddings]}
                   if document.embeddings else {}),
+               **({"junctions": [{"id": j.id, "name": j.name, "left": j.left,
+                                  "right": j.right, "central": j.central}
+                                 for j in document.junctions]} if document.junctions else {}),
+               **({"kpaths": [{"id": k.id, "name": k.name, "vertices": k.vertices}
+                              for k in document.kpaths]} if document.kpaths else {}),
                "undo": history["undo"][:5], "redo": history["redo"][:5],
                "settled": self.settled(), "window": None}
         if self.window is not None:

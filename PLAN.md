@@ -553,7 +553,10 @@ still shows its values at the sites (phase 2, left for later).
 
 One window, one document, three workspaces switched by tabs in the header
 (Blender-style), sharing the same outliner, viewport and properties panel.
-The window as phase 8 built it (2026-10-04), at 1200x800 on
+The window as phase 8 built it (2026-10-04), with what phase 9 changed in
+it (2026-10-15: the K-paths section, the Geometry row naming its geometry,
+the k-path row of a form, Tree and Nodes at the top of the Outliner, and no
+k-space tab, the zone being a window of each k-path), at 1200x800 on
 `honeycomb_zeeman_rashba` with c1 run and then made stale by a change of
 t1 (`python tools/drive.py honeycomb_zeeman_rashba --run c1 --python
 "session.do('set_param', entry='t1', name='m', value=[0, 0, 0.3])"`; the
@@ -565,22 +568,24 @@ tracked):
 | File  Edit  View  Run  Help                                                                     |
 | [Geometry][Hamiltonian][Calculate] | ⊞ New system v  + Add v  ▷ Run c1 · bands |v  ■  ⟲         |
 +-------------------------------+----------------------------------------+------------------------+
-| Outliner                   x  | Structure | k-space | c1 bands ↻  x    | Properties           x |
+| Outliner                   x  | Structure | c1 bands ↻  x              | Properties           x |
+| [Tree][Nodes]                 |                                        |                        |
 | Entry                 Status  | ⤢ ✥ ⊕ | ↖ | ≡v ⇥ ▦ ↗                 ▣ | Band structure       ? |
 | v ⬡ s1  graphene with exch…   | ↻ stale: the model cha… [▷ Run again]  | c1 · Spectral          |
 |     2D · 8 sites · spinful    |         c1 · bands · spinful           | Bands along a path     |
-|   v Geometry               +  |    3 +--------------------+  sz        | through the zone...    |
+|   v Geometry geo1          +  |    3 +--------------------+  sz        | through the zone...    |
 |       ⁞ Honeycomb lattice     |      | \/  \/  \/  \/  \/ |  [#]       | system     s1          |
 |     [x] ⚒ op1 Supercell · n … |    0 | /\  /\  /\  /\  /\ |  [#]       | k-points   [100    ]   |
 |       Regions              +  |      | \/  \/  \/  \/  \/ |  [#]       | operator   [sz    v]   |
-|   v Hamiltonian            +  |   -3 +--------------------+            | k-path     [default]   |
+|   v Hamiltonian            +  |   -3 +--------------------+            | k-path [k1 · def…][Zone]|
 |     [x] Σ t1 Zeeman…  spinful |      Γ      K'   M   K       Γ         | result: stale          |
 |     [x] Σ t2 Rashba…  spinful |                  k                     |                        |
 |     [ ] ∞ Mean field      off |                                        | estimate: under a      |
 |   v Calculations           +  |                                        | second  [▷ Run again]  |
 |       ⌇ c1 Band structure   ↻ |                                        | ---------------------- |
 |       ⌇ c2 Density of states  |                                        | Jobs                 x |
-|                               | 0.06 s                                 | j2  run c1  done  100% |
+|   v K-paths                +  | 0.06 s                                 | j2  run c1  done  100% |
+|       ⬢ k1 default    c1      |                                        |                        |
 |                               |                                        | Help | Sliders | Jobs  |
 +-------------------------------+----------------------------------------+------------------------+
 | s1 · 2D · 8 sites · spinful · dimension 16 · c1: under a second      j2 c1 done   [Log]         |
@@ -618,7 +623,10 @@ Show all, and a line saying what comes next, with a link to the guide.
   with the message on hover, a crossed-out circle, a padlock); the system's
   row reads its summary (2D · 8 sites · spinful) and the mean field its
   interactions. Drag to reorder,
-  right-click to enable, run, rename, lock, duplicate, move or delete.
+  right-click to enable, run, rename, lock, duplicate, move or delete. The
+  same dock shows the Document as a graph instead, Nodes at its top (phase
+  9, part C): geometries, k-paths, systems, embeddings, junctions and
+  calculations, linked by what they name, a link drawn being a Command.
   Selecting an item shows it in Properties, brings its workspace forward,
   and marks what it affects on the canvas (e.g. the atoms a removal op
   deletes, the bonds a hopping term touches).
@@ -636,8 +644,10 @@ Show all, and a line saying what comes next, with a link to the guide.
   beside it.
 - **Viewport** (centre): a Structure tab always present (2D canvas with
   pan/zoom, atom picking, colour by sublattice/onsite/magnetization/LDOS,
-  unit cell and neighbour cells, 3D view for 3D lattices), a k-space tab
-  for a system with a periodic direction, plus one closable tab per result.
+  unit cell and neighbour cells, 3D view for 3D lattices), plus one
+  closable tab per result. The Brillouin zone is a window of each k-path,
+  opened from a calculation's k-path row, the k-path's row or a system's
+  Show Brillouin zone (phase 9, part A), drawn in 3D for a 3D crystal.
   A tab can be detached into a window of its own to compare plots side by
   side, or dragged into a cell of a grid, a tab of rows and columns of live
   result views (decisions 170 to 180). Each drawing has a bar of its own (Fit, Pan, Zoom, the tools of that

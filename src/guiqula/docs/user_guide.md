@@ -984,6 +984,9 @@ functions only: the window loads the plugin too, and must start without pyqula.
 | 3D canvas | Num+9 | the opposite side of the view |
 | 3D canvas | Num++, Num+- | zoom in and out |
 | 3D canvas | Num+. | the selected sites in sight |
+| node view | Shift+A | the Add menu at the cursor |
+| node view | Del, Backspace | remove the selected node |
+| node view | Home | show the whole graph |
 | console | Return | run the input |
 | console | Shift+Return | a new line in the input |
 | console | Up, Down | walk the history |

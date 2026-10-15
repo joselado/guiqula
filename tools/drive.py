@@ -177,6 +177,14 @@ def outline(document):
     if document.embeddings:
         out.append({"embeddings": [f"{e.id}:{e.defect} in {e.pristine}"
                                    for e in document.embeddings]})
+    if document.junctions:
+        out.append({"junctions": [f"{j.id}:{j.left} to {j.right}"
+                                  + (f" through {j.central}" if j.central else "")
+                                  for j in document.junctions]})
+    if document.kpaths:
+        out.append({"kpaths": [f"{k.id}:" + (" ".join(v if isinstance(v, str) else str(v)
+                                                       for v in k.vertices) or "default")
+                               for k in document.kpaths]})
     out.append({"calculations": [f"{c.id}:{c.kind}@{c.system}" for c in document.calculations]})
     return out
 
