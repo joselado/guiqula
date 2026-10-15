@@ -36,7 +36,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QFrame, QGroup
                                QToolButton, QVBoxLayout, QWidget)
 
 from guiqula.core import regions as region_tools
-from guiqula.core.document import DocumentError, kpath_users
+from guiqula.core.document import DocumentError, geometry_chain, kpath_users, terms_of
 from guiqula.registry import base as registry
 from guiqula.registry import cost
 from guiqula.registry.params import FieldParam, VectorFieldParam
@@ -66,9 +66,23 @@ SPARSE_TIP = ("store the Hamiltonian as a sparse matrix (is_sparse), for large s
               "rather than the full spectrum")
 
 
-def _regions(system):
-    """[(id, name)] of a system's regions, for piecewise Fields."""
-    return tuple((r.id, r.name) for r in system.regions)
+def _regions(document, system):
+    """[(id, name)] of the regions of a system's geometry, for piecewise
+    Fields."""
+    return tuple((r.id, r.name) for r in document.geometry_of(system.id).regions)
+
+
+def _first_geometry(document, system_id):
+    """The geometry with the base lattice that a system's starts from."""
+    return geometry_chain(document, document.system(system_id).geometry)[0]
+
+
+def _system_for(panel, owner):
+    """The system an op's or a region's form speaks of: the one it was
+    selected under (panel.context, a linked row of the outliner), else the
+    first on its geometry; None for a geometry no system names."""
+    users = panel.session.document.systems_on(owner.id)
+    return panel.context if panel.context in users else (users[0] if users else None)
 
 
 def _systems(document, system_id):
@@ -552,10 +566,11 @@ class SystemForm(Form):
             self.lattice.addItem(f"{spec.label} ({spec.group})", spec.kind)
         self.lattice.activated.connect(self._set_lattice)
         self.rows.addRow("lattice", self.lattice)
-        self.base_kind = system.geometry.base.kind
+        base = _first_geometry(panel.session.document, system_id).base
+        self.base_kind = base.kind
         try:
             spec = registry.get("lattice", self.base_kind)
-            self.add_editors(spec.params, spec.normalize_params({}) | system.geometry.base.params,
+            self.add_editors(spec.params, spec.normalize_params({}) | base.params,
                              lambda name, value: self.commit("set_param", entry=system_id,
                                                              name=name, value=value))
         except registry.RegistryError:
@@ -597,17 +612,17 @@ class SystemForm(Form):
         self.update_values()
 
     def signature(self):
-        system = self.session.document.system(self.system_id)
-        return ("system", self.system_id, system.geometry.base.kind)
+        return ("system", self.system_id,
+                _first_geometry(self.session.document, self.system_id).base.kind)
 
     def update_values(self):
         system = self.session.document.system(self.system_id)
         _quiet(self.name, self.name.setText, system.name)
-        _quiet(self.lattice, self.lattice.setCurrentIndex,
-               self.lattice.findData(system.geometry.base.kind))
+        base = _first_geometry(self.session.document, self.system_id).base
+        _quiet(self.lattice, self.lattice.setCurrentIndex, self.lattice.findData(base.kind))
         for name, editor in self.editors.items():
             param = editor.param
-            editor.set_value(system.geometry.base.params.get(name, param.default))
+            editor.set_value(base.params.get(name, param.default))
         line_up(self.editors.values())
         if system.hamiltonian is not None:
             c = system.hamiltonian.construction
@@ -657,8 +672,9 @@ class SystemForm(Form):
 
     def _set_lattice(self, index):
         kind = self.lattice.itemData(index)
-        if kind != self.session.document.system(self.system_id).geometry.base.kind:
-            self.commit("set_lattice", system=self.system_id, lattice=kind)
+        first = _first_geometry(self.session.document, self.system_id)
+        if kind != first.base.kind:              # the lattice the geometry starts from
+            self.commit("set_lattice", system=first.id, lattice=kind)
 
     def _set_spin(self, index):
         has_spin = self.has_spin.itemData(index)
@@ -771,22 +787,27 @@ class EntryForm(Form):
             if spec.formula:
                 self.layout().insertWidget(2, self._formula(spec.formula))
         self.family, self.kind, self.spec = family, obj.kind, spec
-        self.system_id = owner.id if owner is not None else obj.system
+        self.system_id = obj.system if owner is None else \
+            _system_for(panel, owner) if family in ("op", "region") else owner.id
+        self.geometry_users = panel.session.document.systems_on(owner.id) \
+            if family == "op" else []
         self.previews = family == "term"
         self.enabled = None
         if family in ("op", "term"):
             self.add_enabled(lambda v: self.commit("set_enabled", entry=entry_id, enabled=v))
         self.region = self.region_link = None
         self.region_ids = ()
-        if family == "term" and owner.regions:
+        regions_here = panel.session.document.geometry_of(owner.id).regions \
+            if family == "term" else []
+        if family == "term" and regions_here:
             self.region = QComboBox()
             self.region.setObjectName("regionBox")
             self.region.setToolTip("where the term acts: everywhere, or on the sites of one "
                                    "region of the system (set_region)")
             self.region.addItem(EVERYWHERE, None)
-            for region in owner.regions:
+            for region in regions_here:
                 self.region.addItem(f"{region.id}  {region.name}", region.id)
-            self.region_ids = tuple(r.id for r in owner.regions)
+            self.region_ids = tuple(r.id for r in regions_here)
             self.region.activated.connect(self._set_region)
             self.rows.addRow("region", self.region)
         elif family == "term":
@@ -809,7 +830,8 @@ class EntryForm(Form):
             self.add_editors(spec.params, spec.normalize_params({}) | obj.params,
                              lambda name, value: self.commit("set_param", entry=entry_id,
                                                              name=name, value=value),
-                             _regions(owner) if family == "term" else (), self.sources,
+                             _regions(panel.session.document, owner) if family == "term"
+                             else (), self.sources,
                              systems=_systems(panel.session.document, obj.system)
                              if family == "calculation" else (),
                              kpaths=_kpaths(panel.session.document)
@@ -824,15 +846,16 @@ class EntryForm(Form):
 
     def whole_locks(self):
         out = [self.item_id]
-        if self.family == "op":
-            out += [self.system_id, f"{self.system_id}/geometry"]
+        if self.family == "op":        # the geometry is shared: every system on it
+            for system in self.geometry_users:
+                out += [system, f"{system}/geometry"]
         elif self.family == "term":
             out.append(self.system_id)
         return out
 
     def signature(self):
         found = self.session.document.find(self.item_id)
-        regions = _regions(found[1]) if found[0] == "term" else ()
+        regions = _regions(self.session.document, found[1]) if found[0] == "term" else ()
         sources = tuple((calc, tuple(arrays)) for calc, _, arrays in
                         result_sources(self.session, found[1].id)) if found[0] == "term" else ()
         systems = _systems(self.session.document, found[-1].system) \
@@ -970,6 +993,60 @@ class EntryForm(Form):
         update()
 
 
+class GeometryForm(Form):
+    """A geometry of the document (phase 9, part B): its name, what it
+    starts from (a lattice or another geometry) and the systems built on
+    it. Its ops and regions are edited as any, under a system's Geometry
+    row or under it in the outliner."""
+
+    def __init__(self, panel, geometry_id):
+        super().__init__(panel, geometry_id, f"Geometry {geometry_id}",
+                         "The sites: a base lattice, or another geometry it starts from, then "
+                         "its ops; every system built on it shares it, so an op or a region "
+                         "edited once is edited for all of them.")
+        self.name = QLineEdit()
+        self.name.setObjectName("geometryName")
+        self.name.editingFinished.connect(self._rename)
+        self.rows.addRow("name", self.name)
+        self.start = QLabel()
+        self.start.setObjectName("geometryStart")
+        self.rows.addRow("starts from", self.start)
+        self.users = QLabel()
+        self.users.setObjectName("geometryUsers")
+        self.users.setWordWrap(True)
+        self.rows.addRow("built on it", self.users)
+        self.guarded = [self.name]
+        self.update_values()
+
+    def whole_locks(self):
+        return [self.item_id]
+
+    def signature(self):
+        return ("geometry", self.item_id)
+
+    def update_values(self):
+        document = self.session.document
+        geometry = document.geometry(self.item_id)
+        _quiet(self.name, self.name.setText, geometry.name)
+        if geometry.parent is not None:
+            self.start.setText(f"the geometry {geometry.parent}")
+        else:
+            try:
+                self.start.setText(registry.get("lattice", geometry.base.kind).label)
+            except registry.RegistryError:
+                self.start.setText(geometry.base.kind)
+        users = document.systems_on(self.item_id)
+        children = [g.id for g in document.geometries if g.parent == self.item_id]
+        self.users.setText(", ".join(users + [f"{c} (a geometry)" for c in children])
+                           or "nothing: removing it loses nothing")
+        self.update_reports()
+
+    def _rename(self):
+        name = self.name.text().strip()
+        if name != self.session.document.geometry(self.item_id).name:
+            self.commit("rename", entry=self.item_id, name=name)
+
+
 class KPathForm(Form):
     """A k-path of the document (phase 9, part A): its name, its vertices as
     text, the calculations that walk it, and Zone, which opens its window on
@@ -1037,11 +1114,13 @@ class KPathForm(Form):
 
 class RegionForm(Form):
     def __init__(self, panel, region_id):
-        _, system, _, _, region = panel.session.document.find(region_id)
+        _, geometry, _, _, region = panel.session.document.find(region_id)
         super().__init__(panel, region_id, f"Region {region_id}",
-                         "A named site selection; any term whose parameters take a function "
-                         "of position can be restricted to it.")
-        self.system_id = system.id
+                         "A named site selection of a geometry; any term whose parameters "
+                         "take a function of position can be restricted to it, on every "
+                         "system built on that geometry.")
+        self.system_id = _system_for(panel, geometry)
+        self.geometry_id = geometry.id
         self.select_kind = region.select.get("kind")
         self.name = QLineEdit()
         self.name.setObjectName("regionName")
@@ -1077,7 +1156,7 @@ class RegionForm(Form):
         self.update_values()
 
     def whole_locks(self):
-        return [self.item_id, self.system_id]
+        return [self.item_id] + self.session.document.systems_on(self.geometry_id)
 
     def _select_sites(self):
         region = self.session.document.find(self.item_id)[-1]
@@ -1115,8 +1194,9 @@ class RegionForm(Form):
                 self.sites.setText(f"{n} of {build['sites']}")
             except Exception as error:
                 self.sites.setText(str(error))
-        users = [t.id for t in system.hamiltonian.terms if t.region == self.item_id] \
-            if system.hamiltonian else []
+        document = self.session.document
+        users = [t.id for s in document.systems_on(self.geometry_id)
+                 for t in terms_of(document.system(s)) if t.region == self.item_id]
         self.users.setText(", ".join(users) or "no term")
 
     def _rename(self):
@@ -1180,7 +1260,8 @@ class MeanFieldForm(Form):
             rest = [p for p in spec.params if p.name not in FURTHER_NEIGHBOURS]
             # the first neighbours' V and J right after U, then the folded ones
             first = [p for p in rest if p.name in ("U", "V1", "J1")] if further else []
-            self.add_editors(first or rest, values, send, _regions(system))
+            self.add_editors(first or rest, values, send,
+                             _regions(self.session.document, system))
             if further:
                 # a check box over a framed group of rows: a checkable QGroupBox keeps its
                 # empty frame when its rows are hidden
@@ -1196,12 +1277,13 @@ class MeanFieldForm(Form):
                 rows.setContentsMargins(6, 4, 6, 4)
                 rows.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
                 self.further_rows = inner
-                self.add_editors(further, values, send, _regions(system), rows=rows)
+                self.add_editors(further, values, send, _regions(self.session.document, system),
+                                 rows=rows)
                 self.rows.addRow(self.further)
                 self.rows.addRow(inner)
                 self.further.toggled.connect(self._fold_further)
                 self.add_editors([p for p in rest if p not in first], values, send,
-                                 _regions(system))
+                                 _regions(self.session.document, system))
                 self._show_further(self._further_set(block.params))
             self.guarded = [self.further] if self.further is not None else []
         self.status = QLabel()
@@ -1212,7 +1294,8 @@ class MeanFieldForm(Form):
 
     def signature(self):
         system = self.session.document.system(self.system_id)
-        return ("meanfield", self.system_id, system.hamiltonian.meanfield.kind, _regions(system))
+        return ("meanfield", self.system_id, system.hamiltonian.meanfield.kind,
+                _regions(self.session.document, system))
 
     def update_values(self):
         block = self.session.document.system(self.system_id).hamiltonian.meanfield
@@ -1337,6 +1420,7 @@ class PropertiesPanel(QWidget):
         self.run = run
         self.session = None
         self.item_id = ""
+        self.context = None      # the system an op or a region was selected under
         self.form = None
         self._signature = None
         self._set_form(EmptyForm(self))
@@ -1377,7 +1461,7 @@ class PropertiesPanel(QWidget):
 
     def _make(self, item_id):
         document = self.session.document
-        if not item_id or item_id in ("calculations", "kpaths"):
+        if not item_id or item_id in ("calculations", "kpaths", "geometries"):
             return EmptyForm(self)
         if item_id.endswith("/meanfield"):
             return MeanFieldForm(self, item_id)
@@ -1391,6 +1475,8 @@ class PropertiesPanel(QWidget):
             return SystemForm(self, item_id)
         if family == "kpath":
             return KPathForm(self, item_id)
+        if family == "geometry":
+            return GeometryForm(self, item_id)
         if family == "embedding":
             return EmbeddingForm(self, item_id)
         if family == "region":

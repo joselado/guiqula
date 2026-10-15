@@ -38,7 +38,8 @@ beside the outliner, was planned on 2026-10-15 (the end of section 7,
 decisions 213 to 233); the maintainer answered 222, 224 and 226 and said to
 go ahead, and part A, the k-path as an object with its zone window (a 3D
 zone for a 3D crystal), was built the same day on branch kpath-window,
-decisions 234 to 239.
+decisions 234 to 239, and merged; part B, the geometry as an object (schema
+version 2), on branch shared-geometry, decisions 240 to 245.
 
 ## 1. Requirements (as stated by the maintainer)
 
@@ -4668,6 +4669,54 @@ opened by the `kpath_window` action. The k-space tab, `KSPACE_TAB`,
      calculations walk it, its label naming them ("add k = ... to the
      k-path k1 of c1, c3"); or one target per calculation, all editing the
      same path.
+
+*Part B as built (2026-10-15, branch shared-geometry).* The Document is
+schema version 2: `geometries` (`Geometry`: id, name, a base lattice or a
+`parent` geometry, ops, regions) and a system's `geometry`, an id. A
+version-1 file, an autosave or the snapshot of a result is lifted in
+`from_data` (`lift_geometries`: one geometry per system, every id kept), and
+the presets were saved again; the keys of the 38 calculations of the presets
+are those of before phase 9. The planner flattens a geometry's chain of
+parents (`geometry_chain`) into the stages, so two systems on one geometry
+share the cache, and a ribbon starting from a decorated cell follows every
+edit of it, without a change of the engine. The mutations are
+`add_geometry`, `set_geometry`, `set_parent`, `duplicate_linked`, and
+`add_system(geometry=...)`; `duplicate` of a system copies its geometry, of a
+geometry gives fresh op and region ids; `remove` refuses a geometry a system
+is built on or another starts from, and a region a term of any system on
+the geometry uses; New embedding of a defect builds the defect on the
+pristine geometry (decision 224), so an engine test now gives the defect a
+copy before it can make the cells differ. Decisions, the built option
+first:
+
+240. the first system in document order shows the ops and regions of a
+     shared geometry by their ids, and every later system shows the same
+     rows as `<system>/<entry>`, which `select` turns into the entry with
+     that system as the context (`window.context`, `linked_rows`): the
+     canvas draws it and the forms speak of it; or the rows under the first
+     system only, the later ones reading "edited under s1";
+241. a command's `system=` (`add_geometry_op`, `add_region`, `set_lattice`,
+     `set_param` of a lattice parameter) takes a system's id, meaning its
+     geometry, or a geometry's own id, so every driver, test and remote call
+     written before part B keeps working; or the geometry's id only;
+242. a geometry no system is built on is listed under Geometries, after
+     K-paths, with its ops, and is not drawn, since a build is a system's
+     (the node view, part C, is where one is made and linked); or it gets a
+     drawing of its own on the canvas now;
+243. a lock of a system or of its geometry (`s1/geometry`) covers the whole
+     chain of geometries it is built from, and `geo1` locks a geometry by
+     its id, so a teaching preset's lock refuses an edit made through any
+     system on the geometry; or the lock covers the system's own geometry
+     only;
+244. the lattice of a system's form, and its parameters, are those of the
+     first geometry of its chain, the one with the lattice, so a ribbon's
+     form changes the lattice of the cell it is cut from, for every system
+     on it; `set_lattice` on a geometry that starts from another makes it
+     start from the lattice instead; or the form's lattice replaces the
+     ribbon's parent;
+245. a document without a version whose systems carry their geometry inline
+     is read as version 1, as the hand-written documents of the tests and of
+     plugins are; or such a document is refused.
 
 ### Where the section 13 items land
 

@@ -155,7 +155,7 @@ def test_piecewise_fields_resolve_regions():
         d.do("set_param", entry=t1, name="mu", value={
             "kind": "piecewise", "default": 0.0, "pieces": [{"region": "r99", "value": 0.3}]})
     data = d.document.model_dump()
-    data["systems"][0]["regions"][-1]["select"] = {"kind": "lasso"}   # a broken selection
+    data["geometries"][0]["regions"][-1]["select"] = {"kind": "lasso"}   # a broken selection
     from guiqula.core.document import Document
     assert "unknown selection kind" in pipeline.plan_system(
         Document.from_data(data), s).stage(t1).problem

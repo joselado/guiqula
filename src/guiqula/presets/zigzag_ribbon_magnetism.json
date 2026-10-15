@@ -1,22 +1,26 @@
 {
-  "version": 1,
+  "version": 2,
   "notes": "Edge magnetism of a zigzag ribbon\nA graphene zigzag ribbon with a Hubbard interaction solved in the mean field (U = 2, from an antiferromagnetic guess): the flat edge band polarizes, each edge ferromagnetic and the two edges opposite. The bands coloured by Sz (c1) show the gap the magnetism opens; the magnetization on the atoms (c2) sits on the edges. Change U in the mean-field block, or the width of the ribbon.",
   "locks": [],
+  "geometries": [
+    {
+      "id": "geo1",
+      "base": {
+        "kind": "honeycomb_zigzag_ribbon",
+        "params": {
+          "width": 6
+        }
+      },
+      "ops": [],
+      "regions": []
+    }
+  ],
   "systems": [
     {
       "id": "s1",
       "name": "zigzag ribbon",
       "kind": "quantum",
-      "geometry": {
-        "base": {
-          "kind": "honeycomb_zigzag_ribbon",
-          "params": {
-            "width": 6
-          }
-        },
-        "ops": []
-      },
-      "regions": [],
+      "geometry": "geo1",
       "hamiltonian": {
         "construction": {
           "has_spin": true,

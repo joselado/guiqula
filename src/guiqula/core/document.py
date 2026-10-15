@@ -1,13 +1,18 @@
 """The Document: the whole editable state, as JSON-serializable data
 (PLAN.md 3.1). Mutations happen only through guiqula.commands.
 
-A document holds systems and calculations. A system of kind ``quantum`` has
-a geometry stack (a base lattice and ordered ops), regions, and a
+A document holds geometries, systems and calculations. A geometry
+(``geometries``, ids geo1, geo2..., phase 9, part B) is a base lattice, or
+another geometry it starts from (``parent``, a ribbon cut from a decorated
+cell), ordered ops, and the regions, named site selections of it; a system
+names one by id (``System.geometry``), and several systems may name the same
+one, so that one geometry carries several Hamiltonians or a Hamiltonian and
+a classical model. A system of kind ``quantum`` has a geometry and a
 Hamiltonian (construction, an ordered term stack, and the mean-field block
 that turns the terms into a self-consistent interacting Hamiltonian when it
 is enabled). A system of one of the classical kinds (``classical_spin``,
-``lattice_gas``, ``ising``, decision 13.5) has the same geometry stack and
-regions and, in place of the Hamiltonian, a ``model``: the classical model
+``lattice_gas``, ``ising``, decision 13.5) has a geometry too and, in place
+of the Hamiltonian, a ``model``: the classical model
 built on the geometry (its kind names a registry entry of the "model"
 family, whose parameters set it up: the filling, the initial
 magnetization, the seed of the random initial configuration) and its
@@ -51,7 +56,7 @@ from pydantic import (BaseModel, ConfigDict, Field, field_validator, model_seria
 
 from guiqula.core import fields as field_tools
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2                 # 2: geometries of their own (version 1 is lifted)
 # a JSON string, which is left as it is (the characters of a value never
 # change: "[1,2]" in a note or in a Python node's code stays so), or a JSON
 # list spread over lines whose items are numbers, strings without commas or
@@ -61,7 +66,7 @@ _LEAF_LIST = re.compile(rf'"(?:[^"\\]|\\.)*"|\[\s*((?:{_LEAF})(?:\s*,\s*(?:{_LEA
 SYSTEM_KINDS = ("quantum", "classical_spin", "lattice_gas", "ising")
 CLASSICAL_KINDS = SYSTEM_KINDS[1:]
 
-ID_PREFIX = {"system": "s", "op": "op", "term": "t", "region": "r", "calculation": "c",
+ID_PREFIX = {"geometry": "geo", "system": "s", "op": "op", "term": "t", "region": "r", "calculation": "c",
              "embedding": "e", "kpath": "k"}
 
 
@@ -107,15 +112,32 @@ class Entry(_Kind):
     region: str | None = None      # terms only: restrict to this region
 
 
-class Geometry(_Model):
-    base: Base
-    ops: list[Entry] = Field(default_factory=list)
-
-
 class Region(_Model):
     id: str
     name: str = ""
     select: dict[str, Any]
+
+
+class Geometry(_Model):
+    """A geometry of the document: a base lattice, or the geometry it starts
+    from (parent, by id; exactly one of the two), its ops in order, and its
+    regions. The systems that name it share it: an op or a region edited
+    once is edited for all of them."""
+    id: str
+    name: str = ""
+    base: Base | None = None
+    parent: str | None = None
+    ops: list[Entry] = Field(default_factory=list)
+    regions: list[Region] = Field(default_factory=list)
+
+    @model_serializer(mode="wrap")
+    def _without_empty_fields(self, handler):
+        data = handler(self)
+        if isinstance(data, dict):
+            for key in ("name", "parent", "base"):
+                if key in data and not data[key]:
+                    del data[key]
+        return data
 
 
 class Construction(_Model):
@@ -163,8 +185,7 @@ class System(_Model):
     id: str
     name: str = ""
     kind: Literal["quantum", "classical_spin", "lattice_gas", "ising"] = "quantum"
-    geometry: Geometry
-    regions: list[Region] = Field(default_factory=list)
+    geometry: str                  # the id of its geometry
     hamiltonian: Hamiltonian | None = Field(default_factory=Hamiltonian)
     model: Model | None = None
 
@@ -224,6 +245,7 @@ class Document(_Model):
     version: int = SCHEMA_VERSION
     notes: str = ""                # what the document is about (the presets gallery shows it)
     locks: list[str] = Field(default_factory=list)   # what a teacher locked (core/locks.py)
+    geometries: list[Geometry] = Field(default_factory=list)
     systems: list[System] = Field(default_factory=list)
     embeddings: list[Embedding] = Field(default_factory=list)
     calculations: list[Calculation] = Field(default_factory=list)
@@ -265,6 +287,11 @@ class Document(_Model):
         if not isinstance(data, dict):
             raise DocumentError("a document is a JSON object")
         version = data.get("version", SCHEMA_VERSION)
+        inline = any(isinstance(s, dict) and isinstance(s.get("geometry"), dict)
+                     for s in data.get("systems") or [])
+        if version == 1 or (inline and "version" not in data):     # written before part B
+            data = lift_geometries(data)
+            version = SCHEMA_VERSION
         if version != SCHEMA_VERSION:
             raise DocumentError(f"document schema version {version} is not supported "
                                 f"(this guiqula reads version {SCHEMA_VERSION})")
@@ -306,6 +333,20 @@ class Document(_Model):
                 return calc
         raise DocumentError(f"no calculation {calc_id!r}")
 
+    def geometry(self, geometry_id):
+        for geometry in self.geometries:
+            if geometry.id == geometry_id:
+                return geometry
+        raise DocumentError(f"no geometry {geometry_id!r}")
+
+    def geometry_of(self, system_id):
+        """The geometry a system names (its object)."""
+        return self.geometry(self.system(system_id).geometry)
+
+    def systems_on(self, geometry_id):
+        """The ids of the systems that name a geometry, in document order."""
+        return [s.id for s in self.systems if s.geometry == geometry_id]
+
     def kpath(self, kpath_id):
         for kpath in self.kpaths:
             if kpath.id == kpath_id:
@@ -313,18 +354,22 @@ class Document(_Model):
         raise DocumentError(f"no k-path {kpath_id!r}")
 
     def find(self, entry_id):
-        """Locate any entry by id: returns (family, owner system or None,
-        containing list, index, object). family is one of "system", "op",
-        "term", "region", "calculation"."""
+        """Locate any entry by id: returns (family, owner or None, containing
+        list, index, object). family is one of "geometry", "op", "region"
+        (whose owner is their geometry), "system", "term" (whose owner is its
+        system), "embedding", "calculation", "kpath"."""
+        for i, geometry in enumerate(self.geometries):
+            if geometry.id == entry_id:
+                return "geometry", None, self.geometries, i, geometry
+            for j, op in enumerate(geometry.ops):
+                if op.id == entry_id:
+                    return "op", geometry, geometry.ops, j, op
+            for j, region in enumerate(geometry.regions):
+                if region.id == entry_id:
+                    return "region", geometry, geometry.regions, j, region
         for i, system in enumerate(self.systems):
             if system.id == entry_id:
                 return "system", None, self.systems, i, system
-            for j, op in enumerate(system.geometry.ops):
-                if op.id == entry_id:
-                    return "op", system, system.geometry.ops, j, op
-            for j, region in enumerate(system.regions):
-                if region.id == entry_id:
-                    return "region", system, system.regions, j, region
             terms = terms_of(system)
             for j, term in enumerate(terms):
                 if term.id == entry_id:
@@ -343,9 +388,11 @@ class Document(_Model):
     def plugins(self):
         """The plugins its entries record (sorted, without repeats)."""
         found = set()
+        for geometry in self.geometries:
+            if geometry.base is not None:
+                found.add(geometry.base.plugin)
+            found.update(op.plugin for op in geometry.ops)
         for system in self.systems:
-            found.add(system.geometry.base.plugin)
-            found.update(op.plugin for op in system.geometry.ops)
             found.update(term.plugin for term in terms_of(system))
             if system.hamiltonian is not None:
                 found.add(system.hamiltonian.meanfield.plugin)
@@ -356,10 +403,12 @@ class Document(_Model):
 
     def all_ids(self):
         ids = []
+        for geometry in self.geometries:
+            ids.append(geometry.id)
+            ids += [op.id for op in geometry.ops]
+            ids += [region.id for region in geometry.regions]
         for system in self.systems:
             ids.append(system.id)
-            ids += [op.id for op in system.geometry.ops]
-            ids += [region.id for region in system.regions]
             ids += [term.id for term in terms_of(system)]
         ids += [embedding.id for embedding in self.embeddings]
         ids += [calc.id for calc in self.calculations]
@@ -442,14 +491,66 @@ def region_users(system):
     return users
 
 
+def lift_geometries(data):
+    """A document of schema version 1 (each system with its geometry and
+    regions inline) as version 2: one geometry per system, geo1, geo2... in
+    the order of the systems, holding its base, ops and regions with their
+    ids, so nothing is shared until it is asked for. data: the JSON object;
+    returns a new one."""
+    import copy
+    data = copy.deepcopy(data)
+    geometries = []
+    for system in data.get("systems", []):
+        if not isinstance(system, dict) or not isinstance(system.get("geometry"), dict):
+            continue
+        inline = system["geometry"]
+        geometry = {"id": f"geo{len(geometries) + 1}", **inline,
+                    "regions": system.pop("regions", [])}
+        geometries.append(geometry)
+        system["geometry"] = geometry["id"]
+    data["geometries"] = geometries + list(data.get("geometries", []))
+    data["version"] = SCHEMA_VERSION
+    return data
+
+
+def geometry_chain(document, geometry_id):
+    """The geometries a geometry is made from, the one with the base lattice
+    first and geometry_id last; raises DocumentError on a cycle or a parent
+    that is not there."""
+    chain = []
+    current = geometry_id
+    while current is not None:
+        if current in chain:
+            raise DocumentError(f"geometry {geometry_id!r} starts from itself "
+                                f"({' <- '.join(chain + [current])})")
+        chain.append(current)
+        current = document.geometry(current).parent
+    return [document.geometry(g) for g in reversed(chain)]
+
+
 def check(document):
     """Raise DocumentError on duplicate ids or dangling references."""
     ids = document.all_ids()
     duplicates = sorted({i for i in ids if ids.count(i) > 1})
     if duplicates:
         raise DocumentError(f"duplicate ids: {duplicates}")
+    geometries = {g.id: g for g in document.geometries}
+    for geometry in document.geometries:
+        if (geometry.base is None) == (geometry.parent is None):
+            raise DocumentError(f"geometry {geometry.id!r} starts from a lattice or from "
+                                f"another geometry, one of the two")
+        if geometry.parent is not None and geometry.parent not in geometries:
+            raise DocumentError(f"geometry {geometry.id!r} starts from missing geometry "
+                                f"{geometry.parent!r}")
+        geometry_chain(document, geometry.id)
+        for op in geometry.ops:
+            if op.region is not None:
+                raise DocumentError(f"geometry op {op.id!r} cannot carry a region")
     systems = {s.id: s for s in document.systems}
     for system in document.systems:
+        if system.geometry not in geometries:
+            raise DocumentError(f"system {system.id!r} names missing geometry "
+                                f"{system.geometry!r}")
         if system.kind == "quantum" and (system.hamiltonian is None or system.model is not None):
             raise DocumentError(f"quantum system {system.id!r} needs a hamiltonian and no model")
         if system.kind in CLASSICAL_KINDS and (system.model is None
@@ -459,20 +560,18 @@ def check(document):
         if system.model is not None and system.model.kind != system.kind:
             raise DocumentError(f"system {system.id!r} is {system.kind} but its model is "
                                 f"{system.model.kind}")
-        regions = {r.id for r in system.regions}
+        regions = {r.id for r in geometries[system.geometry].regions}
         for term in terms_of(system):
             if term.region is not None and term.region not in regions:
                 raise DocumentError(f"term {term.id!r} refers to region {term.region!r}, "
-                                    f"which system {system.id!r} does not have")
+                                    f"which the geometry of {system.id!r} does not have")
         for owner, params in region_users(system):
             missing = [r for r in field_tools.regions_of(list(params.values()))
                        if r not in regions]
             if missing:
                 raise DocumentError(f"{owner} has a piecewise Field over region "
-                                    f"{missing[0]!r}, which system {system.id!r} does not have")
-        for op in system.geometry.ops:
-            if op.region is not None:
-                raise DocumentError(f"geometry op {op.id!r} cannot carry a region in phase 1")
+                                    f"{missing[0]!r}, which the geometry of {system.id!r} "
+                                    f"does not have")
     for embedding in document.embeddings:
         for role in ("pristine", "defect"):
             target = getattr(embedding, role)

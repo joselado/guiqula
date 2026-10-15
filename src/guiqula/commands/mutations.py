@@ -17,7 +17,7 @@ from guiqula.core import locks as lock_tools
 from guiqula.core import regions as region_tools
 from guiqula.core.document import (CLASSICAL_KINDS, SYSTEM_KINDS, Base, Calculation,
                                    Construction, DocumentError, Embedding, Entry, Geometry,
-                                   Hamiltonian, KPath, MeanField, Model, Region, System,
+                                   Hamiltonian, KPath, geometry_chain, MeanField, Model, Region, System,
                                    kpath_params, kpath_users, region_users, terms_of)
 from guiqula.registry import base as registry
 from guiqula.registry import plugins
@@ -70,16 +70,19 @@ def _insert(items, item, index):
 # ---- systems
 @mutation
 def add_system(document, lattice="honeycomb_lattice", name="", lattice_params=None,
-               kind="quantum", model_params=None):
-    """Add a system built on a base lattice; returns its id. kind: quantum
+               kind="quantum", model_params=None, geometry=None):
+    """Add a system; returns its id. geometry: the id of a geometry of the
+    document it is built on (New Hamiltonian on this geometry); left out, a
+    new geometry on a base lattice (lattice, lattice_params). kind: quantum
     (a Hamiltonian) or a classical kind (classical_spin, lattice_gas,
     ising: a model, set up with model_params)."""
     if kind not in SYSTEM_KINDS:
         raise CommandError(f"unknown system kind {kind!r}; kinds: {list(SYSTEM_KINDS)}")
-    params = _normalize("lattice", lattice, lattice_params)
     system_id = document.new_id("system")
-    geometry = Geometry(base=Base(kind=lattice, params=params,
-                                  plugin=_plugin("lattice", lattice)))
+    if geometry is None:
+        geometry = _new_geometry(document, lattice, lattice_params).id
+    else:
+        _geometry(document, geometry)
     if kind in CLASSICAL_KINDS:
         model = Model(kind=kind, params=_normalize("model", kind, model_params),
                       plugin=_plugin("model", kind))
@@ -92,12 +95,75 @@ def add_system(document, lattice="honeycomb_lattice", name="", lattice_params=No
     return system_id
 
 
+def _new_geometry(document, lattice, params=None, name=""):
+    geometry = Geometry(id=document.new_id("geometry"), name=_text("name", name),
+                        base=Base(kind=lattice, params=_normalize("lattice", lattice, params),
+                                  plugin=_plugin("lattice", lattice)))
+    document.geometries.append(geometry)
+    return geometry
+
+
+def _geometry(document, target):
+    """The geometry a command acts on: a geometry's id, or a system's (its
+    geometry), so that system="s1" names the geometry of s1."""
+    try:
+        if any(g.id == target for g in document.geometries):
+            return document.geometry(target)
+        return document.geometry_of(target)
+    except DocumentError:
+        raise CommandError(f"no system or geometry {target!r}") from None
+
+
+def _base(document, target):
+    """The base lattice a geometry (of a system) starts from, through its
+    parents."""
+    try:
+        return geometry_chain(document, _geometry(document, target).id)[0].base
+    except DocumentError as error:
+        raise CommandError(str(error)) from None
+
+
 @mutation
 def set_lattice(document, system, lattice, params=None):
-    """Replace the base lattice of a system (ops and terms are kept)."""
-    document.system(system).geometry.base = Base(kind=lattice,
-                                                 params=_normalize("lattice", lattice, params),
-                                                 plugin=_plugin("lattice", lattice))
+    """Replace the base lattice of a geometry, given by its id or a system's
+    (ops, regions and terms are kept); a geometry that started from another
+    one starts from the lattice then."""
+    geometry = _geometry(document, system)
+    geometry.base = Base(kind=lattice, params=_normalize("lattice", lattice, params),
+                         plugin=_plugin("lattice", lattice))
+    geometry.parent = None
+
+
+# ---- geometries (phase 9, part B)
+@mutation
+def add_geometry(document, lattice="honeycomb_lattice", params=None, parent=None, name=""):
+    """Add a geometry, on a base lattice or starting from another geometry
+    (parent: its id, a ribbon or an island cut from a decorated cell, which
+    follows every edit of it); returns its id."""
+    if parent is None:
+        return _new_geometry(document, lattice, params, name).id
+    _geometry(document, parent)
+    geometry = Geometry(id=document.new_id("geometry"), name=_text("name", name),
+                        parent=parent)
+    document.geometries.append(geometry)
+    return geometry.id
+
+
+@mutation
+def set_geometry(document, system, geometry):
+    """Build a system on another geometry of the document (its terms' regions
+    must be regions of that geometry)."""
+    target = document.system(system)
+    target.geometry = _geometry(document, geometry).id
+
+
+@mutation
+def set_parent(document, geometry, parent):
+    """Make a geometry start from another one (its base lattice goes); a
+    cycle is refused."""
+    target = _geometry(document, geometry)
+    target.parent = _geometry(document, parent).id
+    target.base = None
 
 
 @mutation
@@ -151,7 +217,8 @@ def rename(document, entry, name):
     """Name a system, region, op, term, embedding, calculation or k-path (""
     takes an entry's name away)."""
     family, _, _, _, obj = document.find(entry)
-    if family not in ("system", "region", "op", "term", "embedding", "calculation", "kpath"):
+    if family not in ("geometry", "system", "region", "op", "term", "embedding",
+                      "calculation", "kpath"):
         raise CommandError(f"{entry!r} is a {family}, which has no name")
     obj.name = _text("name", name)
 
@@ -172,10 +239,11 @@ def _quantum(document, system, role):
 def add_embedding(document, pristine, defect=None, name=""):
     """Add an embedding of a defect in the infinite pristine system; returns
     its id. defect: the defective system; None makes it, a copy of the
-    pristine one to which the defect's terms are added."""
+    pristine one on the same geometry (decision 224: the two cells are one),
+    to which the defect's terms are added."""
     _quantum(document, pristine, "pristine")
     if defect is None:
-        defect = _copy_system(document, pristine)
+        defect = _copy_system(document, pristine, linked=True)
         copy = document.system(defect)
         copy.name = f"{document.system(pristine).name or pristine} (defect)"
     _quantum(document, defect, "defect")
@@ -206,12 +274,13 @@ def set_embedding(document, embedding, pristine=None, defect=None):
 # ---- stacks
 @mutation
 def add_geometry_op(document, system, kind, params=None, index=None, enabled=True):
-    """Add a geometry op (at the end, or at index); returns its id."""
-    target = document.system(system)
+    """Add a geometry op to a geometry, given by its id or a system's (at the
+    end, or at index); returns its id."""
+    target = _geometry(document, system)
     op = Entry(id=document.new_id("op"), kind=kind, enabled=_flag("enabled", enabled),
                params=_normalize("geometry_op", kind, params),
                plugin=_plugin("geometry_op", kind))
-    _insert(target.geometry.ops, op, index)
+    _insert(target.ops, op, index)
     return op.id
 
 
@@ -235,14 +304,15 @@ def add_term(document, system, kind, params=None, region=None, index=None, enabl
 
 @mutation
 def add_region(document, system, select, name=""):
-    """Add a named region (a site selection); returns its id."""
+    """Add a named region (a site selection) to a geometry, given by its id
+    or a system's; returns its id."""
     try:
         select = region_tools.normalize(select)
     except region_tools.RegionError as error:
         raise CommandError(str(error)) from None
     region = Region(id=document.new_id("region"), name=name, select=select)
     region.name = name or region.id
-    document.system(system).regions.append(region)
+    _geometry(document, system).regions.append(region)
     return region.id
 
 
@@ -381,17 +451,28 @@ def single_user_kpath(document, calculation, param="kpath", copy=True):
 
 @mutation
 def remove(document, entry):
-    """Remove a system, op, term, region, embedding, calculation or k-path. A
-    region still used by a term, a system a calculation runs on or names (the
+    """Remove a geometry, system, op, term, region, embedding, calculation or
+    k-path. A geometry a system names or another starts from, a region still
+    used by a term, a system a calculation runs on or names (the
     tip of a local probe) or an embedding names, an embedding a calculation
     runs on, or a k-path a calculation walks, cannot be removed."""
     family, owner, items, index, obj = document.find(entry)
     if family == "region":
-        users = [t.id for t in terms_of(owner) if t.region == entry]
-        users += [user for user, params in region_users(owner)
-                  if entry in field_tools.regions_of(list(params.values())) and user not in users]
+        users = []
+        for system in (document.system(s) for s in document.systems_on(owner.id)):
+            users += [t.id for t in terms_of(system) if t.region == entry]
+            users += [user for user, params in region_users(system)
+                      if entry in field_tools.regions_of(list(params.values()))
+                      and user not in users]
         if users:
             raise CommandError(f"region {entry!r} is used by {users}")
+    if family == "geometry":
+        users = document.systems_on(entry)
+        if users:
+            raise CommandError(f"geometry {entry!r} is the geometry of systems {users}")
+        children = [g.id for g in document.geometries if g.parent == entry]
+        if children:
+            raise CommandError(f"geometry {entry!r} is where geometries {children} start")
     if family == "system":
         users = [c.id for c in document.calculations
                  if c.system == entry or entry in _systems_named(c)]
@@ -422,12 +503,16 @@ def _systems_named(calc):
 
 @mutation
 def duplicate(document, entry):
-    """Copy an op, term, region, embedding, calculation (which walks the same
-    k-path as the original) or k-path (placed right after the original), or a whole system with fresh ids for everything in it (its
-    terms keep pointing at the copies of its regions); returns the new id."""
+    """Copy a geometry, op, term, region, embedding, calculation (which walks
+    the same k-path as the original) or k-path (placed right after the
+    original), or a whole system with a copy of its geometry and fresh ids
+    for everything in them (its terms point at the copies of the regions);
+    returns the new id."""
     family, _, items, index, obj = document.find(entry)
     if family == "system":
         return _copy_system(document, entry)
+    if family == "geometry":
+        return _copy_geometry(document, entry)[0]
     copy = obj.model_copy(deep=True)
     items.insert(index + 1, copy)          # new ids are allocated with the copy in place
     copy.id = document.new_id(family)
@@ -438,22 +523,46 @@ def duplicate(document, entry):
     return copy.id
 
 
-def _copy_system(document, system_id):
-    """A copy of a system right after it, with fresh ids; returns its id."""
+@mutation
+def duplicate_linked(document, system):
+    """Copy a system that shares its geometry with the original (Blender's
+    Alt+D): a new Hamiltonian or model on the same sites, whose terms keep
+    naming the same regions; returns its id."""
+    return _copy_system(document, system, linked=True)
+
+
+def _copy_geometry(document, geometry_id):
+    """A copy of a geometry right after it, with fresh op and region ids;
+    returns (its id, {old region id: new id})."""
+    _, _, items, index, obj = document.find(geometry_id)
+    copy = obj.model_copy(deep=True)
+    items.insert(index + 1, copy)
+    copy.id = document.new_id("geometry")
+    if obj.name:
+        copy.name = f"{obj.name} (copy)"
+    for op in copy.ops:
+        op.id = document.new_id("op")
+    regions = {}
+    for region in copy.regions:
+        regions[region.id] = region.id = document.new_id("region")
+    return copy.id, regions
+
+
+def _copy_system(document, system_id, linked=False):
+    """A copy of a system right after it, with fresh ids; with a copy of its
+    geometry, or naming the same one (linked); returns its id."""
     _, _, items, index, obj = document.find(system_id)
     copy = obj.model_copy(deep=True)
     items.insert(index + 1, copy)
     copy.id = document.new_id("system")
     copy.name = f"{obj.name or obj.id} (copy)"
-    for op in copy.geometry.ops:
-        op.id = document.new_id("op")
     regions = {}
-    for region in copy.regions:
-        regions[region.id] = region.id = document.new_id("region")
+    if not linked:
+        copy.geometry, regions = _copy_geometry(document, obj.geometry)
     for term in terms_of(copy):
         term.id = document.new_id("term")
         if term.region is not None:
-            term.region = regions[term.region]
+            term.region = regions.get(term.region, term.region)
         term.params = _rename_regions(term.params, regions)
     if copy.hamiltonian is not None:
         block = copy.hamiltonian.meanfield
@@ -465,7 +574,7 @@ def _copy_system(document, system_id):
 def move(document, entry, index):
     """Move an op, term, region or calculation to a new position in its list."""
     family, _, items, old, obj = document.find(entry)
-    if family in ("system", "embedding", "kpath"):
+    if family in ("geometry", "system", "embedding", "kpath"):
         raise CommandError(f"{family}s are not ordered")
     if not 0 <= index < len(items):
         raise CommandError(f"index {index} out of range 0..{len(items) - 1}")
@@ -482,11 +591,11 @@ def set_enabled(document, entry, enabled):
 
 @mutation
 def set_param(document, entry, name, value):
-    """Set one parameter of an op, term or calculation (or of a system's base
-    lattice, when entry is a system id)."""
+    """Set one parameter of an op, term or calculation (or of the base
+    lattice of a geometry, when entry is a geometry's id or a system's)."""
     family, _, _, _, obj = document.find(entry)
-    if family == "system":
-        base = obj.geometry.base
+    if family in ("system", "geometry"):
+        base = _base(document, entry)
         base.params = _normalize("lattice", base.kind, dict(base.params, **{name: value}))
         return
     if family not in FAMILY_OF:

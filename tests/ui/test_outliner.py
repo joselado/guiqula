@@ -168,7 +168,7 @@ def test_the_rows_say_what_they_are(window, qtbot):
         "s1/geometry", "s1/base", "op1", "s1/regions", "s1/hamiltonian", "t1", "t2",
         "s1/meanfield", "calculations", "c1", "c2")}
     assert texts == {
-        "s1/geometry": ("Geometry", ""), "s1/base": ("Honeycomb lattice", ""),
+        "s1/geometry": ("Geometry geo1", ""), "s1/base": ("Honeycomb lattice", ""),
         "op1": ("op1  Supercell · n [2, 2, 1]", ""), "s1/regions": ("Regions", ""),
         "s1/hamiltonian": ("Hamiltonian", ""), "t1": ("t1  Zeeman / exchange field", "spinful"),
         "t2": ("t2  Rashba spin-orbit coupling", "spinful"), "s1/meanfield": ("Mean field", "off"),

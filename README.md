@@ -101,6 +101,9 @@ kernels the first time and then keeps them in a cache.
 - To add an operation, a term or a calculation, you click the "+" of its section in the
   outliner and choose it from a menu with a search line. The workspace shows what you
   selected.
+- A geometry can carry several systems, two Hamiltonians on the same sites or a classical
+  model and the quantum system that reads its texture, and a ribbon can be cut from a
+  decorated cell and follow every edit of it.
 - The Run button says which calculation it will compute. When a result does not match the
   model anymore, a message above its plot says so, with a Run again button next to it.
 - Every plot is interactive. From the menu of a parameter's name you can attach a slider or

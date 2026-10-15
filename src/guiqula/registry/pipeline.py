@@ -38,7 +38,7 @@ from dataclasses import dataclass, field
 
 from guiqula.core import fields
 from guiqula.core import regions as region_tools
-from guiqula.core.document import DocumentError, terms_of
+from guiqula.core.document import DocumentError, geometry_chain, terms_of
 from guiqula.core.hashing import content_hash
 from guiqula.registry import base as registry
 from guiqula.registry import plugins
@@ -122,9 +122,10 @@ def _check_entry(family, entry_kind, params, system_kind, trusted=True, plugin="
 def code_entries(document):
     """Ids of the entries that run code from the document (Python nodes)."""
     found = []
+    for geometry in document.geometries:
+        found += [op.id for op in geometry.ops if _runs_code("geometry_op", op.kind)]
     for system in document.systems:
-        items = [("geometry_op", op) for op in system.geometry.ops]
-        items += [("term", term) for term in terms_of(system)]
+        items = [("term", term) for term in terms_of(system)]
         found += [item.id for family, item in items if _runs_code(family, item.kind)]
     return found + [c.id for c in document.calculations if _runs_code("calculation", c.kind)]
 
@@ -253,7 +254,12 @@ def plan_system(document, system_id, trusted=True, results=None):
     from_result Fields may read."""
     system = document.system(system_id)
     plan = SystemPlan(system_id=system.id, kind=system.kind)
-    base = system.geometry.base
+    try:     # the geometries it starts from first, the base lattice of the first of them
+        chain = geometry_chain(document, system.geometry)
+    except DocumentError as error:
+        plan.problem = str(error)
+        return plan
+    base = chain[0].base
     spec, params, problem = _check_entry("lattice", base.kind, base.params, system.kind,
                                          plugin=base.plugin)
     stage = StagePlan("base", None, base.kind, True, spec, params, None, problem)
@@ -265,7 +271,7 @@ def plan_system(document, system_id, trusted=True, results=None):
     plan.stages.append(stage)
     key = stage.key
 
-    for op in system.geometry.ops:
+    for op in (op for geometry in chain for op in geometry.ops):
         spec, params, problem = _check_entry("geometry_op", op.kind, op.params, system.kind,
                                              trusted, op.plugin)
         stage = StagePlan("op", op.id, op.kind, op.enabled, spec, params, None, problem)
@@ -275,7 +281,7 @@ def plan_system(document, system_id, trusted=True, results=None):
         stage.key = key
         plan.stages.append(stage)
 
-    regions = {r.id: r for r in system.regions}
+    regions = {r.id: r for r in chain[-1].regions}
     term_stages = []
     for term in terms_of(system):
         spec, params, problem = _check_entry("term", term.kind, term.params, system.kind,
@@ -516,16 +522,23 @@ def plan_calculation(document, calc_id, trusted=True, results=None):
     return plan
 
 
-def _owner(document, target):
-    """The system a swept parameter belongs to."""
+def _owners(document, target):
+    """The systems a swept parameter belongs to: those on its geometry, for
+    an op or a lattice's (a geometry is shared, and those it starts from
+    too)."""
     if "/" in target:
-        return target.split("/", 1)[0]
+        return {target.split("/", 1)[0]}
     family, owner, _, _, obj = document.find(target)
     if family == "system":
-        return obj.id
+        return {s.id for s in document.systems
+                if any(g.id == obj.geometry for g in geometry_chain(document, s.geometry))}
     if family == "calculation":
-        return obj.system
-    return owner.id
+        return {obj.system}
+    if family in ("op", "geometry"):
+        geometry = owner.id if family == "op" else obj.id
+        return {s.id for s in document.systems
+                if any(g.id == geometry for g in geometry_chain(document, s.geometry))}
+    return {owner.id}
 
 
 def _parts(document, target):
@@ -553,7 +566,7 @@ def _plan_sweep(document, calc, params, trusted, results):
         problem = sweeps.check_target(document, target, param, component)
         if problem:
             return problem, None
-        if _owner(document, target) not in _parts(document, calc.system):
+        if not _owners(document, target) & set(_parts(document, calc.system)):
             return f"{target} is not part of {calc.system}, which the sweep runs on", None
         problem = sweeps.check_values(document, target, param, component, values)
         if problem:

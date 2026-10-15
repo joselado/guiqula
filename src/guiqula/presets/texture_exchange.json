@@ -1,36 +1,67 @@
 {
-  "version": 1,
+  "version": 2,
   "notes": "A classical texture as an exchange field\nTwo systems: classical spins on a ladder, with a field that turns along it, minimized into a domain wall (c1); then electrons on the same ladder whose exchange field reads that texture site by site (a from_result Field). Run c1 first, then c2 and c3: the electrons feel the domain wall. Running c1 again makes them stale.",
+  "locks": [],
+  "geometries": [
+    {
+      "id": "geo1",
+      "base": {
+        "kind": "ladder",
+        "params": {}
+      },
+      "ops": [
+        {
+          "id": "op1",
+          "kind": "supercell",
+          "enabled": true,
+          "params": {
+            "n": [20, 1, 1]
+          },
+          "region": null
+        },
+        {
+          "id": "op2",
+          "kind": "finite",
+          "enabled": true,
+          "params": {},
+          "region": null
+        }
+      ],
+      "regions": []
+    },
+    {
+      "id": "geo2",
+      "base": {
+        "kind": "ladder",
+        "params": {}
+      },
+      "ops": [
+        {
+          "id": "op3",
+          "kind": "supercell",
+          "enabled": true,
+          "params": {
+            "n": [20, 1, 1]
+          },
+          "region": null
+        },
+        {
+          "id": "op4",
+          "kind": "finite",
+          "enabled": true,
+          "params": {},
+          "region": null
+        }
+      ],
+      "regions": []
+    }
+  ],
   "systems": [
     {
       "id": "s1",
       "name": "spin texture",
       "kind": "classical_spin",
-      "geometry": {
-        "base": {
-          "kind": "ladder",
-          "params": {}
-        },
-        "ops": [
-          {
-            "id": "op1",
-            "kind": "supercell",
-            "enabled": true,
-            "params": {
-              "n": [20, 1, 1]
-            },
-            "region": null
-          },
-          {
-            "id": "op2",
-            "kind": "finite",
-            "enabled": true,
-            "params": {},
-            "region": null
-          }
-        ]
-      },
-      "regions": [],
+      "geometry": "geo1",
       "hamiltonian": null,
       "model": {
         "kind": "classical_spin",
@@ -64,31 +95,7 @@
       "id": "s2",
       "name": "electrons on the texture",
       "kind": "quantum",
-      "geometry": {
-        "base": {
-          "kind": "ladder",
-          "params": {}
-        },
-        "ops": [
-          {
-            "id": "op3",
-            "kind": "supercell",
-            "enabled": true,
-            "params": {
-              "n": [20, 1, 1]
-            },
-            "region": null
-          },
-          {
-            "id": "op4",
-            "kind": "finite",
-            "enabled": true,
-            "params": {},
-            "region": null
-          }
-        ]
-      },
-      "regions": [],
+      "geometry": "geo2",
       "hamiltonian": {
         "construction": {
           "has_spin": true,

@@ -160,7 +160,14 @@ tests, `drive.py --widget` and the remote `widgets` and `screenshot` methods rel
   widen the Status column; an embedding is a detail row after the systems (`s2 in s1`, a
   warning when `cell_problem` finds the builds' cells differ) with the rows
   `<embedding>/pristine` and `<embedding>/defect`, which `select` turns into the system
-  they name, and a quantum system's context menu has New embedding of a defect. The K-paths
+  they name, and a quantum system's context menu has New embedding of a defect. A system's
+  Geometry row reads `Geometry geo1 · shared with s2`; the first system on a geometry shows
+  its ops and regions by their ids and every later one as linked rows `<system>/<entry>`
+  (`linked_rows`, `_linked`, `current_entry()`), which the window's `select` turns into the
+  entry with `window.context` (and `properties.context`) set to that system; a system's
+  context menu has New Hamiltonian on this geometry and Duplicate linked (Alt+D); the
+  geometries no system is built on are under Geometries (`geometries`), whose form is
+  `GeometryForm` (`geometryName`, `geometryStart`, `geometryUsers`). The K-paths
   section (`kpaths`, after Calculations) lists the k-paths with the calculations walking
   them as their status, its "+" `outlinerAdd_kpaths` adding one; a k-path's context menu
   has Show in the Brillouin zone and a system's Show Brillouin zone (`kpath_window`).
@@ -354,6 +361,9 @@ python tools/drive.py --do '{"do": "add_system", "lattice": "chain"}' --do '{"do
     {"mu": 1.0}}' --do '{"do": "add_calculation", "system": "e1", "kind": "embedding_dos"}' \
     --run c1 --widget plot_c1 --shot bound.png     # a defect in an infinite chain: its bound
                                                    # state at 2.24 (decisions 200 to 212)
+python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "duplicate_linked", "system": "s1"}' \
+    --do '{"do": "select", "entry": "s2/op1"}' --shot shared.png
+                                                   # a geometry shared by two systems (part B)
 python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "kpath_window", "calculation": "c1"}' \
     --widget kspaceWindow_k1 --shot zone.png       # a k-path's zone window (phase 9, part A)
 python tools/drive.py --do '{"do": "add_system", "lattice": "diamond_lattice"}' --do '{"do":

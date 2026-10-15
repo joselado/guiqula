@@ -158,12 +158,14 @@ def settle(app, window, session, timeout, builds_only=False):
 def outline(document):
     """Systems with their ops and terms (a classical system's model's too,
     and the model's kind), then the calculations."""
-    from guiqula.core.document import terms_of
+    from guiqula.core.document import geometry_chain, terms_of
     out = []
     for system in document.systems:
-        item = {"system": system.id, "name": system.name, "lattice": system.geometry.base.kind,
+        chain = geometry_chain(document, system.geometry)
+        item = {"system": system.id, "name": system.name, "geometry": system.geometry,
+                "lattice": chain[0].base.kind,
                 "ops": [f"{o.id}:{o.kind}" + ("" if o.enabled else "(off)")
-                        for o in system.geometry.ops],
+                        for g in chain for o in g.ops],
                 "terms": [f"{t.id}:{t.kind}" + ("" if t.enabled else "(off)")
                           for t in terms_of(system)]}
         if system.model is not None:

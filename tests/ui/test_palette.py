@@ -189,7 +189,8 @@ def test_the_plus_of_a_section_adds_to_its_own_system(window, qtbot):
     assert menu.system == second
     menu.entries["island"].trigger()
     menu.hide()
-    assert session.document.find(window.selected)[1].id == second
+    geometry = session.document.system(second).geometry
+    assert session.document.find(window.selected)[1].id == geometry
     assert window.workspace == "geometry"
     # Regions: by expression, and from a selection of that system's sites only
     window.select("s1")
@@ -200,7 +201,8 @@ def test_the_plus_of_a_section_adds_to_its_own_system(window, qtbot):
     window.findChild(QAction, "addRegion_expression").trigger()
     window.regions_menu.hide()
     region = window.selected
-    assert session.document.find(region)[1].id == "s1" and window.workspace == "geometry"
+    assert session.document.find(region)[1].id == session.document.system("s1").geometry
+    assert window.workspace == "geometry"
     session.act("select_sites", sublattice=1)
     opened = window.open_regions_menu("s1")
     assert opened["entries"] == ["addRegion_expression", "addRegion_selection"]

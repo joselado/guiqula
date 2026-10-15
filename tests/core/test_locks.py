@@ -83,7 +83,7 @@ def test_locks_are_saved(d, tmp_path):
 def test_a_lattice_parameter_lock():
     d = Dispatcher()
     s = d.do("add_system", lattice="honeycomb_zigzag_ribbon")
-    name = next(iter(d.document.system(s).geometry.base.params))
+    name = next(iter(d.document.geometry_of(s).base.params))
     d.do("lock", target=f"{s}.{name}")
     with pytest.raises(CommandError, match="locked"):
         d.do("set_param", entry=s, name=name, value=7)

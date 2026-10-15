@@ -142,7 +142,7 @@ def test_the_page_comes_and_goes_with_the_systems(empty, qtbot, shot):
     shot(window, "start")
     page.card("lattice", "kagome_lattice").click()
     assert stack.currentWidget() is window.viewport and not page.isVisible()
-    assert [s.geometry.base.kind for s in window.session.document.systems] == \
+    assert [window.session.document.geometry_of(s.id).base.kind for s in window.session.document.systems] == \
         ["kagome_lattice"]
     window.undo()                                        # no system again
     assert stack.currentWidget() is page
@@ -160,7 +160,7 @@ def test_the_page_comes_and_goes_with_the_systems(empty, qtbot, shot):
     window.new_document()
     assert stack.currentWidget() is page
     QTest.keyClick(page.card("lattice", "dimer"), Qt.Key.Key_Return)    # Enter clicks a card
-    assert [s.geometry.base.kind for s in window.session.document.systems] == ["dimer"]
+    assert [window.session.document.geometry_of(s.id).base.kind for s in window.session.document.systems] == ["dimer"]
     window.new_document()
 
 

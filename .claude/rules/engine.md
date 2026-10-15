@@ -48,6 +48,11 @@ and exported, what the plan and the build do, and what the refresh of `vendor/` 
   `<name> = h`; `remove` refuses a system so named; the cost sees its mode in
   `size["others"]`. A sweep targets the calculation's own system only (or, on an
   embedding, either of its two).
+- A system's geometry is an object of the document (phase 9, part B): `plan_system` takes
+  the stages of its chain of geometries (`core.document.geometry_chain`, the one with the
+  lattice first), so a geometry shared by systems, or one starting from another, needs no
+  change of the engine, the stage keys hashing content and never ids; its regions are the
+  last geometry's.
 - A `KPathParam` holds the id of a k-path of the document (phase 9, part A):
   `pipeline._resolve_kpaths` puts its vertices in place of the id before the key is made
   (None for no vertex, pyqula's default path), so an entry reads the path with

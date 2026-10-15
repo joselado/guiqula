@@ -173,7 +173,7 @@ def test_a_box_on_an_ldos_map_picks_the_atoms_inside_it(window, qtbot, shot):
         view.pick_tools["box"].setChecked(False)
         done = session.act("pick_to", calculation=calc, box=box,
                            target=of(picked["targets"], "region"))
-        region = session.document.system("s1").regions[-1]
+        region = session.document.geometry_of("s1").regions[-1]
         assert done["region"] == region.id and len(region.select["positions"]) == len(inside)
         session.undo()
         done = session.act("pick_to", calculation=calc, box=box,

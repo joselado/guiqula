@@ -76,7 +76,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QHeaderView, QInputDialog, QMe
                                QTreeWidget, QTreeWidgetItem, QWidget)
 
 from guiqula.core import regions as region_tools
-from guiqula.core.document import kpath_users
+from guiqula.core.document import geometry_chain, kpath_users
 from guiqula.registry import base as registry
 from guiqula.ui import icons, marks, shortcuts, theme
 from guiqula.ui.plots import scalar_rows
@@ -154,6 +154,21 @@ def pseudo_ids(system):
     if system.model is not None:
         rows += ["model_stack", "model"]
     return {f"{system.id}/{row}" for row in rows}
+
+
+def linked_rows(document, system):
+    """The rows of the ops and regions of a geometry under a system that is
+    not the first to name it (phase 9, part B, decision 240): the first
+    system in document order shows them by their own ids, every later one
+    as <system>/<entry>, which select turns into the entry, keeping that
+    system as the one shown. {row id: entry id}."""
+    try:
+        geometry = document.geometry_of(system.id)
+    except Exception:
+        return {}
+    if document.systems_on(geometry.id)[:1] == [system.id]:
+        return {}
+    return {f"{system.id}/{entry.id}": entry.id for entry in geometry.ops + geometry.regions}
 
 
 def embedding_rows(embedding):
@@ -648,6 +663,7 @@ class Outliner(QTreeWidget):
         self._add_buttons = {}          # section path -> its "+" (rebuilt with the tree)
         self._details = {}              # item id -> its state and messages in words
         self._locks = {}                # item id -> (status text, tooltip line) of its locks
+        self._linked = {}               # row id -> entry id of a shared geometry's later rows
         self._refreshing = False
         self._viewport_width = -1
         self._entry_delegate = EntryDelegate(self)
@@ -658,6 +674,8 @@ class Outliner(QTreeWidget):
         for text, shortcut, slot in (("Delete", "delete", self.delete_current),
                                      ("Rename", "rename", self.rename_current),
                                      ("Duplicate", "duplicate", self.duplicate_current),
+                                     ("Duplicate linked", "duplicate_linked",
+                                      self.duplicate_linked_current),
                                      ("Move up", "move_up", lambda: self.move_current(-1)),
                                      ("Move down", "move_down", lambda: self.move_current(1))):
             action = shortcuts.bind(QAction(text, self), shortcut)
@@ -766,6 +784,7 @@ class Outliner(QTreeWidget):
             self._add_buttons = {}
             self._details = {}
             self._locks = {}
+            self._linked = {}
             document = session.document
             for system in document.systems:
                 self._add_system(session, system)
@@ -778,6 +797,7 @@ class Outliner(QTreeWidget):
             kpaths = self._add(None, "kpaths", "K-paths")
             for kpath in document.kpaths:
                 self._add_kpath(document, kpaths, kpath)
+            self._add_geometries(session)
             self._mark_locks(document)
             self._add_pluses(document)
             for item_id in self._items:
@@ -846,33 +866,55 @@ class Outliner(QTreeWidget):
             return
         stages = {s.id: s for s in plan.stages if s.id}
 
-        geometry = self._add(top, f"{system.id}/geometry", "Geometry",
-                             details=["the base lattice, then the ops in their order"])
+        document = session.document
+        shared = document.geometry_of(system.id)
+        users = document.systems_on(shared.id)
+        others = [u for u in users if u != system.id]
+        linked = linked_rows(document, system)
+        prefix = f"{system.id}/" if linked else ""
+        name = shared.name if shared.name and shared.name != shared.id else ""
+        geometry = self._add(top, f"{system.id}/geometry", " · ".join(
+            [f"Geometry {shared.id}"] + [part for part in (
+                name, f"shared with {', '.join(others)}" if others else "") if part]),
+            details=["the base lattice, then the ops in their order"] + (
+                [f"the geometry {shared.id}, shared with {', '.join(others)}: an op or a "
+                 f"region edited here is edited for them too"] if others else []))
         base = plan.stages[0]
-        base_item = self._add(geometry, f"{system.id}/base", _label("lattice", base.kind),
-                              details=["the base lattice"], kind="lattice")
+        chain = geometry_chain(document, shared.id)
+        parent = chain[-2] if len(chain) > 1 else None
+        base_item = self._add(
+            geometry, f"{system.id}/base",
+            _label("lattice", base.kind) if parent is None else
+            _entry_text(f"from {parent.id}", parent.name if parent.name != parent.id else ""),
+            details=["the base lattice"] if parent is None else
+            [f"it starts from the geometry {parent.id}, every op of which comes first"],
+            kind="lattice")
         if base.problem:
             self._mark_invalid(base_item, base.problem)
-        for op in system.geometry.ops:
+        for op in shared.ops:
+            self._linked.update({prefix + op.id: op.id} if prefix else {})
             self._add_entry(geometry, op, "geometry_op", stages[op.id], runtime.get(op.id),
-                            summary=_summary(op.params))
+                            summary=_summary(op.params), item_id=prefix + op.id)
 
         positions = build["positions"] if build is not None and current else None
-        count = len(system.regions)
+        count = len(shared.regions)
         regions = self._add(top, f"{system.id}/regions", "Regions",
                             details=[f"{count} region{'s' if count != 1 else ''}"
                                      if count else "no region yet: the + makes one"])
-        for region in system.regions:
+        for region in shared.regions:
             selection = _selection_text(region.select)
             name = region.name if region.name != region.id else ""
-            item = self._add(regions, region.id, _entry_text(region.id, name, selection),
+            row = prefix + region.id
+            if prefix:
+                self._linked[row] = region.id
+            item = self._add(regions, row, _entry_text(region.id, name, selection),
                              details=[f"the sites of {selection}"], movable=True, kind="region")
             if positions is not None:
                 try:
                     inside = int(region_tools.evaluate_positions(region.select,
                                                                  positions).sum())
                     item.setText(1, _sites(inside))
-                    self._details[region.id].append(f"{_sites(inside)} of the current build")
+                    self._details[row].append(f"{_sites(inside)} of the current build")
                 except Exception as error:
                     self._mark_invalid(item, str(error))
 
@@ -973,16 +1015,19 @@ class Outliner(QTreeWidget):
         self._detail_row(item)
         return item
 
-    def _add_entry(self, parent, entry, family, stage, report, mode=None, summary=""):
+    def _add_entry(self, parent, entry, family, stage, report, mode=None, summary="",
+                   item_id=None):
         """An op or a term: what it is in the label (with an op's parameters
-        and the region a term is restricted to), its state in the status."""
+        and the region a term is restricted to), its state in the status;
+        item_id: the row's id, a linked row's (linked_rows) or the entry's."""
         region = getattr(entry, "region", None)
         code = isinstance(entry.params.get("code"), str)          # a Python node
-        item = self._add(parent, entry.id, _entry_text(
+        item_id = item_id or entry.id
+        item = self._add(parent, item_id, _entry_text(
             entry.id, _label(family, entry.kind), entry.name, summary,
             f"in {region}" if region else ""), movable=True,
             kind="python" if code else "op" if family == "geometry_op" else "term")
-        details = self._details[entry.id]
+        details = self._details[item_id]
         if summary and _summary(entry.params, 400) != summary:     # cut in the label
             details.append(_summary(entry.params, 400))
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
@@ -1088,6 +1133,30 @@ class Outliner(QTreeWidget):
         item.setData(1, MARK_ROLE, state)
         if color is not None:
             self._paint(item, color, (1,))
+
+    def _add_geometries(self, session):
+        """The geometries no system names (one a ribbon starts from, one left
+        when its systems went): their ops under them, the systems' own being
+        under each system's Geometry row."""
+        document = session.document
+        unused = [g for g in document.geometries if not document.systems_on(g.id)]
+        if not unused:
+            return
+        section = self._add(None, "geometries", "Geometries",
+                            details=["the geometries no system is built on"])
+        for geometry in unused:
+            children = [g.id for g in document.geometries if g.parent == geometry.id]
+            name = geometry.name if geometry.name != geometry.id else ""
+            start = f"from {geometry.parent}" if geometry.parent else \
+                _label("lattice", geometry.base.kind)
+            item = self._add(section, geometry.id, _entry_text(geometry.id, start, name),
+                             f"start of {', '.join(children)}" if children else "unused",
+                             [f"{', '.join(children)} start from it" if children else
+                              "no system is built on it: removing it loses nothing"],
+                             kind="structure")
+            for op in geometry.ops:
+                self._add(item, op.id, _entry_text(op.id, _label("geometry_op", op.kind),
+                                                   op.name, _summary(op.params)), kind="op")
 
     def _add_kpath(self, document, parent, kpath):
         """A k-path: its vertices, and the calculations that walk it as its
@@ -1213,7 +1282,7 @@ class Outliner(QTreeWidget):
         if self._refreshing or column != 0 or not item.flags() & Qt.ItemFlag.ItemIsUserCheckable \
                 or item.data(0, Qt.ItemDataRole.CheckStateRole) is None:
             return
-        item_id = item.data(0, ID_ROLE)
+        item_id = self._linked.get(item.data(0, ID_ROLE), item.data(0, ID_ROLE))
         enabled = item.checkState(0) == Qt.CheckState.Checked
         if item_id.endswith("/meanfield"):
             name, args = "set_meanfield", {"system": system_of(item_id), "enabled": enabled}
@@ -1223,29 +1292,39 @@ class Outliner(QTreeWidget):
         QTimer.singleShot(0, lambda: self.command.emit(name, args))
 
     def _family(self, item_id):
+        item_id = self._linked.get(item_id, item_id)
         if self._session is None or not item_id or "/" in item_id or \
-                item_id in ("calculations", "kpaths"):
+                item_id in ("calculations", "kpaths", "geometries"):
             return None
         try:
             return self._session.document.find(item_id)
         except Exception:
             return None
 
+    def current_entry(self):
+        """The entry the current row shows (a linked row's entry)."""
+        return self._linked.get(self.current_id(), self.current_id())
+
     def delete_current(self):
         if self._family(self.current_id()):
-            self.command.emit("remove", {"entry": self.current_id()})
+            self.command.emit("remove", {"entry": self.current_entry()})
 
     def duplicate_current(self):
         if self._family(self.current_id()):
-            self.command.emit("duplicate", {"entry": self.current_id()})
+            self.command.emit("duplicate", {"entry": self.current_entry()})
+
+    def duplicate_linked_current(self):
+        found = self._family(self.current_id())
+        if found and found[0] == "system":
+            self.command.emit("duplicate_linked", {"system": found[-1].id})
 
     def move_current(self, step):
         found = self._family(self.current_id())
-        if found is None or found[0] in ("system", "embedding", "kpath"):
+        if found is None or found[0] in ("geometry", "system", "embedding", "kpath"):
             return
         _, _, items, index, _ = found
         if 0 <= index + step < len(items):
-            self.command.emit("move", {"entry": self.current_id(), "index": index + step})
+            self.command.emit("move", {"entry": self.current_entry(), "index": index + step})
 
     # ---- drag to reorder
     def move_for_drop(self, point):
@@ -1259,10 +1338,12 @@ class Outliner(QTreeWidget):
             return None
         family, owner, items, old, obj = found
         target_id = target.data(0, ID_ROLE)
-        if target_id == obj.id:
+        if self._linked.get(target_id, target_id) == obj.id:
             return None
-        system = owner.id if owner is not None else None
-        if target_id in list_heads(family, system):
+        document = self._session.document
+        systems = document.systems_on(owner.id) if family in ("op", "region") else \
+            [owner.id] if owner is not None else [None]
+        if any(target_id in list_heads(family, system) for system in systems):
             new = 0
         else:
             other = self._family(target_id)
@@ -1298,11 +1379,12 @@ class Outliner(QTreeWidget):
 
     def rename_current(self):
         found = self._family(self.current_id())
-        if found is None or found[0] not in ("system", "region", "embedding", "kpath"):
+        if found is None or found[0] not in ("geometry", "system", "region", "embedding",
+                                             "kpath"):
             return
         name, ok = QInputDialog.getText(self, "Rename", "Name:", text=found[-1].name)
         if ok and name.strip():
-            self.command.emit("rename", {"entry": self.current_id(), "name": name.strip()})
+            self.command.emit("rename", {"entry": self.current_entry(), "name": name.strip()})
 
     def _context_menu(self, point):
         item = self.itemAt(point)
@@ -1320,8 +1402,13 @@ class Outliner(QTreeWidget):
         if family == "calculation":
             menu.addAction("Run", lambda: self.command.emit("run_calculation",
                                                             {"calculation": obj.id}))
-        if family in ("system", "region", "embedding", "kpath"):
+        if family in ("geometry", "system", "region", "embedding", "kpath"):
             menu.addAction("Rename...", self.rename_current)
+        if family == "system":
+            menu.addAction(icons.icon("structure"), "New Hamiltonian on this geometry",
+                           lambda: self.command.emit("add_system", {"geometry": obj.geometry}))
+            menu.addAction(f"Duplicate linked\t{shortcuts.text('duplicate_linked')}",
+                           self.duplicate_linked_current)
         if family == "kpath":
             menu.addAction(icons.icon("kspace"), "Show in the Brillouin zone",
                            lambda: self.command.emit("kpath_window", {"kpath": obj.id}))
@@ -1342,7 +1429,7 @@ class Outliner(QTreeWidget):
                 menu.addAction(f"Lock{what}", lambda t=target: self.command.emit(
                     "lock", {"target": t}))
         menu.addAction("Duplicate", self.duplicate_current)
-        if family not in ("system", "embedding", "kpath"):
+        if family not in ("geometry", "system", "embedding", "kpath"):
             menu.addAction("Move up", lambda: self.move_current(-1))
             menu.addAction("Move down", lambda: self.move_current(1))
         menu.addSeparator()

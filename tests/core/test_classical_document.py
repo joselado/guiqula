@@ -48,7 +48,7 @@ def test_duplicate_and_remove():
     copy = d.do("duplicate", entry=s)
     term = terms_of(d.document.system(copy))[0]
     assert term.id != t and term.region != r
-    assert term.region == d.document.system(copy).regions[0].id
+    assert term.region == d.document.geometry_of(copy).regions[0].id
     with pytest.raises(CommandError, match="is used by"):
         d.do("remove", entry=r)                # a model term uses it
     d.do("remove", entry=t)

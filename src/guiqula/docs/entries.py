@@ -15,6 +15,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from guiqula import vendoring
+from guiqula.core.document import geometry_chain
 from guiqula.docs import docstrings, guide as guides
 from guiqula.registry import base as registry
 
@@ -271,7 +272,7 @@ def item_help(session, item_id):
     if slash:
         system = document.system(system_id)
         if part == "base":
-            spec = registry.get("lattice", system.geometry.base.kind)
+            spec = registry.get("lattice", geometry_chain(document, system.geometry)[0].base.kind)
             return spec.label, entry_help(spec, _stage(session, system_id, None, "base"))
         if part == "meanfield" and system.hamiltonian is not None:
             spec = registry.get("meanfield", system.hamiltonian.meanfield.kind)

@@ -30,7 +30,8 @@ def settle(qtbot, window, timeout=120_000):
 
 
 def status_of(window, entry):
-    system = window.session.document.find(entry)[1].id
+    family, owner = window.session.document.find(entry)[:2]
+    system = window.session.document.systems_on(owner.id)[0] if family == "op" else owner.id
     build = window.builds[system]
     return next(r for r in build["reports"] if r["id"] == entry)["status"]
 
