@@ -686,6 +686,7 @@ class Outliner(QTreeWidget):
         self._locks = {}                # item id -> (status text, tooltip line) of its locks
         self._linked = {}               # row id -> entry id of a shared geometry's later rows
         self._refreshing = False
+        self._pending = []            # the spans and colours of a refresh (_later)
         self._viewport_width = -1
         self._entry_delegate = EntryDelegate(self)
         self.setItemDelegateForColumn(0, self._entry_delegate)
@@ -787,11 +788,21 @@ class Outliner(QTreeWidget):
     def _detail_row(self, item):
         """Make a row read its status across both columns (DETAIL_ROLE)."""
         item.setData(0, DETAIL_ROLE, True)
-        item.setFirstColumnSpanned(True)
+        self._later(item.setFirstColumnSpanned, True)
 
     def _paint(self, item, color, columns=(0, 1)):
         for column in columns:
-            item.setForeground(column, QBrush(QColor(color)))
+            self._later(item.setForeground, column, QBrush(QColor(color)))
+
+    def _later(self, call, *args):
+        """Run a change of a row now, or at the end of a refresh: a span or a
+        colour lays out every row of the tree first, so made row by row while
+        rows are added it costs one layout per row (seconds on 150 systems),
+        and made together at the end it costs one."""
+        if self._refreshing:
+            self._pending.append((call, args))
+        else:
+            call(*args)
 
     # ---- building
     def refresh(self, session):
@@ -808,6 +819,7 @@ class Outliner(QTreeWidget):
             self._details = {}
             self._locks = {}
             self._linked = {}
+            self._pending = []
             document = session.document
             for system in document.systems:
                 self._add_system(session, system)
@@ -824,6 +836,9 @@ class Outliner(QTreeWidget):
                 self._add_kpath(document, kpaths, kpath)
             self._add_geometries(session)
             self._mark_locks(document)
+            for call, args in self._pending:
+                call(*args)
+            self._pending = []
             self._add_pluses(document)
             for item_id in self._items:
                 self._set_tooltip(item_id)

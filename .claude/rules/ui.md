@@ -177,7 +177,10 @@ tests, `drive.py --widget` and the remote `widgets` and `screenshot` methods rel
   form is `JunctionForm` (`junctionName`, `junction_left`, `junction_right`,
   `junction_central`, whose first item is none).
   `tests/ui/test_outliner.py`'s `cut` checks the labels as well as the statuses on every
-  preset.
+  preset. A span or a colour of a row lays out every row of the tree, so `refresh` makes
+  them together at its end (`_later`), and a row's "+" reads its row through a
+  `QPersistentModelIndex`, never a plain index, which a resize after a rebuild would read
+  freed (a segfault).
 - `nodes.py`: the node view (phase 9, part C), `NodeView` (`nodeView`) drawing
   `registry/graph.py`'s nodes and links, in `OutlinerPanel`, the Outliner dock's content
   (`outlinerViewTabs` Tree and Nodes, `outlinerStack`, `nodeArrange`); its items are no

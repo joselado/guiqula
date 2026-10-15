@@ -334,3 +334,32 @@ def test_parameters_read_short():
         "n 4, nedges 6, rot 0, clean"
     assert _summary({"n": [2, 2, 1]}) == "n [2, 2, 1]"
     assert _summary({"m": [0.0, 0.0, 0.1]}) == "m [0, 0, 0.1]"
+
+
+def test_a_refresh_lays_the_rows_out_once(qapp, no_jobs, monkeypatch):
+    # a span or a colour made while rows are added lays out every row, so made
+    # row by row the cost grew as the square of the systems (9 s on 150)
+    from guiqula.session import Session
+    from guiqula.ui.outliner import EntryDelegate
+    calls = []            # line_height, plain Python, measures a row for sizeHint
+    measure = EntryDelegate.line_height
+    monkeypatch.setattr(EntryDelegate, "line_height",
+                        lambda self, *args, **kw: calls.append(1) or measure(self, *args, **kw))
+    window = build_main_window()
+    window.resize(1200, 800)
+    window.show()
+    counts = []
+    for n in (10, 40):
+        session = Session(jobs=no_jobs)
+        for i in range(n):
+            session.do("add_system", lattice="honeycomb_lattice")
+            session.do("add_calculation", system=f"s{i + 1}", kind="dos")
+        window.attach(session)
+        calls.clear()
+        window._refresh_tree()
+        counts.append(len(calls))
+        session.close()
+    window.close()
+    window.deleteLater()
+    QApplication.sendPostedEvents(None, 0)    # gone before the patch is undone
+    assert counts[1] < 6 * counts[0]          # linear: 4 times the rows, not 16

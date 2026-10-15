@@ -306,6 +306,9 @@ def test_a_variant_is_not_made_on_the_tip_of_its_probe():
             graph.connect(d.document, s2, c1, "target", replace=replace)
     with pytest.raises(CommandError, match="names s2 as its tip"):
         d.do("add_variant", entry=c1, target=s2)
+    with pytest.raises(CommandError, match="names s2 as its tip"):  # from the console too
+        d.do("set_calculation_system", calculation=c1, system=s2)
+    assert d.document.calculation(c1).system == s1
     assert not [c for c in d.document.calculations if c.variant_of == c1]
 
 

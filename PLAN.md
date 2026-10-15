@@ -4889,7 +4889,9 @@ graph and the forms agree with them. Decisions, the built option first:
      target either (a variant or, with Ctrl, a move), since a variant
      follows its original's parameters and would then probe itself, so
      `add_variant` and the link are refused saying which parameter names
-     it; or the variant made and flagged by the planner.
+     it, and so is `set_calculation_system` onto that system from the
+     console or the remote API; or the variant made and flagged by the
+     planner.
 
 *The node view, the faults found (2026-10-15).* A second review of the node
 view found gestures that the window did not finish: Del on several nodes
@@ -4908,7 +4910,10 @@ closes, and a redo of `add_variant` puts the variant back in its original's
 grid as decision 261 has it, and the "+" of a section row reads its row
 through a persistent index, since a grab right after a link (`drive.py`'s
 `node_connect` then `--shot`) resized it after the tree was rebuilt and Qt
-read freed rows (a segfault). Decisions, the built option first:
+read freed rows (a segfault), and the tree is rebuilt in a time linear in
+its rows: a span or a colour made while rows are added laid out every row,
+so 150 systems took 9 s, and they are now made together at the end (1.2 s).
+Decisions, the built option first:
 
 269. Del on the nodes selected removes them as one step, `remove_entries`,
      each after whatever among them uses it (a calculation before its

@@ -562,6 +562,10 @@ def set_calculation_system(document, calculation, system):
              if c.variant_of == calc.id and c.id not in following]
     if system in taken:
         raise CommandError(f"{calculation} runs on {system} already")
+    for param in spec.params:   # it would probe the system it runs on (decision 268)
+        if isinstance(param, SystemParam) and calc.params.get(param.name) == system:
+            raise CommandError(f"{calculation} names {system} as its {param.label}: it "
+                               f"cannot run on it too")
     calc.system = system
     # the variants that followed it on the variants of its old system go, and it
     # follows the variants of its new one (decision 264)
