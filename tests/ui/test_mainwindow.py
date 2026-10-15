@@ -29,7 +29,7 @@ def test_main_window_builds_without_workers(qtbot, shot):
                        (QDockWidget, "jobsDock"), (QDockWidget, "logDock"),
                        (QToolBar, "workspaceToolbar"), (QWidget, "structureBar"),
                        (QToolBar, "structureToolbar"), (QToolBar, "runToolbar"),
-                       (QWidget, "kspaceBar"), (QStackedWidget, "centralStack"),
+                       (QStackedWidget, "centralStack"),
                        (QWidget, "startPage"), (QLineEdit, "startSearch"),
                        (QAbstractButton, "startLattice_dimer"),   # the first in sight
                        (QToolButton, "startOpenButton")]:
@@ -50,9 +50,10 @@ def test_main_window_builds_without_workers(qtbot, shot):
     assert window.selected_calculation() is None
     assert window.run_button.text() == "Run" and not window.run_button.isEnabled()
     assert not window.cancel_button.isEnabled()
-    # one tab per result, opened when a calculation is shown; Structure and k-space stay
+    # one tab per result, opened when a calculation is shown; Structure stays (the zone is a
+    # window of each k-path, phase 9)
     assert [window.viewport.tabText(i) for i in range(window.viewport.count())] == \
-        ["Structure", "k-space"]
+        ["Structure"]
     assert window.status_label.toolTip().startswith("pyqula: ")
     assert shot(window, "main_window").stat().st_size > 1000
 

@@ -21,12 +21,13 @@ section 9 says what it keeps and what it drops.
 (section 1), the architecture (section 3: headless core + command API + worker process +
 Qt view, and 3.8, any parameter spatially modulable), the window as built (section 4), the
 decisions (sections 12 to 14; section 11 records where every former open question was
-settled; the open ones are phase 9's, decisions 213 to 233) and the phases (section 7: what each of phases 0
+settled; phase 9's are decisions 213 to 233 and on) and the phases (section 7: what each of phases 0
 to 8 built, its report with numbered decisions, and the maintainer's answers). Read it
 before designing anything; update it when a decision changes. Status: phases 0 to 8 are
 done and merged into master (2026-10-04). Phase 9 (the Document as a graph: k-paths and geometries as
 shared objects, a node view beside the outliner) is planned at the end of section 7,
-decisions 213 to 233, waiting for the maintainer's answers. A numbered decision stands as built unless the
+decisions 213 to 233, and being built in its four parts, A (the k-path as an object, with
+its zone window) built on branch kpath-window, decisions 234 to 239. A numbered decision stands as built unless the
 maintainer answers it; a new change records its decisions, numbered on from the last, at
 the end of section 7, the recommended option first.
 
@@ -81,7 +82,9 @@ not carry.
   construction, terms, mean-field block; a classical system's `model` = the model entry's
   set-up and its terms; `terms_of(system)`; an embedding names a pristine and a defective
   quantum system, and a calculation's `system` names a system or an embedding
-  (`target_kind`); an entry's `name` is left out of the JSON when
+  (`target_kind`); a k-path (`kpaths`, `KPath`) is shared by the calculations whose
+  `KPathParam` names it (`kpath_users`), and `lift_kpaths` turns the inline paths of an
+  older file into k-paths; an entry's `name` is left out of the JSON when
   empty, never in a key), `fields.py` and `expressions.py` (the Field kinds of 3.8 and the
   AST-whitelisted expression evaluator), `regions.py`, `nearest.py` (the stored point
   nearest to a position within a tolerance, by a cell hash: regions by positions, painted

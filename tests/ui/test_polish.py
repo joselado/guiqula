@@ -277,8 +277,8 @@ def test_every_toolbar_control_and_palette_entry_has_a_tooltip(window):
     assert not missing
     # the canvas bars are groups of toolbars, walked above (P3); Fit names its keys
     walked = {bar.objectName() for bar in window.findChildren(QToolBar)}
-    assert {"structureBar_navigation", "structureBar_tools", "structureBar_selection",
-            "kspaceBar_pathTools"} <= walked
+    assert {"structureBar_navigation", "structureBar_tools",
+            "structureBar_selection"} <= walked
     assert shortcuts.text("fit") in window.structure.bar.fit_button.toolTip()
     tabs = window.findChild(QTabBar, "workspaceTabs")
     assert all("Ctrl+" in tabs.tabToolTip(i) for i in range(tabs.count()))
@@ -459,7 +459,9 @@ def test_plot_text_is_a_setting_every_drawing_follows(window, qtbot):
     assert abs(left - right) < 3, (left, right)
     qtbot.waitUntil(lambda: abs(margins(window.structure)[0] - margins(window.structure)[1]) < 3,
                     timeout=10_000)
-    assert abs(margins(window.kspace_view)[0] - margins(window.kspace_view)[1]) < 3
+    zone = window.kpath_windows[window.kpath_window(calculation="c1")["kpath"]].view
+    assert abs(margins(zone)[0] - margins(zone)[1]) < 3
+    zone.window().close()
     assert session.act("plot_text", name="large") == "large"
     assert window.text_actions["large"].isChecked()
     assert view.ax.xaxis.label.get_size() == pytest.approx(1.2 * theme.FONT_POINTS["large"])

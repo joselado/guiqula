@@ -58,11 +58,12 @@ def parse_field(text):
 
 
 def parse_kpath(text):
-    """"G K M G" or "G (0.5, 0.5) G" -> a k-path; empty: None (the default)."""
+    """"G K M G" or "G (0.5, 0.5) G" -> the vertices of a k-path; empty: []
+    (the default)."""
     import re
     text = text.strip()
     if not text:
-        return None
+        return []
     out = []
     for match in re.finditer(r"\(([^)]*)\)|([A-Za-z][A-Za-z0-9']*)", text):
         point, label = match.groups()
@@ -74,7 +75,7 @@ def parse_kpath(text):
 
 
 def format_kpath(value):
-    if value is None:
+    if not value:
         return ""
     return " ".join(v if isinstance(v, str) else
                     "(" + ", ".join(format_number(float(c)) for c in v[:2]) +
@@ -1032,6 +1033,73 @@ class SystemEditor(Editor):
         self._quiet(self.combo, self.combo.setCurrentIndex, index)
 
 
+def kpath_label(kpath, users):
+    """"k1 · Γ K M Γ · c1, c3": a k-path in a list, with its vertices and
+    the calculations that walk it."""
+    path = format_kpath(kpath.vertices).replace("G", "Γ") if kpath.vertices else "default path"
+    name = f" {kpath.name}" if kpath.name and kpath.name != kpath.id else ""
+    return f"{kpath.id}{name} · {path} · " + (", ".join(users) if users else "no calculation")
+
+
+class KPathEditor(Editor):
+    """The k-path a calculation walks, among the document's (phase 9, part
+    A): a combo of the k-paths with their vertices and users, a Zone button
+    and a menu with New k-path and Make single-user; action says which of
+    those was asked: "new", "single" or "zone". kpaths: [(id, label, number of calculations walking it)]."""
+
+    action = Signal(str)
+
+    def __init__(self, param, kpaths=(), parent=None):
+        super().__init__(param, parent)
+        self.combo = QComboBox()
+        self.combo.setObjectName(f"kpath_{param.name}")
+        self.combo.setToolTip("the k-path the calculation walks; several calculations may walk "
+                              "one, and an edit of it changes them all")
+        self.combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.combo.setMinimumContentsLength(8)
+        self.users = {}
+        for kpath_id, label, users in kpaths:
+            self.combo.addItem(label, kpath_id)
+            self.combo.setItemData(self.combo.count() - 1, label, Qt.ItemDataRole.ToolTipRole)
+            self.users[kpath_id] = users
+        self.combo.activated.connect(lambda _: self.committed.emit())
+        self.zone = QToolButton()
+        self.zone.setText("Zone")
+        self.zone.setObjectName(f"kpathZone_{param.name}")
+        self.zone.setToolTip("open the window of this k-path on the Brillouin zone, to draw "
+                             "and edit it")
+        self.zone.clicked.connect(lambda: self.action.emit("zone"))
+        self.more = QToolButton()
+        self.more.setText("⋯")
+        self.more.setObjectName(f"kpathMenu_{param.name}")
+        self.more.setToolTip("a new k-path for this calculation, or a copy of this one that "
+                             "only it walks")
+        self.more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        menu = QMenu(self.more)
+        menu.setObjectName(f"kpathActions_{param.name}")
+        menu.addAction("New k-path (pyqula's default)", lambda: self.action.emit("new"))
+        self.single = menu.addAction("Make single-user (a copy for this calculation)",
+                                     lambda: self.action.emit("single"))
+        self.more.setMenu(menu)
+        self.layout_.addWidget(self.combo, 1)
+        self.layout_.addWidget(self.zone)
+        self.layout_.addWidget(self.more)
+
+    def value(self):
+        return self.combo.currentData()
+
+    def set_value(self, value):
+        index = self.combo.findData(value)
+        if index < 0:                  # a k-path that is gone: shown, the plan says why
+            self._quiet(self.combo, self.combo.addItem, f"{value} (missing)", value)
+            index = self.combo.findData(value)
+        self._quiet(self.combo, self.combo.setCurrentIndex, index)
+        self.single.setEnabled(self.users.get(value, 0) > 1)      # walked by others too
+        self.combo.setToolTip(f"{self.combo.itemText(index)}: the k-path the calculation "
+                              f"walks; several calculations may walk one, and an edit of it "
+                              f"changes them all")
+
+
 class PositionsEditor(Editor):
     """Positions are picked on the structure canvas; here only counted."""
 
@@ -1061,11 +1129,12 @@ class PositionsEditor(Editor):
         self.clear.setEnabled(bool(n))
 
 
-def make_editor(param, names=None, regions=(), sources=(), systems=()):
+def make_editor(param, names=None, regions=(), sources=(), systems=(), kpaths=()):
     """The editor for a registry parameter (subclasses first); regions:
     [(id, name)] a piecewise Field can use; sources: result_sources() a
     from_result Field can read; systems: [(id, label, kind)] a SystemParam
-    can name, of the kinds it takes."""
+    can name, of the kinds it takes; kpaths: [(id, label)] of the
+    document's k-paths (KPathEditor)."""
     if isinstance(param, VectorFieldParam):
         return VectorFieldEditor(param, regions, sources=sources)
     if isinstance(param, FieldParam):
@@ -1088,8 +1157,7 @@ def make_editor(param, names=None, regions=(), sources=(), systems=()):
     if isinstance(param, CodeParam):
         return CodeEditor(param)
     if isinstance(param, KPathParam):
-        return LineEditor(param, parse_kpath, format_kpath,
-                          "default path, or e.g. G K M G, (0.5, 0) for reduced coordinates")
+        return KPathEditor(param, kpaths)
     if isinstance(param, ConditionParam):
         return LineEditor(param, str.strip, str, "a condition on x, y, z, r")
     if isinstance(param, TextParam):

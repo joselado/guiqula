@@ -38,6 +38,7 @@ from guiqula.ui import structure as structure_tools
 from guiqula.ui import theme
 
 RENDERERS = ("matplotlib", "pyvista")
+CLICK_PIXELS = 3          # a press released this close to where it started is a click
 GLYPH_LIMIT = 4000        # above this many sites they are drawn as points, not spheres
 HINT = "middle drag: orbit · shift+middle: pan · ctrl+middle: zoom · wheel: zoom · numpad: views"
 VIEW_TIP = ("the views of the numpad, the projection and framing (the view shown is "
@@ -238,6 +239,9 @@ class SceneCanvas(QWidget):
 
     view_changed = Signal()             # the camera moved
     frame_requested = Signal(str)       # "all" or "selected": the scene knows the bounds
+    # a press released where it started by a button that does not move the view: the
+    # button ("LeftButton", "RightButton"), x, y in widget pixels (the zone window's picks)
+    clicked = Signal(str, float, float)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -248,6 +252,7 @@ class SceneCanvas(QWidget):
         self.image = None                 # QImage of the last rendering
         self.view = navigation.Turntable()
         self.gesture = None               # the drag in progress (orbit, pan or zoom)
+        self._click = None                # (button, x, y) of a press that moves nothing
         self._rendered = False            # a rendering since the image was read
         self._stale = True                # the scene changed: render before painting
         self._filter = None
@@ -421,6 +426,7 @@ class SceneCanvas(QWidget):
 
     def _press(self, button, x, y, ctrl, shift, alt):
         kind = self.gesture_of(button, ctrl, shift, alt)
+        self._click = (button, x, y) if kind is None else None
         self.gesture = None if kind is None else {
             "kind": kind, "button": button, "x": x, "y": y, "y0": y,
             "distance": self.view.distance}
@@ -444,6 +450,10 @@ class SceneCanvas(QWidget):
     def _release(self, button, x, y, ctrl, shift, alt):
         if self.gesture is not None and self.gesture["button"] == button:
             self.gesture = None
+        click, self._click = self._click, None
+        if click is not None and click[0] == button and \
+                np.hypot(x - click[1], y - click[2]) <= CLICK_PIXELS:
+            self.clicked.emit(button, float(x), float(y))
         return False
 
     def _wheel(self, notches, ctrl=False, shift=False):
@@ -672,6 +682,20 @@ class SceneView(QWidget):
             self.reset_view()
         elif fit:
             self.frame_all()
+        else:
+            self.canvas.apply_view()
+
+    def show_drawing(self, draw, keep=False):
+        """Draw a scene of its own: draw(plotter, pixel_ratio) draws and
+        returns the bounds the camera fits (the zone window's 3D zone). keep:
+        the camera stays where the user left it."""
+        plotter = self.canvas.ensure()
+        kept = keep and self.drawn
+        self.bounds = draw(plotter, self.canvas.devicePixelRatioF())
+        self.selection = np.zeros((0, 3))
+        self.drawn = True
+        if not kept:
+            self.reset_view()
         else:
             self.canvas.apply_view()
 

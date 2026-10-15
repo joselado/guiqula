@@ -3,8 +3,7 @@ package P3): every bar fits at 1200 px on every preset, wrapping onto lines
 instead of hiding its tools behind a chevron; the structure bar holds the
 selection tools; a stale result says so above its plot and Run again
 computes it, a running one shows its progress and Cancel stops it, a failed
-one says why; the k-space tab is there only for a system with a periodic
-direction."""
+one says why; the zone window of a finite system says it has no zone.""" 
 import numpy as np
 import pytest
 from PySide6.QtWidgets import QApplication, QFrame, QToolBar, QToolButton, QWidget
@@ -13,7 +12,7 @@ from guiqula.io import project
 from guiqula.ui import marks, pyvista_view, shortcuts, theme
 from guiqula.ui.app import build_main_window
 from guiqula.ui.canvasbar import CanvasBar
-from guiqula.ui.mainwindow import KSPACE_TAB, STRUCTURE_TAB
+from guiqula.ui.mainwindow import STRUCTURE_TAB
 
 FAIL = "raise ValueError('no band here')"
 SLOW = "import time\ntime.sleep(60)\narrays = {'x': np.arange(3.0), 'y': np.arange(3.0)}"
@@ -57,8 +56,8 @@ def assert_fits(bar):
 
 
 def test_the_bars_wrap_and_never_overflow_at_1200_px(window, qtbot):
-    """On every preset at 1200x800 the structure bar, the k-space bar (for a
-    periodic system) and a result's bar fit, on more than one line where
+    """On every preset at 1200x800 the structure bar, the bar of a zone window
+    (for a periodic system) and a result's bar fit, on more than one line where
     they must; matplotlib's toolbar is there, hidden, as the canvas's."""
     structure = window.structure
     assert structure.canvas.toolbar is structure.toolbar and structure.toolbar.isHidden()
@@ -77,9 +76,11 @@ def test_the_bars_wrap_and_never_overflow_at_1200_px(window, qtbot):
         window.viewport.setCurrentIndex(STRUCTURE_TAB)
         assert_fits(structure.bar)
         assert len(structure.bar.lines()) > 1            # the viewport is about 480 px wide
-        if window.viewport.isTabVisible(KSPACE_TAB):
-            window.viewport.setCurrentIndex(KSPACE_TAB)
-            assert_fits(window.kspace_view.bar)
+        system = window.session.document.systems[0].id
+        if window.builds[system].get("kspace") is not None:
+            zone = window.kpath_windows[window.kpath_window(system=system)["kpath"]]
+            assert_fits(zone.view.bar)
+            zone.close()
         calc = window.session.document.calculations[0].id
         window.show_result(calc)
         assert_fits(window.plots[calc].bar)
@@ -260,38 +261,26 @@ def test_a_failed_run_says_why_and_over_an_earlier_result_reads_stale(window, qt
     assert window.viewport.tabToolTip(index) == ""
 
 
-def test_the_kspace_tab_is_there_only_for_a_periodic_system(window, qtbot):
-    load(qtbot, window, "honeycomb_zeeman_rashba")
-    assert window.viewport.isTabVisible(KSPACE_TAB)
-    window.viewport.setCurrentIndex(KSPACE_TAB)
+def test_a_finite_system_has_no_zone(window, qtbot):
+    """The zone window of a k-path on a finite system says so, and the
+    k-space tab is gone (phase 9: one window per k-path)."""
     load(qtbot, window, "graphene_island")               # 0D: no Brillouin zone
-    assert not window.viewport.isTabVisible(KSPACE_TAB)
-    assert window.current_tab() == "structure"           # not the tab next to it
+    out = window.kpath_window(system="s1")
+    view = window.kpath_windows[out["kpath"]].view
+    assert "finite" in view.caption.text() and view.ax is None
+    window.kpath_windows[out["kpath"]].close()
     window.show_result("c1")
     visible = [window.viewport.tabText(i) for i in range(window.viewport.count())
                if window.viewport.isTabVisible(i)]
     assert visible == ["Structure", "c1 dos"]
-    load(qtbot, window, "honeycomb_zeeman_rashba")
-    assert window.viewport.isTabVisible(KSPACE_TAB)
-    session = window.session                             # the selected system decides
-    island = session.do("add_system", lattice="honeycomb_lattice")
-    session.do("add_geometry_op", system=island, kind="island", params={"n": 2.0})
-    window.select(island)
-    settle(qtbot, window)
-    assert window.current_system() == island and not window.viewport.isTabVisible(KSPACE_TAB)
-    window.select("s1")
-    settle(qtbot, window)
-    assert window.viewport.isTabVisible(KSPACE_TAB)
-    session.act("new")                                   # no system, no Brillouin zone
-    settle(qtbot, window)
-    assert not window.viewport.isTabVisible(KSPACE_TAB)
 
 
 def test_every_bar_control_has_a_tooltip(window, qtbot):
     load(qtbot, window, "honeycomb_zeeman_rashba")
     window.show_result("c1")
     missing = []
-    for bar in [window.structure.bar, window.kspace_view.bar, window.plots["c1"].bar]:
+    zone = window.kpath_windows[window.kpath_window(calculation="c1")["kpath"]].view
+    for bar in [window.structure.bar, zone.bar, window.plots["c1"].bar]:
         for group in bar.findChildren(QToolBar):
             if group is bar.toolbar:
                 continue

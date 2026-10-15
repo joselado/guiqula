@@ -35,8 +35,10 @@ answered on 2026-10-05 (all as recommended but 121, answered with its
 alternative), and section 4 draws the window as built. Phase 8 was merged into
 master and pushed on 2026-10-04. Phase 9, the Document as a graph with a node view
 beside the outliner, was planned on 2026-10-15 (the end of section 7,
-decisions 213 to 233), and nothing of it is built until the maintainer has
-answered them.
+decisions 213 to 233); the maintainer answered 222, 224 and 226 and said to
+go ahead, and part A, the k-path as an object with its zone window (a 3D
+zone for a 3D crystal), was built the same day on branch kpath-window,
+decisions 234 to 239.
 
 ## 1. Requirements (as stated by the maintainer)
 
@@ -4611,6 +4613,61 @@ recommended option first:
 The maintainer answered 222, 224 and 226 on 2026-10-15, each as recommended,
 asked one at a time as the ones that change the most; the other decisions
 stand as recommended unless answered.
+
+*Part A as built (2026-10-15, branch kpath-window).* The maintainer said to
+go ahead with the plan, and asked while it was being built that the zone of a
+three-dimensional crystal be drawn in 3D and turned as the 3D crystal is. The
+Document has `kpaths` (`KPath`: id, name, vertices), and a calculation's
+`KPathParam` holds the id of one. The planner puts the vertices in place of
+the id (`pipeline._resolve_kpaths`, None for no vertex), so an entry, the
+export and the key see exactly what they saw before; the keys of the 38
+calculations of the presets were computed on master and on the branch and
+are the same, so no saved result goes stale. A document is lifted when it is
+made or read (`lift_kpaths`, a validator of the Document, idempotent), and
+the presets were saved again with their k-paths. The mutations are
+`add_kpath`, `set_kpath`, `single_user_kpath` (Make single-user, and New
+k-path with `copy` false), `remove` (refused while walked), `duplicate` and
+`rename`. The form's row is the combo `kpath_<param>` with Zone
+(`kpathZone_<param>`) and a menu (`kpathMenu_<param>`); a k-path selected in
+the outliner shows `KPathForm` (`kpathName`, `kpathVertices`, `kpathUsers`,
+`kpathZone`); the outliner has the K-paths section after Calculations with
+`outlinerAdd_kpaths`, a k-path's context menu Show in the Brillouin zone and
+a system's Show Brillouin zone. The zone is `KPathWindow`, `kspaceWindow_<k>`,
+opened by the `kpath_window` action. The k-space tab, `KSPACE_TAB`,
+`kspace_view`, the "path of" combo `kpathCalculation` and the tab's state
+`"kspace"` are gone. Decisions, the built option first:
+
+234. a lock of a calculation, or of its k-path parameter, covers the
+     vertices of the k-path it walks (`core/locks.py`), so an edit of a
+     shared k-path through another calculation, the zone or a pick is
+     refused while a teaching preset locks one of its users, and the zone
+     window shows the path without its tools; or the lock covers the id
+     only, and a shared path changes under a locked calculation;
+235. `add_calculation` takes a k-path as its vertices as well as an id, and
+     vertices make a k-path of its own named after the calculation (drivers,
+     the remote API and the tests write a path in one command); or an id
+     only, a path first made with `add_kpath`;
+236. a three-dimensional crystal's zone is drawn whole in 3D, the Wigner-Seitz
+     cell of the reciprocal lattice computed with numpy in the window's
+     process (`kspace.brillouin_zone_3d`; scipy stays out of it, 13.15), by
+     mplot3d or by pyvista as View > 3D drawing says, turned with the mouse
+     as the 3D structure is (`ui/kspace3d.py`); a click near a high-symmetry
+     point or a vertex adds it (Add points) or picks it, and a click
+     elsewhere does nothing, since a point of the screen is a line through
+     the zone, the maintainer's request; or the k3 = 0 cut kept, with the 3D
+     zone beside it;
+237. the widgets of the zone are named after their k-path (`kspaceView_<k>`,
+     `kspaceCanvas_<k>`, `kspaceBar_<k>`, `kpathAdd_<k>`,
+     `kpathRemoveLast_<k>`, `kpathDefault_<k>`, `kspaceCaption_<k>`,
+     `kspaceScene_<k>`), since several windows may be open; or the old names
+     kept for the window opened last;
+238. a k-path no calculation walks stays in the document, its row reading
+     "unused", until it is removed (as Blender keeps a data-block with no
+     user while the file is open); or removed with its last user;
+239. a pick's k-point target edits the k-path once, however many
+     calculations walk it, its label naming them ("add k = ... to the
+     k-path k1 of c1, c3"); or one target per calculation, all editing the
+     same path.
 
 ### Where the section 13 items land
 

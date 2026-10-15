@@ -148,7 +148,8 @@ def test_the_targets_of_an_energy_and_a_kpoint():
     assert kinds(found, "set")[0]["params"] == {"energy": 0.3, "k": k}
     path = kinds(found, "kpath")
     assert [t["calculation"] for t in path] == [bands_]
-    assert path[0]["kpath"] == ["G", [1 / 3, 1 / 3, 0.0]]         # the default path: from Γ
+    assert path[0]["vertices"] == ["G", [1 / 3, 1 / 3, 0.0]]       # the default path: from Γ
+    assert path[0]["kpath"] == d.document.calculation(bands_).params["kpath"]
     level = kinds(found, "fermi_level")[0]
     assert level["term"] is None and level["mu"] == pytest.approx(-0.3)
     # a one-dimensional system has no Fermi surface; a Nambu one no Fermi-level target

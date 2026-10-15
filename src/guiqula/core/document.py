@@ -23,6 +23,16 @@ must share their cell: pyqula's Embedding takes the pristine Hamiltonian and
 only the intracell matrix of the defective one. The list is left out of the
 JSON while it is empty, so a document without embeddings reads as before.
 
+A k-path (``kpaths``, ids k1, k2...) is a path through the Brillouin zone
+that calculations share (phase 9, part A): its vertices, each a label pyqula
+knows or reduced coordinates, and no vertex at all for pyqula's default path
+of the geometry it is walked on. A calculation that walks one names it by id
+in its parameters; the planner resolves the id into the vertices, so the
+key of a result hashes the path and never the id. The list is left out of
+the JSON while it is empty. A document written before k-paths were objects
+carried the vertices in each calculation (None for the default path);
+reading it lifts them (lift_kpaths).
+
 Parameters are stored as plain JSON (``params``); their meaning and
 validation belong to the registry entry named by ``kind``. An entry whose
 kind a plugin provides records that plugin (``plugin``), so a document
@@ -52,7 +62,7 @@ SYSTEM_KINDS = ("quantum", "classical_spin", "lattice_gas", "ising")
 CLASSICAL_KINDS = SYSTEM_KINDS[1:]
 
 ID_PREFIX = {"system": "s", "op": "op", "term": "t", "region": "r", "calculation": "c",
-             "embedding": "e"}
+             "embedding": "e", "kpath": "k"}
 
 
 class DocumentError(ValueError):
@@ -185,6 +195,23 @@ class Embedding(_Model):
         return data
 
 
+class KPath(_Model):
+    """A path through the Brillouin zone, shared by the calculations that
+    name it: its vertices (labels or [k1, k2, k3] in reciprocal lattice
+    units, checked by registry.params.normalize_vertices); none, pyqula's
+    default path."""
+    id: str
+    name: str = ""
+    vertices: list[Any] = Field(default_factory=list)
+
+    @model_serializer(mode="wrap")
+    def _without_empty_name(self, handler):
+        data = handler(self)
+        if isinstance(data, dict) and not data.get("name"):
+            data.pop("name", None)
+        return data
+
+
 class Calculation(_Kind):
     id: str
     system: str
@@ -200,13 +227,23 @@ class Document(_Model):
     systems: list[System] = Field(default_factory=list)
     embeddings: list[Embedding] = Field(default_factory=list)
     calculations: list[Calculation] = Field(default_factory=list)
+    kpaths: list[KPath] = Field(default_factory=list)
     ui: dict[str, Any] = Field(default_factory=dict)
 
+    @model_validator(mode="after")
+    def _kpaths_lifted(self):
+        """A document made or read with k-paths inside its calculations names
+        k-paths of its own instead (lift_kpaths)."""
+        lift_kpaths(self)
+        return self
+
     @model_serializer(mode="wrap")
-    def _without_empty_embeddings(self, handler):
+    def _without_empty_lists(self, handler):
         data = handler(self)
-        if isinstance(data, dict) and not data.get("embeddings", True):
-            del data["embeddings"]
+        if isinstance(data, dict):
+            for key in ("embeddings", "kpaths"):
+                if not data.get(key, True):
+                    del data[key]
         return data
 
     # ---- serialization
@@ -269,6 +306,12 @@ class Document(_Model):
                 return calc
         raise DocumentError(f"no calculation {calc_id!r}")
 
+    def kpath(self, kpath_id):
+        for kpath in self.kpaths:
+            if kpath.id == kpath_id:
+                return kpath
+        raise DocumentError(f"no k-path {kpath_id!r}")
+
     def find(self, entry_id):
         """Locate any entry by id: returns (family, owner system or None,
         containing list, index, object). family is one of "system", "op",
@@ -292,6 +335,9 @@ class Document(_Model):
         for i, calc in enumerate(self.calculations):
             if calc.id == entry_id:
                 return "calculation", None, self.calculations, i, calc
+        for i, kpath in enumerate(self.kpaths):
+            if kpath.id == entry_id:
+                return "kpath", None, self.kpaths, i, kpath
         raise DocumentError(f"no entry {entry_id!r}")
 
     def plugins(self):
@@ -317,14 +363,64 @@ class Document(_Model):
             ids += [term.id for term in terms_of(system)]
         ids += [embedding.id for embedding in self.embeddings]
         ids += [calc.id for calc in self.calculations]
+        ids += [kpath.id for kpath in self.kpaths]
         return ids
 
     def new_id(self, family):
-        """Next free id for a family: s3, op2, t5, r1, c4 (deterministic)."""
+        """Next free id for a family: s3, op2, t5, r1, c4, k2 (deterministic)."""
         prefix = ID_PREFIX[family]
         pattern = re.compile(rf"^{prefix}(\d+)$")
         used = [int(m.group(1)) for m in map(pattern.match, self.all_ids()) if m]
         return f"{prefix}{max(used, default=0) + 1}"
+
+
+def kpath_params(calc):
+    """The names of a calculation's parameters that are k-paths (its
+    registry entry's KPathParams); none for a kind the registry does not
+    know (a missing plugin)."""
+    from guiqula.registry import base as registry
+    from guiqula.registry.params import KPathParam
+    try:
+        spec = registry.get("calculation", calc.kind)
+    except registry.RegistryError:
+        return []
+    return [p.name for p in spec.params if isinstance(p, KPathParam)]
+
+
+def kpath_users(document, kpath_id):
+    """The ids of the calculations that walk a k-path."""
+    return [c.id for c in document.calculations
+            if any(c.params.get(name) == kpath_id for name in kpath_params(c))]
+
+
+def lift_kpaths(document):
+    """Turn the k-paths a document of before phase 9 carries inside its
+    calculations into k-paths of the document: an inline path becomes a
+    k-path of its own, named after its calculation, and the calculations of
+    one system on pyqula's default path share one empty k-path. A document
+    whose calculations already name k-paths is left as it is, so reading
+    one twice gives the same document."""
+    from guiqula.registry.params import ParamError, normalize_vertices
+    shared = {}                    # system id: its empty k-path
+    for calc in document.calculations:
+        for name in kpath_params(calc):
+            value = calc.params.get(name)
+            if isinstance(value, str):
+                continue
+            if value is None:
+                if calc.system not in shared:
+                    shared[calc.system] = KPath(id=document.new_id("kpath"))
+                    document.kpaths.append(shared[calc.system])
+                calc.params = dict(calc.params, **{name: shared[calc.system].id})
+                continue
+            try:
+                vertices = normalize_vertices(name, value)
+            except ParamError:
+                continue                # left for the planner to flag
+            kpath = KPath(id=document.new_id("kpath"), name=calc.name or calc.id,
+                          vertices=vertices)
+            document.kpaths.append(kpath)
+            calc.params = dict(calc.params, **{name: kpath.id})
 
 
 def terms_of(system):

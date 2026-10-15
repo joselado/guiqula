@@ -126,14 +126,15 @@ entry("calculation", "bands", "Band structure",
       IntParam("nk", 200, "k-points", "points along the k-path", minimum=2),
       ChoiceParam("operator", None, source="operators", optional=True, label="operator",
                   doc="colour the bands by this operator's expectation value"),
-      KPathParam(doc="the vertices of the path (labels such as G, K, M, or reduced "
-                     "coordinates); empty: pyqula's default path. The k-space tab edits it."),
+      KPathParam(doc="the k-path walked, a k-path of the document that other "
+                     "calculations may walk too: its vertices are labels such as G, K, M, "
+                     "or reduced coordinates, and none is pyqula's default path"),
       group="Spectral", doc="Bands along a path through the Brillouin zone (by default the "
                            "high-symmetry path pyqula chooses for the geometry).",
       apply=_bands, script=_bands_script, plot=_bands_plot,
       cost=lambda p, size: p["nk"] * cost.diagonalization(size["dimension"])
       * (2 if p["operator"] else 1),
-      guide=("Electronic band structures", "guiqula: The k-space tab",
+      guide=("Electronic band structures", "guiqula: K-paths and the Brillouin zone",
              "guiqula: Picking from a plot"), pyqula=("h.get_bands",))
 
 
@@ -305,7 +306,7 @@ def _eigenstate_script(ctx):
 
 entry("calculation", "eigenstate", "Eigenstate",
       FloatVectorParam("k", (0.0, 0.0, 0.0), "k-point", "reduced coordinates [k1, k2, k3] "
-                       "(a pick on the bands or a click in the k-space tab sets it); a "
+                       "(a pick on the bands or a click in the zone window of a k-path sets it); a "
                        "finite system has one k and ignores it", quantity="kpoint"),
       FloatParam("energy", 0.0, "energy", "the state nearest this energy is drawn",
                  quantity="energy"),
@@ -605,8 +606,9 @@ entry("calculation", "spectral_function", "Spectral function",
       ChoiceParam("mode", "ED", choices=("ED", "green"), label="method",
                   doc="ED: from the eigenstates; green: from the Green's function"),
       _operator(),
-      KPathParam(doc="the vertices of the path (labels or reduced coordinates); empty: "
-                     "pyqula's default path"),
+      KPathParam(doc="the k-path walked, a k-path of the document that other "
+                     "calculations may walk too: its vertices are labels or reduced "
+                     "coordinates, and none is pyqula's default path"),
       group="Spectral", doc="Momentum-resolved spectral function A(k, E) along a k-path "
                            "(pyqula's kdos.kdos_bands): broadened bands, weighted by an "
                            "operator if one is chosen.",

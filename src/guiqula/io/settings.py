@@ -20,7 +20,7 @@ tools/drive.py unless asked) never depend on what a user chose.
   matplotlib, and matplotlib whenever pyvista is not installed and the user
   never chose it (`chosen`).
 - ``plot_text``: the size of the text of every drawing (the labels, the
-  ticks, the titles of the plots, the canvas and the k-space tab, and of
+  ticks, the titles of the plots, the canvas and the zone window of a k-path, and of
   the exported figures): "small", "normal" or "large" (ui/theme.py's
   sizes). normal unless the user chooses another.
 - ``ui_text``: the size of the widgets' text, "normal" or "large" (for a

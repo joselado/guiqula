@@ -17,11 +17,11 @@ from guiqula.core import locks as lock_tools
 from guiqula.core import regions as region_tools
 from guiqula.core.document import (CLASSICAL_KINDS, SYSTEM_KINDS, Base, Calculation,
                                    Construction, DocumentError, Embedding, Entry, Geometry,
-                                   Hamiltonian, MeanField, Model, Region, System, region_users,
-                                   terms_of)
+                                   Hamiltonian, KPath, MeanField, Model, Region, System,
+                                   kpath_params, kpath_users, region_users, terms_of)
 from guiqula.registry import base as registry
 from guiqula.registry import plugins
-from guiqula.registry.params import ParamError, SystemParam
+from guiqula.registry.params import ParamError, SystemParam, normalize_vertices
 
 FAMILY_OF = {"op": "geometry_op", "term": "term", "calculation": "calculation"}
 
@@ -148,10 +148,10 @@ def set_notes(document, notes):
 
 @mutation
 def rename(document, entry, name):
-    """Name a system, region, op, term or calculation ("" takes an entry's
-    name away)."""
+    """Name a system, region, op, term, embedding, calculation or k-path (""
+    takes an entry's name away)."""
     family, _, _, _, obj = document.find(entry)
-    if family not in ("system", "region", "op", "term", "embedding", "calculation"):
+    if family not in ("system", "region", "op", "term", "embedding", "calculation", "kpath"):
         raise CommandError(f"{entry!r} is a {family}, which has no name")
     obj.name = _text("name", name)
 
@@ -270,30 +270,121 @@ def set_selection(document, entry, select):
 @mutation
 def add_calculation(document, system, kind, params=None, name=""):
     """Add a calculation on a system or an embedding, with an optional name;
-    returns its id."""
+    returns its id. A k-path it walks and is not given is the one of the
+    last calculation of the document on the same system that walks one,
+    else a new k-path, pyqula's default path (phase 9, decision 217); one
+    given as its vertices rather than an id becomes a k-path of its own,
+    named after the calculation (decision 235)."""
     try:
         target_kind = document.target_kind(system)
     except DocumentError as error:
         raise CommandError(str(error)) from None
-    params = _normalize("calculation", kind, params)
+    calc = Calculation(id=document.new_id("calculation"), system=system, kind=kind,
+                       params={}, plugin=_plugin("calculation", kind), name=_text("name", name))
+    names = kpath_params(calc)
+    inline = {n: v for n, v in (params or {}).items() if n in names and isinstance(v, list)}
+    params = _normalize("calculation", kind, {n: v for n, v in (params or {}).items()
+                                              if n not in inline})
     spec = registry.get("calculation", kind)
     if target_kind not in spec.systems:
         what = "an embedding" if target_kind == "embedding" else f"a {target_kind} system"
         raise CommandError(f"{spec.label} does not apply to {what}; it is a calculation of "
                            f"{', '.join(spec.systems)} systems")
-    calc = Calculation(id=document.new_id("calculation"), system=system, kind=kind,
-                       params=params, plugin=_plugin("calculation", kind),
-                       name=_text("name", name))
+    for n, vertices in inline.items():         # its own k-path, named after it
+        kpath = KPath(id=document.new_id("kpath"), name=calc.name or calc.id,
+                      vertices=_vertices(vertices))
+        document.kpaths.append(kpath)
+        params[n] = kpath.id
+    calc.params = params
+    if any(params.get(n) is None for n in names):
+        last = _last_kpath(document, system)
+        if last is None:
+            last = KPath(id=document.new_id("kpath"))
+            document.kpaths.append(last)
+            last = last.id
+        calc.params = dict(params, **{n: last for n in names if params.get(n) is None})
+    _check_kpaths(document, calc)
     document.calculations.append(calc)
     return calc.id
 
 
+def _last_kpath(document, system):
+    """The k-path of the last calculation on a system that walks one."""
+    for calc in reversed(document.calculations):
+        if calc.system == system:
+            for name in kpath_params(calc):
+                if isinstance(calc.params.get(name), str):
+                    return calc.params[name]
+    return None
+
+
+def _check_kpaths(document, calc):
+    """Refuse a calculation that names a k-path the document does not have."""
+    for name in kpath_params(calc):
+        value = calc.params.get(name)
+        if value is not None and value not in {k.id for k in document.kpaths}:
+            raise CommandError(f"{name}: there is no k-path {value!r}; the k-paths are "
+                               f"{[k.id for k in document.kpaths]}")
+
+
+# ---- k-paths (phase 9, part A)
+def _vertices(vertices):
+    try:
+        return normalize_vertices("vertices", vertices)
+    except ParamError as error:
+        raise CommandError(str(error)) from None
+
+
+def _kpath(document, kpath):
+    try:
+        return document.kpath(kpath)
+    except DocumentError as error:
+        raise CommandError(str(error)) from None
+
+
+@mutation
+def add_kpath(document, vertices=None, name=""):
+    """Add a k-path (no vertices: pyqula's default path); returns its id."""
+    kpath = KPath(id=document.new_id("kpath"), name=_text("name", name),
+                  vertices=_vertices(vertices))
+    document.kpaths.append(kpath)
+    return kpath.id
+
+
+@mutation
+def set_kpath(document, kpath, vertices):
+    """Set the vertices of a k-path (none: pyqula's default path), for every
+    calculation that walks it."""
+    _kpath(document, kpath).vertices = _vertices(vertices)
+
+
+@mutation
+def single_user_kpath(document, calculation, param="kpath", copy=True):
+    """Give a calculation a k-path of its own, a copy of the one it walks
+    (copy true, Make single-user) or pyqula's default path (copy false, New
+    k-path), named after it, so that an edit of the path changes this
+    calculation alone; returns the new k-path's id."""
+    try:
+        calc = document.calculation(calculation)
+    except DocumentError as error:
+        raise CommandError(str(error)) from None
+    if param not in kpath_params(calc):
+        raise CommandError(f"{calculation} walks no k-path {param!r}")
+    vertices = []
+    if _flag("copy", copy) and calc.params.get(param) is not None:
+        vertices = list(_kpath(document, calc.params[param]).vertices)
+    copy = KPath(id=document.new_id("kpath"), name=calc.name or calc.id, vertices=vertices)
+    document.kpaths.append(copy)
+    calc.params = dict(calc.params, **{param: copy.id})
+    return copy.id
+
+
 @mutation
 def remove(document, entry):
-    """Remove a system, op, term, region, embedding or calculation. A region
-    still used by a term, a system a calculation runs on or names (the tip of
-    a local probe) or an embedding names, or an embedding a calculation runs
-    on, cannot be removed."""
+    """Remove a system, op, term, region, embedding, calculation or k-path. A
+    region still used by a term, a system a calculation runs on or names (the
+    tip of a local probe) or an embedding names, an embedding a calculation
+    runs on, or a k-path a calculation walks, cannot be removed."""
     family, owner, items, index, obj = document.find(entry)
     if family == "region":
         users = [t.id for t in terms_of(owner) if t.region == entry]
@@ -313,6 +404,10 @@ def remove(document, entry):
         users = [c.id for c in document.calculations if c.system == entry]
         if users:
             raise CommandError(f"embedding {entry!r} is used by calculations {users}")
+    if family == "kpath":
+        users = kpath_users(document, entry)
+        if users:
+            raise CommandError(f"k-path {entry!r} is walked by calculations {users}")
     del items[index]
 
 
@@ -327,8 +422,8 @@ def _systems_named(calc):
 
 @mutation
 def duplicate(document, entry):
-    """Copy an op, term, region, embedding or calculation (placed right after
-    the original), or a whole system with fresh ids for everything in it (its
+    """Copy an op, term, region, embedding, calculation (which walks the same
+    k-path as the original) or k-path (placed right after the original), or a whole system with fresh ids for everything in it (its
     terms keep pointing at the copies of its regions); returns the new id."""
     family, _, items, index, obj = document.find(entry)
     if family == "system":
@@ -338,7 +433,7 @@ def duplicate(document, entry):
     copy.id = document.new_id(family)
     if family == "region":
         copy.name = f"{obj.name} (copy)"
-    if family == "embedding":
+    if family in ("embedding", "kpath"):
         copy.name = f"{obj.name or obj.id} (copy)"
     return copy.id
 
@@ -370,7 +465,7 @@ def _copy_system(document, system_id):
 def move(document, entry, index):
     """Move an op, term, region or calculation to a new position in its list."""
     family, _, items, old, obj = document.find(entry)
-    if family in ("system", "embedding"):
+    if family in ("system", "embedding", "kpath"):
         raise CommandError(f"{family}s are not ordered")
     if not 0 <= index < len(items):
         raise CommandError(f"index {index} out of range 0..{len(items) - 1}")
@@ -397,6 +492,8 @@ def set_param(document, entry, name, value):
     if family not in FAMILY_OF:
         raise CommandError(f"{entry!r} is a {family}, which has no parameters")
     obj.params = _normalize(FAMILY_OF[family], obj.kind, dict(obj.params, **{name: value}))
+    if family == "calculation":
+        _check_kpaths(document, obj)
 
 
 @mutation
@@ -406,6 +503,8 @@ def set_params(document, entry, params):
     if family not in FAMILY_OF:
         raise CommandError(f"{entry!r} is a {family}, which has no parameters")
     obj.params = _normalize(FAMILY_OF[family], obj.kind, dict(obj.params, **params))
+    if family == "calculation":
+        _check_kpaths(document, obj)
 
 
 # ---- locks (teaching presets, core/locks.py)

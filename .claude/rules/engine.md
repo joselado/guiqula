@@ -48,6 +48,13 @@ and exported, what the plan and the build do, and what the refresh of `vendor/` 
   `<name> = h`; `remove` refuses a system so named; the cost sees its mode in
   `size["others"]`. A sweep targets the calculation's own system only (or, on an
   embedding, either of its two).
+- A `KPathParam` holds the id of a k-path of the document (phase 9, part A):
+  `pipeline._resolve_kpaths` puts its vertices in place of the id before the key is made
+  (None for no vertex, pyqula's default path), so an entry reads the path with
+  `ctx.value("kpath")`, the script writes it and the key hashes it, never the id; an engine
+  test takes the planned parameters (`pipeline.plan_calculation(...).params`) as the
+  direct pyqula call's. `add_calculation` names the k-path of the last calculation of the
+  same system that walks one, or a new one, and takes vertices as a k-path of its own.
 - A calculation on an embedding (`systems=("embedding",)`, decisions 200 to 212) is
   planned by `_plan_embedding`: `plan.system` is the pristine system, `plan.others["defect"]`
   the defect, `plan.embedding` the embedding; the adapter calls `embedded_pair(h,

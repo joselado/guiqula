@@ -50,7 +50,7 @@
       "params": {
         "nk": 200,
         "operator": null,
-        "kpath": null
+        "kpath": "k1"
       }
     },
     {
@@ -73,6 +73,12 @@
       "system": "s1",
       "kind": "gap",
       "params": {}
+    }
+  ],
+  "kpaths": [
+    {
+      "id": "k1",
+      "vertices": []
     }
   ],
   "ui": {

@@ -62,7 +62,10 @@ new grid of result views, rows and cols, 2 x 2 by default, its widget
 grid_<id> and its cells gridCell_<id>_<row>_<col>; or grid: g1 and rows,
 cols, close or image, a PNG of it), grid_place (calculation, grid, row,
 col counted from 0: its result shown in that cell; grid left out: back
-into its tab); the
+into its tab), kpath_window (kpath, or calculation, or system: the window of
+a k-path on the Brillouin zone, kspaceWindow_<k>, with its zone
+kspaceView_<k> and its tools kpathAdd_<k>, kpathRemoveLast_<k>,
+kpathDefault_<k>); the
 session's undo, redo (with "steps") and history; lock and unlock are
 mutations. The driven window never reads or writes the settings file.
 Every calculation's result has its own view, plot_<calculation id>, with

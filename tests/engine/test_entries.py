@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 from guiqula import registry
+from guiqula.registry import pipeline
 from guiqula.commands import Dispatcher
 from guiqula.core.picks import AXES
 from guiqula.engine.build import build_system
@@ -913,7 +914,7 @@ def test_calculation(pyqula, kind, case):
     c = d.do("add_calculation", system=s, kind=kind, params=params)
     progress = []
     result = run_calculation(d.document, c, progress=lambda f, text: progress.append(f))
-    p = registry.get("calculation", kind).normalize_params(params)
+    p = pipeline.plan_calculation(d.document, c).params     # a k-path id: its vertices
     expected = DIRECT[kind](h, p)
     assert set(result.arrays) == set(expected)
     for key, value in expected.items():

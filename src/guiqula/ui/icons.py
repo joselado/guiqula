@@ -31,7 +31,7 @@ closed window is never kept alive by its callback, and a callback whose Qt
 object was deleted is dropped. follow(widget, method) is the usual way in:
 the method sets the widget's icons when the widget is first shown, so a
 control out of sight at start (the structure canvas's bar behind the start
-page, the k-space tab) costs nothing then, and again after every change of
+page, the zone window of a k-path) costs nothing then, and again after every change of
 theme from then on, through on_theme_change."""
 import types
 import weakref

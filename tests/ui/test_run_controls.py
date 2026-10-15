@@ -91,7 +91,7 @@ def test_the_outliner_follows_the_tab_the_user_shows(window):
     assert window.current_tab() == "c1" and window.selected == "c1"
     QTest.keyClick(viewport, Qt.Key.Key_Tab, Qt.KeyboardModifier.ControlModifier
                    | Qt.KeyboardModifier.ShiftModifier)
-    assert window.current_tab() == "kspace" and window.selected == "c1"   # not a result
+    assert window.current_tab() == "structure" and window.selected == "c1"   # not a result
     assert run.text() == "Run c1 · bands"
     window.show_result("c2")                     # a pick's target shows another result
     assert window.selected == "c2" and window.properties.form.item_id == "c2"

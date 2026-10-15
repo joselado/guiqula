@@ -36,12 +36,13 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QFrame, QGroup
                                QToolButton, QVBoxLayout, QWidget)
 
 from guiqula.core import regions as region_tools
-from guiqula.core.document import DocumentError
+from guiqula.core.document import DocumentError, kpath_users
 from guiqula.registry import base as registry
 from guiqula.registry import cost
 from guiqula.registry.params import FieldParam, VectorFieldParam
 from guiqula.ui import formulas, icons, marks, theme
-from guiqula.ui.forms import format_number, line_up, make_editor, result_sources
+from guiqula.ui.forms import (KPathEditor, format_kpath, format_number, kpath_label, line_up,
+                              make_editor, parse_kpath, result_sources)
 from guiqula.ui.outliner import cell_problem, system_of
 from guiqula.ui.sliders import range_from
 
@@ -76,6 +77,16 @@ def _systems(document, system_id):
     the editor keeps those of the kinds the parameter takes."""
     return tuple((s.id, f"{s.id} {s.name}".strip(), s.kind) for s in document.systems
                  if s.id != system_id)
+
+
+def _kpaths(document):
+    """[(id, label, number of users)] of the document's k-paths, for a
+    calculation's k-path row."""
+    out = []
+    for kpath in document.kpaths:
+        users = kpath_users(document, kpath.id)
+        out.append((kpath.id, kpath_label(kpath, users), len(users)))
+    return tuple(out)
 
 
 def _quiet(widget, setter, value):
@@ -203,16 +214,20 @@ class Form(QWidget):
         return ok
 
     def add_editors(self, params, values, send, regions=(), sources=(), rows=None,
-                    systems=()):
+                    systems=(), kpaths=()):
         """One editor per parameter; send(name, value) commits it. regions:
         [(id, name)] the piecewise Fields can use; sources: the results a
         from_result Field can read (forms.result_sources); rows: the form
         layout they go in (the form's own rows by default); systems: [(id,
-        label, kind)] a SystemParam can name."""
+        label, kind)] a SystemParam can name; kpaths: _kpaths() of the
+        document, for a KPathParam."""
         rows = self.rows if rows is None else rows
         for param in params:
             editor = make_editor(param, getattr(self.session.jobs, "names", {}), regions,
-                                 sources, systems)
+                                 sources, systems, kpaths)
+            if isinstance(editor, KPathEditor):
+                editor.action.connect(lambda what, p=param, e=editor: self.kpath_action(
+                    p.name, e.value(), what))
             editor.set_value(values[param.name])
             editor.committed.connect(lambda p=param, e=editor: self._send(e, p, send))
             if hasattr(editor, "preview"):
@@ -228,6 +243,14 @@ class Form(QWidget):
             self.editors[param.name] = editor
             self._label_says(param.name, [])
         line_up(self.editors.values())        # the kind buttons of all rows, one width
+
+    def kpath_action(self, name, kpath, what):
+        """A k-path row's Zone, New k-path or Make single-user."""
+        if what == "zone":
+            self.commit("kpath_window", kpath=kpath, calculation=self.item_id)
+        else:
+            self.commit("single_user_kpath", calculation=self.item_id, param=name,
+                        copy=what == "single")
 
     def add_enabled(self, send):
         """The enabled switch, in the title's row (check_enabled); send(bool)
@@ -788,6 +811,8 @@ class EntryForm(Form):
                                                              name=name, value=value),
                              _regions(owner) if family == "term" else (), self.sources,
                              systems=_systems(panel.session.document, obj.system)
+                             if family == "calculation" else (),
+                             kpaths=_kpaths(panel.session.document)
                              if family == "calculation" else ())
         self.guarded = [w for w in (self.enabled, self.region, self.region_link) if w is not None]
         self.status = QLabel()
@@ -812,7 +837,8 @@ class EntryForm(Form):
                         result_sources(self.session, found[1].id)) if found[0] == "term" else ()
         systems = _systems(self.session.document, found[-1].system) \
             if found[0] == "calculation" else ()
-        return (self.family, self.item_id, found[-1].kind, regions, sources, systems)
+        kpaths = _kpaths(self.session.document) if found[0] == "calculation" else ()
+        return (self.family, self.item_id, found[-1].kind, regions, sources, systems, kpaths)
 
     def update_values(self):
         obj = self.session.document.find(self.item_id)[-1]
@@ -942,6 +968,71 @@ class EntryForm(Form):
                                if running() else self.commit("run", calculation=self.item_id))
         self.update_run = update
         update()
+
+
+class KPathForm(Form):
+    """A k-path of the document (phase 9, part A): its name, its vertices as
+    text, the calculations that walk it, and Zone, which opens its window on
+    the Brillouin zone."""
+
+    def __init__(self, panel, kpath_id):
+        super().__init__(panel, kpath_id, f"k-path {kpath_id}",
+                         "A path through the Brillouin zone, shared by the calculations that "
+                         "walk it: an edit here or in its zone window changes them all. No "
+                         "vertex is pyqula's default path of each calculation's geometry.")
+        self.name = QLineEdit()
+        self.name.setObjectName("kpathName")
+        self.name.editingFinished.connect(self._rename)
+        self.rows.addRow("name", self.name)
+        self.vertices = QLineEdit()
+        self.vertices.setObjectName("kpathVertices")
+        self.vertices.setPlaceholderText("default path, or e.g. G K M G, (0.5, 0) for reduced "
+                                         "coordinates")
+        self.vertices.setToolTip("the vertices: labels pyqula knows (G, K, M, X, ...) or "
+                                 "reduced coordinates in parentheses (set_kpath)")
+        self.vertices.editingFinished.connect(self._set_vertices)
+        self.rows.addRow("vertices", self.vertices)
+        self.users = QLabel()
+        self.users.setObjectName("kpathUsers")
+        self.users.setWordWrap(True)
+        self.rows.addRow("walked by", self.users)
+        self.zone = QPushButton("Zone")
+        self.zone.setObjectName("kpathZone")
+        self.zone.setToolTip("open the window of this k-path on the Brillouin zone, to draw "
+                             "and edit it")
+        self.zone.clicked.connect(lambda: self.commit("kpath_window", kpath=self.item_id))
+        self.rows.addRow("", self.zone)
+        self.guarded = [self.name, self.vertices]
+        self.update_values()
+
+    def whole_locks(self):
+        return [self.item_id]
+
+    def signature(self):
+        return ("kpath", self.item_id)
+
+    def update_values(self):
+        kpath = self.session.document.kpath(self.item_id)
+        _quiet(self.name, self.name.setText, kpath.name)
+        _quiet(self.vertices, self.vertices.setText, format_kpath(kpath.vertices))
+        users = kpath_users(self.session.document, self.item_id)
+        self.users.setText(", ".join(users) or "no calculation: removing it loses nothing")
+        self.update_reports()
+
+    def _rename(self):
+        name = self.name.text().strip()
+        if name != self.session.document.kpath(self.item_id).name:
+            self.commit("rename", entry=self.item_id, name=name)
+
+    def _set_vertices(self):
+        try:
+            vertices = parse_kpath(self.vertices.text())
+        except ValueError as error:
+            self.error.setText(f"vertices: {error}")
+            self.update_values()
+            return
+        if vertices != self.session.document.kpath(self.item_id).vertices:
+            self.commit("set_kpath", kpath=self.item_id, vertices=vertices)
 
 
 class RegionForm(Form):
@@ -1286,7 +1377,7 @@ class PropertiesPanel(QWidget):
 
     def _make(self, item_id):
         document = self.session.document
-        if not item_id or item_id == "calculations":
+        if not item_id or item_id in ("calculations", "kpaths"):
             return EmptyForm(self)
         if item_id.endswith("/meanfield"):
             return MeanFieldForm(self, item_id)
@@ -1298,6 +1389,8 @@ class PropertiesPanel(QWidget):
         family = document.find(item_id)[0]
         if family == "system":
             return SystemForm(self, item_id)
+        if family == "kpath":
+            return KPathForm(self, item_id)
         if family == "embedding":
             return EmbeddingForm(self, item_id)
         if family == "region":
