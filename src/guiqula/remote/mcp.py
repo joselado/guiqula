@@ -135,7 +135,8 @@ def tools():
     return [
         ("status", "Outline of the open document: systems (lattice, geometry ops, regions, "
                    "terms, Hilbert space, the latest build: sites and dimension; invalid "
-                   "entries), calculations with their status and estimated seconds, undo "
+                   "entries), the embeddings (a defect system in a pristine one), "
+                   "calculations with their status and estimated seconds, undo "
                    "steps, and the window's state. Start here.", _schema(), True),
         ("document", "The whole document as JSON (every parameter of every entry).",
          _schema(), True),

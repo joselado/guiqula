@@ -217,8 +217,11 @@ A document holds a list of **systems** (decision 13.1). Each system has a
 `kind`: `quantum` (geometry, regions, Hamiltonian construction, term stack,
 mean field) or one of the classical kinds `classical_spin`, `lattice_gas`,
 `ising` (geometry, regions, a classical model term stack). Calculations name
-the system they act on; a transport or embedding calculation names two or
-three. **Regions** (decision 13.2) are named site selections stored by
+the system they act on; a transport calculation names a second one (the tip
+of a local probe, decision 192), and an **embedding**, a list of its own in
+the Document (`embeddings`), names a pristine and a defective quantum
+system, on which a calculation runs as on a system (decisions 200 to 212).
+**Regions** (decision 13.2) are named site selections stored by
 positions or by rule (expression, sublattice, layer, edge distance), and any
 term may carry a `region` that restricts it to those sites.
 
@@ -4271,6 +4274,103 @@ shows the gap with its two coherence peaks at $\pm 0.1$.
      chain conducts exactly twice what a spinless one does), and the entry
      is called Local probe, since the undo history lowercases a label and
      "local probe di/dv" read badly.
+
+**The embedding (2026-10-15, branch embedding).** The maintainer asked for
+the embedding object, made of two Hamiltonians, the defective part and the
+pristine part, each modifiable independently as the usual Hamiltonians and
+compatible with the other. Asked before building (one question): how the
+object holds them; the maintainer picked an object naming two systems of
+the document over one object owning two stacks, terms flagged as the
+defect, or a calculation naming the defect as the local probe names its
+tip. The planner reuses the plumbing of decision 194: a calculation on an
+embedding runs on its pristine system and names the defect as the second
+system `defect` (`CalculationPlan.embedding`, `plan.others["defect"]`), so
+both key the result, both are built through the same cache and the script
+builds the defect first. The engine's `embedded_pair`
+(`registry/calculations.py`, carried into the exported script) puts the two
+in one Hilbert space and checks what the planner cannot know. Verified
+against direct pyqula calls (an onsite impurity on a chain, a magnetic
+impurity on a spinless chain, a vacancy in Haldane graphene, a
+Yu-Shiba-Rusinov chain), by the exported scripts, by the physics (the bound
+state of an onsite impurity $V=1$ on a chain at $\sqrt{V^2+4t^2}=2.24$, the
+vacancy's bound state at zero energy in the Chern gap, 2.09 in the defect's
+cell against 0.009 in the pristine one, a Yu-Shiba-Rusinov state moving
+into the gap as the exchange grows), and in the window.
+
+200. the embedding is an object of the Document that names two quantum
+     systems, the pristine one and the defect, each an ordinary system
+     edited as any other, the maintainer's answer; or one object owning
+     two stacks, or the defect as flagged terms of one stack, or a
+     calculation naming the defect;
+201. the Document keeps them in a list of their own, `embeddings`, ids
+     e1, e2, and a calculation names an embedding in `system` as it names
+     a system; the list is left out of the JSON while empty, so the
+     presets and the projects without one read and hash as before; or a
+     system kind `embedding` without a geometry, which every reader of a
+     system's geometry would have to skip;
+202. New embedding of a defect (the context menu of a quantum system, the
+     mutation `add_embedding`) makes the defect a copy of the pristine
+     system, so the two share their cell from the start, and selects the
+     embedding; a defect can also be named (`defect=`, the form's combo);
+     or an empty defect to fill;
+203. compatible means the same sites at the same positions, the same
+     lattice vectors and the same hoppings between cells, checked by the
+     engine when a calculation runs (pyqula's own check is the size of the
+     matrices alone, and it uses the intracell matrix of the defect only);
+     the outliner's row and the form warn as soon as the builds show
+     cells that differ; a defect changing the hoppings to the next cell is
+     refused with the size of the change, rather than dropped silently as
+     pyqula would; or that left to pyqula;
+204. the Hilbert spaces are matched, both made Nambu when one is, else
+     spinful when one is, so a magnetic impurity on a spinless metal
+     works as it is; the cost counts the doubling; or equal modes
+     required;
+205. the defect's cell is the pristine cell: pyqula's `nsuper` of the
+     constructor, a defect given in a supercell of the pristine cell, is
+     left out, and a larger defect takes the same supercell on both; or a
+     supercell parameter on the embedding;
+206. three calculations, in an Embedding group offered on an embedding
+     only: Embedded LDOS on the window of `cells around` cells per
+     direction (pyqula's `nsuper` of `get_ldos`, named so on the form
+     since it is not the constructor's), drawn on the atoms of the window
+     as a finite piece of the crystal, without images; Embedded DOS of the
+     defect's cell with the same cell of the pristine crystal as a
+     reference, the second curve, for which the `lines` plot learnt
+     `labels` (each column in its colour, a legend); In-gap state, its
+     energy and the gap, refused on a gapless pristine system with that
+     reason rather than pyqula's "Singular matrix"; the dI/dV through the
+     defect, the multi-energy LDOS folder and the boundary embedding left
+     out; or those too;
+207. the defaults are pyqula's broadening 0.01 and `nk=100` for the LDOS,
+     a window of 5 cells, a broadening of 0.02 for the DOS on 100 energies
+     from -3 to 3, and 51 energies in the gap for the in-gap state; or a
+     larger window;
+208. the cost is the Green's function of the window: in 2D 5e-5 s per
+     k-point and orbital of the window plus a tenth of a diagonalization
+     of it (measured: 0.4 s for one cell of 64 orbitals at `nk=100`, 2.4 s
+     for 3x3 cells, 5 s for 5x5, 8.6 s for 7x7 at `nk=50`), in 1D a
+     millisecond an energy, pyqula using a renormalization there; or the
+     size of the pristine system alone;
+209. a pick on an embedding's result moves or adds calculations of the
+     embedding (an energy picked on the DOS sets the LDOS's); the picked
+     sites, which are the window's and no system's, and a Fermi level,
+     which would have to move in both systems, are not offered; or both,
+     on the defect;
+210. a sweep on an embedding may change a parameter of either system, so
+     the in-gap state is followed against the strength of the defect;
+     Sweep this parameter on a term of the defect runs a calculation of an
+     embedding naming it when its own system has none; or sweeps of one
+     system only, as before;
+211. selecting the embedding, or a calculation on it, shows the defect on
+     the canvas and turns to the Calculate workspace; the rows under the
+     embedding select the system they name, so it is edited where it
+     lives; a system an embedding names cannot be removed, nor an
+     embedding a calculation runs on; or the pristine system on the
+     canvas;
+212. the embedding's icon is Tabler's focus-2, a point in rings; no
+     preset ships with this change; or a preset (a vacancy in Haldane
+     graphene, a Yu-Shiba-Rusinov chain) with its picture on the start
+     page.
 
 ### Where the section 13 items land
 

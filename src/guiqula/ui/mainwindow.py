@@ -81,7 +81,7 @@ from guiqula.ui.help import HelpPanel
 from guiqula.ui.kspace import KSpaceView
 from guiqula.ui.sliders import SlidersPanel
 from guiqula.ui.jobpanel import JobPanel
-from guiqula.ui.outliner import Outliner, pseudo_ids, system_of
+from guiqula.ui.outliner import Outliner, embedding_rows, pseudo_ids, system_of
 from guiqula.ui.palette import FAMILIES as PALETTE_FAMILIES, MenuButton, PaletteMenu
 from guiqula.ui.marks import ERROR_STATES, calculation_state, mark
 from guiqula.ui.grid import MAX_SIDE as GRID_MAX_SIDE, GridView, ResultTabBar
@@ -169,7 +169,7 @@ def workspace_of(entry, family=None):
     Document.find says of an entry id), or None for nothing selected."""
     if not entry:
         return None
-    if entry == "calculations" or family == "calculation":
+    if entry == "calculations" or family in ("calculation", "embedding"):
         return "calculate"
     if family is not None:
         return "hamiltonian" if family == "term" else "geometry"
@@ -620,10 +620,11 @@ class MainWindow(QMainWindow):
         to (the current one at that moment when left out)."""
         menu = self.palette_menus[family]
         menu.system = system
-        target = system or self.current_system()
+        target = system or (self.current_target() if family == "calculation"
+                            else self.current_system())
         kind = "quantum"                   # New system offers the lattices of quantum systems
         if family != "lattice" and target is not None and self.session is not None:
-            kind = self.session.document.system(target).kind
+            kind = self.session.document.target_kind(target)    # or "embedding"
         return menu.prepare(kind)
 
     def _palette_shown(self, menu):
@@ -638,7 +639,7 @@ class MainWindow(QMainWindow):
         if menu.family == "lattice":
             return self.new_system(kind)
         system = menu.system if menu.system and self._exists(menu.system) \
-            else self._target_system()
+            else self._target_system(menu.family == "calculation")
         if system is None:
             return None
         command = {"geometry_op": "add_geometry_op", "term": "add_term",
@@ -655,7 +656,7 @@ class MainWindow(QMainWindow):
         if section == "systems":
             return self.palette_menu("lattice"), None
         if section == "calculations":
-            system = self.current_system()
+            system = self.current_target()
             if system is None:
                 raise ValueError("add a system first (New system)")
             return self.palette_menu("calculation", system), system
@@ -1228,6 +1229,9 @@ class MainWindow(QMainWindow):
             return True
         system = system_of(item_id)
         try:
+            if system is not None and any(e.id == system
+                                          for e in self.session.document.embeddings):
+                return item_id in embedding_rows(self.session.document.embedding(system))
             if system is not None:      # a row the outliner shows for a system of its kind
                 return item_id in pseudo_ids(self.session.document.system(system))
             self.session.document.find(item_id)
@@ -1351,6 +1355,9 @@ class MainWindow(QMainWindow):
             return ""
         if entry and not self._exists(entry):
             raise ValueError(f"nothing called {entry!r} in the document")
+        head = system_of(entry)
+        if head is not None and any(e.id == head for e in self.session.document.embeddings):
+            entry = embedding_rows(self.session.document.embedding(head))[entry]  # its system
         self.selected = entry
         self.outliner.set_current(entry)
         self.properties.show_item(self.session, entry)
@@ -1863,21 +1870,43 @@ class MainWindow(QMainWindow):
         self.calculate_button.setEnabled(count > 0)
 
     def current_system(self):
-        """The system of the selected item, else the first one, else None."""
+        """The system of the selected item, else the first one, else None;
+        the defect of an embedding, or of a calculation on one, which is
+        the system the canvas then shows."""
         if self.session is None or not self.session.document.systems:
             return None
+        document = self.session.document
         entry = self.selected
         if entry and entry != "calculations":
             system = system_of(entry)
             if system is not None:
                 return system
-            family, owner, _, _, obj = self.session.document.find(entry)
+            family, owner, _, _, obj = document.find(entry)
             if family == "system":
                 return obj.id
+            if family == "embedding":
+                return obj.defect
             if family == "calculation":
+                if document.target_kind(obj.system) == "embedding":
+                    return document.embedding(obj.system).defect
                 return obj.system
             return owner.id
-        return self.session.document.systems[0].id
+        return document.systems[0].id
+
+    def current_target(self):
+        """What a calculation added now runs on: the embedding selected, or
+        the one a selected calculation runs on, else the current system."""
+        if self.session is None:
+            return None
+        document = self.session.document
+        entry = self.selected
+        if entry and entry != "calculations" and "/" not in entry:
+            family, _, _, _, obj = document.find(entry)
+            if family == "embedding":
+                return obj.id
+            if family == "calculation" and document.target_kind(obj.system) == "embedding":
+                return obj.system
+        return self.current_system()
 
     def _overlays(self, system_id, build):
         """What the selected entry touches, drawn over the structure."""
@@ -2072,8 +2101,10 @@ class MainWindow(QMainWindow):
         self.select(system)
         return system
 
-    def _target_system(self):
-        system = self.current_system()
+    def _target_system(self, calculation=False):
+        """The current system (calculation: what a calculation runs on, which
+        may be an embedding), or None, said in the status bar."""
+        system = self.current_target() if calculation else self.current_system()
         if system is None:
             self.message("add a system first (New system)", error=True)
         return system
@@ -2087,7 +2118,7 @@ class MainWindow(QMainWindow):
         return self._do_and_select("add_term", system=system, kind=kind) if system else None
 
     def add_calculation(self, kind):
-        system = self._target_system()
+        system = self._target_system(calculation=True)
         return self._do_and_select("add_calculation", system=system, kind=kind) if system else None
 
     def add_region(self, select=None, name="", system=None):
@@ -2104,7 +2135,7 @@ class MainWindow(QMainWindow):
             self.run_guarded(args["calculation"])
             return
         ok, out = self._do(name, **args)
-        if ok and name == "duplicate":
+        if ok and name in ("duplicate", "add_embedding"):
             self.select(out)
         elif not ok and name in ("set_enabled", "set_meanfield"):
             # Qt ticked or unticked the box before the refusal (a lock): show the Document
@@ -3187,7 +3218,8 @@ class MainWindow(QMainWindow):
         started = []
         for calc in self.session.document.calculations:
             if calc.id not in self.session.results or not self.session.is_stale(calc.id) \
-                    or not self.session.build_is_current(calc.system):
+                    or not all(self.session.build_is_current(system)
+                               for system in self.session.systems_of(calc.system)):
                 continue
             try:
                 key = self.session.calculation_key(calc.id)

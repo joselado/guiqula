@@ -166,6 +166,9 @@ def outline(document):
         if system.model is not None:
             item["model"] = system.model.kind
         out.append(item)
+    if document.embeddings:
+        out.append({"embeddings": [f"{e.id}:{e.defect} in {e.pristine}"
+                                   for e in document.embeddings]})
     out.append({"calculations": [f"{c.id}:{c.kind}@{c.system}" for c in document.calculations]})
     return out
 

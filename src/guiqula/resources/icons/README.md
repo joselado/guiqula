@@ -85,3 +85,4 @@ every icon in both themes.
 | `grid` | `layout-grid` | 3.35.0 |
 | `close` | `x` | 3.35.0 |
 | `blender` | `brand-blender` | 3.35.0 |
+| `embedding` | `focus-2` | 3.35.0 |

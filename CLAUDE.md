@@ -77,7 +77,9 @@ not carry.
 - `core/`: the Document and what the engine and the UI share without pyqula. `document.py`
   (pydantic models; ids unique across the document; a quantum system's Hamiltonian =
   construction, terms, mean-field block; a classical system's `model` = the model entry's
-  set-up and its terms; `terms_of(system)`; an entry's `name` is left out of the JSON when
+  set-up and its terms; `terms_of(system)`; an embedding names a pristine and a defective
+  quantum system, and a calculation's `system` names a system or an embedding
+  (`target_kind`); an entry's `name` is left out of the JSON when
   empty, never in a key), `fields.py` and `expressions.py` (the Field kinds of 3.8 and the
   AST-whitelisted expression evaluator), `regions.py`, `nearest.py` (the stored point
   nearest to a position within a tolerance, by a cell hash: regions by positions, painted

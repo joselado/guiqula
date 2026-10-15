@@ -68,6 +68,8 @@ NAMES = (
     "grid", "close",
     # the export to Blender of a result on the atoms and of the canvas
     "blender",
+    # an embedding: a defect in the infinite pristine system
+    "embedding",
 )
 
 SIZE = 16                 # pixels of the icon of a control, in a bar, a row or a tree

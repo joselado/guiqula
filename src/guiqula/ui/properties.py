@@ -42,7 +42,7 @@ from guiqula.registry import cost
 from guiqula.registry.params import FieldParam, VectorFieldParam
 from guiqula.ui import formulas, icons, marks, theme
 from guiqula.ui.forms import format_number, line_up, make_editor, result_sources
-from guiqula.ui.outliner import system_of
+from guiqula.ui.outliner import cell_problem, system_of
 from guiqula.ui.sliders import range_from
 
 EVERYWHERE = "(everywhere)"
@@ -88,13 +88,15 @@ def _quiet(widget, setter, value):
 
 def sweep_target(session, system_id, entry_id):
     """The calculation a sweep of a parameter of entry_id runs at every
-    value: the calculation itself when it is one; else one of the system's
-    (a sweep runs no sweep), the first that gives numbers to collect (a
+    value: the calculation itself when it is one; else one of the system's,
+    or of an embedding naming it (a sweep runs no sweep), the first that gives numbers to collect (a
     gap, a Chern number, an energy: gives_numbers), or the first; "" when
     the system has none, and the label menu then says to add one."""
     document = session.document
-    own = [c for c in document.calculations if c.system == system_id
+    targets = {system_id} | {e.id for e in document.embeddings_of(system_id)}
+    own = [c for c in document.calculations if c.system in targets
            and not getattr(_spec_of(c), "document_level", True)]
+    own.sort(key=lambda c: c.system != system_id)        # the system's own first
     if any(c.id == entry_id for c in own):
         return entry_id
     return next((c.id for c in own if gives_numbers(session, c.id)),
@@ -435,11 +437,11 @@ class Form(QWidget):
         except ValueError as error:
             self.error.setText(str(error))
             return None
-        system = self.sweep_system()
-        target = sweep_target(self.session, system, self.item_id)
+        target = sweep_target(self.session, self.sweep_system(), self.item_id)
         if not target:
             self.error.setText(self._no_calculation())
             return None
+        system = self.session.document.calculation(target).system   # or its embedding
         params = {"calculation": target, "entry": self.item_id, "param": name,
                   "component": component, "start": low, "stop": high, "steps": SWEEP_POINTS}
         run = self.panel.run
@@ -651,6 +653,82 @@ class SystemForm(Form):
             return
         if tij != self.session.document.system(self.system_id).hamiltonian.construction.tij:
             self.commit("set_construction", system=self.system_id, tij=tij)
+
+
+class EmbeddingForm(Form):
+    """An embedding: its name and the two systems it names, chosen among the
+    document's quantum systems, and whether their cells match."""
+
+    def __init__(self, panel, embedding_id):
+        self.lock_owner = embedding_id
+        super().__init__(panel, embedding_id, f"Embedding {embedding_id}",
+                         "A defect in the infinite pristine system: the defect replaces one "
+                         "cell of the crystal, so both systems need the same cell. Edit each "
+                         "under its own row; the defect's extra terms are the defect.")
+        self.embedding_id = embedding_id
+        self.name = QLineEdit()
+        self.name.setObjectName("embeddingName")
+        self.name.editingFinished.connect(self._rename)
+        self.rows.addRow("name", self.name)
+        self.boxes = {}
+        for role, tip in (("pristine", "the infinite crystal, without the defect"),
+                          ("defect", "the same cell with the defect: a copy of the pristine "
+                                     "system with the defect's terms added")):
+            box = QComboBox()
+            box.setObjectName(f"embedding_{role}")
+            box.setToolTip(tip)
+            box.activated.connect(lambda index, r=role: self._set(r))
+            self.boxes[role] = box
+            label = QLabel(role)
+            label.setToolTip(tip)
+            self.rows.addRow(label, box)
+        self.guarded = [self.name, *self.boxes.values()]
+        self.info = QLabel()
+        self.info.setObjectName("embeddingInfo")
+        self.info.setWordWrap(True)
+        self.layout().insertWidget(self.layout().count() - 2, self.info)
+        self.update_values()
+
+    def _systems(self):
+        return tuple((s.id, f"{s.id} {s.name if s.name != s.id else ''}".strip())
+                     for s in self.session.document.systems if s.kind == "quantum")
+
+    def signature(self):
+        return ("embedding", self.embedding_id, self._systems())
+
+    def update_values(self):
+        embedding = self.session.document.embedding(self.embedding_id)
+        _quiet(self.name, self.name.setText, embedding.name)
+        for role, box in self.boxes.items():
+            box.blockSignals(True)
+            try:
+                box.clear()
+                for system_id, label in self._systems():
+                    box.addItem(label, system_id)
+                box.setCurrentIndex(box.findData(getattr(embedding, role)))
+            finally:
+                box.blockSignals(False)
+        self.update_reports()
+
+    def update_reports(self):
+        embedding = self.session.document.embedding(self.embedding_id)
+        problem = cell_problem(self.session, embedding)
+        self.info.setText(f"{marks.mark('warning')} {problem}" if problem else
+                          f"{embedding.defect} sits in the infinite {embedding.pristine}; the "
+                          f"calculations under Embedding in the Add menu run on it")
+
+    def whole_locks(self):
+        return [self.embedding_id]
+
+    def _rename(self):
+        name = self.name.text().strip()
+        if name and name != self.session.document.embedding(self.embedding_id).name:
+            self.commit("rename", entry=self.embedding_id, name=name)
+
+    def _set(self, role):
+        system = self.boxes[role].currentData()
+        if system != getattr(self.session.document.embedding(self.embedding_id), role):
+            self.commit("set_embedding", embedding=self.embedding_id, **{role: system})
 
 
 class EntryForm(Form):
@@ -1220,6 +1298,8 @@ class PropertiesPanel(QWidget):
         family = document.find(item_id)[0]
         if family == "system":
             return SystemForm(self, item_id)
+        if family == "embedding":
+            return EmbeddingForm(self, item_id)
         if family == "region":
             return RegionForm(self, item_id)
         return EntryForm(self, item_id)

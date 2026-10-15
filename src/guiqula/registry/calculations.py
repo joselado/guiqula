@@ -936,7 +936,7 @@ entry("calculation", "embedding_ldos", "Embedded LDOS",
           "arrays = dict(ldos=ldos)"],
       plot={"kind": "structure_scalar", "values": "ldos", "clabel": "LDOS"},
       cost=_embedding_cost(lambda p: 1),
-      guide=("Single defects in infinite systems",),
+      guide=("guiqula: Embedding a defect", "Single defects in infinite systems"),
       pyqula=("embedding.Embedding", "embedding.Embedding.get_ldos"))
 
 entry("calculation", "embedding_dos", "Embedded DOS",
@@ -958,7 +958,7 @@ entry("calculation", "embedding_dos", "Embedded DOS",
             "ylabel": "DOS of the cell", "labels": ["defect", "pristine"],
             "picks": {"x": "energy"}},
       cost=_embedding_cost(lambda p: 2 * p["ne"]),
-      guide=("Single defects in infinite systems",),
+      guide=("guiqula: Embedding a defect", "Single defects in infinite systems"),
       pyqula=("embedding.Embedding", "embedding.Embedding.multidos"))
 
 entry("calculation", "embedding_ingap", "In-gap state",
@@ -977,5 +977,5 @@ entry("calculation", "embedding_ingap", "In-gap state",
           f"nk={ctx.code('nk')})), gap=float(eb.H.get_gap()))"],
       plot={"kind": "scalar", "rows": [["energy", "in-gap state"], ["gap", "gap"]]},
       cost=_embedding_cost(lambda p: p["ne"] + 20),
-      guide=("Single defects in infinite systems",),
+      guide=("guiqula: Embedding a defect", "Single defects in infinite systems"),
       pyqula=("embedding.Embedding", "embedding.Embedding.get_energy_ingap_state"))
