@@ -4811,6 +4811,37 @@ The maintainer answered 253, 254 and 255 on 2026-10-15, each as built, asked
 one at a time as the ones with a face of the physics; decisions 234 to 258
 otherwise stand as built.
 
+*Variants: two inputs of one node (2026-10-15, branch variants).* The
+maintainer asked that two Hamiltonians may be inputs of one calculation, or
+two geometries of one Hamiltonian, the same calculation then run with both
+and shown in a grid, and answered two questions: a second input is a linked
+variant (rather than a list of inputs held by one entry), and a
+Hamiltonian's variant on a second geometry brings variants of its
+calculations. A `Calculation` or a `System` may be a variant (`variant_of`):
+an ordinary entry with its own input (a calculation's system, embedding or
+junction; a system's geometry) and no parameters, terms or model of its own,
+the planner reading its original's (`source_of`), so results, tabs, picks,
+sweeps, scripts and saved files treat it as any entry. `add_variant` makes
+one (a system's variant makes one of each of its original's calculations,
+and a calculation added later to the original gets one on each variant of
+its system); an edit of a variant's parameters or Hamiltonian goes to its
+original; an original with variants is not removed, and a system variant
+takes its calculation variants with it. In the node view a variant is no
+node: it is a further link into its original's input. Decisions, the built
+option first:
+
+259. a link dropped onto a calculation's target or a system's geometry that
+     has an input adds one, and Ctrl while dropping replaces it, as
+     Blender's multi-input sockets add; or a drop replaces as before
+     (decision 230) and Shift adds;
+260. Run of an original runs its variants with it, under one estimate of
+     the cost guard, and a variant's own Run runs it alone; or each runs
+     alone;
+261. the grid of an original and its variants is made when the variant is,
+     and grown as more come (`show_variants`, also a window action), not
+     saved as its own state beyond the grids'; or a grid made only on
+     request.
+
 ### Where the section 13 items land
 
 | Phase | Items |

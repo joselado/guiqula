@@ -38,7 +38,7 @@ from dataclasses import dataclass, field
 
 from guiqula.core import fields
 from guiqula.core import regions as region_tools
-from guiqula.core.document import DocumentError, geometry_chain, terms_of
+from guiqula.core.document import DocumentError, geometry_chain, source_of, terms_of
 from guiqula.core.hashing import content_hash
 from guiqula.registry import base as registry
 from guiqula.registry import plugins
@@ -282,6 +282,7 @@ def plan_system(document, system_id, trusted=True, results=None):
         plan.stages.append(stage)
 
     regions = {r.id: r for r in chain[-1].regions}
+    system = source_of(document, system)   # a variant: its original's terms, on its geometry
     term_stages = []
     for term in terms_of(system):
         spec, params, problem = _check_entry("term", term.kind, term.params, system.kind,
@@ -512,6 +513,13 @@ def _plan_junction(document, calc, plan, trusted, results):
 def plan_calculation(document, calc_id, trusted=True, results=None):
     calc = document.calculation(calc_id)
     plan = CalculationPlan(calc.id, calc.kind, calc.system)
+    if calc.variant_of is not None:     # a variant: its original's parameters, its own target
+        try:
+            original = document.calculation(calc.variant_of)
+        except DocumentError as error:
+            plan.problem = str(error)
+            return plan
+        calc = calc.model_copy(update={"params": original.params, "plugin": original.plugin})
     embedded = None
     try:
         if document.target_kind(calc.system) == "embedding":

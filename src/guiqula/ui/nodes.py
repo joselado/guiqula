@@ -80,7 +80,10 @@ class NodeItem(QGraphicsItem):
             item = SocketItem(node.id, socket.name, True, self)
             item.setPos(0, top + LINE * i + LINE / 2)
             item.setToolTip(f"{socket.label}: takes a {' or '.join(socket.accepts)}"
-                            + ("" if socket.required else "; optional, the right click cuts it"))
+                            + ("" if socket.required else "; optional, the right click cuts it")
+                            + ("; a further link adds an input, the same calculation run "
+                               "with each (Ctrl while dropping replaces it)" if socket.multi
+                               else ""))
             self.inputs[socket.name] = item
         self.output = SocketItem(node.id, node.output, False, self)
         self.output.setPos(WIDTH, HEADER / 2)
@@ -159,8 +162,9 @@ class LinkItem(QGraphicsPathItem):
 class NodeView(QGraphicsView):
     selected = Signal(str)                       # a node clicked: its id
     activated = Signal(str)                      # a node double clicked
-    connect_requested = Signal(str, str, str)    # output node, input node, input name
-    cut_requested = Signal(str, str)             # node, input name
+    # output node, input node, input name, whether it replaces the input (Ctrl held)
+    connect_requested = Signal(str, str, str, bool)
+    cut_requested = Signal(str, str, str)        # node, input name, the further input or ""
     moved = Signal(str, float, float)            # a node dragged to x, y
     add_requested = Signal(object)               # Shift+A: the cursor's global position
     delete_requested = Signal(str)               # Del on a node
@@ -293,7 +297,8 @@ class NodeView(QGraphicsView):
             self.scene().removeItem(link)
             target = self._socket_at(event.position().toPoint())
             if target is not None and target.is_input:
-                self.connect_requested.emit(socket.node, target.node, target.name)
+                replace = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+                self.connect_requested.emit(socket.node, target.node, target.name, replace)
             return
         super().mouseReleaseEvent(event)
         for node, item in self.node_items.items():
@@ -317,8 +322,11 @@ class NodeView(QGraphicsView):
         entry = next(s for s in node.inputs if s.name == socket.name)
         menu = QMenu(self)
         menu.setObjectName("nodeSocketMenu")
+        for source, variant in entry.extra:
+            menu.addAction(f"Take away the input {source} ({variant})",
+                           lambda s=source: self.cut_requested.emit(socket.node, socket.name, s))
         cut = menu.addAction("Cut the link (the default)",
-                             lambda: self.cut_requested.emit(socket.node, socket.name))
+                             lambda: self.cut_requested.emit(socket.node, socket.name, ""))
         cut.setEnabled(not entry.required and entry.source is not None)
         if entry.required:
             cut.setToolTip("never empty: link another one to it instead")

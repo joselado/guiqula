@@ -69,7 +69,7 @@ from guiqula import vendoring
 from guiqula.core import fields
 from guiqula.core import picks as pick_tools
 from guiqula.core import regions as region_tools
-from guiqula.core.document import kpath_params, kpath_users
+from guiqula.core.document import kpath_params, kpath_users, variants_of
 from guiqula.registry import graph as graph_tools
 from guiqula.io import blender as blender_export
 from guiqula.io import bundle, crashreport, project, settings
@@ -108,7 +108,7 @@ WINDOW_ACTIONS = ("select", "workspace", "tool", "select_sites", "region_from_se
                   "run_at_once", "renderer_3d", "view_3d", "plot_text", "ui_text",
                   "reset_layout", "log", "panel", "add_menu", "run_stale", "start", "run",
                   "grid", "grid_place", "kpath_window", "outliner_view", "node_connect",
-                  "node_cut", "node_move", "node_arrange")
+                  "node_cut", "node_move", "node_arrange", "show_variants")
 STRUCTURE_TAB = 0
 TREE_WIDTH, NODES_WIDTH = 320, 640     # the Outliner dock's width with the tree, the nodes
 NODES_SHARE = 0.4                       # at most this share of the window for the nodes
@@ -254,10 +254,11 @@ class MainWindow(QMainWindow):
         self.node_view.selected.connect(self.select)
         self.node_view.activated.connect(self._node_activated)
         self.node_view.connect_requested.connect(
-            lambda source, target, socket: self._act("node_connect", source=source,
-                                                     target=target, socket=socket))
+            lambda source, target, socket, replace: self._act(
+                "node_connect", source=source, target=target, socket=socket, replace=replace))
         self.node_view.cut_requested.connect(
-            lambda node, socket: self._act("node_cut", node=node, socket=socket))
+            lambda node, socket, source: self._act("node_cut", node=node, socket=socket,
+                                                   source=source or None))
         self.node_view.moved.connect(lambda node, x, y: self.node_move(node, x, y))
         self.node_view.add_requested.connect(self._node_add_menu)
         self.node_view.delete_requested.connect(lambda node: self._act("remove", entry=node))
@@ -266,6 +267,7 @@ class MainWindow(QMainWindow):
                                                                        name=name))
         self.outliner_panel.arrange_requested.connect(lambda: self._act("node_arrange"))
         self.node_places = {}          # {node id: [x, y]} of the nodes moved by hand
+        self.variant_grids = {}        # calculation id: the grid of it and its variants
         self.properties = PropertiesPanel(self._do)
         self.properties.preview.connect(self._preview_requested)
         self.properties.help_requested.connect(lambda item: self.show_help(item))
@@ -1113,6 +1115,7 @@ class MainWindow(QMainWindow):
         dispatcher.register_action("node_cut", self.node_cut)
         dispatcher.register_action("node_move", self.node_move)
         dispatcher.register_action("node_arrange", self.node_arrange)
+        dispatcher.register_action("show_variants", self.show_variants)
         dispatcher.register_action("panel", self.show_panel)
         dispatcher.register_action("view_3d", self.set_view_3d)
         dispatcher.register_action("add_menu", self.open_add_menu)
@@ -2075,22 +2078,58 @@ class MainWindow(QMainWindow):
                 QTimer.singleShot(0, self.node_view.frame_all)   # once the dock has widened
         return name
 
-    def node_connect(self, source, target, socket):
+    def node_connect(self, source, target, socket, replace=False):
         """Link the output of a node to an input of another (one Command:
         the geometry of a system, the parent of a geometry, the target, the
-        tip or a k-path of a calculation, a system of an embedding); refused
-        with its reason when the declaration does not take it. Returns the
-        Command's name."""
-        name, args = graph_tools.connect(self.session.document, source, target, socket)
+        tip or a k-path of a calculation, a system of an embedding or a
+        junction); refused with its reason when the declaration does not take
+        it. Onto a calculation's target or a system's geometry that has an
+        input, the link adds one, a variant, and the results of the
+        calculation on every input show in a grid; replace moves the input
+        instead (Ctrl while dropping). Returns the Command's name."""
+        name, args = graph_tools.connect(self.session.document, source, target, socket,
+                                         replace=bool(replace))
+        self.session.do(name, **args)
+        if name == "add_variant":
+            document = self.session.document
+            calcs = [target] if document.find(target)[0] == "calculation" else \
+                [c.id for c in document.calculations
+                 if c.system == target and c.variant_of is None and
+                 variants_of(document, c.id)]
+            for calc in calcs:
+                self.show_variants(calc)
+        return name
+
+    def node_cut(self, node, socket, source=None):
+        """Empty an optional input (the tip of a local probe), meaning the
+        entry's default, or take away a further input of source (its
+        variant); an input that is never empty is refused."""
+        name, args = graph_tools.cut(self.session.document, node, socket, source)
         self.session.do(name, **args)
         return name
 
-    def node_cut(self, node, socket):
-        """Empty an optional input (the tip of a local probe), meaning the
-        entry's default; an input that is never empty is refused."""
-        name, args = graph_tools.cut(self.session.document, node, socket)
-        self.session.do(name, **args)
-        return name
+    def show_variants(self, calculation):
+        """A grid of the result views of a calculation and its variants, one
+        cell each (the grid shown for it before, grown as they grow).
+        Returns the grid's state."""
+        document = self.session.document
+        root = document.calculation(calculation)
+        root = document.calculation(root.variant_of) if root.variant_of else root
+        group = [root.id] + variants_of(document, root.id)
+        group = group[:GRID_MAX_SIDE * GRID_MAX_SIDE]
+        cols = min(len(group), 2 if len(group) <= 4 else 3 if len(group) <= 9 else 4)
+        rows = -(-len(group) // cols)
+        grid = self.variant_grids.get(root.id)
+        if grid not in self.grids:
+            grid = self.grid(rows=rows, cols=cols)["grid"]
+            self.variant_grids[root.id] = grid
+        else:
+            view = self.grids[grid]
+            self.grid(grid=grid, rows=max(rows, view.rows), cols=max(cols, view.cols))
+        for n, calc in enumerate(group):
+            self.place_result(calc, grid, n // cols, n % cols)
+        self.viewport.setCurrentWidget(self.grids[grid])
+        return self.grid_state(grid)
 
     def node_move(self, node, x, y):
         """Keep a node at a place (view state in the ui block, not a Command)."""
@@ -2142,6 +2181,7 @@ class MainWindow(QMainWindow):
         if calculation is not None:
             calc = document.calculation(calculation)
             system = system or self._zone_system(calc.system)
+            calc = document.calculation(calc.variant_of) if calc.variant_of else calc
             if kpath is None:
                 kpath = next((calc.params.get(n) for n in kpath_params(calc)
                               if calc.params.get(n)), None)
@@ -3409,9 +3449,16 @@ class MainWindow(QMainWindow):
         return self.run_guarded(calculation)
 
     def run_guarded(self, calc, confirmed=False):
-        """Run a calculation; one that would take longer than cost.SLOW
-        asks first, in the cost bar (non-modal)."""
-        estimate = self.session.estimate(calc)
+        """Run a calculation, with its variants (the same calculation on its
+        further inputs); one that would take longer than cost.SLOW asks
+        first, in the cost bar (non-modal)."""
+        group = [calc] + variants_of(self.session.document, calc)
+        if len(group) > 1:
+            estimates = [self.session.estimate(c) for c in group]
+            estimate = None if any(e is None for e in estimates) else dict(
+                estimates[0], seconds=sum(e["seconds"] for e in estimates))
+        else:
+            estimate = self.session.estimate(calc)
         if not confirmed and estimate is not None and estimate["seconds"] > cost.SLOW:
             extra = " including the mean field" if estimate["meanfield"] else ""
             self.cost_bar.show_message(
@@ -3422,7 +3469,8 @@ class MainWindow(QMainWindow):
                  ("Cancel", self.cost_bar.dismiss, "costCancelButton")])
             return None
         self.cost_bar.dismiss()
-        return self._act("run_calculation", calculation=calc)
+        jobs = [self._act("run_calculation", calculation=c) for c in group]
+        return jobs[0]
 
     def set_auto_rerun(self, enabled=True):
         """Re-run stale results automatically when they are cheap (opt-in)."""

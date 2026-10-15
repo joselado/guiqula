@@ -195,15 +195,28 @@ class System(_Model):
     geometry: str                  # the id of its geometry
     hamiltonian: Hamiltonian | None = Field(default_factory=Hamiltonian)
     model: Model | None = None
+    variant_of: str | None = None  # a variant: the original's Hamiltonian or model, on
+                                   # this geometry (left out of the JSON when None)
 
     @model_validator(mode="before")
     @classmethod
     def _classical_has_no_hamiltonian(cls, data):
-        """A classical system written without a hamiltonian has none (the
-        field's default is a Hamiltonian, for the quantum systems)."""
-        if isinstance(data, dict) and data.get("kind") in CLASSICAL_KINDS \
+        """A classical system, or a variant, written without a hamiltonian has
+        none (the field's default is a Hamiltonian, for the quantum systems)."""
+        if isinstance(data, dict) and (data.get("kind") in CLASSICAL_KINDS
+                                       or data.get("variant_of")) \
                 and "hamiltonian" not in data:
             data = dict(data, hamiltonian=None)
+        return data
+
+    @model_serializer(mode="wrap")
+    def _without_empty_variant(self, handler):
+        data = handler(self)
+        if isinstance(data, dict) and not data.get("variant_of"):
+            data.pop("variant_of", None)
+        if isinstance(data, dict) and data.get("variant_of"):
+            data.pop("hamiltonian", None)       # the original's
+            data.pop("model", None)
         return data
 
 
@@ -265,6 +278,18 @@ class Calculation(_Kind):
     kind: str
     name: str = ""                 # where it came from ("at E = 0.3 from c1"); "" is left out
     params: dict[str, Any] = Field(default_factory=dict)
+    variant_of: str | None = None  # a variant: the original's parameters, on its own system
+
+    @model_serializer(mode="wrap")
+    def _without_empty_fields(self, handler):
+        data = handler(self)
+        if isinstance(data, dict):
+            for key in ("plugin", "name", "variant_of"):
+                if key in data and not data[key]:
+                    del data[key]
+            if data.get("variant_of"):
+                data.pop("params", None)        # the original's
+        return data
 
 
 class Document(_Model):
@@ -516,6 +541,22 @@ def lift_kpaths(document):
             calc.params = dict(calc.params, **{name: kpath.id})
 
 
+def source_of(document, entry):
+    """The original a variant follows (a system's Hamiltonian or model, a
+    calculation's parameters), or the entry itself."""
+    original = getattr(entry, "variant_of", None)
+    if original is None:
+        return entry
+    family = "system" if isinstance(entry, System) else "calculation"
+    return getattr(document, family)(original)
+
+
+def variants_of(document, entry_id):
+    """The ids of the variants of a system or a calculation, in order."""
+    return [x.id for x in list(document.systems) + list(document.calculations)
+            if x.variant_of == entry_id]
+
+
 def terms_of(system):
     """A system's term stack: its Hamiltonian's, or its classical model's
     (the list itself, so a mutation can change it)."""
@@ -595,6 +636,15 @@ def check(document):
         if system.geometry not in geometries:
             raise DocumentError(f"system {system.id!r} names missing geometry "
                                 f"{system.geometry!r}")
+        if system.variant_of is not None:
+            original = systems.get(system.variant_of)
+            if original is None or original.variant_of is not None or original.kind != system.kind:
+                raise DocumentError(f"system {system.id!r} is a variant of {system.variant_of!r}, "
+                                    f"which is not an original system of its kind")
+            if system.hamiltonian is not None or system.model is not None:
+                raise DocumentError(f"system {system.id!r} is a variant: its Hamiltonian or "
+                                    f"model is its original's")
+            continue
         if system.kind == "quantum" and (system.hamiltonian is None or system.model is not None):
             raise DocumentError(f"quantum system {system.id!r} needs a hamiltonian and no model")
         if system.kind in CLASSICAL_KINDS and (system.model is None
@@ -629,6 +679,13 @@ def check(document):
                 raise DocumentError(f"junction {junction.id!r} names missing system "
                                     f"{target!r} as its {role} one")
     embeddings = {e.id for e in document.embeddings} | {j.id for j in document.junctions}
+    calcs = {c.id: c for c in document.calculations}
     for calc in document.calculations:
         if calc.system not in systems and calc.system not in embeddings:
             raise DocumentError(f"calculation {calc.id!r} refers to missing system {calc.system!r}")
+        if calc.variant_of is not None:
+            original = calcs.get(calc.variant_of)
+            if original is None or original.variant_of is not None or original.kind != calc.kind:
+                raise DocumentError(f"calculation {calc.id!r} is a variant of "
+                                    f"{calc.variant_of!r}, which is not an original calculation "
+                                    f"of its kind")

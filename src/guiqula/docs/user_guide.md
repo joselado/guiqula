@@ -144,8 +144,18 @@ that is never empty (a geometry, a k-path, what a calculation runs on) is moved 
 cut, while the tip of a local probe can be cut from the right click on its input, meaning
 pyqula's default tip. A dashed link goes from a calculation to a system whose Field reads its
 result, and a dotted one from a sweep to what it runs and moves; those two are shown, and
-edited in the forms. A click selects, as in the tree, a double click opens a k-path's zone
-window or a calculation's result, Shift+A opens the Add menu at the cursor, Del removes,
+edited in the forms. Two inputs of one calculation are a comparison done in one gesture: a second Hamiltonian
+dragged onto the input of a calculation that runs on one already makes a variant of it, the
+same calculation with the same parameters on the second system, and the results of both show
+side by side in a grid, Run running them together. In the same way a second geometry dragged
+onto a Hamiltonian's geometry builds the same Hamiltonian on both geometries, and every
+calculation of it gets a variant on the second one, so a band structure of a cell and of a
+supercell, or of a flake and of a ribbon, appear next to each other. A variant has no
+parameters, terms or model of its own: an edit of either is an edit of the original, and the
+tree writes it as such ("c3 Density of states · variant of c1", "Hamiltonian of s1"). Ctrl
+held while dropping replaces the input instead of adding one, and the right click on the
+input takes a further one away. A click selects, as in the tree, a double click opens a
+k-path's zone window or a calculation's result, Shift+A opens the Add menu at the cursor, Del removes,
 Home shows the whole graph and the wheel zooms. The dock widens while the nodes show; a node
 dragged keeps its place in the project, and Arrange puts every node back in its column.
 

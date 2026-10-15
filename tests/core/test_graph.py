@@ -69,10 +69,35 @@ def test_a_link_drawn_is_one_command():
     assert d.document.calculation(ids["bands"]).params["kpath"] == k2
     other = d.do("add_system", lattice="square_lattice")
     apply(d, graph.connect(d.document, d.document.system(other).geometry, ids["tip"],
-                           "geometry"))
+                           "geometry", replace=True))           # Ctrl: moved
     assert d.document.system(ids["tip"]).geometry == d.document.system(other).geometry
-    apply(d, graph.connect(d.document, other, ids["bands"], "target"))
+    apply(d, graph.connect(d.document, other, ids["bands"], "target", replace=True))
     assert d.document.calculation(ids["bands"]).system == other
+
+
+def test_a_second_input_is_a_variant():
+    """A link dropped onto a calculation's target, or a system's geometry,
+    that has one adds an input: a variant, drawn into the same socket."""
+    d, ids = document()
+    other = d.do("add_system", lattice="chain")
+    name, args = graph.connect(d.document, other, ids["bands"], "target")
+    assert (name, args) == ("add_variant", {"entry": ids["bands"], "target": other})
+    variant = apply(d, (name, args))
+    nodes = {n.id: n for n in graph.nodes(d.document)}
+    assert variant not in nodes                                    # no node of its own
+    socket = next(s for s in nodes[ids["bands"]].inputs if s.name == "target")
+    assert socket.extra == [(other, variant)]
+    assert (other, ids["bands"], "target") in {(l.source, l.target, l.socket)
+                                               for l in graph.links(d.document)}
+    with pytest.raises(graph.GraphError, match="already"):
+        graph.connect(d.document, other, ids["bands"], "target")
+    assert graph.cut(d.document, ids["bands"], "target", other) == ("remove",
+                                                                     {"entry": variant})
+    geometry = d.do("add_geometry", lattice="chain")
+    hamiltonian = apply(d, graph.connect(d.document, geometry, ids["s1"], "geometry"))
+    nodes = {n.id: n for n in graph.nodes(d.document)}
+    assert hamiltonian not in nodes
+    assert next(s for s in nodes[ids["s1"]].inputs).extra == [(geometry, hamiltonian)]
     apply(d, graph.cut(d.document, ids["probe"], "probe"))           # optional: the default
     assert d.document.calculation(ids["probe"]).params["probe"] is None
 

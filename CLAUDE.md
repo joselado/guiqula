@@ -90,7 +90,10 @@ not carry.
   (`target_kind`); a k-path (`kpaths`, `KPath`) is shared by the calculations whose
   `KPathParam` names it (`kpath_users`), and `lift_kpaths` turns the inline paths of an
   older file into k-paths; a junction (`junctions`, j1) names a left and a right lead and
-  an optional central region, a target of calculations as an embedding is; an entry's
+  an optional central region, a target of calculations as an embedding is; a calculation
+  or a system may be a variant (`variant_of`, `source_of`, `variants_of`), the same
+  parameters or Hamiltonian on another input, which the node view draws as a further link
+  into its original's input; an entry's
   `name` is left out of the JSON when
   empty, never in a key), `fields.py` and `expressions.py` (the Field kinds of 3.8 and the
   AST-whitelisted expression evaluator), `regions.py`, `nearest.py` (the stored point

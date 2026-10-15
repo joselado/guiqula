@@ -153,6 +153,8 @@ def pseudo_ids(system):
         rows += ["hamiltonian", "meanfield"]
     if system.model is not None:
         rows += ["model_stack", "model"]
+    if system.variant_of is not None:
+        rows += ["hamiltonian"]           # the row naming the original whose terms it has
     return {f"{system.id}/{row}" for row in rows}
 
 
@@ -939,6 +941,15 @@ class Outliner(QTreeWidget):
                 except Exception as error:
                     self._mark_invalid(item, str(error))
 
+        if system.variant_of is not None:         # the original's Hamiltonian or model
+            what = "Hamiltonian" if system.kind == "quantum" else "Model"
+            self._add(top, f"{system.id}/hamiltonian",
+                      f"{what} of {system.variant_of}",
+                      details=[f"a variant of {system.variant_of}: its {what.lower()}, on "
+                               f"the geometry {system.geometry}; edit it under "
+                               f"{system.variant_of} (an edit here goes there)"],
+                      kind="structure")
+            return
         if system.model is not None:
             self._add_model(top, system, stages, runtime, plan)
             return
@@ -1174,7 +1185,8 @@ class Outliner(QTreeWidget):
         return status, color, details, state
 
     def _add_calculation(self, session, parent, calc, several=False):
-        label = _label("calculation", calc.kind) + (f" on {calc.system}" if several else "")
+        label = _label("calculation", calc.kind) + (f" on {calc.system}" if several else "") \
+            + (f" · variant of {calc.variant_of}" if calc.variant_of else "")
         status, color, details, state = self._calculation_status(session, calc.id)
         code = isinstance(calc.params.get("code"), str)          # a Python calculation
         item = self._add(parent, calc.id, _entry_text(calc.id, label, calc.name), status,

@@ -51,6 +51,8 @@ def describe(name, args, document):
     if name == "add_embedding":
         return f"new embedding of {args.get('pristine')}" + (
             f" with {args['defect']}" if args.get("defect") else "")
+    if name == "add_variant":
+        return f"run {args.get('entry')} on {args.get('target')} too"
     if name == "add_junction":
         return f"new junction of {args.get('left')}" + (
             f" and {args['right']}" if args.get("right") else "")

@@ -17,7 +17,8 @@ from guiqula.core import locks as lock_tools
 from guiqula.core import regions as region_tools
 from guiqula.core.document import (CLASSICAL_KINDS, SYSTEM_KINDS, Base, Calculation,
                                    Construction, DocumentError, Embedding, Entry, Geometry,
-                                   Hamiltonian, Junction, KPath, geometry_chain, MeanField, Model, Region, System,
+                                   Hamiltonian, Junction, KPath, geometry_chain, source_of,
+                                   variants_of, MeanField, Model, Region, System,
                                    kpath_params, kpath_users, region_users, terms_of)
 from guiqula.registry import base as registry
 from guiqula.registry import plugins
@@ -95,6 +96,72 @@ def add_system(document, lattice="honeycomb_lattice", name="", lattice_params=No
     return system_id
 
 
+def _original_system(document, system):
+    """The system whose Hamiltonian or model a command changes: a variant's
+    original (a variant has none of its own)."""
+    try:
+        return source_of(document, document.system(system))
+    except DocumentError as error:
+        raise CommandError(str(error)) from None
+
+
+# ---- variants: one calculation on two inputs, one Hamiltonian on two geometries
+@mutation
+def add_variant(document, entry, target):
+    """A second input of a calculation or a system (a link drawn onto an
+    input that has one, in the node view): a variant, an ordinary entry that
+    follows its original's parameters (a calculation, on the system,
+    embedding or junction target) or its Hamiltonian or model (a system, on
+    the geometry target, or a system's geometry), so that the same
+    calculation runs with both. A system's variant gets a variant of each of
+    its original's calculations too. Returns the new id."""
+    try:
+        family, _, _, _, obj = document.find(entry)
+    except DocumentError as error:
+        raise CommandError(str(error)) from None
+    original = source_of(document, obj)
+    if family == "calculation":
+        return _calculation_variant(document, original, target)
+    if family != "system":
+        raise CommandError(f"{entry!r} is a {family}: only a calculation or a system takes a "
+                           f"second input")
+    geometry = _geometry(document, target).id
+    taken = [original.geometry] + [document.system(v).geometry
+                                   for v in variants_of(document, original.id)
+                                   if any(s.id == v for s in document.systems)]
+    if geometry in taken:
+        raise CommandError(f"{original.id} is built on {geometry} already")
+    variant = System(id=document.new_id("system"), kind=original.kind, geometry=geometry,
+                     hamiltonian=None, model=None, variant_of=original.id,
+                     name=f"{original.name or original.id} on {geometry}")
+    document.systems.append(variant)
+    for calc in [c for c in document.calculations
+                 if c.system == original.id and c.variant_of is None]:
+        _calculation_variant(document, calc, variant.id)
+    return variant.id
+
+
+def _calculation_variant(document, original, target):
+    try:
+        target_kind = document.target_kind(target)
+    except DocumentError as error:
+        raise CommandError(str(error)) from None
+    try:
+        spec = registry.get("calculation", original.kind)
+    except registry.RegistryError as error:
+        raise CommandError(str(error).strip("\"'")) from None
+    if target_kind not in spec.systems:
+        raise CommandError(f"{spec.label} does not apply to {target}")
+    taken = [original.system] + [c.system for c in document.calculations
+                                 if c.variant_of == original.id]
+    if target in taken:
+        raise CommandError(f"{original.id} runs on {target} already")
+    variant = Calculation(id=document.new_id("calculation"), system=target, kind=original.kind,
+                          plugin=original.plugin, variant_of=original.id)
+    document.calculations.append(variant)
+    return variant.id
+
+
 def _new_geometry(document, lattice, params=None, name=""):
     geometry = Geometry(id=document.new_id("geometry"), name=_text("name", name),
                         base=Base(kind=lattice, params=_normalize("lattice", lattice, params),
@@ -170,7 +237,7 @@ def set_parent(document, geometry, parent):
 def set_construction(document, system, has_spin=None, nambu=None, tij=None, is_sparse=None):
     """Change how the Hamiltonian is built (the requested Hilbert space,
     neighbour hoppings, sparse storage)."""
-    target = document.system(system)
+    target = _original_system(document, system)
     if target.hamiltonian is None:
         raise CommandError(f"system {system!r} has no Hamiltonian")
     data = target.hamiltonian.construction.model_dump()
@@ -184,7 +251,7 @@ def set_construction(document, system, has_spin=None, nambu=None, tij=None, is_s
 def set_meanfield(document, system, enabled=None, params=None, kind=None):
     """Enable or disable the mean-field block of a system, change its
     parameters (merged into the stored ones, one undo step) or its kind."""
-    target = document.system(system)
+    target = _original_system(document, system)
     if target.hamiltonian is None:
         raise CommandError(f"system {system!r} has no Hamiltonian")
     block = target.hamiltonian.meanfield
@@ -199,7 +266,7 @@ def set_meanfield(document, system, enabled=None, params=None, kind=None):
 def set_model(document, system, params):
     """Change the set-up parameters of a classical system's model (merged
     into the stored ones, one undo step)."""
-    target = document.system(system)
+    target = _original_system(document, system)
     if target.model is None:
         raise CommandError(f"system {system!r} is {target.kind}: it has no classical model")
     model = target.model
@@ -329,7 +396,7 @@ def add_term(document, system, kind, params=None, region=None, index=None, enabl
              name=""):
     """Add a term to a system's Hamiltonian, or to its classical model (at
     the end, or at index), with an optional name; returns its id."""
-    target = document.system(system)
+    target = _original_system(document, system)
     params = _normalize("term", kind, params)
     spec = registry.get("term", kind)
     if target.kind not in spec.systems:
@@ -415,6 +482,9 @@ def add_calculation(document, system, kind, params=None, name=""):
         calc.params = dict(params, **{n: last for n in names if params.get(n) is None})
     _check_kpaths(document, calc)
     document.calculations.append(calc)
+    for variant in variants_of(document, system):        # the system's variants follow
+        if any(s.id == variant for s in document.systems):
+            _calculation_variant(document, calc, variant)
     return calc.id
 
 
@@ -495,7 +565,7 @@ def single_user_kpath(document, calculation, param="kpath", copy=True):
     k-path), named after it, so that an edit of the path changes this
     calculation alone; returns the new k-path's id."""
     try:
-        calc = document.calculation(calculation)
+        calc = source_of(document, document.calculation(calculation))  # a variant's: its original's
     except DocumentError as error:
         raise CommandError(str(error)) from None
     if param not in kpath_params(calc):
@@ -533,6 +603,14 @@ def remove(document, entry):
         children = [g.id for g in document.geometries if g.parent == entry]
         if children:
             raise CommandError(f"geometry {entry!r} is where geometries {children} start")
+    if family in ("system", "calculation"):
+        variants = [v for v in variants_of(document, entry)
+                    if family == "calculation" or any(s.id == v for s in document.systems)]
+        if variants:
+            raise CommandError(f"{family} {entry!r} has variants {variants}: remove them first")
+    if family == "system" and obj.variant_of is not None:   # its calculation variants go too
+        document.calculations[:] = [c for c in document.calculations
+                                    if not (c.system == entry and c.variant_of is not None)]
     if family == "system":
         users = [c.id for c in document.calculations
                  if c.system == entry or entry in _systems_named(c)]
@@ -663,6 +741,8 @@ def set_param(document, entry, name, value):
         return
     if family not in FAMILY_OF:
         raise CommandError(f"{entry!r} is a {family}, which has no parameters")
+    if family == "calculation":
+        obj = source_of(document, obj)        # a variant's are its original's
     obj.params = _normalize(FAMILY_OF[family], obj.kind, dict(obj.params, **{name: value}))
     if family == "calculation":
         _check_kpaths(document, obj)
@@ -674,6 +754,8 @@ def set_params(document, entry, params):
     family, _, _, _, obj = document.find(entry)
     if family not in FAMILY_OF:
         raise CommandError(f"{entry!r} is a {family}, which has no parameters")
+    if family == "calculation":
+        obj = source_of(document, obj)
     obj.params = _normalize(FAMILY_OF[family], obj.kind, dict(obj.params, **params))
     if family == "calculation":
         _check_kpaths(document, obj)
