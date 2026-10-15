@@ -27,7 +27,7 @@ def _entry_name(document, entry):
     except Exception:
         return str(entry)
     family, obj = found[0], found[-1]
-    if family in ("geometry", "system", "region", "embedding", "kpath") and getattr(obj, "name", "") not in ("", entry):
+    if family in ("geometry", "system", "region", "embedding", "junction", "kpath") and getattr(obj, "name", "") not in ("", entry):
         return f"{entry} ({obj.name})"
     kind = getattr(obj, "kind", None)
     registry_family = {"op": "geometry_op", "term": "term",
@@ -51,6 +51,11 @@ def describe(name, args, document):
     if name == "add_embedding":
         return f"new embedding of {args.get('pristine')}" + (
             f" with {args['defect']}" if args.get("defect") else "")
+    if name == "add_junction":
+        return f"new junction of {args.get('left')}" + (
+            f" and {args['right']}" if args.get("right") else "")
+    if name == "set_junction":
+        return f"change the systems of {args.get('junction')}"
     if name == "set_embedding":
         return f"change the systems of {args.get('embedding')}"
     if name == "add_geometry":
@@ -119,5 +124,5 @@ def touched(name, args, result):
         return f"{args['system']}/{row}", args["system"]
     entry = result if isinstance(result, str) and name.startswith(("add_", "duplicate")) \
         else args.get("entry") or args.get("system") or args.get("embedding") \
-        or args.get("kpath") or args.get("calculation") or args.get("geometry")
+        or args.get("kpath") or args.get("calculation") or args.get("geometry") or args.get("junction")
     return entry, args.get("system")

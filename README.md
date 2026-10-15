@@ -104,6 +104,9 @@ kernels the first time and then keeps them in a cache.
 - A geometry can carry several systems, two Hamiltonians on the same sites or a classical
   model and the quantum system that reads its texture, and a ribbon can be cut from a
   decorated cell and follow every edit of it.
+- Transport runs on a junction of two leads and an optional central region: the
+  conductance with Andreev reflection, the Landauer transmission and the current against
+  the voltage of a superconducting junction.
 - The Run button says which calculation it will compute. When a result does not match the
   model anymore, a message above its plot says so, with a Run again button next to it.
 - Every plot is interactive. From the menu of a parameter's name you can attach a slider or

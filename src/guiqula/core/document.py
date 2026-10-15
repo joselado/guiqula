@@ -28,6 +28,13 @@ must share their cell: pyqula's Embedding takes the pristine Hamiltonian and
 only the intracell matrix of the defective one. The list is left out of the
 JSON while it is empty, so a document without embeddings reads as before.
 
+A junction (``junctions``, ids j1, j2..., phase 9, part D) is a two-terminal
+transport device in pyqula's sense: two semi-infinite leads, the left and
+the right one (one-dimensional quantum systems), and an optional central
+region between them, a finite system contacted at two of its sites or a
+one-dimensional one; a calculation may run on it as on a system or an
+embedding. Left out of the JSON while empty, as the embeddings.
+
 A k-path (``kpaths``, ids k1, k2...) is a path through the Brillouin zone
 that calculations share (phase 9, part A): its vertices, each a label pyqula
 knows or reduced coordinates, and no vertex at all for pyqula's default path
@@ -67,7 +74,7 @@ SYSTEM_KINDS = ("quantum", "classical_spin", "lattice_gas", "ising")
 CLASSICAL_KINDS = SYSTEM_KINDS[1:]
 
 ID_PREFIX = {"geometry": "geo", "system": "s", "op": "op", "term": "t", "region": "r", "calculation": "c",
-             "embedding": "e", "kpath": "k"}
+             "embedding": "e", "kpath": "k", "junction": "j"}
 
 
 class DocumentError(ValueError):
@@ -216,6 +223,25 @@ class Embedding(_Model):
         return data
 
 
+class Junction(_Model):
+    """Two semi-infinite leads and an optional central region, by the ids of
+    quantum systems of the document."""
+    id: str
+    name: str = ""
+    left: str
+    right: str
+    central: str | None = None
+
+    @model_serializer(mode="wrap")
+    def _without_empty_fields(self, handler):
+        data = handler(self)
+        if isinstance(data, dict):
+            for key in ("name", "central"):
+                if key in data and not data[key]:
+                    del data[key]
+        return data
+
+
 class KPath(_Model):
     """A path through the Brillouin zone, shared by the calculations that
     name it: its vertices (labels or [k1, k2, k3] in reciprocal lattice
@@ -248,6 +274,7 @@ class Document(_Model):
     geometries: list[Geometry] = Field(default_factory=list)
     systems: list[System] = Field(default_factory=list)
     embeddings: list[Embedding] = Field(default_factory=list)
+    junctions: list[Junction] = Field(default_factory=list)
     calculations: list[Calculation] = Field(default_factory=list)
     kpaths: list[KPath] = Field(default_factory=list)
     ui: dict[str, Any] = Field(default_factory=dict)
@@ -263,7 +290,7 @@ class Document(_Model):
     def _without_empty_lists(self, handler):
         data = handler(self)
         if isinstance(data, dict):
-            for key in ("embeddings", "kpaths"):
+            for key in ("embeddings", "junctions", "kpaths"):
                 if not data.get(key, True):
                     del data[key]
         return data
@@ -321,7 +348,20 @@ class Document(_Model):
         for embedding in self.embeddings:
             if embedding.id == target_id:
                 return "embedding"
+        for junction in self.junctions:
+            if junction.id == target_id:
+                return "junction"
         return self.system(target_id).kind
+
+    def junction(self, junction_id):
+        for junction in self.junctions:
+            if junction.id == junction_id:
+                return junction
+        raise DocumentError(f"no junction {junction_id!r}")
+
+    def junctions_of(self, system_id):
+        """The junctions that name a system (as a lead or the central region)."""
+        return [j for j in self.junctions if system_id in (j.left, j.right, j.central)]
 
     def embeddings_of(self, system_id):
         """The embeddings that name a system (as pristine or defect)."""
@@ -357,7 +397,7 @@ class Document(_Model):
         """Locate any entry by id: returns (family, owner or None, containing
         list, index, object). family is one of "geometry", "op", "region"
         (whose owner is their geometry), "system", "term" (whose owner is its
-        system), "embedding", "calculation", "kpath"."""
+        system), "embedding", "junction", "calculation", "kpath"."""
         for i, geometry in enumerate(self.geometries):
             if geometry.id == entry_id:
                 return "geometry", None, self.geometries, i, geometry
@@ -377,6 +417,9 @@ class Document(_Model):
         for i, embedding in enumerate(self.embeddings):
             if embedding.id == entry_id:
                 return "embedding", None, self.embeddings, i, embedding
+        for i, junction in enumerate(self.junctions):
+            if junction.id == entry_id:
+                return "junction", None, self.junctions, i, junction
         for i, calc in enumerate(self.calculations):
             if calc.id == entry_id:
                 return "calculation", None, self.calculations, i, calc
@@ -411,6 +454,7 @@ class Document(_Model):
             ids.append(system.id)
             ids += [term.id for term in terms_of(system)]
         ids += [embedding.id for embedding in self.embeddings]
+        ids += [junction.id for junction in self.junctions]
         ids += [calc.id for calc in self.calculations]
         ids += [kpath.id for kpath in self.kpaths]
         return ids
@@ -578,7 +622,13 @@ def check(document):
             if target not in systems:
                 raise DocumentError(f"embedding {embedding.id!r} names missing system "
                                     f"{target!r} as its {role} one")
-    embeddings = {e.id for e in document.embeddings}
+    for junction in document.junctions:
+        for role in ("left", "right", "central"):
+            target = getattr(junction, role)
+            if target is not None and target not in systems:
+                raise DocumentError(f"junction {junction.id!r} names missing system "
+                                    f"{target!r} as its {role} one")
+    embeddings = {e.id for e in document.embeddings} | {j.id for j in document.junctions}
     for calc in document.calculations:
         if calc.system not in systems and calc.system not in embeddings:
             raise DocumentError(f"calculation {calc.id!r} refers to missing system {calc.system!r}")

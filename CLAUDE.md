@@ -26,9 +26,10 @@ to 8 built, its report with numbered decisions, and the maintainer's answers). R
 before designing anything; update it when a decision changes. Status: phases 0 to 8 are
 done and merged into master (2026-10-04). Phase 9 (the Document as a graph: k-paths and geometries as
 shared objects, a node view beside the outliner) is planned at the end of section 7,
-decisions 213 to 233, and being built in its four parts: A (the k-path as an object, with
-its zone window, decisions 234 to 239) and B (the geometry as an object, schema version 2,
-decisions 240 to 245) merged, C (the node view, decisions 246 to 252) on branch node-view. A numbered decision stands as built unless the
+decisions 213 to 233, built in its four parts: A (the k-path as an object, with its zone
+window, decisions 234 to 239), B (the geometry as an object, schema version 2, decisions
+240 to 245), C (the node view, decisions 246 to 252) and D (the junction, decisions 253 to
+258), all merged into master (2026-10-15). A numbered decision stands as built unless the
 maintainer answers it; a new change records its decisions, numbered on from the last, at
 the end of section 7, the recommended option first.
 
@@ -88,7 +89,9 @@ not carry.
   quantum system, and a calculation's `system` names a system or an embedding
   (`target_kind`); a k-path (`kpaths`, `KPath`) is shared by the calculations whose
   `KPathParam` names it (`kpath_users`), and `lift_kpaths` turns the inline paths of an
-  older file into k-paths; an entry's `name` is left out of the JSON when
+  older file into k-paths; a junction (`junctions`, j1) names a left and a right lead and
+  an optional central region, a target of calculations as an embedding is; an entry's
+  `name` is left out of the JSON when
   empty, never in a key), `fields.py` and `expressions.py` (the Field kinds of 3.8 and the
   AST-whitelisted expression evaluator), `regions.py`, `nearest.py` (the stored point
   nearest to a position within a tolerance, by a cell hash: regions by positions, painted

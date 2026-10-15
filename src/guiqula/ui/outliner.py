@@ -177,6 +177,25 @@ def embedding_rows(embedding):
             f"{embedding.id}/defect": embedding.defect}
 
 
+def junction_rows(junction):
+    """The rows under a junction, which select the systems it names."""
+    rows = {f"{junction.id}/left": junction.left, f"{junction.id}/right": junction.right}
+    if junction.central:
+        rows[f"{junction.id}/central"] = junction.central
+    return rows
+
+
+def target_rows(document, head):
+    """The rows under the embedding or the junction head: {row: system}."""
+    for embedding in document.embeddings:
+        if embedding.id == head:
+            return embedding_rows(embedding)
+    for junction in document.junctions:
+        if junction.id == head:
+            return junction_rows(junction)
+    return None
+
+
 def cell_problem(session, embedding):
     """Why the two systems of an embedding do not share a cell, as their
     latest builds say (the engine checks it again when a calculation runs),
@@ -790,6 +809,8 @@ class Outliner(QTreeWidget):
                 self._add_system(session, system)
             for embedding in document.embeddings:
                 self._add_embedding(session, embedding)
+            for junction in document.junctions:
+                self._add_junction(session, junction)
             calcs = self._add(None, "calculations", "Calculations")
             several = len(document.systems) > 1
             for calc in document.calculations:
@@ -963,6 +984,35 @@ class Outliner(QTreeWidget):
             self._add(top, row, label, details=[
                 f"the {role} system, {system_id}: selecting this row selects it, and its "
                 f"geometry and Hamiltonian are edited there"], kind="structure")
+
+    def _add_junction(self, session, junction):
+        """A junction: a detail row with its leads and its central region, and
+        under it a row for each, which selects that system."""
+        document = session.document
+        name = junction.name if junction.name != junction.id else ""
+        middle = f" through {junction.central}" if junction.central else ""
+        status = f"{junction.left} to {junction.right}{middle}"
+        details = [f"a junction: the lead {junction.left} on the left, {junction.right} on "
+                   f"the right" + (f", and the central region {junction.central} between "
+                                   f"them" if junction.central else ", in contact")]
+        top = self._add(None, junction.id, _entry_text(junction.id, "Junction", name),
+                        status, details, kind="embedding")
+        font = self.font()
+        font.setBold(True)
+        top.setFont(0, font)
+        self._detail_row(top)
+        words = {"left": "Left lead", "right": "Right lead", "central": "Central region"}
+        for row, system_id in junction_rows(junction).items():
+            role = row.split("/", 1)[1]
+            try:
+                system = document.system(system_id)
+                label = _entry_text(words[role], system_id,
+                                    system.name if system.name != system_id else "")
+            except Exception:
+                label = _entry_text(words[role], system_id)
+            self._add(top, row, label, details=[
+                f"the {words[role].lower()}, {system_id}: selecting this row selects it, and "
+                f"its geometry and Hamiltonian are edited there"], kind="structure")
 
     def _add_model(self, top, system, stages, runtime, plan):
         """A classical system's Model branch: its set-up row and its terms."""
@@ -1320,7 +1370,8 @@ class Outliner(QTreeWidget):
 
     def move_current(self, step):
         found = self._family(self.current_id())
-        if found is None or found[0] in ("geometry", "system", "embedding", "kpath"):
+        if found is None or found[0] in ("geometry", "system", "embedding", "junction",
+                                         "kpath"):
             return
         _, _, items, index, _ = found
         if 0 <= index + step < len(items):
@@ -1380,7 +1431,7 @@ class Outliner(QTreeWidget):
     def rename_current(self):
         found = self._family(self.current_id())
         if found is None or found[0] not in ("geometry", "system", "region", "embedding",
-                                             "kpath"):
+                                             "junction", "kpath"):
             return
         name, ok = QInputDialog.getText(self, "Rename", "Name:", text=found[-1].name)
         if ok and name.strip():
@@ -1402,7 +1453,7 @@ class Outliner(QTreeWidget):
         if family == "calculation":
             menu.addAction("Run", lambda: self.command.emit("run_calculation",
                                                             {"calculation": obj.id}))
-        if family in ("geometry", "system", "region", "embedding", "kpath"):
+        if family in ("geometry", "system", "region", "embedding", "junction", "kpath"):
             menu.addAction("Rename...", self.rename_current)
         if family == "system":
             menu.addAction(icons.icon("structure"), "New Hamiltonian on this geometry",
@@ -1415,6 +1466,8 @@ class Outliner(QTreeWidget):
         if family == "system" and obj.kind == "quantum":
             menu.addAction(icons.icon("embedding"), "New embedding of a defect",
                            lambda: self.command.emit("add_embedding", {"pristine": obj.id}))
+            menu.addAction(icons.icon("embedding"), "New junction with this lead",
+                           lambda: self.command.emit("add_junction", {"left": obj.id}))
         if family == "system":
             menu.addAction(icons.icon("kspace"), "Show Brillouin zone",
                            lambda: self.command.emit("kpath_window", {"system": obj.id}))
@@ -1429,7 +1482,7 @@ class Outliner(QTreeWidget):
                 menu.addAction(f"Lock{what}", lambda t=target: self.command.emit(
                     "lock", {"target": t}))
         menu.addAction("Duplicate", self.duplicate_current)
-        if family not in ("geometry", "system", "embedding", "kpath"):
+        if family not in ("geometry", "system", "embedding", "junction", "kpath"):
             menu.addAction("Move up", lambda: self.move_current(-1))
             menu.addAction("Move down", lambda: self.move_current(1))
         menu.addSeparator()

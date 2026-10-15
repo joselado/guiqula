@@ -84,7 +84,8 @@ from guiqula.ui.kspace import KPathWindow
 from guiqula.ui.nodes import NodeView, OutlinerPanel
 from guiqula.ui.sliders import SlidersPanel
 from guiqula.ui.jobpanel import JobPanel
-from guiqula.ui.outliner import Outliner, embedding_rows, linked_rows, pseudo_ids, system_of
+from guiqula.ui.outliner import (Outliner, linked_rows, pseudo_ids, system_of,
+                                 target_rows)
 from guiqula.ui.palette import FAMILIES as PALETTE_FAMILIES, MenuButton, PaletteMenu
 from guiqula.ui.marks import ERROR_STATES, calculation_state, mark
 from guiqula.ui.grid import MAX_SIDE as GRID_MAX_SIDE, GridView, ResultTabBar
@@ -174,7 +175,8 @@ def workspace_of(entry, family=None):
     Document.find says of an entry id), or None for nothing selected."""
     if not entry:
         return None
-    if entry in ("calculations", "kpaths") or family in ("calculation", "embedding", "kpath"):
+    if entry in ("calculations", "kpaths") or family in ("calculation", "embedding", "junction",
+                                                         "kpath"):
         return "calculate"
     if family is not None:
         return "hamiltonian" if family == "term" else "geometry"
@@ -1263,9 +1265,9 @@ class MainWindow(QMainWindow):
             return True
         system = system_of(item_id)
         try:
-            if system is not None and any(e.id == system
-                                          for e in self.session.document.embeddings):
-                return item_id in embedding_rows(self.session.document.embedding(system))
+            rows = target_rows(self.session.document, system) if system is not None else None
+            if rows is not None:                  # under an embedding or a junction
+                return item_id in rows
             if system is not None:      # a row the outliner shows for a system of its kind
                 target = self.session.document.system(system)
                 return item_id in pseudo_ids(target) or \
@@ -1394,8 +1396,9 @@ class MainWindow(QMainWindow):
         if entry and not self._exists(entry):
             raise ValueError(f"nothing called {entry!r} in the document")
         head = system_of(entry)
-        if head is not None and any(e.id == head for e in self.session.document.embeddings):
-            entry = embedding_rows(self.session.document.embedding(head))[entry]  # its system
+        rows = target_rows(self.session.document, head) if head is not None else None
+        if rows is not None:
+            entry = rows[entry]          # a row under an embedding or a junction: its system
         self.context = None
         if head is not None and any(s.id == head for s in self.session.document.systems):
             linked = linked_rows(self.session.document, self.session.document.system(head))
@@ -1949,9 +1952,14 @@ class MainWindow(QMainWindow):
                 return obj.id
             if family == "embedding":
                 return obj.defect
+            if family == "junction":           # the canvas: its central region, else a lead
+                return obj.central or obj.left
             if family == "calculation":
                 if document.target_kind(obj.system) == "embedding":
                     return document.embedding(obj.system).defect
+                if document.target_kind(obj.system) == "junction":
+                    junction = document.junction(obj.system)
+                    return junction.central or junction.left
                 return obj.system
             return owner.id
         return document.systems[0].id
@@ -1966,9 +1974,10 @@ class MainWindow(QMainWindow):
         if entry and entry not in ("calculations", "kpaths", "geometries") and \
                 "/" not in entry:
             family, _, _, _, obj = document.find(entry)
-            if family == "embedding":
+            if family in ("embedding", "junction"):
                 return obj.id
-            if family == "calculation" and document.target_kind(obj.system) == "embedding":
+            if family == "calculation" and document.target_kind(obj.system) in ("embedding",
+                                                                                "junction"):
                 return obj.system
         return self.current_system()
 
@@ -2165,6 +2174,8 @@ class MainWindow(QMainWindow):
         document = self.session.document
         if document.target_kind(target) == "embedding":
             return document.embedding(target).pristine
+        if document.target_kind(target) == "junction":
+            return document.junction(target).left
         return target
 
     def _last_kpath_of(self, system):
@@ -2349,7 +2360,7 @@ class MainWindow(QMainWindow):
             self.run_guarded(args["calculation"])
             return
         ok, out = self._do(name, **args)
-        if ok and name in ("duplicate", "add_embedding"):
+        if ok and name in ("duplicate", "add_embedding", "add_junction"):
             self.select(out)
         elif not ok and name in ("set_enabled", "set_meanfield"):
             # Qt ticked or unticked the box before the refusal (a lock): show the Document

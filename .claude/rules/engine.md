@@ -53,6 +53,12 @@ and exported, what the plan and the build do, and what the refresh of `vendor/` 
   lattice first), so a geometry shared by systems, or one starting from another, needs no
   change of the engine, the stage keys hashing content and never ids; its regions are the
   last geometry's.
+- A calculation on a junction (`systems=("junction",)`, phase 9, part D) is planned by
+  `_plan_junction`: `plan.system` is the left lead, `plan.others` holds `right` and, when
+  there is one, `central`, and `plan.junction` the junction; the adapter builds pyqula's
+  Heterostructure with `junction_of(h, ctx.system("right"), ctx.system("central"), ...)`,
+  whose `helpers=` carries it into the script, where `central = None` stands for no
+  central region.
 - A `KPathParam` holds the id of a k-path of the document (phase 9, part A):
   `pipeline._resolve_kpaths` puts its vertices in place of the id before the key is made
   (None for no vertex, pyqula's default path), so an entry reads the path with

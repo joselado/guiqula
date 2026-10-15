@@ -770,6 +770,84 @@ class EmbeddingForm(Form):
             self.commit("set_embedding", embedding=self.embedding_id, **{role: system})
 
 
+class JunctionForm(Form):
+    """A junction: its name, its two leads and its central region, chosen
+    among the document's quantum systems (the central region can be none)."""
+
+    NONE = "(none: the leads in contact)"
+    ROLES = (("left", "left lead", "a semi-infinite one-dimensional system, on the left"),
+             ("right", "right lead", "a semi-infinite one-dimensional system, on the right: "
+                                     "a copy of the left one with what makes it different"),
+             ("central", "central region", "between the leads: a finite system contacted "
+                                           "at two of its sites (the calculations' contact "
+                                           "sites), or a one-dimensional one; none, the "
+                                           "leads in contact"))
+
+    def __init__(self, panel, junction_id):
+        self.lock_owner = junction_id
+        super().__init__(panel, junction_id, f"Junction {junction_id}",
+                         "Two semi-infinite leads and the region between them, as in a "
+                         "transport measurement; the calculations under Junction in the Add "
+                         "menu run on it.")
+        self.junction_id = junction_id
+        self.name = QLineEdit()
+        self.name.setObjectName("junctionName")
+        self.name.editingFinished.connect(self._rename)
+        self.rows.addRow("name", self.name)
+        self.boxes = {}
+        for role, text, tip in self.ROLES:
+            box = QComboBox()
+            box.setObjectName(f"junction_{role}")
+            box.setToolTip(tip)
+            box.activated.connect(lambda index, r=role: self._set(r))
+            self.boxes[role] = box
+            label = QLabel(text)
+            label.setToolTip(tip)
+            self.rows.addRow(label, box)
+        self.guarded = [self.name, *self.boxes.values()]
+        self.update_values()
+
+    def _systems(self):
+        return tuple((s.id, f"{s.id} {s.name if s.name != s.id else ''}".strip())
+                     for s in self.session.document.systems if s.kind == "quantum")
+
+    def signature(self):
+        return ("junction", self.junction_id, self._systems())
+
+    def update_values(self):
+        junction = self.session.document.junction(self.junction_id)
+        _quiet(self.name, self.name.setText, junction.name)
+        for role, box in self.boxes.items():
+            box.blockSignals(True)
+            try:
+                box.clear()
+                if role == "central":
+                    box.addItem(self.NONE, None)
+                for system_id, label in self._systems():
+                    box.addItem(label, system_id)
+                box.setCurrentIndex(box.findData(getattr(junction, role)))
+            finally:
+                box.blockSignals(False)
+        self.update_reports()
+
+    def whole_locks(self):
+        return [self.junction_id]
+
+    def _rename(self):
+        name = self.name.text().strip()
+        if name and name != self.session.document.junction(self.junction_id).name:
+            self.commit("rename", entry=self.junction_id, name=name)
+
+    def _set(self, role):
+        system = self.boxes[role].currentData()
+        if system == getattr(self.session.document.junction(self.junction_id), role):
+            return
+        if role == "central" and system is None:
+            self.commit("set_junction", junction=self.junction_id, clear_central=True)
+        else:
+            self.commit("set_junction", junction=self.junction_id, **{role: system})
+
+
 class EntryForm(Form):
     """A geometry op, a term or a calculation."""
 
@@ -1479,6 +1557,8 @@ class PropertiesPanel(QWidget):
             return GeometryForm(self, item_id)
         if family == "embedding":
             return EmbeddingForm(self, item_id)
+        if family == "junction":
+            return JunctionForm(self, item_id)
         if family == "region":
             return RegionForm(self, item_id)
         return EntryForm(self, item_id)

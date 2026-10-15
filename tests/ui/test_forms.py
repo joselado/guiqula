@@ -35,6 +35,8 @@ def test_every_entry_has_a_form(panel, spec):
     system = "s1"
     if spec.systems == ("embedding",):            # what it runs on: an embedding of s1
         system = session.do("add_embedding", pristine="s1")
+    elif spec.systems == ("junction",):           # or a junction with s1 as a lead
+        system = session.do("add_junction", left="s1")
     elif "quantum" not in spec.systems:           # a system of a kind it applies to
         system = session.do("add_system", lattice="square_lattice", kind=spec.systems[0])
     entry = session.do(FAMILIES[spec.family], system=system, kind=spec.kind)

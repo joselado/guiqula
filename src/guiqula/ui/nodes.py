@@ -42,7 +42,8 @@ STYLES = {"solid": Qt.PenStyle.SolidLine, "dashed": Qt.PenStyle.DashLine,
 def kind_color(kind):
     """The colour of a node's title bar, by kind, in the active theme."""
     return {"geometry": theme.CELL, "kpath": theme.REGION, "system": theme.SUBLATTICE[-1.0],
-            "embedding": theme.POINT, "calculation": theme.SELECTED}.get(kind, theme.MUTED)
+            "embedding": theme.POINT, "junction": theme.POINT,
+            "calculation": theme.SELECTED}.get(kind, theme.MUTED)
 
 
 class SocketItem(QGraphicsEllipseItem):

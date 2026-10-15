@@ -17,7 +17,7 @@ from guiqula.core import locks as lock_tools
 from guiqula.core import regions as region_tools
 from guiqula.core.document import (CLASSICAL_KINDS, SYSTEM_KINDS, Base, Calculation,
                                    Construction, DocumentError, Embedding, Entry, Geometry,
-                                   Hamiltonian, KPath, geometry_chain, MeanField, Model, Region, System,
+                                   Hamiltonian, Junction, KPath, geometry_chain, MeanField, Model, Region, System,
                                    kpath_params, kpath_users, region_users, terms_of)
 from guiqula.registry import base as registry
 from guiqula.registry import plugins
@@ -217,7 +217,7 @@ def rename(document, entry, name):
     """Name a system, region, op, term, embedding, calculation or k-path (""
     takes an entry's name away)."""
     family, _, _, _, obj = document.find(entry)
-    if family not in ("geometry", "system", "region", "op", "term", "embedding",
+    if family not in ("geometry", "system", "region", "op", "term", "embedding", "junction",
                       "calculation", "kpath"):
         raise CommandError(f"{entry!r} is a {family}, which has no name")
     obj.name = _text("name", name)
@@ -230,8 +230,8 @@ def _quantum(document, system, role):
     except DocumentError as error:
         raise CommandError(str(error)) from None
     if target.kind != "quantum":
-        raise CommandError(f"{role}: {system} is a {target.kind.replace('_', ' ')} system; an "
-                           f"embedding takes two quantum systems")
+        raise CommandError(f"{role}: {system} is a {target.kind.replace('_', ' ')} system, and "
+                           f"it has to be a quantum one")
     return target
 
 
@@ -269,6 +269,46 @@ def set_embedding(document, embedding, pristine=None, defect=None):
     if pristine == defect:
         raise CommandError("the defect is a system of its own, not the pristine one")
     target.pristine, target.defect = pristine, defect
+
+
+# ---- junctions (phase 9, part D)
+@mutation
+def add_junction(document, left, right=None, central=None, name=""):
+    """Add a junction of two semi-infinite leads, with an optional central
+    region between them; returns its id. right: the right lead; None makes
+    it, a copy of the left one on the same geometry, to which what makes it
+    different is added (a pairing, an exchange field)."""
+    _quantum(document, left, "left")
+    if right is None:
+        right = _copy_system(document, left, linked=True)
+        document.system(right).name = f"{document.system(left).name or left} (right lead)"
+    _quantum(document, right, "right")
+    if central is not None:
+        _quantum(document, central, "central")
+    if len({left, right, central} - {None}) < (3 if central else 2):
+        raise CommandError("the two leads and the central region are three systems")
+    junction = Junction(id=document.new_id("junction"), name=_text("name", name), left=left,
+                        right=right, central=central)
+    junction.name = junction.name or junction.id
+    document.junctions.append(junction)
+    return junction.id
+
+
+@mutation
+def set_junction(document, junction, left=None, right=None, central=None, clear_central=False):
+    """Name another system as a lead or the central region of a junction;
+    clear_central takes the central region away."""
+    try:
+        target = document.junction(junction)
+    except DocumentError as error:
+        raise CommandError(str(error)) from None
+    left = target.left if left is None else _quantum(document, left, "left").id
+    right = target.right if right is None else _quantum(document, right, "right").id
+    central = None if _flag("clear_central", clear_central) else \
+        target.central if central is None else _quantum(document, central, "central").id
+    if len({left, right, central} - {None}) < (3 if central else 2):
+        raise CommandError("the two leads and the central region are three systems")
+    target.left, target.right, target.central = left, right, central
 
 
 # ---- stacks
@@ -501,10 +541,13 @@ def remove(document, entry):
         named = [e.id for e in document.embeddings_of(entry)]
         if named:
             raise CommandError(f"system {entry!r} is part of embeddings {named}")
-    if family == "embedding":
+        named = [j.id for j in document.junctions_of(entry)]
+        if named:
+            raise CommandError(f"system {entry!r} is part of junctions {named}")
+    if family in ("embedding", "junction"):
         users = [c.id for c in document.calculations if c.system == entry]
         if users:
-            raise CommandError(f"embedding {entry!r} is used by calculations {users}")
+            raise CommandError(f"{family} {entry!r} is used by calculations {users}")
     if family == "kpath":
         users = kpath_users(document, entry)
         if users:
@@ -538,7 +581,7 @@ def duplicate(document, entry):
     copy.id = document.new_id(family)
     if family == "region":
         copy.name = f"{obj.name} (copy)"
-    if family in ("embedding", "kpath"):
+    if family in ("embedding", "junction", "kpath"):
         copy.name = f"{obj.name or obj.id} (copy)"
     return copy.id
 
@@ -594,7 +637,7 @@ def _copy_system(document, system_id, linked=False):
 def move(document, entry, index):
     """Move an op, term, region or calculation to a new position in its list."""
     family, _, items, old, obj = document.find(entry)
-    if family in ("geometry", "system", "embedding", "kpath"):
+    if family in ("geometry", "system", "embedding", "junction", "kpath"):
         raise CommandError(f"{family}s are not ordered")
     if not 0 <= index < len(items):
         raise CommandError(f"index {index} out of range 0..{len(items) - 1}")

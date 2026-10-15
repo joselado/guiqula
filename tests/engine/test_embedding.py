@@ -69,7 +69,7 @@ def test_what_cannot_be_embedded_is_refused():
     with pytest.raises(CommandError, match="its own"):
         d.do("set_embedding", embedding=e, defect=s)
     spins = d.do("add_system", kind="classical_spin", lattice="chain")
-    with pytest.raises(CommandError, match="two quantum systems"):
+    with pytest.raises(CommandError, match="has to be a quantum one"):
         d.do("set_embedding", embedding=e, defect=spins)
     with pytest.raises(CommandError, match="does not apply to an embedding"):
         d.do("add_calculation", system=e, kind="bands")
