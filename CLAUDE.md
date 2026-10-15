@@ -27,8 +27,8 @@ before designing anything; update it when a decision changes. Status: phases 0 t
 done and merged into master (2026-10-04). Phase 9 (the Document as a graph: k-paths and geometries as
 shared objects, a node view beside the outliner) is planned at the end of section 7,
 decisions 213 to 233, and being built in its four parts: A (the k-path as an object, with
-its zone window, decisions 234 to 239) merged, B (the geometry as an object, schema version
-2, decisions 240 to 245) on branch shared-geometry. A numbered decision stands as built unless the
+its zone window, decisions 234 to 239) and B (the geometry as an object, schema version 2,
+decisions 240 to 245) merged, C (the node view, decisions 246 to 252) on branch node-view. A numbered decision stands as built unless the
 maintainer answers it; a new change records its decisions, numbered on from the last, at
 the end of section 7, the recommended option first.
 
@@ -99,7 +99,8 @@ not carry.
   `QUANTITIES` and `AXES`), `bonds.py` (a site Field at the bond midpoints), `hashing.py`.
 - `registry/`: one declaration per lattice, op, term, mean field and calculation
   (`lattices.py`, `geometry_ops.py`, `terms.py`, `meanfield.py`, `calculations.py`,
-  `classical.py`, `python_nodes.py`, `sweeps.py`, `kpaths.py`, `picks.py`; `base.py` and
+  `classical.py`, `python_nodes.py`, `sweeps.py`, `kpaths.py`, `picks.py`; `graph.py` is the
+  Document as a graph for the node view, its sockets read from the declarations; `base.py` and
   `params.py` are the declarations themselves); `pipeline.py` plans a system without pyqula
   (the stage and calculation keys, the invalid entries, trust); `plugins.py` loads the
   plugins after the built-in entries; `cost.py` estimates durations (the cost guard). How an

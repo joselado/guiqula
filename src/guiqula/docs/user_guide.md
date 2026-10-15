@@ -127,6 +127,28 @@ lock) are in the row's tooltip. A check box enables or disables an op or a term,
 reorders the entries, and the context menu enables, runs, renames, locks, duplicates,
 moves or deletes.
 
+### The node view
+
+The Outliner dock has a second view, Nodes, chosen at its top beside Tree, which draws the
+same document as a graph, as Blender's node editor does: a node per geometry, k-path,
+system (a Hamiltonian or a Model), embedding and calculation, in columns from left to right,
+each with its id, its name, a geometry's lattice, a k-path's vertices or a calculation's
+state, its inputs on the left and its output on the right. What matters is that the tree
+shows what each system owns while the graph shows what is shared: one geometry feeding two
+Hamiltonians, one k-path feeding several band structures, the tip of a local probe, the two
+systems of an embedding. A solid link is something an input names, and dragging an output
+onto an input makes that link, one step of the undo history, so moving a band structure to
+another k-path, a Hamiltonian to another geometry or a calculation to another system is one
+gesture; a link the input does not take is refused and the status bar says why. An input
+that is never empty (a geometry, a k-path, what a calculation runs on) is moved and never
+cut, while the tip of a local probe can be cut from the right click on its input, meaning
+pyqula's default tip. A dashed link goes from a calculation to a system whose Field reads its
+result, and a dotted one from a sweep to what it runs and moves; those two are shown, and
+edited in the forms. A click selects, as in the tree, a double click opens a k-path's zone
+window or a calculation's result, Shift+A opens the Add menu at the cursor, Del removes,
+Home shows the whole graph and the wheel zooms. The dock widens while the nodes show; a node
+dragged keeps its place in the project, and Arrange puts every node back in its column.
+
 ### The drawings
 
 The centre holds the Structure tab (the geometry, the Hamiltonian or a Field, drawn on the

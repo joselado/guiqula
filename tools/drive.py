@@ -65,7 +65,10 @@ col counted from 0: its result shown in that cell; grid left out: back
 into its tab), kpath_window (kpath, or calculation, or system: the window of
 a k-path on the Brillouin zone, kspaceWindow_<k>, with its zone
 kspaceView_<k> and its tools kpathAdd_<k>, kpathRemoveLast_<k>,
-kpathDefault_<k>); the
+kpathDefault_<k>), outliner_view (tree, nodes: the Outliner dock's node view,
+nodeView), node_connect (source, target, socket: a link of the node view as one
+Command), node_cut (node, socket: an optional input emptied), node_move (node,
+x, y), node_arrange; the
 session's undo, redo (with "steps") and history; lock and unlock are
 mutations. The driven window never reads or writes the settings file.
 Every calculation's result has its own view, plot_<calculation id>, with

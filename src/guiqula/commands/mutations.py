@@ -378,6 +378,26 @@ def add_calculation(document, system, kind, params=None, name=""):
     return calc.id
 
 
+@mutation
+def set_calculation_system(document, calculation, system):
+    """Run a calculation on another system or embedding (a link drawn in the
+    node view); refused when its entry does not apply to that kind."""
+    try:
+        calc = document.calculation(calculation)
+        target_kind = document.target_kind(system)
+    except DocumentError as error:
+        raise CommandError(str(error)) from None
+    try:
+        spec = registry.get("calculation", calc.kind)
+    except registry.RegistryError as error:
+        raise CommandError(str(error).strip("\"'")) from None
+    if target_kind not in spec.systems:
+        what = "an embedding" if target_kind == "embedding" else f"a {target_kind} system"
+        raise CommandError(f"{spec.label} does not apply to {what}; it is a calculation of "
+                           f"{', '.join(spec.systems)} systems")
+    calc.system = system
+
+
 def _last_kpath(document, system):
     """The k-path of the last calculation on a system that walks one."""
     for calc in reversed(document.calculations):
