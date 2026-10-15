@@ -8,8 +8,9 @@ target (a system or an embedding), the other systems it uses (a
 SystemParam, the tip of a local probe) and the k-paths it walks (a
 KPathParam), an embedding its pristine and its defect system; besides
 those, a from_result Field reads the result of a calculation, and a sweep
-moves parameters of entries. A node is a geometry, a system, a k-path, an
-embedding or a calculation. The sockets are read from the declarations
+moves parameters of entries; a junction names its two leads and its
+central region (part D). A node is a geometry, a system, a k-path, an
+embedding, a junction or a calculation. The sockets are read from the declarations
 (spec.systems, the SystemParams, the KPathParams of a calculation's
 registry entry), never listed by hand, so a plugin's calculation gets
 them too. A link is solid when it is an id a socket holds, which a link
@@ -34,12 +35,13 @@ from guiqula.core.document import DocumentError, terms_of
 from guiqula.registry import base as registry
 from guiqula.registry.params import KPathParam, SystemParam
 
-COLUMNS = ("geometry", "kpath", "system", "embedding", "calculation")
+COLUMNS = ("geometry", "kpath", "system", "embedding", "junction", "calculation")
 # the column of each kind, left to right: what a node takes is to its left (the k-paths
 # under the geometries, which nothing links to each other)
-COLUMN_OF = {"geometry": 0, "kpath": 0, "system": 1, "embedding": 2, "calculation": 3}
+COLUMN_OF = {"geometry": 0, "kpath": 0, "system": 1, "embedding": 2, "junction": 2,
+             "calculation": 3}
 OUTPUT = {"geometry": "geometry", "kpath": "kpath", "system": "system",
-          "embedding": "embedding", "calculation": "result"}
+          "embedding": "embedding", "junction": "junction", "calculation": "result"}
 TITLES = {"geometry": "Geometry", "kpath": "k-path", "embedding": "Embedding",
           "calculation": "Calculation"}
 
@@ -126,14 +128,21 @@ def nodes(document):
             Socket("pristine", "pristine", ("system",), True, embedding.pristine, ("quantum",)),
             Socket("defect", "defect", ("system",), True, embedding.defect, ("quantum",))],
             "embedding"))
+    for junction in document.junctions:
+        add(Node(junction.id, "junction", "Junction", junction.name, [
+            Socket("left", "left lead", ("system",), True, junction.left, ("quantum",)),
+            Socket("right", "right lead", ("system",), True, junction.right, ("quantum",)),
+            Socket("central", "central region", ("system",), False, junction.central,
+                   ("quantum",))], "junction"))
     for calc in document.calculations:
         spec = _calc_spec(calc)
         target_kinds = tuple(spec.systems) if spec is not None else ()
         accepts = tuple(kind for kind, takes in (
-            ("system", bool(set(target_kinds) - {"embedding"})),
-            ("embedding", "embedding" in target_kinds)) if takes)
+            ("system", bool(set(target_kinds) - {"embedding", "junction"})),
+            ("embedding", "embedding" in target_kinds),
+            ("junction", "junction" in target_kinds)) if takes)
         inputs = [Socket("target", "runs on", accepts or ("system",), True, calc.system,
-                         tuple(k for k in target_kinds if k != "embedding"))]
+                         tuple(k for k in target_kinds if k not in ("embedding", "junction")))]
         for param in (spec.params if spec is not None else ()):
             if isinstance(param, SystemParam):
                 inputs.append(Socket(param.name, param.label, ("system",), not param.optional,
@@ -182,7 +191,7 @@ def owner_node(document, target):
         family, owner, _, _, obj = document.find(target)
     except DocumentError:
         return None
-    if family in ("system", "geometry", "calculation", "embedding", "kpath"):
+    if family in ("system", "geometry", "calculation", "embedding", "junction", "kpath"):
         return obj.id
     return owner.id if owner is not None else None
 
@@ -227,6 +236,8 @@ def connect(document, source, target, socket):
         return "set_parent", {"geometry": target, "parent": source}
     if node.kind == "embedding":
         return "set_embedding", {"embedding": target, socket: source}
+    if node.kind == "junction":
+        return "set_junction", {"junction": target, socket: source}
     if socket == "target":
         return "set_calculation_system", {"calculation": target, "system": source}
     return "set_param", {"entry": target, "name": socket, "value": source}
@@ -243,6 +254,8 @@ def cut(document, target, socket):
     if entry.required:
         raise GraphError(f"the {entry.label} of {target} is never empty: link another one "
                          f"to it instead")
+    if node.kind == "junction":
+        return "set_junction", {"junction": target, "clear_central": True}
     return "set_param", {"entry": target, "name": socket, "value": None}
 
 

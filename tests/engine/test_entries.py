@@ -567,6 +567,8 @@ def calc_system(name):
             h.tip.add_swave(0.1)
     elif name in EMBEDDINGS:       # s is the embedding, h the pristine one, h.defect the other
         d, s, h = embedding_case(name)
+    elif name in JUNCTIONS:        # s is the junction, h the left lead, h.right, h.central
+        d, s, h = junction_case(name)
     else:
         raise KeyError(name)
     return d, s, h
@@ -588,6 +590,90 @@ EMBEDDINGS = {
     "ysr_chain": ("chain", True, [("swave", {"delta": 0.2})],
                   [("zeeman", {"m": [0.0, 0.0, 0.3]})]),
 }
+
+
+JUNCTIONS = {
+    # a normal chain against a superconducting one: Andreev reflection below the gap
+    "ns_chain": (True, [("swave", {"delta": 0.1})], None),
+    # two spinless metallic chains through a five-site dot contacted at its ends
+    "nn_dot": (False, [], ("dot", 5)),
+    # two spinless chains through a chain with an onsite energy, one cell long
+    "nn_wire": (False, [], ("wire", 0.5)),
+}
+
+
+def junction_case(name):
+    """A junction built through commands (the right lead a copy of the left
+    one with its own terms, the central region a system of its own), and the
+    same leads and central region directly."""
+    from pyqula import geometry
+    has_spin, right_terms, central = JUNCTIONS[name]
+    d = Dispatcher()
+    left = d.do("add_system", lattice="chain")
+    d.do("set_construction", system=left, has_spin=has_spin)
+    middle = None
+    if central is not None:
+        middle = d.do("add_system", lattice="chain", name="central")
+        d.do("set_construction", system=middle, has_spin=has_spin)
+        if central[0] == "dot":
+            d.do("add_geometry_op", system=middle, kind="supercell",
+                 params={"n": [central[1], 1, 1]})
+            d.do("add_geometry_op", system=middle, kind="finite", params={})
+        else:
+            d.do("add_term", system=middle, kind="onsite", params={"mu": central[1]})
+    j = d.do("add_junction", left=left, central=middle)
+    right = d.document.junction(j).right
+    for kind, params in right_terms:
+        d.do("add_term", system=right, kind=kind, params=params)
+    h = geometry.chain().get_hamiltonian(has_spin=has_spin)
+    h.right = h.copy()
+    for kind, params in right_terms:
+        h.right.add_swave(params["delta"])
+    h.central = None
+    if central is not None and central[0] == "dot":
+        g = geometry.chain().get_supercell(central[1])
+        g.dimensionality = 0
+        h.central = g.get_hamiltonian(has_spin=has_spin)
+    elif central is not None:
+        h.central = geometry.chain().get_hamiltonian(has_spin=has_spin)
+        h.central.add_onsite(central[1])
+    return d, j, h
+
+
+def _direct_junction(h, p, explicit=False):
+    from pyqula import heterostructures
+    if h.central is not None and h.central.dimensionality == 0:
+        n = len(h.central.geometry.r)
+        ht = h.central.get_central_heterostructure(p["i"] % n, p["j"] % n, left=h,
+                                                   right=h.right)
+    elif h.central is not None:
+        ht = heterostructures.build(h, h.right, central=[h.central])
+    else:
+        ht = heterostructures.build(h, h.right, central=[h.copy()] if explicit else None)
+    if p["T"] != 1.0:
+        ht.set_coupling(p["T"])
+    return ht
+
+
+def _direct_junction_didv(h, p):
+    es = _energies(p)
+    ht = _direct_junction(h, p)
+    didv = ht.didv_curve(es, temp=p["temp"], delta=p["delta"]) if p["temp"] > 0 else \
+        ht.didv(energies=es, delta=p["delta"])
+    return {"energies": es, "didv": np.asarray(didv, dtype=float)}
+
+
+def _direct_junction_transmission(h, p):
+    es = _energies(p)
+    ht = _direct_junction(h, p, explicit=True)
+    return {"energies": es, "transmission": [float(ht.landauer(energy=e)) for e in es]}
+
+
+def _direct_junction_iv(h, p):
+    vs = np.linspace(p["vmin"], p["vmax"], p["nv"])
+    ht = _direct_junction(h, p)
+    return {"voltages": vs, "current": [float(ht.get_dc_current(v, delta=p["delta"]))
+                                        for v in vs]}
 
 
 def embedding_case(name):
@@ -778,6 +864,9 @@ DIRECT = {
     "embedding_ldos": _direct_embedding_ldos,
     "embedding_dos": _direct_embedding_dos,
     "embedding_ingap": _direct_embedding_ingap,
+    "junction_didv": _direct_junction_didv,
+    "junction_transmission": _direct_junction_transmission,
+    "junction_iv": _direct_junction_iv,
     "density": lambda h, p: {"density": h.get_vev(nk=p["nk"])},
     "magnetization": lambda h, p: {"magnetization": h.get_magnetization(nk=p["nk"])},
     "real_space_chern": lambda h, p: {"marker": pq("topology").real_space_chern(h)[1]},
@@ -865,6 +954,18 @@ CALC_CASES = {
                                                                             # in the gap at 0
     "embedding_ingap": [({"ne": 21, "nk": 40}, "ysr_chain",
                          lambda a: abs(a["energy"]) < a["gap"] / 2)],    # inside the gap
+    "junction_didv": [
+        ({"ne": 7, "emin": -0.3, "emax": 0.3}, "ns_chain",              # Andreev: doubled
+         lambda a: a["didv"][3] > 1.5 * a["didv"][0]),                  # below the gap
+        ({"ne": 5, "emin": -0.3, "emax": 0.3, "T": 0.3, "temp": 0.02}, "ns_chain", None),
+        ({"ne": 5}, "nn_dot", None),
+        ({"ne": 5}, "nn_wire", lambda a: a["didv"].max() < 1.0)],       # a barrier
+    "junction_transmission": [
+        ({"ne": 5, "emin": -1.0, "emax": 1.0}, "nn_wire", lambda a: a["transmission"].max()
+         < 1.0),
+        ({"ne": 3, "emin": -1.0, "emax": 1.0}, "nn_dot", None)],
+    "junction_iv": [({"nv": 2, "vmin": 0.1, "vmax": 0.15, "T": 0.5}, "ns_chain",
+                     lambda a: a["current"][1] > a["current"][0])],
     "qpi": [({"energy": 0.5, "nk": 10}, "rashba", None),
             ({"energy": 0.3, "nk": 8, "mode": "pm"}, "haldane", None)],
     "density": [({"nk": 6}, "zeeman", None)],
@@ -901,6 +1002,8 @@ PLOT_KINDS = {"ldos": "structure_scalar", "density": "structure_scalar",
               "eigenstate": "structure_scalar", "site_dos": "lines", "qpi": "heatmap",
               "local_probe": "lines", "embedding_ldos": "structure_scalar",
               "embedding_dos": "lines", "embedding_ingap": "scalar",
+              "junction_didv": "lines", "junction_transmission": "lines",
+              "junction_iv": "lines",
               "magnetization": "structure_vector", "real_space_chern": "structure_scalar",
               "fermi_surface": "heatmap", "spectral_function": "heatmap",
               "berry_curvature": "heatmap", "chern": "scalar", "gap": "scalar"}

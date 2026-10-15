@@ -170,7 +170,12 @@ tests, `drive.py --widget` and the remote `widgets` and `screenshot` methods rel
   `GeometryForm` (`geometryName`, `geometryStart`, `geometryUsers`). The K-paths
   section (`kpaths`, after Calculations) lists the k-paths with the calculations walking
   them as their status, its "+" `outlinerAdd_kpaths` adding one; a k-path's context menu
-  has Show in the Brillouin zone and a system's Show Brillouin zone (`kpath_window`).
+  has Show in the Brillouin zone and a system's Show Brillouin zone (`kpath_window`). A
+  junction is a detail row after the embeddings (`s1 to s2 through s3`) with the rows
+  `<junction>/left`, `/right` and `/central`, which `select` turns into their system
+  (`target_rows`), a quantum system's context menu has New junction with this lead, and its
+  form is `JunctionForm` (`junctionName`, `junction_left`, `junction_right`,
+  `junction_central`, whose first item is none).
   `tests/ui/test_outliner.py`'s `cut` checks the labels as well as the statuses on every
   preset.
 - `nodes.py`: the node view (phase 9, part C), `NodeView` (`nodeView`) drawing
@@ -382,5 +387,11 @@ python tools/drive.py --do '{"do": "add_system", "lattice": "diamond_lattice"}' 
     "Z", "G"]}}' --do '{"do": "renderer_3d", "name": "pyvista"}' --do '{"do":
     "kpath_window", "calculation": "c1"}' --widget kspaceWindow_k1 --shot zone3d.png
                                                    # the 3D zone of a 3D crystal (decision 236)
+python tools/drive.py --do '{"do": "add_system", "lattice": "chain"}' --do '{"do":
+    "add_junction", "left": "s1"}' --do '{"do": "add_term", "system": "s2", "kind": "swave",
+    "params": {"delta": 0.1}}' --do '{"do": "add_calculation", "system": "j1", "kind":
+    "junction_didv", "params": {"emin": -0.3, "emax": 0.3, "ne": 61}}' --run c1 \
+    --widget plot_c1 --shot andreev.png            # Andreev reflection: dI/dV 4 below the gap,
+                                                   # 2 above (phase 9, part D)
 PYTHONPATH=src python -m guiqula --remote preset      # the window, remote control on (3.7)
 ```

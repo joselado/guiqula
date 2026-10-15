@@ -123,6 +123,10 @@ def _docstring(plan, what=None):
             what or f"Calculation {plan.calc_id} ({plan.kind}) on " + (
                 f"embedding {plan.embedding} (pristine {plan.system_id}, defect "
                 f"{plan.others['defect'].system_id})." if plan.embedding
+                else f"junction {plan.junction} (left lead {plan.system_id}, right lead "
+                f"{plan.others['right'].system_id}" + (
+                    f", central region {plan.others['central'].system_id})."
+                    if "central" in plan.others else ").") if plan.junction
                 else f"system {plan.system_id}."),
             "Run it with pyqula importable; it writes result.npz in the current directory.",
             '"""']
@@ -159,7 +163,7 @@ def _parts(plan, skipped=None):
             helpers |= fields.helpers_of(stage.params)
         if stage.applied and stage.spec is not None:
             helpers |= set(stage.spec.helpers)
-    lines = []
+    lines = ["central = None", ""] if plan.junction and "central" not in plan.others else []
     for name, other in plan.others.items():
         lines.append(f"# {name}: system {other.system_id}")
         lines += _system_lines(other, skipped, helpers)

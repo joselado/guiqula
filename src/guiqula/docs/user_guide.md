@@ -475,6 +475,47 @@ script builds the defect first, kept as `defect`, then the pristine system, puts
 one Hilbert space with the function `embedded_pair` it carries, and calls
 `embedding.Embedding(h, m=defect)`.
 
+## A junction
+
+We will now see how to compute the current through a junction between two leads, a
+normal metal against a superconductor, two superconductors, or a quantum dot between two
+metals. A junction is an object of its own, which names three systems of the document: the
+left lead and the right lead, each a semi-infinite one-dimensional system (a chain or a
+ribbon), and an optional central region between them, which is pyqula's `Heterostructure`.
+The central region is either finite, a dot or a molecule, contacted by the left lead at one
+of its sites and by the right lead at another, or one-dimensional, a few cells of another
+wire.
+
+The simplest way in is the context menu of a quantum system, New junction with this lead.
+It makes the junction and, as the right lead, a copy of the system built on the same
+geometry ("s1 (right lead)"), to which what makes it different is added: a pairing for a
+normal-superconductor junction, an exchange field for a magnetic one. Properties of the
+junction names its three systems, chosen among the document's quantum systems (the central
+region can be none), and the outliner shows it after the embeddings, with a row for each of
+its systems, which selects it. The calculations of a junction are in the Junction group of
+the Add menu, offered while the junction, or a calculation on it, is selected:
+
+- Conductance dI/dV, the differential conductance against the bias in units of e²/h, what
+  a two-terminal measurement gives: for normal leads it is the Landauer transmission, and
+  with a superconducting lead it includes Andreev reflection, so that a transparent contact
+  doubles its conductance below the gap while a tunnel contact (a small transparency)
+  follows the density of states of the superconductor; a temperature gives the thermal
+  average, at about 2 s an energy more;
+- Landauer transmission, the number of channels that cross a normal junction at each
+  energy; a superconducting junction is refused, as pyqula refuses it, since a Cooper pair
+  carries charge 2e, and dI/dV is then its conductance;
+- Current against voltage, the time-averaged current at a finite bias by Floquet-Keldysh,
+  which accounts for the multiple Andreev reflections of a junction between two
+  superconductors; it is the slowest calculation of the program, seconds a bias and more at
+  low bias, so Run asks first. Its leads have to be spinful when superconducting: pyqula's
+  Floquet-Keldysh current fails on a lead built spinless and made superconducting, and the
+  calculation says so.
+
+The transparency of these calculations is the coupling of the contact, 1 for a full contact
+and well below 1 for a tunnel junction, and the two contact sites are those of a finite
+central region (the last site is -1). pyqula has no thermal conductance of a junction, so
+the finite-temperature dI/dV is what the window offers in its place.
+
 ## Drawing in 3D
 
 A geometry that is not flat (a 3D lattice, buckled or stacked layers) is drawn in 3D on the

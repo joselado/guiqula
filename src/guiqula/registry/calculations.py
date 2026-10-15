@@ -982,3 +982,172 @@ entry("calculation", "embedding_ingap", "In-gap state",
       cost=_embedding_cost(lambda p: p["ne"] + 20),
       guide=("guiqula: Embedding a defect", "Single defects in infinite systems"),
       pyqula=("embedding.Embedding", "embedding.Embedding.get_energy_ingap_state"))
+
+
+# ---- junctions (phase 9, part D)
+def junction_of(left, right, central=None, i=0, j=-1, coupling=1.0, explicit=False):
+    """pyqula's two-terminal Heterostructure of a junction: two semi-infinite
+    one-dimensional leads and, between them, a finite central region
+    contacted at its sites i and j (h.get_central_heterostructure), a
+    one-dimensional one (heterostructures.build(..., central=[...])), or
+    none; explicit: one cell of the left lead as the central region when
+    there is none, which is the same junction and what the Landauer formula
+    needs. coupling: the transparency of the contact (HT.set_coupling)."""
+    from pyqula import heterostructures
+    for role, h in (("left", left), ("right", right)):
+        if h.dimensionality != 1:
+            raise ValueError(f"the {role} lead is {h.dimensionality}-dimensional; a lead is a "
+                             f"one-dimensional system, a chain or a ribbon")
+    if central is not None and central.dimensionality == 0:
+        n = len(central.geometry.r)
+        for name, site in (("i", i), ("j", j)):
+            if not -n <= site < n:
+                raise ValueError(f"the contact site {name} = {site} is not a site of the "
+                                 f"central region, which has {n}")
+        ht = central.get_central_heterostructure(i % n, j % n, left=left, right=right)
+    elif central is not None:
+        if central.dimensionality != 1:
+            raise ValueError(f"the central region is {central.dimensionality}-dimensional; it "
+                             f"is finite (contacted at two sites) or one-dimensional")
+        ht = heterostructures.build(left, right, central=[central])
+    else:
+        ht = heterostructures.build(left, right, central=[left.copy()] if explicit else None)
+    if coupling != 1.0:
+        ht.set_coupling(coupling)
+    return ht
+
+
+def _junction(h, ctx, explicit=False):
+    return junction_of(h, ctx.system("right"), ctx.system("central"), ctx.value("i"),
+                       ctx.value("j"), ctx.value("T"), explicit)
+
+
+def _junction_code(ctx, explicit=False):
+    return (f"ht = junction_of(h, right, central, i={ctx.code('i')}, j={ctx.code('j')}, "
+            f"coupling={ctx.code('T')}" + (", explicit=True)" if explicit else ")"))
+
+
+def _junction_params():
+    return (FloatParam("T", 1.0, "transparency", "the coupling of the contact: 1 is a full "
+                                                 "contact, well below 1 a tunnel junction",
+                       minimum=0.0),
+            IntParam("i", 0, "left contact", "the site of a finite central region the left "
+                                             "lead touches"),
+            IntParam("j", -1, "right contact", "the site of a finite central region the right "
+                                               "lead touches (-1: its last)"))
+
+
+def _junction_didv(h, ctx):
+    import numpy as np
+    ht = _junction(h, ctx)
+    energies = _energies(ctx)
+    if ctx.value("temp") > 0:
+        didv = ht.didv_curve(energies, temp=ctx.value("temp"), delta=ctx.value("delta"))
+    else:
+        didv = ht.didv(energies=energies, delta=ctx.value("delta"))
+    return {"energies": energies, "didv": np.asarray(didv, dtype=float)}
+
+
+def _junction_transmission(h, ctx):
+    import numpy as np
+    ht = _junction(h, ctx, explicit=True)
+    energies = _energies(ctx)
+    return {"energies": energies,
+            "transmission": np.array([float(ht.landauer(energy=e)) for e in energies])}
+
+
+def _leads_for_keldysh(*leads):
+    """Refuse a superconducting lead built spinless: its hopping between cells
+    (h.inter) keeps the size of a spinless cell, one orbital, which pyqula's
+    Floquet-Keldysh current takes for a number and fails on deep inside."""
+    import numpy as np
+    for lead in leads:
+        if lead is not None and lead.has_eh and np.size(lead.inter) == 1:
+            raise ValueError("a lead built spinless and then made superconducting keeps "
+                             "its hopping between cells at the spinless size, which "
+                             "pyqula's Floquet-Keldysh current cannot use; make the leads "
+                             "spinful (the system's form)")
+
+
+def _junction_iv(h, ctx):
+    import numpy as np
+    _leads_for_keldysh(h, ctx.system("right"))
+    ht = _junction(h, ctx)
+    voltages = np.linspace(ctx.value("vmin"), ctx.value("vmax"), ctx.value("nv"))
+    current = []
+    for n, v in enumerate(voltages):
+        current.append(float(ht.get_dc_current(v, delta=ctx.value("delta"))))
+        ctx.progress((n + 1) / len(voltages), f"bias {n + 1} of {len(voltages)}")
+    return {"voltages": voltages, "current": np.array(current)}
+
+
+_JUNCTION_DOC = ("The left and the right leads are semi-infinite one-dimensional systems, "
+                 "and the central region, when the junction has one, sits between them.")
+_JUNCTION_GUIDE = ("guiqula: A junction", "Quantum transport")
+
+entry("calculation", "junction_didv", "Conductance dI/dV",
+      *_energies_params(-0.5, 0.5, 101),
+      FloatParam("delta", 1e-4, "broadening", "of the leads' Green's functions; well below "
+                                               "the smallest gap", minimum=1e-12),
+      *_junction_params(),
+      FloatParam("temp", 0.0, "temperature", "of the thermal average of dI/dV, about 2 s an "
+                                             "energy more", minimum=0.0),
+      systems=("junction",), group="Junction",
+      doc="Differential conductance against the bias, in units of e²/h: the Landauer "
+          "transmission of a normal junction, with Andreev reflection when a lead is "
+          "superconducting (pyqula's HT.didv). " + _JUNCTION_DOC,
+      apply=_junction_didv, helpers=(junction_of,), modules=("heterostructures",),
+      script=lambda ctx: [_junction_code(ctx), f"energies = {_energies_code(ctx)}",
+                          (f"didv = ht.didv_curve(energies, temp={ctx.code('temp')}, "
+                           f"delta={ctx.code('delta')})" if ctx.value("temp") > 0 else
+                           f"didv = ht.didv(energies=energies, delta={ctx.code('delta')})"),
+                          "arrays = dict(energies=energies, didv=np.asarray(didv, dtype=float))"],
+      plot={"kind": "lines", "x": "energies", "y": "didv", "xlabel": "bias",
+            "ylabel": "dI/dV (e²/h)", "picks": {"x": "energy"}},
+      cost=lambda p, size: p["ne"] * (0.02 + (2.5 if p["temp"] > 0 else 0.0)),
+      guide=_JUNCTION_GUIDE, pyqula=("heterostructures.build", "h.get_central_heterostructure",
+                                     "heterostructures.Heterostructure.didv"))
+
+entry("calculation", "junction_transmission", "Landauer transmission",
+      *_energies_params(-2.0, 2.0, 101),
+      *_junction_params(),
+      systems=("junction",), group="Junction",
+      doc="Transmission of a normal junction against the energy, the number of channels "
+          "that cross it (pyqula's HT.landauer); a superconducting junction is refused, as "
+          "pyqula refuses it, since a Cooper pair carries charge 2e: dI/dV is its "
+          "conductance. " + _JUNCTION_DOC,
+      apply=_junction_transmission, helpers=(junction_of,), modules=("heterostructures",),
+      script=lambda ctx: [_junction_code(ctx, explicit=True),
+                          f"energies = {_energies_code(ctx)}",
+                          "transmission = np.array([float(ht.landauer(energy=e)) "
+                          "for e in energies])",
+                          "arrays = dict(energies=energies, transmission=transmission)"],
+      plot={"kind": "lines", "x": "energies", "y": "transmission", "xlabel": "energy",
+            "ylabel": "transmission", "picks": {"x": "energy"}},
+      cost=lambda p, size: p["ne"] * 0.01,
+      guide=_JUNCTION_GUIDE, pyqula=("heterostructures.build",
+                                     "heterostructures.Heterostructure.landauer"))
+
+entry("calculation", "junction_iv", "Current against voltage",
+      FloatParam("vmin", 0.02, "lowest bias"),
+      FloatParam("vmax", 0.3, "highest bias"),
+      IntParam("nv", 10, "biases", "number of biases", minimum=2),
+      FloatParam("delta", 1e-3, "broadening", "well below the smallest gap", minimum=1e-12),
+      *_junction_params(),
+      systems=("junction",), group="Junction",
+      doc="DC current against the bias voltage by Floquet-Keldysh (pyqula's "
+          "HT.get_dc_current): the multiple Andreev reflections of a superconducting "
+          "junction, for any pair of normal and superconducting leads. The slowest "
+          "calculation of the program, seconds a bias and more at low bias. " + _JUNCTION_DOC,
+      apply=_junction_iv, helpers=(junction_of,), modules=("heterostructures",),
+      script=lambda ctx: [_junction_code(ctx),
+                          f"voltages = np.linspace({ctx.code('vmin')}, {ctx.code('vmax')}, "
+                          f"{ctx.code('nv')})",
+                          f"current = np.array([float(ht.get_dc_current(v, "
+                          f"delta={ctx.code('delta')})) for v in voltages])",
+                          "arrays = dict(voltages=voltages, current=current)"],
+      plot={"kind": "lines", "x": "voltages", "y": "current", "xlabel": "bias voltage",
+            "ylabel": "DC current"},
+      cost=lambda p, size: 7.0 * p["nv"],
+      guide=_JUNCTION_GUIDE, pyqula=("heterostructures.build",
+                                     "heterostructures.Heterostructure.get_dc_current"))

@@ -39,8 +39,9 @@ decisions 213 to 233); the maintainer answered 222, 224 and 226 and said to
 go ahead, and part A, the k-path as an object with its zone window (a 3D
 zone for a 3D crystal), was built the same day on branch kpath-window,
 decisions 234 to 239, and merged; part B, the geometry as an object (schema
-version 2), decisions 240 to 245, merged; part C, the node view, on branch
-node-view, decisions 246 to 252.
+version 2), decisions 240 to 245, merged; part C, the node view, decisions
+246 to 252, merged; part D, the junction, decisions 253 to 258, merged, so
+that phase 9 is built.
 
 ## 1. Requirements (as stated by the maintainer)
 
@@ -4752,6 +4753,49 @@ the two Documents. Decisions, the built option first:
      kinds of its own;
 252. the node view is drawn again whole at every change of the Document,
      cheap at the tens of nodes a document has; or items updated one by one.
+
+*Part D as built (2026-10-15, branch junction).* The Document has
+`junctions` (`Junction`: id, name, `left`, `right`, an optional `central`),
+a target of calculations as an embedding is: `_plan_junction` plans the left
+lead as the system and names `right` and `central` as others, which an entry
+reads with `ctx.system`, and the script builds as variables of those names
+(`central = None` when there is none). `registry/calculations.py`'s
+`junction_of` builds pyqula's Heterostructure (a finite central region
+contacted at two sites, a one-dimensional one, or none) and is written into
+the scripts; the calculations are `junction_didv`, `junction_transmission`
+and `junction_iv`, each tested against direct pyqula calls and exported;
+the mutations `add_junction` (the right lead a copy of the left on the same
+geometry) and `set_junction`. The outliner shows a junction after the
+embeddings with a row for each of its systems, a quantum system's context
+menu gives New junction with this lead, `JunctionForm` (`junctionName`,
+`junction_left`, `junction_right`, `junction_central`) names the three, and
+the node view has a junction node whose central input can be cut. Checking
+pyqula's calls first found what the plan did not know: Landauer needs an
+explicit central region, `didv(energies=..., temp=...)` raises where
+`didv_curve` works, the Floquet-Keldysh current fails on a superconducting
+lead built spinless (an upstream bug, reported to the maintainer), and
+pyqula has no thermal conductance. Decisions, the built option first:
+
+253. the finite-temperature dI/dV (`temp` of `junction_didv`, through
+     `didv_curve`) takes the place of the thermal conductance of the plan,
+     which pyqula does not have; or a thermal conductance written in
+     guiqula, physics that is not pyqula's;
+254. the transparency and the contact sites are parameters of each
+     calculation, as the local probe's are, so a sweep can move them; or
+     properties of the junction shared by its calculations;
+255. the Landauer transmission of a junction without a central region takes
+     one cell of the left lead as its central region, the same junction, as
+     pyqula's message advises; or the transmission refused without one;
+256. the I-V curve refuses a superconducting lead built spinless with a
+     message saying to make the leads spinful, rather than pyqula's
+     `matmul` error; or the leads turned spinful by the engine, which
+     changes what was asked;
+257. a new junction's right lead is a copy of the left one on the same
+     geometry, named "(right lead)", to which what makes it different is
+     added, as New embedding does for the defect; or the user picks both
+     leads among existing systems first;
+258. the canvas of a junction draws its central region, else its left lead;
+     or always the left lead.
 
 ### Where the section 13 items land
 

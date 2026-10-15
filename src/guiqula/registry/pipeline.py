@@ -409,6 +409,8 @@ class CalculationPlan:
     others: dict = field(default_factory=dict)   # {parameter: SystemPlan} of the other
                                                  # systems it names (SystemParam), and
                                                  # "defect" on an embedding
+    junction: str | None = None                  # the junction it runs on (system_id is its
+                                                 # left lead; "right" and "central" others)
     embedding: str | None = None                 # the embedding it runs on (system_id is
                                                  # then its pristine system)
 
@@ -482,6 +484,31 @@ def _resolve_kpaths(document, plan):
     return None
 
 
+def _plan_junction(document, calc, plan, trusted, results):
+    """A calculation on a junction runs on its left lead and names the right
+    one as "right" and the central region, if any, as "central" (an entry
+    reads them with ctx.system); the problem, or None. Whether the leads are
+    one-dimensional is known once they are built, so the engine checks it."""
+    junction = document.junction(calc.system)
+    plan.junction = junction.id
+    roles = [("left", junction.left), ("right", junction.right)] + (
+        [("central", junction.central)] if junction.central else [])
+    for role, system_id in roles:
+        other = document.system(system_id)
+        if other.kind != "quantum":
+            return f"{role}: {other.id} is a {KIND_LABELS.get(other.kind, other.kind)} " \
+                   f"system, and a junction takes quantum ones"
+    if junction.central in (junction.left, junction.right):
+        return f"{junction.id} names {junction.central} as a lead and as the central region"
+    plan.system_id = junction.left
+    plan.system = plan_system(document, junction.left, trusted, results)
+    for role, system_id in roles[1:]:
+        plan.others[role] = plan_system(document, system_id, trusted, results)
+        if plan.others[role].problem:
+            return f"{role}: {system_id}: {plan.others[role].problem}"
+    return None
+
+
 def plan_calculation(document, calc_id, trusted=True, results=None):
     calc = document.calculation(calc_id)
     plan = CalculationPlan(calc.id, calc.kind, calc.system)
@@ -489,6 +516,8 @@ def plan_calculation(document, calc_id, trusted=True, results=None):
     try:
         if document.target_kind(calc.system) == "embedding":
             embedded = _plan_embedding(document, calc, plan, trusted, results)
+        elif document.target_kind(calc.system) == "junction":
+            embedded = _plan_junction(document, calc, plan, trusted, results)
         else:
             plan.system = plan_system(document, calc.system, trusted, results)
     except DocumentError as error:
@@ -497,13 +526,15 @@ def plan_calculation(document, calc_id, trusted=True, results=None):
     if plan.system is None:
         plan.problem = embedded
         return plan
-    system_kind = "embedding" if plan.embedding else plan.system.kind
+    system_kind = "embedding" if plan.embedding else "junction" if plan.junction \
+        else plan.system.kind
     plan.spec, plan.params, plan.problem = _check_entry("calculation", calc.kind, calc.params,
                                                         system_kind, trusted, calc.plugin)
     if plan.params is not None:
         plan.problem = _resolve_kpaths(document, plan) or plan.problem
     if plan.problem is None and plan.system.problem:
-        plan.problem = (f"pristine: {plan.system_id}: " if plan.embedding else "") \
+        plan.problem = (f"pristine: {plan.system_id}: " if plan.embedding else
+                        f"left: {plan.system_id}: " if plan.junction else "") \
             + plan.system.problem
     if plan.problem is None:
         plan.problem = embedded
@@ -542,11 +573,14 @@ def _owners(document, target):
 
 
 def _parts(document, target):
-    """The systems a calculation on target runs on: the system, or the two of
-    an embedding."""
+    """The systems a calculation on target runs on: the system, the two of
+    an embedding, or those of a junction."""
     if document.target_kind(target) == "embedding":
         embedding = document.embedding(target)
         return (embedding.pristine, embedding.defect)
+    if document.target_kind(target) == "junction":
+        junction = document.junction(target)
+        return tuple(s for s in (junction.left, junction.right, junction.central) if s)
     return (target,)
 
 
