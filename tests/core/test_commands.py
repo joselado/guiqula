@@ -71,7 +71,7 @@ def test_duplicate():
     t = d.do("add_term", system=s, kind="onsite", params={"mu": 0.3}, region=r)
     c = d.do("add_calculation", system=s, kind="dos")
     op2 = d.do("duplicate", entry=op)
-    assert [o.id for o in d.document.system(s).geometry.ops] == [op, op2, "op2"]
+    assert [o.id for o in d.document.geometry_of(s).ops] == [op, op2, "op2"]
     assert d.document.find(op2)[-1].params == {"n": [2, 2, 1]}
     r2 = d.do("duplicate", entry=r)
     assert d.document.find(r2)[-1].name == "right (copy)"
@@ -83,7 +83,8 @@ def test_duplicate():
     ids = d.document.all_ids()
     assert len(ids) == len(set(ids))
     term = copy.hamiltonian.terms[0]
-    assert term.id != t and term.region == copy.regions[0].id != r
+    assert term.id != t and term.region == d.document.geometry_of(s2).regions[0].id != r
+    assert d.document.geometry_of(s2) is not d.document.geometry_of(s)    # a copy of it
     d.undo()
     assert [x.id for x in d.document.systems] == [s]
 
@@ -119,7 +120,7 @@ def test_regions_used_by_piecewise_fields():
         d.do("remove", entry=r)
     copy = d.do("duplicate", entry=s)
     system = d.document.system(copy)
-    new = system.regions[0].id
+    new = d.document.geometry_of(copy).regions[0].id
     assert new != r
     assert system.hamiltonian.terms[0].params["mu"]["pieces"][0]["region"] == new
     assert system.hamiltonian.meanfield.params["U"]["pieces"][0]["region"] == new

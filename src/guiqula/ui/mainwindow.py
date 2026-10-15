@@ -82,7 +82,7 @@ from guiqula.ui.help import HelpPanel
 from guiqula.ui.kspace import KPathWindow
 from guiqula.ui.sliders import SlidersPanel
 from guiqula.ui.jobpanel import JobPanel
-from guiqula.ui.outliner import Outliner, embedding_rows, pseudo_ids, system_of
+from guiqula.ui.outliner import Outliner, embedding_rows, linked_rows, pseudo_ids, system_of
 from guiqula.ui.palette import FAMILIES as PALETTE_FAMILIES, MenuButton, PaletteMenu
 from guiqula.ui.marks import ERROR_STATES, calculation_state, mark
 from guiqula.ui.grid import MAX_SIDE as GRID_MAX_SIDE, GridView, ResultTabBar
@@ -192,6 +192,7 @@ class MainWindow(QMainWindow):
         self.use_settings = use_settings
         self.theme_choice = theme.name
         self.selected = ""
+        self.context = None      # the system an op or a region was selected under (part B)
         self.workspace = "geometry"
         self.last_crash_report = None
         self.remote = None             # the remote control server (PLAN.md 3.7), when on
@@ -1188,7 +1189,7 @@ class MainWindow(QMainWindow):
         try:
             self._refresh_calculations()
             self.outliner.refresh(self.session)
-            self.outliner.set_current(self.selected)
+            self.outliner.set_current(self._selected_row())
             if self.properties.session is None or self.properties.item_id != self.selected:
                 self.properties.show_item(self.session, self.selected)
             else:
@@ -1221,8 +1222,17 @@ class MainWindow(QMainWindow):
         title = f"guiqula — {path.name}" if path else "guiqula"
         self.setWindowTitle(title + (" *" if self.session.modified else ""))
 
+    def _selected_row(self):
+        """The outliner row of the selection: a linked row when an op or a
+        region was selected under a later system on its geometry."""
+        if self.context is not None and self.selected:
+            row = f"{self.context}/{self.selected}"
+            if self.outliner.item(row) is not None:
+                return row
+        return self.selected
+
     def _exists(self, item_id):
-        if item_id in ("calculations", "kpaths"):
+        if item_id in ("calculations", "kpaths", "geometries"):
             return True
         system = system_of(item_id)
         try:
@@ -1230,7 +1240,9 @@ class MainWindow(QMainWindow):
                                           for e in self.session.document.embeddings):
                 return item_id in embedding_rows(self.session.document.embedding(system))
             if system is not None:      # a row the outliner shows for a system of its kind
-                return item_id in pseudo_ids(self.session.document.system(system))
+                target = self.session.document.system(system)
+                return item_id in pseudo_ids(target) or \
+                    item_id in linked_rows(self.session.document, target)
             self.session.document.find(item_id)
             return True
         except Exception:
@@ -1357,11 +1369,17 @@ class MainWindow(QMainWindow):
         head = system_of(entry)
         if head is not None and any(e.id == head for e in self.session.document.embeddings):
             entry = embedding_rows(self.session.document.embedding(head))[entry]  # its system
+        self.context = None
+        if head is not None and any(s.id == head for s in self.session.document.systems):
+            linked = linked_rows(self.session.document, self.session.document.system(head))
+            if entry in linked:      # an op or a region of a shared geometry, under head
+                entry, self.context = linked[entry], head
         self.selected = entry
-        self.outliner.set_current(entry)
+        self.outliner.set_current(self._selected_row())
+        self.properties.context = self.context
         self.properties.show_item(self.session, entry)
         family = None
-        if entry and "/" not in entry and entry not in ("calculations", "kpaths"):
+        if entry and "/" not in entry and entry not in ("calculations", "kpaths", "geometries"):
             family = self.session.document.find(entry)[0]
         if family == "calculation":
             self.select_calculation(entry)        # before the workspace, which shows it
@@ -1370,7 +1388,8 @@ class MainWindow(QMainWindow):
             self.set_workspace(workspace)         # only a change: a Field previewed stays
         if family == "calculation":
             self.show_result(entry)
-        elif entry and entry not in ("calculations", "kpaths") and family != "kpath":
+        elif entry and entry not in ("calculations", "kpaths", "geometries") and \
+                family != "kpath":
             self.viewport.setCurrentIndex(STRUCTURE_TAB)
         self._refresh_structure()
         self._update_status()
@@ -1511,7 +1530,8 @@ class MainWindow(QMainWindow):
         indices = list(indices or [])
         if indices:
             current = params.get(param, declared.default)
-            regions = {r.id: r.select for r in system.regions}
+            regions = {r.id: r.select
+                       for r in self.session.document.geometry_of(system.id).regions}
             if vector:
                 new = list(current)
                 new[component] = fields.paint(current[component], positions, indices, value,
@@ -1567,7 +1587,8 @@ class MainWindow(QMainWindow):
                 raise ValueError(f"{entry!r} is a {family}; Fields are parameters of terms "
                                  f"and of the mean field")
             spec, params = registry.get("term", obj.kind), obj.params
-            region = next((r for r in system.regions if r.id == obj.region), None)
+            region = next((r for r in document.geometry_of(system.id).regions
+                           if r.id == obj.region), None)
         if param not in spec.param_map or not hasattr(spec.param_map[param], "native"):
             fields_of = [p.name for p in spec.params if hasattr(p, "native")]
             raise ValueError(f"{entry} has no Field {param!r}; its Fields: {fields_of}")
@@ -1594,7 +1615,8 @@ class MainWindow(QMainWindow):
             live = form.live_value(name)
             value = live if live is not None else value
         positions = build["positions"]
-        regions = {r.id: r.select for r in system.regions}
+        regions = {r.id: r.select
+                   for r in self.session.document.geometry_of(system.id).regions}
         results = self.session.result_refs()
         weight = np.ones(len(positions))
         label = f"{entry} {param.label}"
@@ -1845,7 +1867,7 @@ class MainWindow(QMainWindow):
         """Remove the selected sites: extend the system's last op if it is
         an enabled Remove atoms op, else add one. Returns the op id."""
         system, positions = self._selection_positions()
-        ops = self.session.document.system(system).geometry.ops
+        ops = self.session.document.geometry_of(system).ops
         last = ops[-1] if ops else None
         if last is not None and last.kind == "remove_atoms" and last.enabled:
             stored = last.params["positions"]
@@ -1874,13 +1896,17 @@ class MainWindow(QMainWindow):
             return None
         document = self.session.document
         entry = self.selected
-        if entry and entry not in ("calculations", "kpaths"):
+        if entry and entry not in ("calculations", "kpaths", "geometries"):
             system = system_of(entry)
             if system is not None:
                 return system
             family, owner, _, _, obj = document.find(entry)
             if family == "kpath":
                 return self._kpath_system(entry) or document.systems[0].id
+            if family in ("op", "region", "geometry"):     # a geometry's: a system on it
+                users = document.systems_on(owner.id if owner is not None else obj.id)
+                return self.context if self.context in users else \
+                    (users[0] if users else document.systems[0].id)
             if family == "system":
                 return obj.id
             if family == "embedding":
@@ -1899,7 +1925,8 @@ class MainWindow(QMainWindow):
             return None
         document = self.session.document
         entry = self.selected
-        if entry and entry not in ("calculations", "kpaths") and "/" not in entry:
+        if entry and entry not in ("calculations", "kpaths", "geometries") and \
+                "/" not in entry:
             family, _, _, _, obj = document.find(entry)
             if family == "embedding":
                 return obj.id
@@ -1910,14 +1937,21 @@ class MainWindow(QMainWindow):
     def _overlays(self, system_id, build):
         """What the selected entry touches, drawn over the structure."""
         entry = self.selected
-        if not entry or "/" in entry or entry in ("calculations", "kpaths"):
+        if not entry or "/" in entry or entry in ("calculations", "kpaths", "geometries"):
             return {}
-        family, owner, _, _, obj = self.session.document.find(entry)
-        if owner is None or owner.id != system_id:
+        document = self.session.document
+        family, owner, _, _, obj = document.find(entry)
+        if owner is None:
+            return {}
+        if family in ("op", "region"):      # a geometry: drawn on every system built on it
+            if owner.id != document.system(system_id).geometry:
+                return {}
+        elif owner.id != system_id:
             return {}
         region = obj if family == "region" else None
         if family == "term" and obj.region:
-            region = next((r for r in owner.regions if r.id == obj.region), None)
+            region = next((r for r in document.geometry_of(owner.id).regions
+                           if r.id == obj.region), None)
         if region is not None:
             try:
                 return {"highlight": region_tools.evaluate_positions(region.select,
@@ -2202,7 +2236,7 @@ class MainWindow(QMainWindow):
         elif not ok and name in ("set_enabled", "set_meanfield"):
             # Qt ticked or unticked the box before the refusal (a lock): show the Document
             self.outliner.refresh(self.session)
-            self.outliner.set_current(self.selected)
+            self.outliner.set_current(self._selected_row())
 
     # ---- calculations and results
     def _refresh_calculations(self):

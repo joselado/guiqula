@@ -8,7 +8,8 @@ from guiqula.io import project
 
 
 def small():
-    return Document(systems=[System(id="s1", geometry=Geometry(base=Base(kind="chain")),
+    return Document(geometries=[Geometry(id="geo1", base=Base(kind="chain"))],
+                    systems=[System(id="s1", geometry="geo1",
                                     hamiltonian=Hamiltonian(terms=[Entry(id="t1", kind="onsite")]))],
                     calculations=[Calculation(id="c1", system="s1", kind="bands")])
 
@@ -35,7 +36,7 @@ def test_inconsistent_documents_are_refused(change, message):
 
 def test_unknown_keys_are_refused():
     data = json.loads(small().to_json())
-    data["systems"][0]["geometry"]["bse"] = {}
+    data["geometries"][0]["bse"] = {}
     with pytest.raises(Exception):
         Document.from_data(data)
 

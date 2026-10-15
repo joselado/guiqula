@@ -1,20 +1,24 @@
 {
-  "version": 1,
+  "version": 2,
   "notes": "Chern insulator (Haldane model)\nSpinless electrons on the honeycomb lattice with the Haldane coupling and a sublattice imbalance smaller than it: a Chern insulator. Bands (c1), the Chern number (c2) and the Berry curvature over the Brillouin zone, peaked at the K points (c3). Make the imbalance larger than about 5 times the Haldane coupling and the Chern number drops to zero. The phase diagram (c4) sweeps the Chern number (c2) over the imbalance and the Haldane coupling: the lobes of Chern number +1 and -1 are bounded by the lines where the gap closes, |mass| = 3 sqrt(3) |t|; it runs c2 at each of the 117 points (about ten seconds).",
   "locks": [],
+  "geometries": [
+    {
+      "id": "geo1",
+      "base": {
+        "kind": "honeycomb_lattice",
+        "params": {}
+      },
+      "ops": [],
+      "regions": []
+    }
+  ],
   "systems": [
     {
       "id": "s1",
       "name": "Haldane model",
       "kind": "quantum",
-      "geometry": {
-        "base": {
-          "kind": "honeycomb_lattice",
-          "params": {}
-        },
-        "ops": []
-      },
-      "regions": [],
+      "geometry": "geo1",
       "hamiltonian": {
         "construction": {
           "has_spin": false,

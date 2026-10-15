@@ -1,22 +1,26 @@
 {
-  "version": 1,
+  "version": 2,
   "notes": "Quantum spin Hall ribbon (Kane-Mele model)\nA zigzag graphene ribbon with intrinsic spin-orbit coupling: the bulk gaps, and helical edge states cross the gap, each edge carrying one pair with opposite spins (c1, coloured by the position across the ribbon, so the two edges come out red and blue; colouring by sz shows noise wherever two bands are degenerate, since the spin of a degenerate pair is arbitrary). The local density of states inside the gap sits on the edges (c2).",
   "locks": [],
+  "geometries": [
+    {
+      "id": "geo1",
+      "base": {
+        "kind": "honeycomb_zigzag_ribbon",
+        "params": {
+          "width": 8
+        }
+      },
+      "ops": [],
+      "regions": []
+    }
+  ],
   "systems": [
     {
       "id": "s1",
       "name": "Kane-Mele ribbon",
       "kind": "quantum",
-      "geometry": {
-        "base": {
-          "kind": "honeycomb_zigzag_ribbon",
-          "params": {
-            "width": 8
-          }
-        },
-        "ops": []
-      },
-      "regions": [],
+      "geometry": "geo1",
       "hamiltonian": {
         "construction": {
           "has_spin": true,

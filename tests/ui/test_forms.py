@@ -99,7 +99,7 @@ def test_lattice_parameters(panel):
     editor = panel.form.editors["width"]
     assert isinstance(editor, IntEditor) and editor.value() == 10
     editor.spin.setValue(4)
-    assert session.document.system("s1").geometry.base.params == {"width": 4}
+    assert session.document.geometry_of("s1").base.params == {"width": 4}
     session.do("set_lattice", system="s1", lattice="multilayer_graphene")
     panel.show_item(session, "s1")
     assert panel.form.editors["stacking"].value() == "AB"

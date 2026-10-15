@@ -26,8 +26,9 @@ to 8 built, its report with numbered decisions, and the maintainer's answers). R
 before designing anything; update it when a decision changes. Status: phases 0 to 8 are
 done and merged into master (2026-10-04). Phase 9 (the Document as a graph: k-paths and geometries as
 shared objects, a node view beside the outliner) is planned at the end of section 7,
-decisions 213 to 233, and being built in its four parts, A (the k-path as an object, with
-its zone window) built on branch kpath-window, decisions 234 to 239. A numbered decision stands as built unless the
+decisions 213 to 233, and being built in its four parts: A (the k-path as an object, with
+its zone window, decisions 234 to 239) merged, B (the geometry as an object, schema version
+2, decisions 240 to 245) on branch shared-geometry. A numbered decision stands as built unless the
 maintainer answers it; a new change records its decisions, numbered on from the last, at
 the end of section 7, the recommended option first.
 
@@ -78,7 +79,10 @@ section or decision they build, so this map is an index; the rules files hold wh
 not carry.
 
 - `core/`: the Document and what the engine and the UI share without pyqula. `document.py`
-  (pydantic models; ids unique across the document; a quantum system's Hamiltonian =
+  (pydantic models, schema version 2; ids unique across the document; a geometry
+  (`geometries`, geo1) is a lattice or a `parent` geometry, ops and regions, a system names
+  one by id and several may share it (`geometry_of`, `systems_on`, `geometry_chain`), and
+  `lift_geometries` reads a version-1 file; a quantum system's Hamiltonian =
   construction, terms, mean-field block; a classical system's `model` = the model entry's
   set-up and its terms; `terms_of(system)`; an embedding names a pristine and a defective
   quantum system, and a calculation's `system` names a system or an embedding

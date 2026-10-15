@@ -30,8 +30,9 @@ def chain_and_impurity(kind="embedding_ldos", params=None):
 
 
 def test_a_new_embedding_copies_the_pristine_system():
-    """Without a defect named, the defect is a copy of the pristine system,
-    so the two share their cell from the start; the embedding is saved and
+    """Without a defect named, the defect is a copy of the pristine system on
+    the same geometry, so the two share their cell, and keep sharing it
+    (decision 224); the embedding is saved and
     read back, and a document without one writes no embeddings at all."""
     d, s, defect, e, _, c = chain_and_impurity()
     document = d.document
@@ -97,6 +98,9 @@ def test_a_pair_without_a_common_cell_is_refused(pyqula):
     """The engine checks what the planner cannot know: the cells, the
     hoppings between them and the dimensionality."""
     d, s, defect, e, t, c = chain_and_impurity()
+    shared = d.document.system(defect).geometry       # a new defect shares the cell (224)
+    assert shared == d.document.system(s).geometry
+    d.do("set_geometry", system=defect, geometry=d.do("duplicate", entry=shared))
     op = d.do("add_geometry_op", system=defect, kind="supercell", params={"n": [2, 1, 1]})
     with pytest.raises(CalculationError, match="not the pristine cell"):
         run_calculation(d.document, c)

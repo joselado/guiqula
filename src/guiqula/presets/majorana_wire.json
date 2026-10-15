@@ -1,36 +1,41 @@
 {
-  "version": 1,
+  "version": 2,
   "notes": "Majorana wire\nA finite wire with Rashba spin-orbit coupling, an exchange field and s-wave pairing, in the topological phase (exchange field above the pairing, chemical potential near the band bottom): a Majorana zero mode at each end, seen in the local density of states at zero energy (c1) and as a zero-energy peak in the density of states (c2). Lower the exchange field below the pairing and the end states go.",
+  "locks": [],
+  "geometries": [
+    {
+      "id": "geo1",
+      "base": {
+        "kind": "chain",
+        "params": {}
+      },
+      "ops": [
+        {
+          "id": "op1",
+          "kind": "supercell",
+          "enabled": true,
+          "params": {
+            "n": [80, 1, 1]
+          },
+          "region": null
+        },
+        {
+          "id": "op2",
+          "kind": "finite",
+          "enabled": true,
+          "params": {},
+          "region": null
+        }
+      ],
+      "regions": []
+    }
+  ],
   "systems": [
     {
       "id": "s1",
       "name": "Majorana wire",
       "kind": "quantum",
-      "geometry": {
-        "base": {
-          "kind": "chain",
-          "params": {}
-        },
-        "ops": [
-          {
-            "id": "op1",
-            "kind": "supercell",
-            "enabled": true,
-            "params": {
-              "n": [80, 1, 1]
-            },
-            "region": null
-          },
-          {
-            "id": "op2",
-            "kind": "finite",
-            "enabled": true,
-            "params": {},
-            "region": null
-          }
-        ]
-      },
-      "regions": [],
+      "geometry": "geo1",
       "hamiltonian": {
         "construction": {
           "has_spin": true,

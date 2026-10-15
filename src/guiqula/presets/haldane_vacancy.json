@@ -1,20 +1,45 @@
 {
-  "version": 1,
+  "version": 2,
   "notes": "A vacancy in a Chern insulator (embedding)\nSpinless electrons on the honeycomb lattice with the Haldane coupling, a Chern insulator (s1), and the same system with a vacancy, a large onsite energy on one site (s2), embedded in it (e1): the vacancy sits in the infinite crystal, without the images of a supercell. The DOS of the defect's cell (c1) has a peak at zero energy, inside the gap, that the pristine cell does not have: a state bound to the vacancy. Its map (c2) sits on the three neighbours of the vacancy and decays into the bulk, and c3 gives its energy and the gap. Add a sublattice imbalance to both systems and the bound state moves away from zero (to about -0.1 for a mass of 0.2).",
   "locks": [],
+  "geometries": [
+    {
+      "id": "geo1",
+      "base": {
+        "kind": "honeycomb_lattice",
+        "params": {}
+      },
+      "ops": [],
+      "regions": []
+    },
+    {
+      "id": "geo2",
+      "base": {
+        "kind": "honeycomb_lattice",
+        "params": {}
+      },
+      "ops": [],
+      "regions": [
+        {
+          "id": "r1",
+          "name": "vacancy",
+          "select": {
+            "kind": "positions",
+            "positions": [
+              [-0.5, 0.0, 0.0]
+            ],
+            "tol": 0.05
+          }
+        }
+      ]
+    }
+  ],
   "systems": [
     {
       "id": "s1",
       "name": "Haldane model",
       "kind": "quantum",
-      "geometry": {
-        "base": {
-          "kind": "honeycomb_lattice",
-          "params": {}
-        },
-        "ops": []
-      },
-      "regions": [],
+      "geometry": "geo1",
       "hamiltonian": {
         "construction": {
           "has_spin": false,
@@ -45,26 +70,7 @@
       "id": "s2",
       "name": "with a vacancy",
       "kind": "quantum",
-      "geometry": {
-        "base": {
-          "kind": "honeycomb_lattice",
-          "params": {}
-        },
-        "ops": []
-      },
-      "regions": [
-        {
-          "id": "r1",
-          "name": "vacancy",
-          "select": {
-            "kind": "positions",
-            "positions": [
-              [-0.5, 0.0, 0.0]
-            ],
-            "tol": 0.05
-          }
-        }
-      ],
+      "geometry": "geo2",
       "hamiltonian": {
         "construction": {
           "has_spin": false,

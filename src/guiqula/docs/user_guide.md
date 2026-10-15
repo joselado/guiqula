@@ -221,6 +221,22 @@ expressions, not indices, so they survive a change of the supercell. A geometry 
 not flat is drawn in 3D; the 3D box of the Structure tab's bar switches to the xy
 projection, where the selection tools work (see Drawing in 3D).
 
+A geometry is an object of the document of its own, with an id (geo1, geo2), and a system
+is built on one, so that one geometry can carry several systems: two Hamiltonians on the
+same sites to compare, or a classical model whose texture a quantum system then reads on
+exactly its sites (see Fields). The context menu of a system gives New Hamiltonian on this
+geometry, an empty Hamiltonian on the same sites, and Duplicate linked (Alt+D), a copy of the
+system that shares its geometry, while Duplicate (Ctrl+D) copies the geometry too, as
+before. The Geometry row of a system names its geometry and, when another system is built
+on it, says so ("Geometry geo1 · shared with s2"), which is the reminder that an op or a
+region edited there is edited for both. The first system in the document shows the ops and
+regions of a shared geometry by their own ids, and every later one shows the same rows
+under itself, so that selecting one there edits the same op while the canvas draws that
+system. A geometry can also start from another one rather than from a lattice, a ribbon or
+an island cut from a decorated cell, and it then follows every edit of that cell; the Geometry
+row of its system reads "from geo1" in place of the lattice. A geometry no system is built
+on is listed under Geometries, after K-paths, with its ops, and can be removed.
+
 ## Selections and regions
 
 On the Structure tab the Pick, Box and Lasso tools of its bar select sites (shift adds,
@@ -386,21 +402,22 @@ an object of its own, the embedding, which names two ordinary systems: the prist
 the crystal, and the defective one, the same cell with the defect.
 
 The simplest way in is the context menu of a quantum system, New embedding of a defect.
-It makes the embedding and, as the defect, a copy of the system ("s1 (defect)"), so the two
-share their cell from the start; the outliner shows the embedding after the systems, with
+It makes the embedding and, as the defect, a copy of the system ("s1 (defect)") built on the
+same geometry, so the two share their cell by construction, and an op added to either is
+added to both; the outliner shows the embedding after the systems, with
 a row for each of the two, which selects that system. Both are edited exactly as any
 other system, its geometry, its regions and its Hamiltonian, and what the defect has
 beyond the pristine stack is the defect: an onsite energy on one site, an exchange field
 for a magnetic impurity, a large onsite energy for a vacancy. The way we do this is by
 selecting the site on the canvas of the defect, making it a region, and restricting the
-term to it. Properties of the embedding names the two systems, chosen among the document's
+term to it (the region belongs to the shared geometry, and only the defect's term uses it). Properties of the embedding names the two systems, chosen among the document's
 quantum systems, and says whether their cells match.
 
 What matters is that the two systems share their cell, meaning that they have the same
 sites at the same positions and the same hoppings between cells, since the embedding keeps
 only the defect's own cell. So a vacancy is a large onsite energy on its site, as pyqula
 models it, rather than a removed atom; a defect larger than one cell needs the same
-supercell on both systems; and a term of the defect that changes the hoppings to the next
+supercell on both systems, which a shared geometry gives at once; and a term of the defect that changes the hoppings to the next
 cell (a strain at the edge of the cell, a different Haldane coupling) is refused, with the
 size of the change, rather than silently dropped. The two may differ in their Hilbert
 space: when one is spinful or superconducting the other is made so too, so a magnetic
@@ -875,6 +892,7 @@ functions only: the window loads the plugin too, and must start without pyqula.
 | outliner | Del | delete the selected entry |
 | outliner | F2 | rename the selected entry |
 | outliner | Ctrl+D | duplicate the selected entry |
+| outliner | Alt+D | duplicate the selected system on the same geometry (a new Hamiltonian or model on it) |
 | outliner | Alt+Up | move the selected entry up |
 | outliner | Alt+Down | move the selected entry down |
 | canvas | P | pick tool (click an atom) |

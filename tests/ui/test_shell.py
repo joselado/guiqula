@@ -118,7 +118,7 @@ def test_drag_to_reorder(window, qtbot):
     assert drop(window, qtbot, "t3", "t2", below=True) == ("t3", 2)
     qtbot.waitUntil(lambda: terms() == ["t1", "t2", "t3"], timeout=5000)
     assert drop(window, qtbot, "op2", "s1/base", below=True) == ("op2", 0)    # the list head
-    qtbot.waitUntil(lambda: [o.id for o in session.document.system("s1").geometry.ops]
+    qtbot.waitUntil(lambda: [o.id for o in session.document.geometry_of("s1").ops]
                     == ["op2", "op1"], timeout=5000)
     assert drop(window, qtbot, "t1", "op1", below=False) is None              # another list
     assert drop(window, qtbot, "t1", "t2", below=False) is None               # no change
@@ -126,7 +126,7 @@ def test_drag_to_reorder(window, qtbot):
     assert not window.outliner.item("s1").flags() & Qt.ItemFlag.ItemIsDragEnabled
     assert window.outliner.item("t1").flags() & Qt.ItemFlag.ItemIsDragEnabled
     session.undo()
-    assert [o.id for o in session.document.system("s1").geometry.ops] == ["op1", "op2"]
+    assert [o.id for o in session.document.geometry_of("s1").ops] == ["op1", "op2"]
 
 
 def test_select_action_drives_properties_and_viewport(window, qtbot):
@@ -194,7 +194,7 @@ def test_palettes_add_and_select(window, qtbot):
     form = window.properties.form
     form.lattice.setCurrentIndex(form.lattice.findData("lieb_lattice"))
     form.lattice.activated.emit(form.lattice.currentIndex())
-    assert window.session.document.system("s2").geometry.base.kind == "lieb_lattice"
+    assert window.session.document.geometry_of("s2").base.kind == "lieb_lattice"
     settle(qtbot, window)
     assert window.builds["s2"]["sites"] == 3 and window.structure.system_id == "s2"
 

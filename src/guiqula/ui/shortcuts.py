@@ -51,6 +51,8 @@ SHORTCUTS = (
     ("delete", ("Del",), "outliner", "delete the selected entry"),
     ("rename", ("F2",), "outliner", "rename the selected entry"),
     ("duplicate", ("Ctrl+D",), "outliner", "duplicate the selected entry"),
+    ("duplicate_linked", ("Alt+D",), "outliner",
+     "duplicate the selected system on the same geometry (a new Hamiltonian or model on it)"),
     ("move_up", ("Alt+Up",), "outliner", "move the selected entry up"),
     ("move_down", ("Alt+Down",), "outliner", "move the selected entry down"),
     ("tool_pick", ("P",), "canvas", "pick tool (click an atom)"),

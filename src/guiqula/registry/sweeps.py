@@ -42,8 +42,10 @@ def locate(document, target):
         return registry.get("meanfield" if what == "meanfield" else "model", block.kind), \
             block.params
     family, _, _, _, obj = document.find(target)
-    if family == "system":
-        return registry.get("lattice", obj.geometry.base.kind), obj.geometry.base.params
+    if family in ("system", "geometry"):
+        from guiqula.core.document import geometry_chain
+        base = geometry_chain(document, obj.geometry if family == "system" else obj.id)[0].base
+        return registry.get("lattice", base.kind), base.params
     families = {"op": "geometry_op", "term": "term", "calculation": "calculation"}
     if family not in families:
         raise SweepError(f"{target} is a {family}, which has no parameters to sweep")

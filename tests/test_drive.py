@@ -112,7 +112,7 @@ def test_kill_and_recover(repo, tmp_path):
             except (OSError, ValueError):
                 continue
             if data["document"]["systems"][0]["name"] == "before the crash" and \
-                    len(data["document"]["systems"][0]["geometry"]["ops"]) == 2:
+                    len(data["document"]["geometries"][0]["ops"]) == 2:
                 return path
         return None
     try:

@@ -47,7 +47,7 @@ import numpy as np
 import guiqula
 from guiqula import registry, vendoring
 from guiqula.registry import pipeline, plugins
-from guiqula.core.document import terms_of
+from guiqula.core.document import geometry_chain, terms_of
 from guiqula.remote.server import INVALID_PARAMS, NO_METHOD, Pending, RemoteError
 
 LONGEST_WAIT = 3600.0      # seconds: no request waits longer (remote/client.py knows it)
@@ -332,11 +332,15 @@ class RemoteAPI:
 
     def _system_status(self, system):
         session = self.session
+        chain = geometry_chain(session.document, system.geometry)
         item = {"id": system.id, "name": system.name, "kind": system.kind,
-                "lattice": system.geometry.base.kind,
-                "lattice_params": system.geometry.base.params,
-                "ops": [self._entry(op) for op in system.geometry.ops],
-                "regions": [{"id": r.id, "name": r.name} for r in system.regions],
+                "geometry": system.geometry,
+                "shared_with": [s for s in session.document.systems_on(system.geometry)
+                                if s != system.id],
+                "lattice": chain[0].base.kind,
+                "lattice_params": chain[0].base.params,
+                "ops": [self._entry(op) for g in chain for op in g.ops],
+                "regions": [{"id": r.id, "name": r.name} for r in chain[-1].regions],
                 "terms": [self._entry(t) for t in terms_of(system)]}
         if system.hamiltonian is not None:
             item["construction"] = system.hamiltonian.construction.model_dump()
