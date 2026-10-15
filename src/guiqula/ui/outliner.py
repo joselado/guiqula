@@ -1,7 +1,8 @@
 """The outliner (PLAN.md section 4): the whole Document as one tree. One
 node per system with its Geometry stack (the base lattice, then the ops),
 its Regions and its Hamiltonian (the terms, each with the Hilbert space
-after it), then the Calculations with their result status.
+after it), one node per embedding with the two systems it names, then the
+Calculations with their result status.
 
 Ops and terms carry a checkbox (enabled). Ops, terms, regions and
 calculations are reordered by dragging them within their own list (or with
@@ -14,7 +15,9 @@ Items carry the id of what they show: an entry id (s1, op2, t3, r1, c2),
 or ``<system>/base``, ``<system>/geometry``, ``<system>/regions``,
 ``<system>/hamiltonian``, ``<system>/meanfield`` (``<system>/model_stack``,
 ``<system>/model`` for a classical system) for the rows of a system that
-are not entries (pseudo_ids), and ``calculations``. The mean-field row
+are not entries (pseudo_ids), ``<embedding>/pristine`` and
+``<embedding>/defect`` for the rows under an embedding, which select the
+system they name (embedding_rows), and ``calculations``. The mean-field row
 closes the Hamiltonian's list, with its own checkbox (set_meanfield).
 
 The section rows (a system's Geometry, Regions, Hamiltonian or Model, and
@@ -44,8 +47,8 @@ label and its state in words, with the messages (why an entry is invalid,
 why a job failed, what a warning means).
 
 Icons (package P8, ui/icons.py): a row's kind is the icon before its label
-(KIND_ROLE: a quantum or a classical system, the lattice, an op, a region,
-a term, the mean field, a calculation, Python code), and the marks of the
+(KIND_ROLE: a quantum or a classical system, an embedding, the lattice,
+an op, a region, a term, the mean field, a calculation, Python code), and the marks of the
 Status column and of the detail rows are drawn as icons, failed and
 invalid in the error colour, stale and disabled dimmed, a warning as the
 triangle and an invalid entry as the octagon; the text of the column keeps
@@ -144,6 +147,31 @@ def pseudo_ids(system):
     if system.model is not None:
         rows += ["model_stack", "model"]
     return {f"{system.id}/{row}" for row in rows}
+
+
+def embedding_rows(embedding):
+    """The rows under an embedding, which select the systems it names."""
+    return {f"{embedding.id}/pristine": embedding.pristine,
+            f"{embedding.id}/defect": embedding.defect}
+
+
+def cell_problem(session, embedding):
+    """Why the two systems of an embedding do not share a cell, as their
+    latest builds say (the engine checks it again when a calculation runs),
+    or None, also while either is not built."""
+    import numpy as np
+    builds = [session.builds.get(embedding.pristine), session.builds.get(embedding.defect)]
+    if any(b is None or b.get("positions") is None for b in builds):
+        return None
+    pristine, defect = builds
+    if pristine["dimensionality"] == 0:
+        return f"{embedding.pristine} is finite, and the pristine system must be periodic"
+    a, b = (np.asarray(x["positions"], dtype=float) for x in builds)
+    if a.shape != b.shape or not np.allclose(a, b, atol=1e-6) \
+            or pristine["dimensionality"] != defect["dimensionality"]:
+        return (f"the defect's cell ({_sites(len(b))}) is not the pristine cell "
+                f"({_sites(len(a))}): both need the same sites at the same positions")
+    return None
 
 
 def _label(family, kind):
@@ -734,6 +762,8 @@ class Outliner(QTreeWidget):
             document = session.document
             for system in document.systems:
                 self._add_system(session, system)
+            for embedding in document.embeddings:
+                self._add_embedding(session, embedding)
             calcs = self._add(None, "calculations", "Calculations")
             several = len(document.systems) > 1
             for calc in document.calculations:
@@ -849,6 +879,38 @@ class Outliner(QTreeWidget):
             self._add_entry(hamiltonian, term, "term", stages[term.id], report,
                             mode=report.get("mode") if report else None)
         self._add_meanfield(session, hamiltonian, system, stages[f"{system.id}/meanfield"])
+
+    def _add_embedding(self, session, embedding):
+        """An embedding: a detail row saying which defect sits in which
+        crystal, and under it a row for each of the two systems, which
+        selects that system."""
+        document = session.document
+        name = embedding.name if embedding.name != embedding.id else ""
+        status = f"{embedding.defect} in {embedding.pristine}"
+        details = [f"an embedding: the defect {embedding.defect} in the infinite pristine "
+                   f"system {embedding.pristine}"]
+        problem = cell_problem(session, embedding)
+        if problem:
+            status = f"{marks.mark('warning')} {status}"
+            details.append(f"{marks.mark('warning')} {problem}")
+        top = self._add(None, embedding.id, _entry_text(embedding.id, "Embedding", name),
+                        status, details, kind="embedding")
+        font = self.font()
+        font.setBold(True)
+        top.setFont(0, font)
+        self._detail_row(top)
+        for row, role in ((f"{embedding.id}/pristine", "pristine"),
+                          (f"{embedding.id}/defect", "defect")):
+            system_id = getattr(embedding, role)
+            try:
+                system = document.system(system_id)
+                label = _entry_text(role.capitalize(), system_id,
+                                    system.name if system.name != system_id else "")
+            except Exception:
+                label = _entry_text(role.capitalize(), system_id)
+            self._add(top, row, label, details=[
+                f"the {role} system, {system_id}: selecting this row selects it, and its "
+                f"geometry and Hamiltonian are edited there"], kind="structure")
 
     def _add_model(self, top, system, stages, runtime, plan):
         """A classical system's Model branch: its set-up row and its terms."""
@@ -1155,7 +1217,7 @@ class Outliner(QTreeWidget):
 
     def move_current(self, step):
         found = self._family(self.current_id())
-        if found is None or found[0] == "system":
+        if found is None or found[0] in ("system", "embedding"):
             return
         _, _, items, index, _ = found
         if 0 <= index + step < len(items):
@@ -1212,7 +1274,7 @@ class Outliner(QTreeWidget):
 
     def rename_current(self):
         found = self._family(self.current_id())
-        if found is None or found[0] not in ("system", "region"):
+        if found is None or found[0] not in ("system", "region", "embedding"):
             return
         name, ok = QInputDialog.getText(self, "Rename", "Name:", text=found[-1].name)
         if ok and name.strip():
@@ -1234,8 +1296,11 @@ class Outliner(QTreeWidget):
         if family == "calculation":
             menu.addAction("Run", lambda: self.command.emit("run_calculation",
                                                             {"calculation": obj.id}))
-        if family in ("system", "region"):
+        if family in ("system", "region", "embedding"):
             menu.addAction("Rename...", self.rename_current)
+        if family == "system" and obj.kind == "quantum":
+            menu.addAction(icons.icon("embedding"), "New embedding of a defect",
+                           lambda: self.command.emit("add_embedding", {"pristine": obj.id}))
         locks = self._session.document.locks if self._session is not None else []
         targets = [(obj.id, "")] + ([(f"{obj.id}/geometry", " the geometry")]
                                     if family == "system" else [])
@@ -1247,7 +1312,7 @@ class Outliner(QTreeWidget):
                 menu.addAction(f"Lock{what}", lambda t=target: self.command.emit(
                     "lock", {"target": t}))
         menu.addAction("Duplicate", self.duplicate_current)
-        if family != "system":
+        if family not in ("system", "embedding"):
             menu.addAction("Move up", lambda: self.move_current(-1))
             menu.addAction("Move down", lambda: self.move_current(1))
         menu.addSeparator()

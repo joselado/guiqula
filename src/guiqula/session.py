@@ -301,6 +301,15 @@ class Session:
     def build_all(self, view=False):
         return [self.build(system.id, wait=False, view=view) for system in self.document.systems]
 
+    def systems_of(self, target):
+        """The systems a calculation on target runs on: the system, or the
+        pristine and the defective ones of an embedding."""
+        document = self.document
+        if any(e.id == target for e in document.embeddings):
+            embedding = document.embedding(target)
+            return (embedding.pristine, embedding.defect)
+        return (target,)
+
     def build_is_current(self, system):
         """Whether builds[system] was built from the current Document (it
         stops before the mean field, which runs with the calculations)."""

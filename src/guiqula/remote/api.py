@@ -316,6 +316,9 @@ class RemoteAPI:
                             "modified": session.modified, "trusted": session.trusted,
                             "notes": document.notes, "locks": list(document.locks)},
                "systems": systems, "calculations": calculations,
+               **({"embeddings": [{"id": e.id, "name": e.name, "pristine": e.pristine,
+                                   "defect": e.defect} for e in document.embeddings]}
+                  if document.embeddings else {}),
                "undo": history["undo"][:5], "redo": history["redo"][:5],
                "settled": self.settled(), "window": None}
         if self.window is not None:

@@ -16,8 +16,9 @@ from guiqula.core import fields as field_tools
 from guiqula.core import locks as lock_tools
 from guiqula.core import regions as region_tools
 from guiqula.core.document import (CLASSICAL_KINDS, SYSTEM_KINDS, Base, Calculation,
-                                   Construction, Entry, Geometry, Hamiltonian, MeanField, Model,
-                                   Region, System, region_users, terms_of)
+                                   Construction, DocumentError, Embedding, Entry, Geometry,
+                                   Hamiltonian, MeanField, Model, Region, System, region_users,
+                                   terms_of)
 from guiqula.registry import base as registry
 from guiqula.registry import plugins
 from guiqula.registry.params import ParamError, SystemParam
@@ -150,9 +151,56 @@ def rename(document, entry, name):
     """Name a system, region, op, term or calculation ("" takes an entry's
     name away)."""
     family, _, _, _, obj = document.find(entry)
-    if family not in ("system", "region", "op", "term", "calculation"):
+    if family not in ("system", "region", "op", "term", "embedding", "calculation"):
         raise CommandError(f"{entry!r} is a {family}, which has no name")
     obj.name = _text("name", name)
+
+
+# ---- embeddings
+def _quantum(document, system, role):
+    try:
+        target = document.system(_text(role, system))
+    except DocumentError as error:
+        raise CommandError(str(error)) from None
+    if target.kind != "quantum":
+        raise CommandError(f"{role}: {system} is a {target.kind.replace('_', ' ')} system; an "
+                           f"embedding takes two quantum systems")
+    return target
+
+
+@mutation
+def add_embedding(document, pristine, defect=None, name=""):
+    """Add an embedding of a defect in the infinite pristine system; returns
+    its id. defect: the defective system; None makes it, a copy of the
+    pristine one to which the defect's terms are added."""
+    _quantum(document, pristine, "pristine")
+    if defect is None:
+        defect = _copy_system(document, pristine)
+        copy = document.system(defect)
+        copy.name = f"{document.system(pristine).name or pristine} (defect)"
+    _quantum(document, defect, "defect")
+    if defect == pristine:
+        raise CommandError("the defect is a system of its own, not the pristine one")
+    embedding = Embedding(id=document.new_id("embedding"), name=_text("name", name),
+                          pristine=pristine, defect=defect)
+    embedding.name = embedding.name or embedding.id
+    document.embeddings.append(embedding)
+    return embedding.id
+
+
+@mutation
+def set_embedding(document, embedding, pristine=None, defect=None):
+    """Name another pristine or defective system in an embedding."""
+    try:
+        target = document.embedding(embedding)
+    except DocumentError as error:
+        raise CommandError(str(error)) from None
+    pristine = target.pristine if pristine is None else _quantum(document, pristine,
+                                                                 "pristine").id
+    defect = target.defect if defect is None else _quantum(document, defect, "defect").id
+    if pristine == defect:
+        raise CommandError("the defect is a system of its own, not the pristine one")
+    target.pristine, target.defect = pristine, defect
 
 
 # ---- stacks
@@ -221,13 +269,18 @@ def set_selection(document, entry, select):
 
 @mutation
 def add_calculation(document, system, kind, params=None, name=""):
-    """Add a calculation on a system, with an optional name; returns its id."""
-    target = document.system(system)
+    """Add a calculation on a system or an embedding, with an optional name;
+    returns its id."""
+    try:
+        target_kind = document.target_kind(system)
+    except DocumentError as error:
+        raise CommandError(str(error)) from None
     params = _normalize("calculation", kind, params)
     spec = registry.get("calculation", kind)
-    if target.kind not in spec.systems:
-        raise CommandError(f"{spec.label} does not apply to a {target.kind} system; it is a "
-                           f"calculation of {', '.join(spec.systems)} systems")
+    if target_kind not in spec.systems:
+        what = "an embedding" if target_kind == "embedding" else f"a {target_kind} system"
+        raise CommandError(f"{spec.label} does not apply to {what}; it is a calculation of "
+                           f"{', '.join(spec.systems)} systems")
     calc = Calculation(id=document.new_id("calculation"), system=system, kind=kind,
                        params=params, plugin=_plugin("calculation", kind),
                        name=_text("name", name))
@@ -237,9 +290,10 @@ def add_calculation(document, system, kind, params=None, name=""):
 
 @mutation
 def remove(document, entry):
-    """Remove a system, op, term, region or calculation. A region still
-    used by a term, or a system a calculation runs on or names (the tip of a
-    local probe), cannot be removed."""
+    """Remove a system, op, term, region, embedding or calculation. A region
+    still used by a term, a system a calculation runs on or names (the tip of
+    a local probe) or an embedding names, or an embedding a calculation runs
+    on, cannot be removed."""
     family, owner, items, index, obj = document.find(entry)
     if family == "region":
         users = [t.id for t in terms_of(owner) if t.region == entry]
@@ -252,6 +306,13 @@ def remove(document, entry):
                  if c.system == entry or entry in _systems_named(c)]
         if users:
             raise CommandError(f"system {entry!r} is used by calculations {users}")
+        named = [e.id for e in document.embeddings_of(entry)]
+        if named:
+            raise CommandError(f"system {entry!r} is part of embeddings {named}")
+    if family == "embedding":
+        users = [c.id for c in document.calculations if c.system == entry]
+        if users:
+            raise CommandError(f"embedding {entry!r} is used by calculations {users}")
     del items[index]
 
 
@@ -266,17 +327,27 @@ def _systems_named(calc):
 
 @mutation
 def duplicate(document, entry):
-    """Copy an op, term, region or calculation (placed right after the
-    original), or a whole system with fresh ids for everything in it (its
+    """Copy an op, term, region, embedding or calculation (placed right after
+    the original), or a whole system with fresh ids for everything in it (its
     terms keep pointing at the copies of its regions); returns the new id."""
     family, _, items, index, obj = document.find(entry)
+    if family == "system":
+        return _copy_system(document, entry)
     copy = obj.model_copy(deep=True)
     items.insert(index + 1, copy)          # new ids are allocated with the copy in place
-    if family != "system":
-        copy.id = document.new_id(family)
-        if family == "region":
-            copy.name = f"{obj.name} (copy)"
-        return copy.id
+    copy.id = document.new_id(family)
+    if family == "region":
+        copy.name = f"{obj.name} (copy)"
+    if family == "embedding":
+        copy.name = f"{obj.name or obj.id} (copy)"
+    return copy.id
+
+
+def _copy_system(document, system_id):
+    """A copy of a system right after it, with fresh ids; returns its id."""
+    _, _, items, index, obj = document.find(system_id)
+    copy = obj.model_copy(deep=True)
+    items.insert(index + 1, copy)
     copy.id = document.new_id("system")
     copy.name = f"{obj.name or obj.id} (copy)"
     for op in copy.geometry.ops:
@@ -299,8 +370,8 @@ def duplicate(document, entry):
 def move(document, entry, index):
     """Move an op, term, region or calculation to a new position in its list."""
     family, _, items, old, obj = document.find(entry)
-    if family == "system":
-        raise CommandError("systems are not ordered")
+    if family in ("system", "embedding"):
+        raise CommandError(f"{family}s are not ordered")
     if not 0 <= index < len(items):
         raise CommandError(f"index {index} out of range 0..{len(items) - 1}")
     items.insert(index, items.pop(old))

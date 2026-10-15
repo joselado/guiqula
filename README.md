@@ -85,6 +85,11 @@ kernels the first time and then keeps them in a cache.
 - Optical conductivity.
 - The dI/dV that an STM tip measures on one site. The tip is a system of its own, so it
   can be a metal, a superconductor or a magnet.
+- A single defect in an infinite crystal, by Green's function embedding, without the
+  images a supercell would give it. An embedding names the pristine system and a
+  defective copy of it, each edited as any other system, and gives the local density of
+  states around the defect, the density of states of its cell, and the energy of the state
+  it binds in a gap.
 - Sweeps of one or two parameters of any term, which give curves and phase diagrams.
 - Classical models on the same lattices: Heisenberg spins with isotropic or tensor exchange
   in a magnetic field (solved by minimizing the energy), and Ising models and lattice gases

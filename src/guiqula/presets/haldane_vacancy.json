@@ -1,0 +1,151 @@
+{
+  "version": 1,
+  "notes": "A vacancy in a Chern insulator (embedding)\nSpinless electrons on the honeycomb lattice with the Haldane coupling, a Chern insulator (s1), and the same system with a vacancy, a large onsite energy on one site (s2), embedded in it (e1): the vacancy sits in the infinite crystal, without the images of a supercell. The DOS of the defect's cell (c1) has a peak at zero energy, inside the gap, that the pristine cell does not have: a state bound to the vacancy. Its map (c2) sits on the three neighbours of the vacancy and decays into the bulk, and c3 gives its energy and the gap. Add a sublattice imbalance to both systems and the bound state moves away from zero (to about -0.1 for a mass of 0.2).",
+  "locks": [],
+  "systems": [
+    {
+      "id": "s1",
+      "name": "Haldane model",
+      "kind": "quantum",
+      "geometry": {
+        "base": {
+          "kind": "honeycomb_lattice",
+          "params": {}
+        },
+        "ops": []
+      },
+      "regions": [],
+      "hamiltonian": {
+        "construction": {
+          "has_spin": false,
+          "nambu": false,
+          "tij": [1.0],
+          "is_sparse": false
+        },
+        "terms": [
+          {
+            "id": "t1",
+            "kind": "haldane",
+            "enabled": true,
+            "params": {
+              "t": 0.1
+            },
+            "region": null
+          }
+        ],
+        "meanfield": {
+          "enabled": false,
+          "kind": "interactions",
+          "params": {}
+        }
+      },
+      "model": null
+    },
+    {
+      "id": "s2",
+      "name": "with a vacancy",
+      "kind": "quantum",
+      "geometry": {
+        "base": {
+          "kind": "honeycomb_lattice",
+          "params": {}
+        },
+        "ops": []
+      },
+      "regions": [
+        {
+          "id": "r1",
+          "name": "vacancy",
+          "select": {
+            "kind": "positions",
+            "positions": [
+              [-0.5, 0.0, 0.0]
+            ],
+            "tol": 0.05
+          }
+        }
+      ],
+      "hamiltonian": {
+        "construction": {
+          "has_spin": false,
+          "nambu": false,
+          "tij": [1.0],
+          "is_sparse": false
+        },
+        "terms": [
+          {
+            "id": "t2",
+            "kind": "haldane",
+            "enabled": true,
+            "params": {
+              "t": 0.1
+            },
+            "region": null
+          },
+          {
+            "id": "t3",
+            "kind": "onsite",
+            "name": "vacancy",
+            "enabled": true,
+            "params": {
+              "mu": 1000.0
+            },
+            "region": "r1"
+          }
+        ],
+        "meanfield": {
+          "enabled": false,
+          "kind": "interactions",
+          "params": {}
+        }
+      },
+      "model": null
+    }
+  ],
+  "embeddings": [
+    {
+      "id": "e1",
+      "name": "vacancy in the Haldane model",
+      "pristine": "s1",
+      "defect": "s2"
+    }
+  ],
+  "calculations": [
+    {
+      "id": "c1",
+      "system": "e1",
+      "kind": "embedding_dos",
+      "params": {
+        "emin": -1.0,
+        "emax": 1.0,
+        "ne": 121,
+        "delta": 0.02,
+        "nk": 100
+      }
+    },
+    {
+      "id": "c2",
+      "system": "e1",
+      "kind": "embedding_ldos",
+      "params": {
+        "energy": 0.0,
+        "delta": 0.01,
+        "window": 7,
+        "nk": 50
+      }
+    },
+    {
+      "id": "c3",
+      "system": "e1",
+      "kind": "embedding_ingap",
+      "params": {
+        "ne": 51,
+        "nk": 100
+      }
+    }
+  ],
+  "ui": {
+    "workspace": "calculate",
+    "calculation": "c1"
+  }
+}

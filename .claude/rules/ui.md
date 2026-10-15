@@ -129,7 +129,7 @@ tests, `drive.py --widget` and the remote `widgets` and `screenshot` methods rel
   (`text_changed`), `size()` being 16 px or 20 px at large text; pixmaps at 16 and 24 px
   (and 20 px while the text is large), since a Python `QIconEngine` subclass
   crashes PySide6 6.11; a checkable menu entry gets no icon, which would hide its check
-  box. `resources/icons/` holds the 59 Tabler Icons of the controls (SVG files drawn in
+  box. `resources/icons/` holds the 60 Tabler Icons of the controls (SVG files drawn in
   `currentColor`, outline but the filled `cancel`, their MIT licence) and a README whose
   table of our names, Tabler's names and styles is what its fetch loop and
   `tests/ui/test_icons.py` read; a new icon is a row there, its file and its name in
@@ -157,8 +157,12 @@ tests, `drive.py --widget` and the remote `widgets` and `screenshot` methods rel
   tooltips and the tests read; the system and the mean field as detail rows across both
   columns, their marks icons too (`leading_marks` when the status reads under the label);
   a section row's "+" as high as its first line (`first_line`), so a wrapped label does not
-  widen the Status column. `tests/ui/test_outliner.py`'s `cut` checks the labels as well as
-  the statuses on every preset.
+  widen the Status column; an embedding is a detail row after the systems (`s2 in s1`, a
+  warning when `cell_problem` finds the builds' cells differ) with the rows
+  `<embedding>/pristine` and `<embedding>/defect`, which `select` turns into the system
+  they name, and a quantum system's context menu has New embedding of a defect.
+  `tests/ui/test_outliner.py`'s `cut` checks the labels as well as the statuses on every
+  preset.
 - `gallery.py` (the presets, the start page's cards and `Title` headings, deleted when
   closed), `sliders.py` (the Sliders panel;
   `range_from`, the range a label's menu gives a slider or a sweep), `kspace.py` (the
@@ -177,7 +181,11 @@ tests, `drive.py --widget` and the remote `widgets` and `screenshot` methods rel
   `fieldKindMenu_<p>`, every kind button of a form as wide as the widest (`line_up`); the
   system a calculation names (the tip of a local probe) is the combo `system_<p>` of the
   document's other quantum systems, (default) first, and the form is rebuilt when the
-  systems change (its `signature`).
+  systems change (its `signature`); an embedding's form, `EmbeddingForm`, has
+  `embeddingName`, the combos `embedding_pristine` and `embedding_defect` of the quantum
+  systems, and `embeddingInfo`. While an embedding or a calculation on it is selected,
+  `current_system()` is its defect (the canvas) and `current_target()` the embedding (the
+  calculations' Add menu, which then lists the Embedding group).
 - `structure.py`: the canvas (`structureView`), its three views (structure, Hamiltonian,
   field), its bar `structureBar` with the selection tools, the mplot3d drawing of
   geometries that are not flat, and `blender_scene`, the arrays io/blender.py exports
@@ -326,5 +334,11 @@ python tools/drive.py --do '{"do": "add_system", "lattice": "chain"}' --do '{"do
     "local_probe", "params": {"probe": "s2", "emin": -0.3, "emax": 0.3, "ne": 61, "T": 0.3,
     "delta": 0.001}}' --run c1 --widget plot_c1 --shot gap.png
                                                    # a tip of its own (decisions 192 to 199)
+python tools/drive.py --do '{"do": "add_system", "lattice": "chain"}' --do '{"do":
+    "set_construction", "system": "s1", "has_spin": false}' --do '{"do": "add_embedding",
+    "pristine": "s1"}' --do '{"do": "add_term", "system": "s2", "kind": "onsite", "params":
+    {"mu": 1.0}}' --do '{"do": "add_calculation", "system": "e1", "kind": "embedding_dos"}' \
+    --run c1 --widget plot_c1 --shot bound.png     # a defect in an infinite chain: its bound
+                                                   # state at 2.24 (decisions 200 to 212)
 PYTHONPATH=src python -m guiqula --remote preset      # the window, remote control on (3.7)
 ```

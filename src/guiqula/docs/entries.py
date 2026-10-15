@@ -30,7 +30,7 @@ FAMILY_NAMES = {"lattice": "lattice", "geometry_op": "geometry op", "term": "ter
 OWN_SECTIONS = {"system": "Systems and geometry", "region": "Selections and regions",
                 "calculations": "Calculations and results", "geometry": "Systems and geometry",
                 "regions": "Selections and regions", "hamiltonian": "Terms and the Hamiltonian",
-                "model_stack": "Classical systems"}
+                "model_stack": "Classical systems", "embedding": "Embedding a defect"}
 MORE = 8     # links to further sections whose code calls an entry's pyqula function
 
 
@@ -266,6 +266,8 @@ def item_help(session, item_id):
     if item_id == "calculations":
         return "Calculations", section_page("guiqula", OWN_SECTIONS["calculations"])
     system_id, slash, part = item_id.partition("/")
+    if slash and any(e.id == system_id for e in document.embeddings):
+        return OWN_SECTIONS["embedding"], section_page("guiqula", OWN_SECTIONS["embedding"])
     if slash:
         system = document.system(system_id)
         if part == "base":
@@ -280,7 +282,7 @@ def item_help(session, item_id):
         section = OWN_SECTIONS.get(part, "Systems and geometry")
         return section, section_page("guiqula", section)
     family, owner, _, _, obj = document.find(item_id)
-    if family in ("system", "region"):
+    if family in ("system", "region", "embedding"):
         return OWN_SECTIONS[family], section_page("guiqula", OWN_SECTIONS[family])
     registry_family = {"op": "geometry_op", "term": "term", "calculation": "calculation"}[family]
     spec = registry.get(registry_family, obj.kind)

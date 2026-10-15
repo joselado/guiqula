@@ -26,6 +26,10 @@ entry. In order:
   that changes the pairing problem rather than shifting the spectrum,
   whose zero is the Fermi level already.
 
+On an embedding the targets stop after the k-points: the sites of its LDOS
+are those of the window around the defect, which no system holds, and a
+Fermi level would have to move in both of its systems.
+
 A target is a dict with ``target`` (set, add, parameter, kpath,
 select_sites, region, fermi_level), what doing it needs, and ``label``,
 the text of the menu. pyqula-free, like pipeline.py.
@@ -126,14 +130,14 @@ def snapshot_of(result):
 
 def targets(document, system_id, values, source=None, mode=None, dimensionality=None,
             snapshot=None):
-    """The targets of picked values on a system. source: the calculation
+    """The targets of picked values on a system (or an embedding). source: the calculation
     picked on (it is not moved to a value it holds already, and a sweep
     runs its calculation at the point picked); mode: the system's planned
     Hilbert space (nambu: no Fermi-level target); dimensionality: of its
     geometry, when known (a calculation of two-dimensional systems only is
     not offered on others); snapshot: the Document the picked result was
     computed from (the Fermi level it had)."""
-    system = document.system(system_id)
+    kind = document.target_kind(system_id)      # a system's, or "embedding"
     out = []
     for calc in document.calculations:
         if calc.system != system_id:
@@ -152,7 +156,7 @@ def targets(document, system_id, values, source=None, mode=None, dimensionality=
             out.append({"target": "set", "calculation": calc.id, "params": changed,
                         "label": f"{calc.id} {spec.label}: {_assignments(changed)}"})
     for spec in registry.entries("calculation"):
-        if system.kind not in spec.systems or not _fits(spec, dimensionality):
+        if kind not in spec.systems or not _fits(spec, dimensionality):
             continue
         for params in _variants(spec, values):
             taken = {p.quantity for p in spec.params if p.name in params}
@@ -189,6 +193,8 @@ def targets(document, system_id, values, source=None, mode=None, dimensionality=
                     kpath, label = list(current) + [k], f"add k = {text} to the k-path of {calc.id}"
                 out.append({"target": "kpath", "calculation": calc.id, "param": param.name,
                             "kpath": kpath, "label": label})
+    if kind == "embedding":       # its sites are the window's, and a Fermi level is two
+        return out
     if values.get("sites"):
         sites = [list(p) for p in values["sites"]]
         many = f"the {len(sites)} sites" if len(sites) > 1 else "the site"
@@ -196,8 +202,9 @@ def targets(document, system_id, values, source=None, mode=None, dimensionality=
                     "label": f"select {many} on the Structure tab"})
         out.append({"target": "region", "system": system_id, "positions": sites,
                     "label": f"a region of {many}"})
-    if "energy" in values and system.kind == "quantum" and mode != "nambu":
+    if "energy" in values and kind == "quantum" and mode != "nambu":
         energy = float(values["energy"])
+        system = document.system(system_id)
         term = fermi_term(system)
         mu = _shift_then(snapshot, system_id) - energy
         out.append({"target": "fermi_level", "system": system_id,

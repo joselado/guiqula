@@ -400,7 +400,10 @@ class CalculationPlan:
     key: str = ""
     system: SystemPlan | None = None
     others: dict = field(default_factory=dict)   # {parameter: SystemPlan} of the other
-                                                 # systems it names (SystemParam)
+                                                 # systems it names (SystemParam), and
+                                                 # "defect" on an embedding
+    embedding: str | None = None                 # the embedding it runs on (system_id is
+                                                 # then its pristine system)
 
 
 def system_references(spec, params):
@@ -416,7 +419,7 @@ def _plan_others(document, calc, plan, trusted, results):
     """Plan the other systems the calculation names; the problem, or None."""
     for name, system_id in system_references(plan.spec, plan.params).items():
         param = plan.spec.param_map[name]
-        if system_id == calc.system:
+        if system_id == plan.system_id:
             return f"{name}: {system_id} is the system it runs on; name another one"
         try:
             other = document.system(system_id)
@@ -431,19 +434,51 @@ def _plan_others(document, calc, plan, trusted, results):
     return None
 
 
+def _plan_embedding(document, calc, plan, trusted, results):
+    """A calculation on an embedding runs on its pristine system and names
+    the defective one as "defect" (an entry reads it with
+    ctx.system("defect")); the problem, or None. Whether the two share a cell
+    is known once they are built, so the engine checks it."""
+    embedding = document.embedding(calc.system)
+    plan.embedding = embedding.id
+    for role in ("pristine", "defect"):
+        other = document.system(getattr(embedding, role))
+        if other.kind != "quantum":
+            return f"{role}: {other.id} is a {KIND_LABELS.get(other.kind, other.kind)} " \
+                   f"system, and an embedding takes quantum ones"
+    if embedding.pristine == embedding.defect:
+        return f"{embedding.id} names {embedding.pristine} as both pristine and defect"
+    plan.system_id = embedding.pristine
+    plan.system = plan_system(document, embedding.pristine, trusted, results)
+    plan.others["defect"] = plan_system(document, embedding.defect, trusted, results)
+    if plan.others["defect"].problem:
+        return f"defect: {embedding.defect}: {plan.others['defect'].problem}"
+    return None
+
+
 def plan_calculation(document, calc_id, trusted=True, results=None):
     calc = document.calculation(calc_id)
     plan = CalculationPlan(calc.id, calc.kind, calc.system)
+    embedded = None
     try:
-        plan.system = plan_system(document, calc.system, trusted, results)
+        if document.target_kind(calc.system) == "embedding":
+            embedded = _plan_embedding(document, calc, plan, trusted, results)
+        else:
+            plan.system = plan_system(document, calc.system, trusted, results)
     except DocumentError as error:
         plan.problem = str(error)
         return plan
-    system_kind = plan.system.kind
+    if plan.system is None:
+        plan.problem = embedded
+        return plan
+    system_kind = "embedding" if plan.embedding else plan.system.kind
     plan.spec, plan.params, plan.problem = _check_entry("calculation", calc.kind, calc.params,
                                                         system_kind, trusted, calc.plugin)
     if plan.problem is None and plan.system.problem:
-        plan.problem = plan.system.problem
+        plan.problem = (f"pristine: {plan.system_id}: " if plan.embedding else "") \
+            + plan.system.problem
+    if plan.problem is None:
+        plan.problem = embedded
     if plan.problem is None:
         plan.problem = _plan_others(document, calc, plan, trusted, results)
     inner = None
@@ -471,6 +506,15 @@ def _owner(document, target):
     return owner.id
 
 
+def _parts(document, target):
+    """The systems a calculation on target runs on: the system, or the two of
+    an embedding."""
+    if document.target_kind(target) == "embedding":
+        embedding = document.embedding(target)
+        return (embedding.pristine, embedding.defect)
+    return (target,)
+
+
 def _plan_sweep(document, calc, params, trusted, results):
     """(problem or None, key of the calculation it runs) of a sweep."""
     from guiqula.registry import sweeps
@@ -487,7 +531,7 @@ def _plan_sweep(document, calc, params, trusted, results):
         problem = sweeps.check_target(document, target, param, component)
         if problem:
             return problem, None
-        if _owner(document, target) != calc.system:
+        if _owner(document, target) not in _parts(document, calc.system):
             return f"{target} is not part of {calc.system}, which the sweep runs on", None
         problem = sweeps.check_values(document, target, param, component, values)
         if problem:

@@ -31,7 +31,8 @@ the page back, and File > Presets gallery shows the same examples in a dialog, w
 whole description of the one selected.
 
 A document holds one or more systems (a geometry and its Hamiltonian, or a classical
-model) and the calculations on them. The simplest way in is an example: open one, select
+model), the embeddings that put a defective system in an infinite pristine one (Embedding
+a defect, below), and the calculations on them. The simplest way in is an example: open one, select
 a calculation in the outliner and press Run (F5), then change anything in it and run
 again. From scratch, the way we do this is by choosing a lattice on the start page, then
 adding geometry ops (a supercell, a ribbon, an island) with the "+" of the system's
@@ -374,6 +375,67 @@ estimate beside Run knows all three. The exported script builds the tip first, k
 `probe`, then the sample, and calls `localprobe.LocalProbe(h, lead=probe, ...)` and its
 `didv_curve`. A sweep collects numbers and a curve is not one, so in practice the tip's
 parameters are scanned with a slider.
+
+## Embedding a defect
+
+We will now see how to compute what a single defect does to an infinite crystal, an
+impurity, an adatom or a vacancy, without the replicas a supercell would give it. A
+supercell calculation periodizes the defect, so the impurity sees its own images; the
+Green's function embedding keeps the infinite pristine crystal and replaces the matrix of
+one of its cells by the defective one, which is pyqula's `Embedding`. In the window this is
+an object of its own, the embedding, which names two ordinary systems: the pristine one,
+the crystal, and the defective one, the same cell with the defect.
+
+The simplest way in is the context menu of a quantum system, New embedding of a defect.
+It makes the embedding and, as the defect, a copy of the system ("s1 (defect)"), so the two
+share their cell from the start; the outliner shows the embedding after the systems, with
+a row for each of the two, which selects that system. Both are edited exactly as any
+other system, its geometry, its regions and its Hamiltonian, and what the defect has
+beyond the pristine stack is the defect: an onsite energy on one site, an exchange field
+for a magnetic impurity, a large onsite energy for a vacancy. The way we do this is by
+selecting the site on the canvas of the defect, making it a region, and restricting the
+term to it. Properties of the embedding names the two systems, chosen among the document's
+quantum systems, and says whether their cells match.
+
+What matters is that the two systems share their cell, meaning that they have the same
+sites at the same positions and the same hoppings between cells, since the embedding keeps
+only the defect's own cell. So a vacancy is a large onsite energy on its site, as pyqula
+models it, rather than a removed atom; a defect larger than one cell needs the same
+supercell on both systems; and a term of the defect that changes the hoppings to the next
+cell (a strain at the edge of the cell, a different Haldane coupling) is refused, with the
+size of the change, rather than silently dropped. The two may differ in their Hilbert
+space: when one is spinful or superconducting the other is made so too, so a magnetic
+impurity on a spinless metal works as it is. The pristine system has to be periodic; the
+embedding row warns as soon as the builds show that the cells differ, and the calculation
+says why when it runs.
+
+The calculations of an embedding are in the Embedding group of the Add menu, offered while
+the embedding, or a calculation on it, is selected. Embedded LDOS is the local density of
+states at one energy on the cells around the defect, `cells around` of them per direction,
+the defect's in the middle, drawn on the atoms of that window: Friedel oscillations in a
+metal, a bound state in a gap, what STM sees around an adatom. Embedded DOS is the density
+of states of the defect's cell against energy, drawn with the same cell of the pristine
+crystal as a reference, so that a bound state is a peak the reference does not have; for
+an onsite impurity $V$ on a chain with hopping $t$ it sits at $\sqrt{V^2+4t^2}$, outside
+the band. In-gap state is the energy of the peak a defect binds inside the gap of the
+pristine system, together with that gap, which in a superconductor is the Yu-Shiba-Rusinov
+state of a magnetic impurity; there the states come in pairs at $\pm E$, and the search
+gives one of the two.
+
+The example `haldane_vacancy` (the start page's examples) is a vacancy in Haldane
+graphene: its DOS has the peak of the bound state at zero energy, inside the Chern gap,
+and its LDOS shows that state on the three neighbours of the vacancy.
+
+The in-gap state is a number, so a sweep collects it: Sweep this parameter on the exchange
+of the defect's term runs the In-gap state of the embedding at every value, and the curve
+is the bound state moving into the gap as the exchange grows. A change of either system
+makes the results of the embedding stale. The cost is the Green's function of the window:
+in two dimensions about proportional to the k-points and to the number of orbitals of the
+window (5 s for a window of 5x5 cells of 64 orbitals at `nk=100` on the maintainer's
+machine), and in one dimension milliseconds, the k-points not entering there. The exported
+script builds the defect first, kept as `defect`, then the pristine system, puts them in
+one Hilbert space with the function `embedded_pair` it carries, and calls
+`embedding.Embedding(h, m=defect)`.
 
 ## Drawing in 3D
 

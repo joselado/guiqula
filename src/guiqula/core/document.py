@@ -15,6 +15,14 @@ term stack. Entry ids are unique across the document, so a command can
 name any entry by id alone; terms_of(system) is a system's term stack,
 whatever its kind.
 
+An embedding (``embeddings``, ids e1, e2...) names two quantum systems of
+the document, the pristine crystal and the defect, each an ordinary system
+edited as any other; it has no stack of its own, and a calculation may run
+on it as it runs on a system (``Calculation.system`` names either). The two
+must share their cell: pyqula's Embedding takes the pristine Hamiltonian and
+only the intracell matrix of the defective one. The list is left out of the
+JSON while it is empty, so a document without embeddings reads as before.
+
 Parameters are stored as plain JSON (``params``); their meaning and
 validation belong to the registry entry named by ``kind``. An entry whose
 kind a plugin provides records that plugin (``plugin``), so a document
@@ -43,7 +51,8 @@ _LEAF_LIST = re.compile(rf'"(?:[^"\\]|\\.)*"|\[\s*((?:{_LEAF})(?:\s*,\s*(?:{_LEA
 SYSTEM_KINDS = ("quantum", "classical_spin", "lattice_gas", "ising")
 CLASSICAL_KINDS = SYSTEM_KINDS[1:]
 
-ID_PREFIX = {"system": "s", "op": "op", "term": "t", "region": "r", "calculation": "c"}
+ID_PREFIX = {"system": "s", "op": "op", "term": "t", "region": "r", "calculation": "c",
+             "embedding": "e"}
 
 
 class DocumentError(ValueError):
@@ -160,6 +169,22 @@ class System(_Model):
         return data
 
 
+class Embedding(_Model):
+    """A defect in an otherwise infinite crystal: the pristine system and the
+    defective one, by id (both quantum, with the same cell)."""
+    id: str
+    name: str = ""
+    pristine: str
+    defect: str
+
+    @model_serializer(mode="wrap")
+    def _without_empty_name(self, handler):
+        data = handler(self)
+        if isinstance(data, dict) and not data.get("name"):
+            data.pop("name", None)
+        return data
+
+
 class Calculation(_Kind):
     id: str
     system: str
@@ -173,8 +198,16 @@ class Document(_Model):
     notes: str = ""                # what the document is about (the presets gallery shows it)
     locks: list[str] = Field(default_factory=list)   # what a teacher locked (core/locks.py)
     systems: list[System] = Field(default_factory=list)
+    embeddings: list[Embedding] = Field(default_factory=list)
     calculations: list[Calculation] = Field(default_factory=list)
     ui: dict[str, Any] = Field(default_factory=dict)
+
+    @model_serializer(mode="wrap")
+    def _without_empty_embeddings(self, handler):
+        data = handler(self)
+        if isinstance(data, dict) and not data.get("embeddings", True):
+            del data["embeddings"]
+        return data
 
     # ---- serialization
     def to_json(self, indent=2):
@@ -212,6 +245,24 @@ class Document(_Model):
                 return system
         raise DocumentError(f"no system {system_id!r}")
 
+    def embedding(self, embedding_id):
+        for embedding in self.embeddings:
+            if embedding.id == embedding_id:
+                return embedding
+        raise DocumentError(f"no embedding {embedding_id!r}")
+
+    def target_kind(self, target_id):
+        """The kind of what a calculation may run on: a system's kind, or
+        "embedding"."""
+        for embedding in self.embeddings:
+            if embedding.id == target_id:
+                return "embedding"
+        return self.system(target_id).kind
+
+    def embeddings_of(self, system_id):
+        """The embeddings that name a system (as pristine or defect)."""
+        return [e for e in self.embeddings if system_id in (e.pristine, e.defect)]
+
     def calculation(self, calc_id):
         for calc in self.calculations:
             if calc.id == calc_id:
@@ -235,6 +286,9 @@ class Document(_Model):
             for j, term in enumerate(terms):
                 if term.id == entry_id:
                     return "term", system, terms, j, term
+        for i, embedding in enumerate(self.embeddings):
+            if embedding.id == entry_id:
+                return "embedding", None, self.embeddings, i, embedding
         for i, calc in enumerate(self.calculations):
             if calc.id == entry_id:
                 return "calculation", None, self.calculations, i, calc
@@ -261,6 +315,7 @@ class Document(_Model):
             ids += [op.id for op in system.geometry.ops]
             ids += [region.id for region in system.regions]
             ids += [term.id for term in terms_of(system)]
+        ids += [embedding.id for embedding in self.embeddings]
         ids += [calc.id for calc in self.calculations]
         return ids
 
@@ -322,6 +377,13 @@ def check(document):
         for op in system.geometry.ops:
             if op.region is not None:
                 raise DocumentError(f"geometry op {op.id!r} cannot carry a region in phase 1")
+    for embedding in document.embeddings:
+        for role in ("pristine", "defect"):
+            target = getattr(embedding, role)
+            if target not in systems:
+                raise DocumentError(f"embedding {embedding.id!r} names missing system "
+                                    f"{target!r} as its {role} one")
+    embeddings = {e.id for e in document.embeddings}
     for calc in document.calculations:
-        if calc.system not in systems:
+        if calc.system not in systems and calc.system not in embeddings:
             raise DocumentError(f"calculation {calc.id!r} refers to missing system {calc.system!r}")

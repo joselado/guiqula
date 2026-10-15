@@ -120,7 +120,10 @@ def export_script(document, calc_id, skipped=None, trusted=True, results=None):
 def _docstring(plan, what=None):
     return [f'"""pyqula script exported by guiqula {guiqula.__version__}.',
             "",
-            what or f"Calculation {plan.calc_id} ({plan.kind}) on system {plan.system_id}.",
+            what or f"Calculation {plan.calc_id} ({plan.kind}) on " + (
+                f"embedding {plan.embedding} (pristine {plan.system_id}, defect "
+                f"{plan.others['defect'].system_id})." if plan.embedding
+                else f"system {plan.system_id}."),
             "Run it with pyqula importable; it writes result.npz in the current directory.",
             '"""']
 
@@ -248,7 +251,8 @@ def _export_sweep(document, plan, skipped, trusted, results):
     if inner.problem:
         raise ValueError(f"{plan.calc_id}: {inner.problem}")
     for target, _, _, _ in grid:
-        stage = next((s for s in inner.system.stages if s.id == target), None)
+        stage = next((s for system in [inner.system, *inner.others.values()]   # the defect
+                      for s in system.stages if s.id == target), None)
         if stage is not None and stage.problem:
             raise ValueError(f"{plan.calc_id}: {target} is invalid at the swept values: "
                              f"{stage.problem}")

@@ -797,3 +797,186 @@ entry("calculation", "optical_conductivity", "Optical conductivity",
       cost=lambda p, size: 3 * cost.kmesh(p["nk"], size["dimensionality"])
       * cost.diagonalization(size["dimension"]),
       guide=("Optical conductivity",), pyqula=("h.get_optical_conductivity",))
+
+
+# ---- embedding
+def embedded_pair(h, defect):
+    """The pristine and the defective Hamiltonians of an embedding, in one
+    Hilbert space: both turned Nambu when one is, spinful when one is.
+    Raises ValueError when they do not share a cell: pyqula's Embedding keeps
+    the pristine crystal and replaces the matrix of one cell by the defect's,
+    so the two need the same sites at the same positions and the same
+    hoppings between cells."""
+    import numpy as np
+    if h.dimensionality == 0:
+        raise ValueError("the pristine system is finite; an embedding puts the defect in an "
+                         "infinite crystal, so the pristine system must be periodic")
+    if defect.dimensionality != h.dimensionality:
+        raise ValueError(f"the defect is {defect.dimensionality}-dimensional and the pristine "
+                         f"system {h.dimensionality}-dimensional; both have the same cell")
+    r0, r1 = (np.asarray(x.geometry.r, dtype=float) for x in (h, defect))
+    a0, a1 = (np.array([x.geometry.a1, x.geometry.a2, x.geometry.a3], dtype=float)
+              for x in (h, defect))
+    if r0.shape != r1.shape or not np.allclose(r0, r1, atol=1e-6) \
+            or not np.allclose(a0, a1, atol=1e-6):
+        raise ValueError(f"the defect's cell ({len(r1)} sites) is not the pristine cell "
+                         f"({len(r0)} sites): both need the same sites at the same positions, "
+                         f"so make the supercell on both, and model a vacancy as a large "
+                         f"onsite energy on its site rather than a removed atom")
+    h, defect = h.copy(), defect.copy()
+    if h.has_eh or defect.has_eh:
+        for x in (h, defect):
+            if not x.has_eh:
+                x.turn_nambu()
+    elif h.has_spin or defect.has_spin:
+        for x in (h, defect):
+            if not x.has_spin:
+                x.turn_spinful()
+    h0, h1 = h.get_dict(), defect.get_dict()
+    keys = {tuple(int(n) for n in k) for k in list(h0) + list(h1)} - {(0, 0, 0)}
+    d0 = {tuple(int(n) for n in k): v for k, v in h0.items()}
+    d1 = {tuple(int(n) for n in k): v for k, v in h1.items()}
+    for key in sorted(keys):
+        m0 = np.asarray(d0[key].todense() if hasattr(d0.get(key), "todense") else
+                        d0.get(key, 0.0))
+        m1 = np.asarray(d1[key].todense() if hasattr(d1.get(key), "todense") else
+                        d1.get(key, 0.0))
+        change = float(np.max(np.abs(m1 - m0)))
+        if change > 1e-8:
+            raise ValueError(f"the defect changes the hoppings between cells (by up to "
+                             f"{change:.3g}, to the cell at {list(key)}), and the embedding "
+                             f"keeps only the defect's own cell; make the supercell larger so "
+                             f"that the defect sits inside it")
+    return h, defect
+
+
+def _embedding(h, ctx):
+    from pyqula import embedding
+    h, defect = embedded_pair(h, ctx.system("defect"))
+    ctx.note("mode", "nambu" if h.has_eh else "spinful" if h.has_spin else "spinless")
+    return embedding.Embedding(h, m=defect)
+
+
+_EMBEDDING_SCRIPT = ["h, defect = embedded_pair(h, defect)",
+                     "eb = embedding.Embedding(h, m=defect)"]
+
+
+def _window(h, cells):
+    """The cells around the defect an embedding LDOS is computed on, as a
+    finite geometry (a piece of the infinite crystal, drawn without its
+    images)."""
+    g = h.geometry.supercell(cells)            # as get_ldos makes it, so the order matches
+    g.dimensionality = 0
+    return g
+
+
+def _embedding_ldos(h, ctx):
+    eb = _embedding(h, ctx)
+    _, _, d = eb.get_ldos(energy=ctx.value("energy"), delta=ctx.value("delta"),
+                          nsuper=ctx.value("window"), nk=ctx.value("nk"), write=False)
+    ctx.note("geometry", _window(eb.H, ctx.value("window")))
+    return {"ldos": d}
+
+
+def _embedding_dos(h, ctx):
+    import numpy as np
+    from pyqula import embedding
+    eb = _embedding(h, ctx)
+    energies = _energies(ctx)
+    kwargs = dict(delta=ctx.value("delta"), nk=ctx.value("nk"))
+    _, dos = eb.multidos(es=energies, **kwargs)
+    _, pristine = embedding.Embedding(eb.H).multidos(es=energies, **kwargs)
+    return {"energies": energies, "dos": np.column_stack([dos, pristine])}
+
+
+def _embedding_ingap(h, ctx):
+    eb = _embedding(h, ctx)
+    gap = eb.H.get_gap()
+    if gap < 1e-3:
+        raise ValueError(f"the pristine system has no gap (it is {gap:.2g}), so there is no "
+                         f"in-gap state to look for")
+    return {"energy": eb.get_energy_ingap_state(ne=ctx.value("ne"), nk=ctx.value("nk")),
+            "gap": gap}
+
+
+def _embedding_cost(energies):
+    """The Green's function of the window at each energy. Measured on this
+    machine: in 2D an nk sum over the window, about 5e-5 s per k-point and
+    orbital of the window (0.4 s for one cell of 64 orbitals at nk=100, 5 s
+    for a 5x5 window of it), then one inversion of the window's matrix; in 1D
+    a renormalization, without k-points (milliseconds for 50 cells)."""
+    def estimate(p, size):
+        d = size["dimensionality"]
+        modes = ("spinless", "spinful", "nambu")
+        defect = (size.get("others") or {}).get("defect", {}).get("mode", size["mode"])
+        widen = 2 ** max(0, modes.index(defect) - modes.index(size["mode"])) \
+            if defect in modes and size["mode"] in modes else 1     # the union of the modes
+        orbitals = p.get("window", 1) ** max(1, d) * size["dimension"] * widen
+        mesh = 5e-5 * p["nk"] * orbitals if d >= 2 else 1e-3
+        return energies(p) * (mesh + cost.diagonalization(orbitals) / 10)
+    return estimate
+
+
+_EMBEDDING_DOC = ("The pristine system is the infinite crystal and the defect replaces "
+                  "one of its cells (pyqula's Embedding), so the defect has no images.")
+
+entry("calculation", "embedding_ldos", "Embedded LDOS",
+      FloatParam("energy", 0.0, "energy", quantity="energy"),
+      FloatParam("delta", 1e-2, "broadening", "Lorentzian width", minimum=1e-9),
+      IntParam("window", 5, "cells around", "the map covers this many cells per direction, the "
+                                            "defect's in the middle", minimum=1),
+      IntParam("nk", 100, "k-points", "of the pristine crystal's Green's function", minimum=1),
+      systems=("embedding",), group="Embedding",
+      doc="Density of states at one energy around a single defect in the infinite pristine "
+          "system, on the cells around it: Friedel oscillations in a metal, a bound state in "
+          "a gap, what STM sees around an adatom or a vacancy. " + _EMBEDDING_DOC,
+      apply=_embedding_ldos, helpers=(embedded_pair,), modules=("embedding",),
+      script=lambda ctx: _EMBEDDING_SCRIPT + [
+          f"_, _, ldos = eb.get_ldos(energy={ctx.code('energy')}, delta={ctx.code('delta')}, "
+          f"nsuper={ctx.code('window')}, nk={ctx.code('nk')}, write=False)",
+          "arrays = dict(ldos=ldos)"],
+      plot={"kind": "structure_scalar", "values": "ldos", "clabel": "LDOS"},
+      cost=_embedding_cost(lambda p: 1),
+      guide=("guiqula: Embedding a defect", "Single defects in infinite systems"),
+      pyqula=("embedding.Embedding", "embedding.Embedding.get_ldos"))
+
+entry("calculation", "embedding_dos", "Embedded DOS",
+      *_energies_params(-3.0, 3.0, 100),
+      FloatParam("delta", 2e-2, "broadening", "Lorentzian width", minimum=1e-9),
+      IntParam("nk", 100, "k-points", "of the pristine crystal's Green's function", minimum=1),
+      systems=("embedding",), group="Embedding",
+      doc="Density of states of the defect's cell against energy, and of the same cell of the "
+          "pristine crystal as a reference: an impurity state is a peak the pristine curve "
+          "does not have. " + _EMBEDDING_DOC,
+      apply=_embedding_dos, helpers=(embedded_pair,), modules=("embedding",),
+      script=lambda ctx: _EMBEDDING_SCRIPT + [
+          f"energies = {_energies_code(ctx)}",
+          f"_, dos = eb.multidos(es=energies, delta={ctx.code('delta')}, nk={ctx.code('nk')})",
+          f"_, pristine = embedding.Embedding(eb.H).multidos(es=energies, "
+          f"delta={ctx.code('delta')}, nk={ctx.code('nk')})",
+          "arrays = dict(energies=energies, dos=np.column_stack([dos, pristine]))"],
+      plot={"kind": "lines", "x": "energies", "y": "dos", "xlabel": "energy",
+            "ylabel": "DOS of the cell", "labels": ["defect", "pristine"],
+            "picks": {"x": "energy"}},
+      cost=_embedding_cost(lambda p: 2 * p["ne"]),
+      guide=("guiqula: Embedding a defect", "Single defects in infinite systems"),
+      pyqula=("embedding.Embedding", "embedding.Embedding.multidos"))
+
+entry("calculation", "embedding_ingap", "In-gap state",
+      IntParam("ne", 51, "energies", "the energies inside the gap the peak is looked for on",
+               minimum=5),
+      IntParam("nk", 100, "k-points", "of the pristine crystal's Green's function", minimum=1),
+      systems=("embedding",), group="Embedding",
+      doc="Energy of the state a defect binds inside the gap of the pristine system, the "
+          "maximum of the defect cell's DOS in the gap (a Yu-Shiba-Rusinov state in a "
+          "superconductor). A number, so a sweep can follow it against the strength of the "
+          "defect. " + _EMBEDDING_DOC,
+      apply=lambda h, ctx: {k: float(v) for k, v in _embedding_ingap(h, ctx).items()},
+      helpers=(embedded_pair,), modules=("embedding",),
+      script=lambda ctx: _EMBEDDING_SCRIPT + [
+          f"arrays = dict(energy=float(eb.get_energy_ingap_state(ne={ctx.code('ne')}, "
+          f"nk={ctx.code('nk')})), gap=float(eb.H.get_gap()))"],
+      plot={"kind": "scalar", "rows": [["energy", "in-gap state"], ["gap", "gap"]]},
+      cost=_embedding_cost(lambda p: p["ne"] + 20),
+      guide=("guiqula: Embedding a defect", "Single defects in infinite systems"),
+      pyqula=("embedding.Embedding", "embedding.Embedding.get_energy_ingap_state"))

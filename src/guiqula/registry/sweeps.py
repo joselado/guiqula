@@ -1,5 +1,5 @@
 """Sweeps (decision 13.10): a calculation that runs another calculation of
-the same system at every value of one parameter, or on a grid of two, and
+the same system (or embedding, whose two systems it may change) at every value of one parameter, or on a grid of two, and
 collects the numbers its results give (a gap, a Chern number, a total
 energy, what a Python calculation sets): a curve, or a phase diagram as a
 map. Section 11 left open whether sweeps are a calculation or a "study"
@@ -219,7 +219,7 @@ entry("calculation", "sweep", "Sweep",
       FloatParam("stop2", 1.0, "second to"),
       IntParam("steps2", 11, "second values", minimum=2),
       TextParam("output", "", "draw", "the number drawn (empty: the first one); all are kept"),
-      group="Sweeps", systems=ALL_SYSTEMS, document_level=True,
+      group="Sweeps", systems=ALL_SYSTEMS + ("embedding",), document_level=True,
       doc="Run a calculation at every value of a parameter (or on a grid of two) and draw the "
           "numbers it gives: the gap against a field, the Chern number against two couplings.",
       apply=_sweep, script=lambda ctx: [], plot=_plot,
