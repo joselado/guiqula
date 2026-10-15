@@ -5,7 +5,7 @@ from guiqula.registry import cost
 from guiqula.registry.base import entry
 from guiqula.registry import kpaths
 from guiqula.registry.params import (ChoiceParam, FloatParam, FloatVectorParam, IntParam,
-                                     KPathParam, PositionsParam, SeedParam)
+                                     KPathParam, PositionsParam, SeedParam, SystemParam)
 
 
 def _path(h, ctx, fraction=False):
@@ -386,6 +386,97 @@ entry("calculation", "site_dos", "DOS on sites",
             "ylabel": "DOS on the sites", "picks": {"x": "energy"}},
       cost=_mesh_cost(2.0),
       guide=("Density of states", "guiqula: Picking from a plot"), pyqula=("h.get_dos",))
+
+# ---- transport
+def _probed_site(h, positions, tol):
+    """The index of the site a local probe touches: the one within tol of
+    the position given (one at most), or the first site of the cell when
+    none is."""
+    import numpy as np
+    if not positions:
+        return 0
+    distance = np.linalg.norm(np.asarray(h.geometry.r, dtype=float) - positions[0], axis=1)
+    if distance.min() > tol:
+        raise ValueError(f"no site is within {tol} of {positions[0]}")
+    return int(np.argmin(distance))
+
+
+def _local_probe(h, ctx):
+    import numpy as np
+    from pyqula.transporttk.localprobe import LocalProbe
+    probe = ctx.system("probe")
+    if probe is not None and probe.dimensionality != 1:
+        raise ValueError(f"the tip is a one-dimensional system (a chain), and "
+                         f"{ctx.params['probe']} is {probe.dimensionality}-dimensional")
+    i = _probed_site(h, ctx.value("positions"), ctx.value("tol"))
+    lp = LocalProbe(h, lead=probe, delta=ctx.value("delta"), i=i, T=ctx.value("T"))
+    energies = _energies(ctx)
+    didv = lp.didv_curve(energies, temp=ctx.value("temp"))
+    return {"energies": energies, "didv": np.asarray(didv, dtype=float)}
+
+
+def _local_probe_script(ctx):
+    positions = ctx.value("positions")
+    if positions:
+        site = ["r = np.asarray(h.geometry.r, dtype=float)",
+                f"i = int(np.argmin(np.linalg.norm(r - {positions[0]!r}, axis=1)))"]
+    else:
+        site = ["i = 0"]
+    lead = "None" if ctx.value("probe") is None else "probe"
+    return site + [
+        f"lp = localprobe.LocalProbe(h, lead={lead}, delta={ctx.code('delta')}, i=i, "
+        f"T={ctx.code('T')})",
+        f"energies = {_energies_code(ctx)}",
+        f"didv = lp.didv_curve(energies, temp={ctx.code('temp')})",
+        "arrays = dict(energies=energies, didv=np.asarray(didv, dtype=float))"]
+
+
+def _local_probe_cost(p, size):
+    """Floquet-Keldysh when tip and sample are both Nambu (about 6 s an
+    energy measured above the gaps, more near zero bias), else the sample's Green's
+    function at each energy: milliseconds in 1D, a fraction of a second in
+    2D; a finite temperature averages over about 150 times as many."""
+    tip = (size.get("others") or {}).get("probe")
+    if size.get("mode") == "nambu" and tip is not None and tip["mode"] == "nambu":
+        return 20.0 * p["ne"]
+    each = {0: cost.diagonalization(size["dimension"]), 1: 0.005, 2: 0.25}.get(
+        size["dimensionality"], 5.0)
+    thermal = 150.0 if p["temp"] > 0 else 1.0
+    return p["ne"] * each * thermal * max(1.0, size["dimension"] / 4) ** 3
+
+
+entry("calculation", "local_probe", "Local probe",
+      SystemParam("probe", None, "tip", "a one-dimensional system (a chain) whose terms make "
+                                        "the tip: a Fermi shift, a pairing, an exchange field; "
+                                        "empty: pyqula's default, a spinless metallic chain"),
+      PositionsParam("positions", (), "site", "the position of the site the tip touches (a "
+                                              "pick on a result drawn on the atoms, or the "
+                                              "canvas selection, sets it); empty: the first "
+                                              "site of the cell", quantity="sites",
+                     single=True),
+      FloatParam("tol", 0.05, "tolerance", "the site is the one this close to the position",
+                 minimum=1e-6),
+      *_energies_params(-1.0, 1.0, 50),
+      FloatParam("delta", 1e-2, "broadening", "the probe's and the sample's; inside a gap it "
+                                              "leaves a normal conductance of about "
+                                              "G_N delta / gap", minimum=1e-12),
+      FloatParam("T", 1.0, "transparency", "the tip-sample coupling: 1 is a full contact, "
+                                           "well below 1 the tunneling limit", minimum=0.0),
+      FloatParam("temp", 0.0, "temperature", "of the thermal average of dI/dV", minimum=0.0),
+      group="Transport", doc="dI/dV of a tip touching one site of the infinite sample, against "
+                             "the bias (pyqula's LocalProbe): the spectrum an STM measures. "
+                             "The tip is a chain of its own, so it can be a metal, a "
+                             "superconductor or a magnet; a superconducting tip on a "
+                             "superconducting sample goes through Floquet-Keldysh, tens of "
+                             "seconds an energy, and a finite temperature costs about 150 "
+                             "times more.",
+      modules=("transporttk.localprobe",), apply=_local_probe, script=_local_probe_script,
+      plot={"kind": "lines", "x": "energies", "y": "didv", "xlabel": "bias",
+            "ylabel": "dI/dV (e²/h)", "picks": {"x": "energy"}},
+      cost=_local_probe_cost,
+      guide=("guiqula: A local probe", "Multiple Andreev reflection and AC-Josephson current",
+             "Superconductor-metal transport"),
+      pyqula=("transporttk.localprobe.LocalProbe", "transporttk.didv.didv_curve"))
 
 entry("calculation", "density", "Electron density",
       IntParam("nk", 10, "k-points", "k-points per direction of the mesh (periodic systems)",

@@ -40,6 +40,13 @@ and exported, what the plan and the build do, and what the refresh of `vendor/` 
   (`core/picks.py`: `AXES` and `fixed`); the targets of a picked value (`registry/picks.py`)
   are computed from the parameters' `quantity`, never listed by pairs. A result on the atoms
   yields sites; a bands or spectral-function result carries `kpoints`, reduced, (0, 3) in 0D.
+- A calculation that needs another system names it with a `SystemParam` (the tip of
+  `local_probe`, decisions 192 to 199): `pipeline.plan_calculation` plans it into
+  `plan.others`, refuses a missing, classical or self reference, and puts its key into the
+  calculation's; the engine builds it through the same cache and the adapter reads its
+  Hamiltonian with `ctx.system(name)`; the script builds it first and keeps it as
+  `<name> = h`; `remove` refuses a system so named; the cost sees its mode in
+  `size["others"]`. A sweep still targets the calculation's own system only.
 - A parameter declared `FieldParam(bond=True)` is evaluated at the bond midpoints
   (`core/bonds.py`: the mean of the two ends for a site Field, a region holding a bond when
   it holds both).

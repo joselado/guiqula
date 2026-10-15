@@ -358,3 +358,26 @@ def test_a_sweep_runs_a_calculation_that_gives_numbers(qapp, no_jobs):
     finally:
         window.close()
         session.close()
+
+
+def test_the_tip_of_a_local_probe_is_chosen_among_the_systems(still):
+    """The combo system_probe lists the document's other quantum systems
+    after (default), sets the tip when one is chosen, and follows the
+    systems as they are added (decision 192)."""
+    window, session = still
+    tip = session.do("add_system", lattice="chain", name="tip")
+    session.do("add_system", kind="ising", lattice="square_lattice")   # not a tip
+    calc = session.do("add_calculation", system="s1", kind="local_probe")
+    window.select(calc)
+    combo = window.properties.form.findChild(QComboBox, "system_probe")
+    assert [combo.itemText(i) for i in range(combo.count())] == ["(default)", f"{tip} tip"]
+    combo.setCurrentIndex(1)
+    combo.activated.emit(1)
+    assert session.document.calculation(calc).params["probe"] == tip
+    other = session.do("add_system", lattice="chain")
+    window.select(calc)
+    combo = window.properties.form.findChild(QComboBox, "system_probe")
+    assert combo.currentData() == tip and combo.findData(other) > 0
+    combo.setCurrentIndex(0)
+    combo.activated.emit(0)
+    assert session.document.calculation(calc).params.get("probe") is None

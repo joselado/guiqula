@@ -185,9 +185,12 @@ def test_sites_and_sweeps():
     sweep = d.do("add_calculation", system=s, kind="sweep", params={
         "calculation": gap, "entry": t1, "param": "m", "component": 2})
     found = targets_of.targets(d.document, s, {"sites": [[0.0, 0.0, 0.0]]})
-    assert [t["target"] for t in found] == ["add", "select_sites", "region"]
+    assert [t["target"] for t in found] == ["add", "add", "select_sites", "region"]
     assert found[0]["kind"] == "site_dos" and found[0]["name"] == "on the site at (0, 0)"
     assert found[0]["params"] == {"positions": [[0.0, 0.0, 0.0]]}
+    assert found[1]["kind"] == "local_probe" and found[1]["params"] == found[0]["params"]
+    two = targets_of.targets(d.document, s, {"sites": [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]})
+    assert [t["kind"] for t in two if t["target"] == "add"] == ["site_dos"]   # a probe: one
     point = [{"entry": t1, "param": "m", "component": 2, "value": 0.4}]
     found = targets_of.targets(d.document, s, {"parameter": point}, source=sweep)
     assert found == [{"target": "parameter", "set": point, "run": gap,

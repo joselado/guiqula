@@ -132,27 +132,50 @@ def _footer():
 
 def _parts(plan, skipped=None):
     """(the imports and definitions, the lines that build the system and set
-    arrays) of the script of a calculation plan."""
+    arrays) of the script of a calculation plan. The other systems it names
+    (the tip of a local probe) are built first, each kept in the variable of
+    its parameter's name (probe = h), and then the calculation's own."""
     skipped = dict(skipped or {})
-    system = plan.system
+    systems = list(plan.others.values()) + [plan.system]
+    stages = [stage for system in systems for stage in system.stages]
     head = [*(["import random", ""] if plan.spec.seed_param is not None or any(
                 st.applied and st.spec is not None and st.spec.seed_param is not None
-                for st in system.stages) else []),
+                for st in stages) else []),
             "import numpy as np",
-            *_imports(system.stages, plan.spec),
+            *_imports(stages, plan.spec),
             ""]
     preamble = []
-    for stage in system.stages:
+    for stage in stages:
         if stage.applied and stage.spec is not None:
             preamble += [line for line in stage.spec.preamble if line not in preamble]
     if preamble:
         head += preamble + [""]
     helpers = set()
-    for stage in system.stages:
+    for stage in stages:
         if stage.applied and stage.params is not None:
             helpers |= fields.helpers_of(stage.params)
         if stage.applied and stage.spec is not None:
             helpers |= set(stage.spec.helpers)
+    lines = []
+    for name, other in plan.others.items():
+        lines.append(f"# {name}: system {other.system_id}")
+        lines += _system_lines(other, skipped, helpers)
+        lines += [f"{name} = h", "", f"# system {plan.system_id}"]
+    lines += _system_lines(plan.system, skipped, helpers)
+    helpers |= set(plan.spec.helpers)          # the calculation's own (the DOS on sites)
+    for helper in sorted(helpers, key=lambda f: f.__name__):   # site_field, painted_field...
+        head += ["", inspect.getsource(helper).rstrip(), "", ""]
+    lines.append("")
+    if plan.spec.seed_param is not None:
+        s = plan.params[plan.spec.seed_param.name]
+        lines.append(f"np.random.seed({s}); random.seed({s})")
+    lines += plan.spec.script(ScriptContext(plan.spec, plan.params))
+    return head, lines
+
+
+def _system_lines(system, skipped, helpers):
+    """The lines that build one system as g and h (model for a classical
+    one); adds to helpers what its Fields call."""
     lines = []
     for stage in system.stages:
         if stage.stage == "base":
@@ -201,15 +224,7 @@ def _parts(plan, skipped=None):
         else:
             lines.append(call_code(stage.spec, ctx))
         helpers |= ctx.helpers
-    helpers |= set(plan.spec.helpers)          # the calculation's own (the DOS on sites)
-    for helper in sorted(helpers, key=lambda f: f.__name__):   # site_field, painted_field...
-        head += ["", inspect.getsource(helper).rstrip(), "", ""]
-    lines.append("")
-    if plan.spec.seed_param is not None:
-        s = plan.params[plan.spec.seed_param.name]
-        lines.append(f"np.random.seed({s}); random.seed({s})")
-    lines += plan.spec.script(ScriptContext(plan.spec, plan.params))
-    return head, lines
+    return lines
 
 
 # where between its first and last value each swept parameter is set while

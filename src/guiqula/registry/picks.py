@@ -48,9 +48,10 @@ def _fits(spec, dimensionality):
 
 def _taken(spec, values):
     """{parameter: picked value} of the parameters of a calculation that
-    take a picked quantity."""
+    take a picked quantity (one site, for a parameter that takes one)."""
     return {p.name: values[p.quantity] for p in spec.params
-            if p.quantity is not None and p.quantity in values}
+            if p.quantity is not None and p.quantity in values
+            and not (getattr(p, "single", False) and len(values[p.quantity]) > 1)}
 
 
 def _optional(spec, name):

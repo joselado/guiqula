@@ -42,7 +42,7 @@ from guiqula.core.document import DocumentError, terms_of
 from guiqula.core.hashing import content_hash
 from guiqula.registry import base as registry
 from guiqula.registry import plugins
-from guiqula.registry.params import FieldParam, ParamError
+from guiqula.registry.params import FieldParam, ParamError, SystemParam
 
 MODES = ("spinless", "spinful", "nambu")
 KIND_LABELS = {"classical_spin": "classical spins", "lattice_gas": "lattice gas",
@@ -399,6 +399,36 @@ class CalculationPlan:
     problem: str | None = None
     key: str = ""
     system: SystemPlan | None = None
+    others: dict = field(default_factory=dict)   # {parameter: SystemPlan} of the other
+                                                 # systems it names (SystemParam)
+
+
+def system_references(spec, params):
+    """{parameter name: system id} of the other systems an entry names
+    with these (normalized) parameters."""
+    if spec is None or params is None:
+        return {}
+    return {p.name: params[p.name] for p in spec.params
+            if isinstance(p, SystemParam) and params.get(p.name) is not None}
+
+
+def _plan_others(document, calc, plan, trusted, results):
+    """Plan the other systems the calculation names; the problem, or None."""
+    for name, system_id in system_references(plan.spec, plan.params).items():
+        param = plan.spec.param_map[name]
+        if system_id == calc.system:
+            return f"{name}: {system_id} is the system it runs on; name another one"
+        try:
+            other = document.system(system_id)
+        except DocumentError:
+            return f"{name}: there is no system {system_id!r}"
+        if other.kind not in param.kinds:
+            return f"{name}: {system_id} is a {KIND_LABELS.get(other.kind, other.kind)} " \
+                   f"system, and it takes a {' or '.join(param.kinds)} one"
+        plan.others[name] = plan_system(document, system_id, trusted, results)
+        if plan.others[name].problem:
+            return f"{name}: {system_id}: {plan.others[name].problem}"
+    return None
 
 
 def plan_calculation(document, calc_id, trusted=True, results=None):
@@ -414,6 +444,8 @@ def plan_calculation(document, calc_id, trusted=True, results=None):
                                                         system_kind, trusted, calc.plugin)
     if plan.problem is None and plan.system.problem:
         plan.problem = plan.system.problem
+    if plan.problem is None:
+        plan.problem = _plan_others(document, calc, plan, trusted, results)
     inner = None
     if plan.problem is None and plan.spec.document_level:
         plan.problem, inner = _plan_sweep(document, calc, plan.params, trusted, results)
@@ -421,7 +453,9 @@ def plan_calculation(document, calc_id, trusted=True, results=None):
     if inner is not None:              # a sweep: ids out, the key of what it runs in
         params = {k: v for k, v in params.items() if k != "calculation"}
     plan.key = content_hash({"stage": "calculation", "kind": calc.kind, "params": params,
-                             "systems": [plan.system.key], "inner": inner})
+                             "systems": [plan.system.key], "inner": inner,
+                             **({"others": {name: other.key for name, other in
+                                            plan.others.items()}} if plan.others else {})})
     return plan
 
 

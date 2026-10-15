@@ -20,7 +20,7 @@ from guiqula.core.document import (CLASSICAL_KINDS, SYSTEM_KINDS, Base, Calculat
                                    Region, System, region_users, terms_of)
 from guiqula.registry import base as registry
 from guiqula.registry import plugins
-from guiqula.registry.params import ParamError
+from guiqula.registry.params import ParamError, SystemParam
 
 FAMILY_OF = {"op": "geometry_op", "term": "term", "calculation": "calculation"}
 
@@ -238,7 +238,8 @@ def add_calculation(document, system, kind, params=None, name=""):
 @mutation
 def remove(document, entry):
     """Remove a system, op, term, region or calculation. A region still
-    used by a term, or a system used by a calculation, cannot be removed."""
+    used by a term, or a system a calculation runs on or names (the tip of a
+    local probe), cannot be removed."""
     family, owner, items, index, obj = document.find(entry)
     if family == "region":
         users = [t.id for t in terms_of(owner) if t.region == entry]
@@ -247,10 +248,20 @@ def remove(document, entry):
         if users:
             raise CommandError(f"region {entry!r} is used by {users}")
     if family == "system":
-        users = [c.id for c in document.calculations if c.system == entry]
+        users = [c.id for c in document.calculations
+                 if c.system == entry or entry in _systems_named(c)]
         if users:
             raise CommandError(f"system {entry!r} is used by calculations {users}")
     del items[index]
+
+
+def _systems_named(calc):
+    """Ids of the other systems a calculation names (SystemParam)."""
+    try:
+        spec = registry.get("calculation", calc.kind)
+    except registry.RegistryError:
+        return set()
+    return {calc.params.get(p.name) for p in spec.params if isinstance(p, SystemParam)} - {None}
 
 
 @mutation

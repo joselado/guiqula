@@ -1285,7 +1285,8 @@ say more):
     the classical tensors, the automatic switch to sparse storage (KPM
     now exists; `is_sparse` stays the user's), the calculations of
     section 5 still missing (QPI, entanglement spectrum, RPA and magnons,
-    transport, the real-space Chern density against energy); and the
+    transport, of which the local probe was built on 2026-10-14, decisions
+    192 to 199, the real-space Chern density against energy); and the
     arrays a `from_result` Field reads travel with every job (build, run,
     console), which is nothing for a texture of a few hundred sites and
     will matter for a large result.
@@ -4204,6 +4205,72 @@ The `blender` on this machine's PATH is 2.79, which the search refuses.
      box beside it on the canvas; the bar's groups kept at the right
      edge (the Blender one and Save image) are right-aligned together
      (`FlowLayout` in `ui/canvasbar.py`), where only one was before.
+
+**The local probe (2026-10-14, branch localprobe).** The maintainer asked
+whether pyqula's `LocalProbe` was in the interface, which it was not (no
+transport calculation was, item 19 of phase 4), and then for it, with a tip
+whose Hamiltonian can be tweaked, a metal, a superconductor and so on. Asked
+before building (one question): how the tip is edited; the maintainer picked
+the tip as a system of its own over a few parameters on the calculation. This
+is the first calculation that names a second system, which the schema has
+allowed since decision 13.1, so most of the change is the plumbing: a
+`SystemParam` in `registry/params.py`, planned with the calculation
+(`CalculationPlan.others`, whose keys enter the calculation's), built through
+the same cache and handed to the entry (`ctx.system("probe")`), written first
+in the exported script (`probe = h`), refused when it is missing, classical or
+the sample itself, and protected from removal while named. The entry,
+`local_probe` in a new Transport group, calls `LocalProbe(h, lead=probe,
+delta, i, T)` and `didv_curve` on an energy grid. Verified against direct
+pyqula calls (Rashba graphene with pyqula's tip, a Haldane sample, whose
+hopping reaches beyond a cell, an s-wave chain under a metallic tip at zero
+and at finite temperature, and under a superconducting tip through
+Floquet-Keldysh), by the exported scripts, by the physics (at a bias between
+$\Delta$ and $2\Delta$ a superconducting tip conducts less than a fifth of what
+a metallic one does), and in the window: the s-wave chain under a metallic tip
+shows the gap with its two coherence peaks at $\pm 0.1$.
+
+192. the tip is a system of the document that the calculation names (its
+     parameter `probe`), a chain whose term stack makes it a metal, a
+     superconductor or a magnet; or a few tip parameters on the
+     calculation (Fermi level, gap, exchange field), the maintainer's
+     answer being the first;
+193. an empty tip is pyqula's own, a spinless metallic chain, so the
+     simplest case needs one system; or a tip always required;
+194. a calculation that names a system plans it, keys on it (an edit of
+     the tip makes the curve stale), builds it through the same cache, and
+     its script builds it first; a system named as a tip cannot be
+     removed, as one a calculation runs on cannot; the tip is quantum and
+     not the sample itself, which the planner checks, and one-dimensional,
+     which the engine checks when it runs (the planner does not know the
+     dimensionality, and pyqula's own error for a 2D tip is an
+     AttributeError); or every check left to the run;
+195. the site is one position, the nearest site within the tolerance,
+     and empty means the first site of the cell; the position parameter
+     takes one (`PositionsParam(single=True)`), so a pick of one site
+     offers a new local probe there and a pick of several does not; or the
+     first of several positions, silently;
+196. the cost guard sees the modes of the sample and of the other systems
+     a calculation names (`size["mode"]`, `size["others"]`):
+     Floquet-Keldysh when sample and tip are both Nambu, 20 s an energy
+     (about 6 s measured above the gaps, more near zero bias), else 5 ms an
+     energy on a chain and 0.25 s in 2D, times 150 at a finite temperature
+     (measured 120 on a chain and 190 on Rashba graphene); or the sample's
+     size alone, which lets a Keldysh curve through unasked;
+197. the defaults are a broadening of 0.01 (five energies of Rashba
+     graphene in 1.2 s; at 0.001 the dI/dV at the Dirac point drops from
+     0.61 to 0.23, the broadening filling the dip), pyqula's transparency
+     1, zero temperature and 50 energies from -1 to 1; the sideband cutoffs
+     of Floquet-Keldysh stay at pyqula's defaults, off the form; or the
+     cutoffs on the form;
+198. a sweep still collects numbers, and a dI/dV curve is not one, so the
+     tip's parameters are scanned with a slider: the curve is stale when the
+     tip changes, and Follow computes it again; a sweep target in the tip's
+     system is refused as before; or sweeps that collect curves as maps,
+     a change of the sweep for every calculation;
+199. the curve is dI/dV in units of $e^2/h$ per channel (checked: a spinful
+     chain conducts exactly twice what a spinless one does), and the entry
+     is called Local probe, since the undo history lowercases a label and
+     "local probe di/dv" read badly.
 
 ### Where the section 13 items land
 
