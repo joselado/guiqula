@@ -59,6 +59,8 @@ def describe(name, args, document):
         return f"build {args.get('system')} on {args.get('geometry')}"
     if name == "set_parent":
         return f"start {args.get('geometry')} from {args.get('parent')}"
+    if name == "set_calculation_system":
+        return f"run {args.get('calculation')} on {args.get('system')}"
     if name == "duplicate_linked":
         return f"duplicate {args.get('system')} on the same geometry"
     if name == "add_kpath":

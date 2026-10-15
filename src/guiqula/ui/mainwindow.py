@@ -70,6 +70,7 @@ from guiqula.core import fields
 from guiqula.core import picks as pick_tools
 from guiqula.core import regions as region_tools
 from guiqula.core.document import kpath_params, kpath_users
+from guiqula.registry import graph as graph_tools
 from guiqula.io import blender as blender_export
 from guiqula.io import bundle, crashreport, project, settings
 from guiqula.registry import base as registry
@@ -80,6 +81,7 @@ from guiqula.ui.bars import MessageBar, StatusMessage
 from guiqula.ui.console import ConsoleWidget
 from guiqula.ui.help import HelpPanel
 from guiqula.ui.kspace import KPathWindow
+from guiqula.ui.nodes import NodeView, OutlinerPanel
 from guiqula.ui.sliders import SlidersPanel
 from guiqula.ui.jobpanel import JobPanel
 from guiqula.ui.outliner import Outliner, embedding_rows, linked_rows, pseudo_ids, system_of
@@ -104,8 +106,11 @@ WINDOW_ACTIONS = ("select", "workspace", "tool", "select_sites", "region_from_se
                   "theme", "export_bundle", "export_blender", "help", "remote", "pick", "pick_to",
                   "run_at_once", "renderer_3d", "view_3d", "plot_text", "ui_text",
                   "reset_layout", "log", "panel", "add_menu", "run_stale", "start", "run",
-                  "grid", "grid_place", "kpath_window")
+                  "grid", "grid_place", "kpath_window", "outliner_view", "node_connect",
+                  "node_cut", "node_move", "node_arrange")
 STRUCTURE_TAB = 0
+TREE_WIDTH, NODES_WIDTH = 320, 640     # the Outliner dock's width with the tree, the nodes
+NODES_SHARE = 0.4                       # at most this share of the window for the nodes
 # a new classical system: its lattice, and a supercell the usual orders fit in
 CLASSICAL_STARTS = {"classical_spin": ("triangular_lattice", 3, "Classical spins"),
                     "lattice_gas": ("triangular_lattice", 6, "Lattice gas"),
@@ -242,6 +247,23 @@ class MainWindow(QMainWindow):
         self.outliner.selected.connect(self.select)
         self.outliner.command.connect(self._outliner_command)
         self.outliner.add_requested.connect(self._section_add)
+        # the node view, the Outliner dock's other view (phase 9, part C)
+        self.node_view = NodeView()
+        self.node_view.selected.connect(self.select)
+        self.node_view.activated.connect(self._node_activated)
+        self.node_view.connect_requested.connect(
+            lambda source, target, socket: self._act("node_connect", source=source,
+                                                     target=target, socket=socket))
+        self.node_view.cut_requested.connect(
+            lambda node, socket: self._act("node_cut", node=node, socket=socket))
+        self.node_view.moved.connect(lambda node, x, y: self.node_move(node, x, y))
+        self.node_view.add_requested.connect(self._node_add_menu)
+        self.node_view.delete_requested.connect(lambda node: self._act("remove", entry=node))
+        self.outliner_panel = OutlinerPanel(self.outliner, self.node_view)
+        self.outliner_panel.view_chosen.connect(lambda name: self._act("outliner_view",
+                                                                       name=name))
+        self.outliner_panel.arrange_requested.connect(lambda: self._act("node_arrange"))
+        self.node_places = {}          # {node id: [x, y]} of the nodes moved by hand
         self.properties = PropertiesPanel(self._do)
         self.properties.preview.connect(self._preview_requested)
         self.properties.help_requested.connect(lambda item: self.show_help(item))
@@ -324,7 +346,7 @@ class MainWindow(QMainWindow):
         self.help_panel.browser.setPlaceholderText("Select an entry and press F1 for its help.")
         self.jobs.job_added.connect(self._job_added)
         self.docks = {}
-        for title, widget, name in (("Outliner", self.outliner, "outlinerDock"),
+        for title, widget, name in (("Outliner", self.outliner_panel, "outlinerDock"),
                                     ("Properties", self.properties, "propertiesDock"),
                                     ("Help", self.help_panel, "helpDock"),
                                     ("Sliders", self.sliders_panel, "slidersDock"),
@@ -1084,6 +1106,11 @@ class MainWindow(QMainWindow):
         dispatcher.register_action("grid", self.grid)
         dispatcher.register_action("grid_place", self.place_result)
         dispatcher.register_action("kpath_window", self.kpath_window)
+        dispatcher.register_action("outliner_view", self.set_outliner_view)
+        dispatcher.register_action("node_connect", self.node_connect)
+        dispatcher.register_action("node_cut", self.node_cut)
+        dispatcher.register_action("node_move", self.node_move)
+        dispatcher.register_action("node_arrange", self.node_arrange)
         dispatcher.register_action("panel", self.show_panel)
         dispatcher.register_action("view_3d", self.set_view_3d)
         dispatcher.register_action("add_menu", self.open_add_menu)
@@ -1188,7 +1215,7 @@ class MainWindow(QMainWindow):
         self.show_start(not self.session.document.systems)   # before the canvas draws
         try:
             self._refresh_calculations()
-            self.outliner.refresh(self.session)
+            self._refresh_tree()
             self.outliner.set_current(self._selected_row())
             if self.properties.session is None or self.properties.item_id != self.selected:
                 self.properties.show_item(self.session, self.selected)
@@ -1270,7 +1297,7 @@ class MainWindow(QMainWindow):
         if job.kind == "build":
             system = job.payload["system"]
             if job.status == "done" and self.builds.get(system) is job.value:
-                self.outliner.refresh(self.session)
+                self._refresh_tree()
                 self.properties.refresh(values=False)
                 if system == self.current_system():
                     self._refresh_structure()
@@ -1280,7 +1307,7 @@ class MainWindow(QMainWindow):
                 self._rerun_stale()
             elif job.status == "failed":
                 self.message(f"{system} cannot be built: {job.error}", error=True)
-                self.outliner.refresh(self.session)
+                self._refresh_tree()
                 self._refresh_structure()
             elif job.status == "cancelled" and job.started:
                 self.message(f"a build of {system} was stopped after "
@@ -1297,7 +1324,7 @@ class MainWindow(QMainWindow):
                 self.message(f"{job.id} {job.label} failed: {job.error}", error=True)
             else:
                 self.message(f"{job.id} {job.label} {job.status}")
-            self.outliner.refresh(self.session)
+            self._refresh_tree()
             self.properties.refresh(values=False)
             if job.status == "done" and job.kind == "run":
                 if job.label in pipeline.result_references(self.session.document):
@@ -1376,6 +1403,7 @@ class MainWindow(QMainWindow):
                 entry, self.context = linked[entry], head
         self.selected = entry
         self.outliner.set_current(self._selected_row())
+        self.node_view.select_node(entry)
         self.properties.context = self.context
         self.properties.show_item(self.session, entry)
         family = None
@@ -1669,6 +1697,10 @@ class MainWindow(QMainWindow):
         state = {"workspace": self.workspace, "selected": self.selected,
                  "tool": self.structure.tool, "tab": self.current_tab(),
                  "canvas_view": self.canvas_view, "results": list(self.plots)}
+        if self.outliner_panel.view() == "nodes":
+            state["outliner"] = "nodes"
+        if self.node_places:
+            state["nodes"] = {node: list(place) for node, place in self.node_places.items()}
         if self.structure.projection != "auto":
             state["projection"] = self.structure.projection
         if self.auto_rerun:
@@ -1704,6 +1736,12 @@ class MainWindow(QMainWindow):
         for grid_id in list(self.grids):
             self.close_grid(grid_id)
         self.field_preview = None
+        places = ui.get("nodes")
+        self.node_places = {node: [float(p[0]), float(p[1])] for node, p in places.items()
+                            if isinstance(p, list) and len(p) == 2 and
+                            all(isinstance(v, (int, float)) for v in p)} \
+            if isinstance(places, dict) else {}
+        self.set_outliner_view("nodes" if ui.get("outliner") == "nodes" else "tree")
         preview = ui.get("preview")
         if isinstance(preview, list) and len(preview) == 2 and all(isinstance(p, str)
                                                                    for p in preview):
@@ -2002,6 +2040,86 @@ class MainWindow(QMainWindow):
             except (ValueError, TypeError):
                 pass
 
+    # ---- the node view (phase 9, part C)
+    def _refresh_tree(self):
+        """The outliner, and the node view while it is shown: two views of
+        the same Document, drawn again together."""
+        self.outliner.refresh(self.session)
+        if self.outliner_panel.view() == "nodes":
+            self.node_view.refresh(self.session, self.node_places, self.selected)
+
+    def set_outliner_view(self, name="tree"):
+        """The Outliner dock shows the tree or the nodes; the dock widens
+        while the nodes are shown and narrows back. Returns the view."""
+        if name not in ("tree", "nodes"):
+            raise ValueError(f"unknown outliner view {name!r}: tree or nodes")
+        was = self.outliner_panel.view()
+        self.outliner_panel.show_view(name)
+        if name != was:
+            dock = self.docks["outlinerDock"]
+            wide = min(NODES_WIDTH, int(NODES_SHARE * self.width()))
+            self.resizeDocks([dock], [wide if name == "nodes" else TREE_WIDTH],
+                             Qt.Orientation.Horizontal)
+        if name == "nodes" and self.session is not None:
+            self.node_view.refresh(self.session, self.node_places, self.selected)
+            if name != was:
+                QTimer.singleShot(0, self.node_view.frame_all)   # once the dock has widened
+        return name
+
+    def node_connect(self, source, target, socket):
+        """Link the output of a node to an input of another (one Command:
+        the geometry of a system, the parent of a geometry, the target, the
+        tip or a k-path of a calculation, a system of an embedding); refused
+        with its reason when the declaration does not take it. Returns the
+        Command's name."""
+        name, args = graph_tools.connect(self.session.document, source, target, socket)
+        self.session.do(name, **args)
+        return name
+
+    def node_cut(self, node, socket):
+        """Empty an optional input (the tip of a local probe), meaning the
+        entry's default; an input that is never empty is refused."""
+        name, args = graph_tools.cut(self.session.document, node, socket)
+        self.session.do(name, **args)
+        return name
+
+    def node_move(self, node, x, y):
+        """Keep a node at a place (view state in the ui block, not a Command)."""
+        self.node_places[node] = [float(x), float(y)]
+        if self.outliner_panel.view() == "nodes":
+            item = self.node_view.node_items.get(node)
+            if item is not None and (item.pos().x(), item.pos().y()) != (x, y):
+                item.setPos(float(x), float(y))
+        return self.node_places[node]
+
+    def node_arrange(self):
+        """Every node back in the column of its kind, in Document order."""
+        self.node_places = {}
+        if self.session is not None and self.outliner_panel.view() == "nodes":
+            self.node_view.refresh(self.session, {}, self.selected)
+            self.node_view.frame_all()
+        return graph_tools.layout(graph_tools.nodes(self.session.document))
+
+    def _node_activated(self, node):
+        """A double click on a node: a k-path's zone window, a calculation's
+        result; anything else is selected."""
+        kind = graph_tools.node_kind(self.session.document, node)
+        if kind == "kpath":
+            self.kpath_window(kpath=node)
+        elif kind == "calculation":
+            self.select(node)
+            self.show_result(node)
+        else:
+            self.select(node)
+
+    def _node_add_menu(self, position):
+        """Shift+A in the node view: the Add menu of the workspace at the
+        cursor."""
+        try:
+            self.open_add_menu(position=[position.x(), position.y()])
+        except ValueError as error:
+            self.message(str(error), error=True)
+
     # ---- the zone windows of the k-paths (13.9, phase 9, part A)
     def kpath_window(self, kpath=None, calculation=None, system=None):
         """Open (or bring forward) the window of a k-path on the Brillouin
@@ -2235,7 +2353,7 @@ class MainWindow(QMainWindow):
             self.select(out)
         elif not ok and name in ("set_enabled", "set_meanfield"):
             # Qt ticked or unticked the box before the refusal (a lock): show the Document
-            self.outliner.refresh(self.session)
+            self._refresh_tree()
             self.outliner.set_current(self._selected_row())
 
     # ---- calculations and results
@@ -3807,7 +3925,7 @@ class MainWindow(QMainWindow):
         if self.use_settings:
             settings.put("theme", name)
         if self.session is not None:
-            self.outliner.refresh(self.session)
+            self._refresh_tree()
             self.properties.show_item(self.session, self.selected)   # its formula images
             self._refresh_structure()
             for calc in list(self.plots):
@@ -3847,7 +3965,7 @@ class MainWindow(QMainWindow):
         if remember and self.use_settings:
             settings.put("ui_text", name)
         if self.session is not None:
-            self.outliner.refresh(self.session)
+            self._refresh_tree()
             self.properties.show_item(self.session, self.selected)   # its formula images
         self._show_help_again()                      # its equations at the new size
         return name

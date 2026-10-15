@@ -148,6 +148,17 @@ WINDOW_ACTIONS = {
                     "window on the Brillouin zone, kspaceWindow_<k>, drawn on the zone of the "
                     "calculation's system (else the system given, else of the first "
                     "calculation walking it); returns {kpath, system, window}",
+    "outliner_view": "name: tree or nodes, the Outliner dock's view (the node view, nodeView, "
+                     "widens the dock)",
+    "node_connect": "source, target (node ids: a geometry, k-path, system, embedding or "
+                    "calculation), socket (the target's input: geometry, parent, target, "
+                    "pristine, defect, or a calculation's system or k-path parameter): one "
+                    "Command linking them, refused with its reason; returns its name",
+    "node_cut": "node, socket: empty an optional input (the tip of a local probe), meaning "
+                "the default; an input that is never empty is refused",
+    "node_move": "node, x, y: keep a node at a place of the node view (view state, not a "
+                 "Command)",
+    "node_arrange": "every node back in the column of its kind; returns the places",
 }
 
 

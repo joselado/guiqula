@@ -173,6 +173,13 @@ tests, `drive.py --widget` and the remote `widgets` and `screenshot` methods rel
   has Show in the Brillouin zone and a system's Show Brillouin zone (`kpath_window`).
   `tests/ui/test_outliner.py`'s `cut` checks the labels as well as the statuses on every
   preset.
+- `nodes.py`: the node view (phase 9, part C), `NodeView` (`nodeView`) drawing
+  `registry/graph.py`'s nodes and links, in `OutlinerPanel`, the Outliner dock's content
+  (`outlinerViewTabs` Tree and Nodes, `outlinerStack`, `nodeArrange`); its items are no
+  widgets, so tests read `node_items` and `link_items` and `socket_point(node, socket)`
+  gives a pixel to drag from or to; every gesture is a window action (`outliner_view`,
+  `node_connect`, `node_cut`, `node_move`, `node_arrange`), the places of moved nodes are
+  view state (`ui["nodes"]`), and the window refreshes it with the tree (`_refresh_tree`).
 - `gallery.py` (the presets, the start page's cards and `Title` headings, deleted when
   closed), `sliders.py` (the Sliders panel;
   `range_from`, the range a label's menu gives a slider or a sweep), `kspace.py` (the
@@ -364,6 +371,10 @@ python tools/drive.py --do '{"do": "add_system", "lattice": "chain"}' --do '{"do
 python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "duplicate_linked", "system": "s1"}' \
     --do '{"do": "select", "entry": "s2/op1"}' --shot shared.png
                                                    # a geometry shared by two systems (part B)
+python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "outliner_view", "name": "nodes"}' \
+    --do '{"do": "add_kpath", "vertices": ["G", "K", "M", "G"]}' --do '{"do": "node_connect",
+    "source": "k2", "target": "c1", "socket": "kpath"}' --widget outlinerDock --shot nodes.png
+                                                   # the node view (phase 9, part C)
 python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "kpath_window", "calculation": "c1"}' \
     --widget kspaceWindow_k1 --shot zone.png       # a k-path's zone window (phase 9, part A)
 python tools/drive.py --do '{"do": "add_system", "lattice": "diamond_lattice"}' --do '{"do":

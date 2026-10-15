@@ -39,7 +39,8 @@ decisions 213 to 233); the maintainer answered 222, 224 and 226 and said to
 go ahead, and part A, the k-path as an object with its zone window (a 3D
 zone for a 3D crystal), was built the same day on branch kpath-window,
 decisions 234 to 239, and merged; part B, the geometry as an object (schema
-version 2), on branch shared-geometry, decisions 240 to 245.
+version 2), decisions 240 to 245, merged; part C, the node view, on branch
+node-view, decisions 246 to 252.
 
 ## 1. Requirements (as stated by the maintainer)
 
@@ -4717,6 +4718,40 @@ first:
 245. a document without a version whose systems carry their geometry inline
      is read as version 1, as the hand-written documents of the tests and of
      plugins are; or such a document is refused.
+
+*Part C as built (2026-10-15, branch node-view).* `registry/graph.py` is the
+graph without Qt: the nodes with their sockets read from the declarations,
+the solid, dashed and dotted links, `connect` (the Command a drawn link is,
+or `GraphError` with the reason), `cut` and `layout`. `ui/nodes.py` draws it,
+`NodeView` (`nodeView`) in `OutlinerPanel` (`outlinerViewTabs`,
+`outlinerStack`, `nodeArrange`), the Outliner dock's content now; both views
+are refreshed together (`_refresh_tree`) and select through `select`. The
+window's actions are `outliner_view`, `node_connect`, `node_cut`,
+`node_move` and `node_arrange`; the places are `ui["nodes"]` and the view
+`ui["outliner"]`. A new mutation, `set_calculation_system`, moves a
+calculation to another system or embedding. A test makes one edit through
+the tree's form in one window and through a link in another and compares
+the two Documents. Decisions, the built option first:
+
+246. the graph is a module without Qt (`registry/graph.py`), tested without
+     a window, the view drawing what it says; or the graph read in the view;
+247. geometries and k-paths share the first column, and a column with no
+     node is left out, so that a document fits the dock at 1200 px; or one
+     column per kind always;
+248. the dock widens to 640 px at most and to 40 percent of the window, and
+     the graph is framed when shown; or a fixed width;
+249. a link the declaration refuses is dropped and its reason is the status
+     bar's and the Log's, as a refused command's; or the inputs that would
+     refuse it are dimmed while the link is dragged;
+250. `set_calculation_system` moves a calculation to another target,
+     keeping its parameters and its k-path, refused when its entry does not
+     apply there; or a calculation's target fixed once it is made;
+251. Shift+A opens the Add menu of the workspace at the cursor, so a node is
+     added as an entry is, and New k-path or a geometry stay where they are
+     (the K-paths "+", New Hamiltonian on this geometry); or a menu of node
+     kinds of its own;
+252. the node view is drawn again whole at every change of the Document,
+     cheap at the tens of nodes a document has; or items updated one by one.
 
 ### Where the section 13 items land
 
