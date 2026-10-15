@@ -3,7 +3,7 @@ sockets read from the declarations, the solid, dashed and dotted links, the
 Command a link drawn by hand is, and what is refused."""
 import pytest
 
-from guiqula.commands.dispatcher import Dispatcher
+from guiqula.commands.dispatcher import CommandError, Dispatcher
 from guiqula.core.document import Document
 from guiqula.registry import graph
 
@@ -132,3 +132,166 @@ def test_the_layout_keeps_a_place_moved_by_hand():
     assert places[ids["s1"]] == [500.0, 40.0]
     first = next(n for n in nodes if n.kind == "geometry")
     assert places[first.id] == [0.0, 0.0]
+
+
+# ---- variants in the node view: every calculation is drawn, every input is a node
+def audit(document):
+    """What the node view cannot show: a calculation that is neither a node
+    nor a further input of one, a socket naming no node, a link drawn twice."""
+    nodes = graph.nodes(document)
+    ids = {n.id for n in nodes}
+    drawn = ids | {v for n in nodes for s in n.inputs for _, v in s.extra}
+    follows = {s.id: s.variant_of for s in document.systems if s.variant_of is not None}
+    drawn |= {c.id for c in document.calculations if c.variant_of is not None   # with the
+              and follows.get(c.system) == document.calculation(c.variant_of).system}  # system
+    problems = [f"{c.id} drawn nowhere" for c in document.calculations if c.id not in drawn]
+    problems += [f"{n.id}.{s.name} -> {s.source}" for n in nodes for s in n.inputs
+                 if s.source is not None and s.source not in ids]
+    solid = [(l.source, l.target, l.socket) for l in graph.links(document, nodes)
+             if l.style == "solid"]
+    problems += [f"twice {link}" for link in set(solid) if solid.count(link) > 1]
+    return problems
+
+
+def variant_on_a_geometry():
+    """s1 on two geometries (its variant s3 on geo3), c1 on s1 and so on s3
+    too (its variant c2), and s2 beside them."""
+    d = Dispatcher(Document())
+    s1, s2 = d.do("add_system", lattice="chain"), d.do("add_system", lattice="chain")
+    geometry = d.do("add_geometry", lattice="chain")
+    c1 = d.do("add_calculation", system=s1, kind="bands")
+    s3 = apply(d, graph.connect(d.document, geometry, s1, "geometry"))
+    c2 = next(c.id for c in d.document.calculations if c.variant_of == c1)
+    return d, s1, s2, s3, geometry, c1, c2
+
+
+def test_a_moved_calculation_follows_the_variants_of_its_new_system():
+    d, s1, s2, s3, geometry, c1, c2 = variant_on_a_geometry()
+    apply(d, graph.connect(d.document, s2, c1, "target", replace=True))
+    calcs = [(c.id, c.system, c.variant_of) for c in d.document.calculations]
+    assert calcs == [(c1, s2, None)]                # its variant on s3 followed s1, so it went
+    assert audit(d.document) == []
+    d.undo()
+    c3 = d.do("add_calculation", system=s2, kind="dos")
+    apply(d, graph.connect(d.document, s1, c3, "target", replace=True))
+    follow = [c for c in d.document.calculations if c.variant_of == c3]
+    assert [c.system for c in follow] == [s3]       # it runs on every variant of s1
+    assert audit(d.document) == []
+    d.do("remove", entry=follow[0].id)
+    d.do("remove", entry=c3)
+    with pytest.raises(CommandError, match="variant of"):
+        d.do("set_calculation_system", calculation=c2, system=s2)
+
+
+def test_a_variant_left_behind_by_an_older_file_is_drawn_from_its_system():
+    d, s1, s2, s3, geometry, c1, c2 = variant_on_a_geometry()
+    document = d.document.model_copy(deep=True)
+    document.calculation(c1).system = s2            # as set_calculation_system left it
+    target = next(s for n in graph.nodes(document) if n.id == c1 for s in n.inputs
+                  if s.name == "target")
+    assert target.extra == [(s1, c2)]
+    assert audit(document) == []
+    assert graph.cut(document, c1, "target", s1) == ("remove", {"entry": c2})
+
+
+def test_a_replace_onto_the_input_of_a_variant_is_refused():
+    d = Dispatcher(Document())
+    s1, s2 = d.do("add_system", lattice="chain"), d.do("add_system", lattice="chain")
+    c1 = d.do("add_calculation", system=s1, kind="bands")
+    apply(d, graph.connect(d.document, s2, c1, "target"))
+    with pytest.raises(graph.GraphError, match="already"):
+        graph.connect(d.document, s2, c1, "target", replace=True)
+    with pytest.raises(CommandError, match="runs on s2 already"):
+        d.do("set_calculation_system", calculation=c1, system=s2)
+    geometry = d.do("add_geometry", lattice="chain")
+    s3 = apply(d, graph.connect(d.document, geometry, s1, "geometry"))
+    with pytest.raises(graph.GraphError, match="already"):
+        graph.connect(d.document, geometry, s1, "geometry", replace=True)
+    with pytest.raises(CommandError, match="built on geo3 already"):
+        d.do("set_geometry", system=s1, geometry=geometry)
+    with pytest.raises(CommandError, match="built on geo1 already"):
+        d.do("set_geometry", system=s3, geometry=d.document.system(s1).geometry)
+    assert audit(d.document) == []
+
+
+def test_the_copy_of_a_variant_is_an_entry_of_its_own():
+    d = Dispatcher(Document())
+    s1, s2 = d.do("add_system", lattice="chain"), d.do("add_system", lattice="chain")
+    c1 = d.do("add_calculation", system=s1, kind="bands")
+    c2 = d.do("add_variant", entry=c1, target=s2)
+    c3 = d.do("duplicate", entry=c2)
+    copy = d.document.calculation(c3)
+    assert copy.variant_of is None and copy.system == s2 and copy.kind == "bands"
+    assert copy.params == d.document.calculation(c1).params
+    d.do("add_term", system=s1, kind="onsite", region=None)
+    geometry = d.do("add_geometry", lattice="chain")
+    s3 = d.do("add_variant", entry=s1, target=geometry)
+    follow = next(c.id for c in d.document.calculations if c.variant_of == c1 and c.system == s3)
+    with pytest.raises(CommandError, match="duplicate c1 instead"):
+        d.do("duplicate", entry=follow)
+    c5 = d.do("duplicate", entry=c1)                # the copy of c1 follows s1's variant too
+    assert [c.system for c in d.document.calculations if c.variant_of == c5] == [s3]
+    for command in ("duplicate", "duplicate_linked"):
+        key = "entry" if command == "duplicate" else "system"
+        new = d.do(command, **{key: s3})
+        copy = d.document.system(new)
+        assert copy.variant_of is None and len(copy.hamiltonian.terms) == 1
+        assert copy.hamiltonian.terms[0].id != d.document.system(s1).hamiltonian.terms[0].id
+        assert (copy.geometry == geometry) == (command == "duplicate_linked")
+        d.do("add_term", system=copy.id, kind="onsite")       # its own, not s1's
+        assert len(d.document.system(s1).hamiltonian.terms) == 1
+    assert audit(d.document) == []
+
+
+@pytest.mark.parametrize("command, args", [
+    ("add_calculation", {"kind": "bands", "system": "{v}"}),
+    ("add_embedding", {"pristine": "{v}"}),
+    ("add_embedding", {"pristine": "s1", "defect": "{v}"}),
+    ("add_junction", {"left": "{v}"}),
+    ("add_calculation", {"system": "s1", "kind": "local_probe", "params": {"probe": "{v}"}}),
+    ("set_param", {"entry": "c1", "name": "probe", "value": "{v}"}),
+    ("add_variant", {"entry": "c1", "target": "{v}"}),
+])
+def test_a_variant_is_named_by_nothing_but_its_original(command, args):
+    """A variant is no node: naming it as a target, a lead, a tip or a system
+    of an embedding would draw a socket linked to nothing."""
+    d = Dispatcher(Document())
+    d.do("add_system", lattice="chain")
+    v = d.do("add_variant", entry="s1", target=d.do("add_geometry", lattice="chain"))
+    d.do("add_system", lattice="chain")
+    d.do("add_calculation", system="s3", kind="local_probe")   # c1, on another system
+    args = {k: (val.format(v=v) if isinstance(val, str) else
+                {n: x.format(v=v) for n, x in val.items()} if isinstance(val, dict) else val)
+            for k, val in args.items()}
+    with pytest.raises(CommandError, match=f"{v} is a variant of s1"):
+        d.do(command, **args)
+    assert audit(d.document) == []
+
+
+def test_a_variant_needs_the_regions_of_its_original():
+    d = Dispatcher(Document())
+    s1 = d.do("add_system", lattice="chain")
+    geometry = d.do("add_geometry", lattice="chain")
+    region = d.do("add_region", system=s1, select={"kind": "expression", "expr": "x > 0"})
+    d.do("add_term", system=s1, kind="onsite", region=region)
+    with pytest.raises(CommandError, match="does not have"):
+        d.do("set_geometry", system=s1, geometry=geometry)
+    with pytest.raises(CommandError, match=r"geometry of 's2' \(a variant of 's1'\)"):
+        apply(d, graph.connect(d.document, geometry, s1, "geometry"))  # add_variant
+    d.do("remove", entry=d.document.system(s1).hamiltonian.terms[0].id)
+    d.do("add_variant", entry=s1, target=geometry)
+    with pytest.raises(CommandError, match="a variant of"):
+        d.do("add_term", system=s1, kind="onsite", region=region)
+
+
+def test_the_tip_of_a_probe_is_not_the_system_it_runs_on():
+    d = Dispatcher(Document())
+    s1, s2, s3 = (d.do("add_system", lattice="chain") for _ in range(3))
+    c1 = d.do("add_calculation", system=s1, kind="local_probe")
+    with pytest.raises(graph.GraphError, match="the system it runs on"):
+        graph.connect(d.document, s1, c1, "probe")
+    d.do("add_variant", entry=c1, target=s3)
+    with pytest.raises(graph.GraphError, match="the system it runs on"):
+        graph.connect(d.document, s3, c1, "probe")    # its variant runs on s3
+    assert graph.connect(d.document, s2, c1, "probe") == (
+        "set_param", {"entry": c1, "name": "probe", "value": s2})

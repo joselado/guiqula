@@ -145,3 +145,25 @@ def test_a_double_click_opens_and_del_removes(nodes, qtbot):
     window.select("k1")
     QTest.keyClick(view, Qt.Key.Key_Delete)                    # walked by c1: refused
     assert any(k.id == "k1" for k in session.document.kpaths)
+
+
+def test_the_forms_leave_the_variants_out(nodes):
+    """A variant is no node of its own (decision 262): the forms that name a
+    system, an embedding's and a junction's combos and a tip's, do not offer
+    it, since the node view would draw that input linked to nothing."""
+    from PySide6.QtWidgets import QComboBox
+    window, session = nodes
+    variant = session.do("add_variant", entry="s1",
+                         target=session.do("add_geometry", lattice="honeycomb_lattice"))
+    session.do("add_embedding", pristine="s1")
+    session.do("add_junction", left="s1")
+    session.do("add_calculation", system="s1", kind="local_probe")
+    for entry, combo in (("e1", "embedding_pristine"), ("j1", "junction_left"),
+                         ("c5", "system_probe")):
+        window.select(entry)
+        box = window.properties.form.findChild(QComboBox, combo)
+        assert box is not None and box.count() > 1, combo
+        assert variant not in [box.itemData(i) for i in range(box.count())], combo
+    with pytest.raises(Exception, match="the system it runs on"):     # its own: refused
+        session.act("node_connect", source="s1", target="c5", socket="probe")
+    assert session.document.calculation("c5").params["probe"] is None

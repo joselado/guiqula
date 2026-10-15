@@ -186,8 +186,10 @@ tests, `drive.py --widget` and the remote `widgets` and `screenshot` methods rel
   `node_connect`, `node_cut`, `node_move`, `node_arrange`), the places of moved nodes are
   view state (`ui["nodes"]`), and the window refreshes it with the tree (`_refresh_tree`).
   A drop onto a calculation's target or a system's geometry that has an input adds a
-  variant (`add_variant`; Ctrl replaces), drawn as a further link (`Socket.extra`), and
-  `show_variants` puts the original and its variants in a grid (`variant_grids`).
+  variant (`add_variant`; Ctrl replaces, refused onto an input a variant has already), drawn
+  as a further link (`Socket.extra`), and `show_variants` puts the original and its variants
+  in a grid (`variant_grids`). A variant is no node and no system of its own, so no form
+  offers it (the combos of an embedding, a junction and a tip leave it out, decision 262).
 - `gallery.py` (the presets, the start page's cards and `Title` headings, deleted when
   closed), `sliders.py` (the Sliders panel;
   `range_from`, the range a label's menu gives a slider or a sweep), `kspace.py` (the

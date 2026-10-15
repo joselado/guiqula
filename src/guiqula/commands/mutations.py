@@ -105,6 +105,24 @@ def _original_system(document, system):
         raise CommandError(str(error)) from None
 
 
+def _not_a_variant(document, system, role):
+    """Refuse a system variant named as a calculation's target, a tip, a lead,
+    the central region or a system of an embedding: a variant is no node of
+    its own, only a further input of its original (decision 262), so the
+    original is named instead, or the variant made a system of its own."""
+    found = next((s for s in document.systems if s.id == system), None)
+    if found is not None and found.variant_of is not None:
+        raise CommandError(f"{role}: {system} is a variant of {found.variant_of}, which "
+                           f"follows it on another geometry; name {found.variant_of}, or "
+                           f"duplicate {system} to make it a system of its own")
+
+
+def _system_variants(document, system):
+    """The ids of the variants of a system (none for an embedding or a
+    junction)."""
+    return [s.id for s in document.systems if s.variant_of == system]
+
+
 # ---- variants: one calculation on two inputs, one Hamiltonian on two geometries
 @mutation
 def add_variant(document, entry, target):
@@ -152,6 +170,10 @@ def _calculation_variant(document, original, target):
         raise CommandError(str(error).strip("\"'")) from None
     if target_kind not in spec.systems:
         raise CommandError(f"{spec.label} does not apply to {target}")
+    found = next((s for s in document.systems if s.id == target), None)
+    if found is not None and found.variant_of is not None \
+            and found.variant_of != original.system:   # only the one that follows its system
+        _not_a_variant(document, target, "target")
     taken = [original.system] + [c.system for c in document.calculations
                                  if c.variant_of == original.id]
     if target in taken:
@@ -219,9 +241,15 @@ def add_geometry(document, lattice="honeycomb_lattice", params=None, parent=None
 @mutation
 def set_geometry(document, system, geometry):
     """Build a system on another geometry of the document (its terms' regions
-    must be regions of that geometry)."""
+    must be regions of that geometry); refused onto the geometry of its
+    original or of one of its variants (decision 265)."""
     target = document.system(system)
-    target.geometry = _geometry(document, geometry).id
+    geometry = _geometry(document, geometry).id
+    root = source_of(document, target)
+    family = [root.id] + _system_variants(document, root.id)
+    if any(document.system(s).geometry == geometry for s in family if s != target.id):
+        raise CommandError(f"{root.id} is built on {geometry} already")  # one input each
+    target.geometry = geometry
 
 
 @mutation
@@ -299,6 +327,7 @@ def _quantum(document, system, role):
     if target.kind != "quantum":
         raise CommandError(f"{role}: {system} is a {target.kind.replace('_', ' ')} system, and "
                            f"it has to be a quantum one")
+    _not_a_variant(document, target.id, role)
     return target
 
 
@@ -456,6 +485,7 @@ def add_calculation(document, system, kind, params=None, name=""):
         target_kind = document.target_kind(system)
     except DocumentError as error:
         raise CommandError(str(error)) from None
+    _not_a_variant(document, system, "system")
     calc = Calculation(id=document.new_id("calculation"), system=system, kind=kind,
                        params={}, plugin=_plugin("calculation", kind), name=_text("name", name))
     names = kpath_params(calc)
@@ -473,6 +503,7 @@ def add_calculation(document, system, kind, params=None, name=""):
         document.kpaths.append(kpath)
         params[n] = kpath.id
     calc.params = params
+    _check_systems_named(document, calc)
     if any(params.get(n) is None for n in names):
         last = _last_kpath(document, system)
         if last is None:
@@ -482,16 +513,27 @@ def add_calculation(document, system, kind, params=None, name=""):
         calc.params = dict(params, **{n: last for n in names if params.get(n) is None})
     _check_kpaths(document, calc)
     document.calculations.append(calc)
-    for variant in variants_of(document, system):        # the system's variants follow
-        if any(s.id == variant for s in document.systems):
-            _calculation_variant(document, calc, variant)
+    _follow(document, calc)
     return calc.id
+
+
+def _follow(document, calc):
+    """Give an original calculation a variant on each variant of its system
+    that it has none on: a calculation of a system runs on every variant of
+    it."""
+    taken = {c.system for c in document.calculations if c.variant_of == calc.id}
+    for variant in _system_variants(document, calc.system):
+        if variant not in taken:
+            _calculation_variant(document, calc, variant)
 
 
 @mutation
 def set_calculation_system(document, calculation, system):
     """Run a calculation on another system or embedding (a link drawn in the
-    node view); refused when its entry does not apply to that kind."""
+    node view); refused when its entry does not apply to that kind, for a
+    variant, or onto an input one of its variants has. Its variants on the
+    variants of the old system go, and it gets one on each variant of the
+    new one (decision 264)."""
     try:
         calc = document.calculation(calculation)
         target_kind = document.target_kind(system)
@@ -505,7 +547,22 @@ def set_calculation_system(document, calculation, system):
         what = "an embedding" if target_kind == "embedding" else f"a {target_kind} system"
         raise CommandError(f"{spec.label} does not apply to {what}; it is a calculation of "
                            f"{', '.join(spec.systems)} systems")
+    if calc.variant_of is not None:
+        raise CommandError(f"{calculation} is a variant of {calc.variant_of}: link its new "
+                           f"input to {calc.variant_of}, or remove {calculation}")
+    _not_a_variant(document, system, "system")
+    old = calc.system
+    following = {c.id for c in document.calculations if c.variant_of == calc.id
+                 and c.system in _system_variants(document, old)}
+    taken = [c.system for c in document.calculations
+             if c.variant_of == calc.id and c.id not in following]
+    if system in taken:
+        raise CommandError(f"{calculation} runs on {system} already")
     calc.system = system
+    # the variants that followed it on the variants of its old system go, and it
+    # follows the variants of its new one (decision 264)
+    document.calculations[:] = [c for c in document.calculations if c.id not in following]
+    _follow(document, calc)
 
 
 def _last_kpath(document, system):
@@ -642,6 +699,18 @@ def _systems_named(calc):
     return {calc.params.get(p.name) for p in spec.params if isinstance(p, SystemParam)} - {None}
 
 
+def _check_systems_named(document, calc):
+    """Refuse a SystemParam (the tip of a local probe) naming a system
+    variant."""
+    try:
+        spec = registry.get("calculation", calc.kind)
+    except registry.RegistryError:
+        return
+    for param in spec.params:
+        if isinstance(param, SystemParam) and calc.params.get(param.name) is not None:
+            _not_a_variant(document, calc.params[param.name], param.name)
+
+
 @mutation
 def duplicate(document, entry):
     """Copy a geometry, op, term, region, embedding, calculation (which walks
@@ -654,13 +723,25 @@ def duplicate(document, entry):
         return _copy_system(document, entry)
     if family == "geometry":
         return _copy_geometry(document, entry)[0]
-    copy = obj.model_copy(deep=True)
+    if family == "calculation" and obj.variant_of is not None:
+        # the copy of a variant is a calculation of its own, with its original's
+        # parameters on the variant's input (decision 263)
+        source = source_of(document, obj)
+        if obj.system in _system_variants(document, source.system):
+            raise CommandError(f"{entry} follows {obj.variant_of} on {obj.system}, a variant "
+                               f"of its system; duplicate {obj.variant_of} instead")
+        copy = source.model_copy(deep=True)
+        copy.system, copy.variant_of = obj.system, None
+    else:
+        copy = obj.model_copy(deep=True)
     items.insert(index + 1, copy)          # new ids are allocated with the copy in place
     copy.id = document.new_id(family)
     if family == "region":
         copy.name = f"{obj.name} (copy)"
     if family in ("embedding", "junction", "kpath"):
         copy.name = f"{obj.name or obj.id} (copy)"
+    if family == "calculation":
+        _follow(document, copy)            # on the variants of its system too
     return copy.id
 
 
@@ -694,6 +775,12 @@ def _copy_system(document, system_id, linked=False):
     geometry, or naming the same one (linked); returns its id."""
     _, _, items, index, obj = document.find(system_id)
     copy = obj.model_copy(deep=True)
+    if obj.variant_of is not None:         # a system of its own, with its original's
+        source = source_of(document, obj)  # Hamiltonian or model (decision 263)
+        copy.hamiltonian = None if source.hamiltonian is None else \
+            source.hamiltonian.model_copy(deep=True)
+        copy.model = None if source.model is None else source.model.model_copy(deep=True)
+        copy.variant_of = None
     items.insert(index + 1, copy)
     copy.id = document.new_id("system")
     copy.name = f"{obj.name or obj.id} (copy)"
@@ -746,6 +833,7 @@ def set_param(document, entry, name, value):
     obj.params = _normalize(FAMILY_OF[family], obj.kind, dict(obj.params, **{name: value}))
     if family == "calculation":
         _check_kpaths(document, obj)
+        _check_systems_named(document, obj)
 
 
 @mutation
@@ -759,6 +847,7 @@ def set_params(document, entry, params):
     obj.params = _normalize(FAMILY_OF[family], obj.kind, dict(obj.params, **params))
     if family == "calculation":
         _check_kpaths(document, obj)
+        _check_systems_named(document, obj)
 
 
 # ---- locks (teaching presets, core/locks.py)

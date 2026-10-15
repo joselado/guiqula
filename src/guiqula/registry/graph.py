@@ -125,10 +125,18 @@ def nodes(document):
     for system in document.systems:
         if system.variant_of is not None:      # drawn as a further geometry of its original
             variants.setdefault(system.variant_of, []).append((system.geometry, system.id))
-    hidden = {s.id for s in document.systems if s.variant_of is not None}
+    hidden = {s.id: s.variant_of for s in document.systems if s.variant_of is not None}
+    systems = {c.id: c.system for c in document.calculations}
     for calc in document.calculations:
-        if calc.variant_of is not None and calc.system not in hidden:
+        if calc.variant_of is None:
+            continue
+        if calc.system not in hidden:
             variants.setdefault(calc.variant_of, []).append((calc.system, calc.id))
+        elif hidden[calc.system] != systems.get(calc.variant_of):
+            # it follows its original on a variant of a system the original no longer
+            # runs on (a file written before decision 264): drawn from that system, so
+            # that it can be seen and cut
+            variants.setdefault(calc.variant_of, []).append((hidden[calc.system], calc.id))
     for system in document.systems:
         if system.variant_of is not None:
             continue
@@ -251,10 +259,19 @@ def connect(document, source, target, socket, replace=False):
             raise GraphError(f"the {entry.label} of {target} takes a "
                              f"{' or '.join(entry.kinds).replace('_', ' ')} system, and "
                              f"{source} is {kind.replace('_', ' ')}")
-    if entry.multi and not replace and entry.source is not None:
+    if entry.multi and entry.source is not None:
         if source == entry.source or source in [s for s, _ in entry.extra]:
+            # a replace too: the original and its variant would share one input
             raise GraphError(f"{source} is an input of {target} already")
-        return "add_variant", {"entry": target, "target": source}
+        if not replace:
+            return "add_variant", {"entry": target, "target": source}
+    if node.kind == "calculation" and socket != "target" and out.kind == "system":
+        calc = document.calculation(target)
+        own = [calc.system] + [c.system for c in document.calculations
+                               if c.variant_of == target]
+        if source in own:
+            raise GraphError(f"the {entry.label} of {target} is {source}, the system it runs "
+                             f"on; link another one")
     if node.kind == "system":
         return "set_geometry", {"system": target, "geometry": source}
     if node.kind == "geometry":

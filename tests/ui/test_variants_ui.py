@@ -93,3 +93,15 @@ def test_a_second_geometry_into_a_hamiltonian(two):
     window.select(system.id)                                      # its form shows s1's
     assert window.properties.form.has_spin.currentData() is True
     assert system.id not in window.node_view.node_items           # drawn into s1's socket
+
+
+def test_a_calculation_added_on_a_variant_goes_to_its_original(two):
+    window, session = two
+    geometry = session.do("add_geometry", lattice="square_lattice")
+    session.do("add_variant", entry="s1", target=geometry)
+    variant = variants_of(session.document, "s1")[0]
+    window.select(variant)
+    calc = window.add_calculation("dos")       # decision 262: never on the variant
+    assert session.document.calculation(calc).system == "s1"
+    assert [session.document.calculation(c).system
+            for c in variants_of(session.document, calc)] == [variant]

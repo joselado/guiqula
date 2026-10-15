@@ -4842,6 +4842,48 @@ option first:
      saved as its own state beyond the grids'; or a grid made only on
      request.
 
+*Variants in the node view, the faults found (2026-10-15).* A review of the
+node view found that a variant could end up drawn nowhere, or drawn twice, or
+named by an entry whose socket then pointed at no node, since a variant is no
+node and only some mutations knew it. The fix keeps two rules in every
+mutation, one input per member of a family (the original and its variants)
+and a calculation of a system running on every variant of it, and makes the
+graph and the forms agree with them. Decisions, the built option first:
+
+262. a variant is no node and no system of its own: nothing names it but the
+     calculation variants that follow its original onto it, so
+     `add_calculation`, an embedding, a junction, the tip of a probe and
+     `add_variant` refuse it, saying to name the original or duplicate the
+     variant, and the forms leave it out; in the window, a calculation added
+     while a variant is selected goes to its original (and so follows onto
+     the variant), and a variant's row offers no New embedding or New
+     junction; or a variant named elsewhere drawn as a node of its own;
+263. Duplicate and Duplicate linked of a variant make an entry of its own, a
+     copy of its original's parameters or Hamiltonian on the variant's input
+     (its geometry copied, or shared when linked), and the copy of an
+     original calculation gets a variant on each variant of its system; a
+     calculation variant that follows a system variant is not duplicated,
+     its original is; or a duplicate of a variant refused;
+264. `set_calculation_system` moves an original calculation with its family:
+     the variants that followed it on the variants of its old system go, it
+     gets one on each variant of its new system, and a variant itself is
+     not moved; a file written before this, with a calculation variant left
+     on a variant of a system its original no longer runs on, draws it from
+     that system, where it can be cut; or the variants left where they are;
+265. a link dropped with Ctrl onto an input that one of the variants has
+     already is refused ("is an input already"), and `set_calculation_system`
+     and `set_geometry` refuse to put an original on an input of one of its
+     variants, or a variant on its original's or a sibling's, as
+     `add_variant` does; or the replace removing that variant;
+266. the geometry of a variant has to have the regions its original's terms
+     and piecewise Fields name, as `set_geometry` asks of the original, so a
+     variant on a geometry without them is refused, and so is a term
+     restricted to a region a variant's geometry lacks; or the variant built
+     without those terms, flagged by the planner;
+267. the node view refuses as the tip of a local probe the system the
+     calculation, or one of its variants, runs on, as the planner and the
+     form do; or the link accepted and the calculation flagged.
+
 ### Where the section 13 items land
 
 | Phase | Items |

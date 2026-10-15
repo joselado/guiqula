@@ -644,6 +644,22 @@ def check(document):
             if system.hamiltonian is not None or system.model is not None:
                 raise DocumentError(f"system {system.id!r} is a variant: its Hamiltonian or "
                                     f"model is its original's")
+        source = systems[system.variant_of] if system.variant_of is not None else system
+        where = (f"{system.id!r}" if source is system else
+                 f"{system.id!r} (a variant of {source.id!r})")
+        regions = {r.id for r in geometries[system.geometry].regions}
+        for term in terms_of(source):          # a variant's terms are its original's
+            if term.region is not None and term.region not in regions:
+                raise DocumentError(f"term {term.id!r} refers to region {term.region!r}, "
+                                    f"which the geometry of {where} does not have")
+        for owner, params in region_users(source):
+            missing = [r for r in field_tools.regions_of(list(params.values()))
+                       if r not in regions]
+            if missing:
+                raise DocumentError(f"{owner} has a piecewise Field over region "
+                                    f"{missing[0]!r}, which the geometry of {where} "
+                                    f"does not have")
+        if system.variant_of is not None:
             continue
         if system.kind == "quantum" and (system.hamiltonian is None or system.model is not None):
             raise DocumentError(f"quantum system {system.id!r} needs a hamiltonian and no model")
@@ -654,18 +670,6 @@ def check(document):
         if system.model is not None and system.model.kind != system.kind:
             raise DocumentError(f"system {system.id!r} is {system.kind} but its model is "
                                 f"{system.model.kind}")
-        regions = {r.id for r in geometries[system.geometry].regions}
-        for term in terms_of(system):
-            if term.region is not None and term.region not in regions:
-                raise DocumentError(f"term {term.id!r} refers to region {term.region!r}, "
-                                    f"which the geometry of {system.id!r} does not have")
-        for owner, params in region_users(system):
-            missing = [r for r in field_tools.regions_of(list(params.values()))
-                       if r not in regions]
-            if missing:
-                raise DocumentError(f"{owner} has a piecewise Field over region "
-                                    f"{missing[0]!r}, which the geometry of {system.id!r} "
-                                    f"does not have")
     for embedding in document.embeddings:
         for role in ("pristine", "defect"):
             target = getattr(embedding, role)

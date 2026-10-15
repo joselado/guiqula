@@ -2372,6 +2372,10 @@ class MainWindow(QMainWindow):
         system = self.current_target() if calculation else self.current_system()
         if system is None:
             self.message("add a system first (New system)", error=True)
+        elif calculation:      # a variant's calculations are its original's (decision 262)
+            found = next((s for s in self.session.document.systems if s.id == system), None)
+            if found is not None and found.variant_of is not None:
+                system = found.variant_of
         return system
 
     def add_op(self, kind):

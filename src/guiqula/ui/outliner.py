@@ -1475,7 +1475,8 @@ class Outliner(QTreeWidget):
         if family == "kpath":
             menu.addAction(icons.icon("kspace"), "Show in the Brillouin zone",
                            lambda: self.command.emit("kpath_window", {"kpath": obj.id}))
-        if family == "system" and obj.kind == "quantum":
+        if family == "system" and obj.kind == "quantum" and obj.variant_of is None:
+            # a variant is no system of its own for an embedding or a lead (decision 262)
             menu.addAction(icons.icon("embedding"), "New embedding of a defect",
                            lambda: self.command.emit("add_embedding", {"pristine": obj.id}))
             menu.addAction(icons.icon("embedding"), "New junction with this lead",

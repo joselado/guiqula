@@ -88,10 +88,11 @@ def _system_for(panel, owner):
 
 def _systems(document, system_id):
     """[(id, label, kind)] of the systems a calculation of system_id may
-    name (a SystemParam: the tip of a local probe), every one but its own;
-    the editor keeps those of the kinds the parameter takes."""
+    name (a SystemParam: the tip of a local probe), every one but its own
+    and the variants, which are no systems of their own (decision 262); the
+    editor keeps those of the kinds the parameter takes."""
     return tuple((s.id, f"{s.id} {s.name}".strip(), s.kind) for s in document.systems
-                 if s.id != system_id)
+                 if s.id != system_id and s.variant_of is None)
 
 
 def _kpaths(document):
@@ -737,7 +738,8 @@ class EmbeddingForm(Form):
 
     def _systems(self):
         return tuple((s.id, f"{s.id} {s.name if s.name != s.id else ''}".strip())
-                     for s in self.session.document.systems if s.kind == "quantum")
+                     for s in self.session.document.systems
+                     if s.kind == "quantum" and s.variant_of is None)
 
     def signature(self):
         return ("embedding", self.embedding_id, self._systems())
@@ -816,7 +818,8 @@ class JunctionForm(Form):
 
     def _systems(self):
         return tuple((s.id, f"{s.id} {s.name if s.name != s.id else ''}".strip())
-                     for s in self.session.document.systems if s.kind == "quantum")
+                     for s in self.session.document.systems
+                     if s.kind == "quantum" and s.variant_of is None)
 
     def signature(self):
         return ("junction", self.junction_id, self._systems())
