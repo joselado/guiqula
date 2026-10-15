@@ -138,7 +138,8 @@ def run_calculation(document, calc_id, cache=None, progress=None, trusted=True, 
     over_the_zone = "kmesh" in (plot.get("picks") or {}).values()
     return Result(calculation=calc_id, kind=plan.kind, key=plan.key, params=plan.params,
                   arrays=arrays, plot=plot,
-                  reports=built.reports, mode=built.mode, document=document.to_json(),
+                  reports=built.reports, mode=ctx.notes.get("mode", built.mode),   # matched
+                  document=document.to_json(),
                   structure=geometry,
                   reads=reads(built.plan, *(other.plan for other in others.values())),
                   kspace=structure.frame(built.g) if over_the_zone else None,

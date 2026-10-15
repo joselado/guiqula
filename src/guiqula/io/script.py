@@ -251,7 +251,8 @@ def _export_sweep(document, plan, skipped, trusted, results):
     if inner.problem:
         raise ValueError(f"{plan.calc_id}: {inner.problem}")
     for target, _, _, _ in grid:
-        stage = next((s for s in inner.system.stages if s.id == target), None)
+        stage = next((s for system in [inner.system, *inner.others.values()]   # the defect
+                      for s in system.stages if s.id == target), None)
         if stage is not None and stage.problem:
             raise ValueError(f"{plan.calc_id}: {target} is invalid at the swept values: "
                              f"{stage.problem}")

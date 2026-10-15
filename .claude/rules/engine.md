@@ -46,14 +46,16 @@ and exported, what the plan and the build do, and what the refresh of `vendor/` 
   calculation's; the engine builds it through the same cache and the adapter reads its
   Hamiltonian with `ctx.system(name)`; the script builds it first and keeps it as
   `<name> = h`; `remove` refuses a system so named; the cost sees its mode in
-  `size["others"]`. A sweep still targets the calculation's own system only.
+  `size["others"]`. A sweep targets the calculation's own system only (or, on an
+  embedding, either of its two).
 - A calculation on an embedding (`systems=("embedding",)`, decisions 200 to 212) is
   planned by `_plan_embedding`: `plan.system` is the pristine system, `plan.others["defect"]`
   the defect, `plan.embedding` the embedding; the adapter calls `embedded_pair(h,
   ctx.system("defect"))`, which matches the Hilbert spaces and refuses two cells that
   differ (sites, lattice vectors, hoppings between cells), and its `helpers=` carries it
   into the script. An adapter can hand the drawing its own geometry with
-  `ctx.note("geometry", g)` (the LDOS window). A sweep on an embedding may change either
+  `ctx.note("geometry", g)` (the LDOS window), and its Hilbert space with
+  `ctx.note("mode", ...)` (the matched one of an embedding). A sweep on an embedding may change either
   of its systems.
 - A parameter declared `FieldParam(bond=True)` is evaluated at the bond midpoints
   (`core/bonds.py`: the mean of the two ends for a site Field, a region holding a bond when

@@ -125,10 +125,9 @@ def test_the_script_builds_the_defect_first(pyqula):
     assert "def embedded_pair(h, defect):" in script
 
 
-def test_a_sweep_follows_the_in_gap_state(pyqula):
-    """A sweep on an embedding changes the defect, and the in-gap state is a
-    number: a Yu-Shiba-Rusinov state moves into the gap as the exchange of
-    the impurity grows."""
+def ysr_sweep():
+    """A Yu-Shiba-Rusinov chain: the in-gap state of an exchange-field
+    impurity in an s-wave chain, swept over the exchange of the defect."""
     d = Dispatcher()
     s = d.do("add_system", lattice="chain")
     d.do("add_term", system=s, kind="swave", params={"delta": 0.2})
@@ -139,6 +138,14 @@ def test_a_sweep_follows_the_in_gap_state(pyqula):
     sweep = d.do("add_calculation", system=e, kind="sweep",
                  params={"calculation": c, "entry": t, "param": "m", "component": 2,
                          "start": 0.1, "stop": 0.5, "steps": 3})
+    return d, sweep
+
+
+def test_a_sweep_follows_the_in_gap_state(pyqula):
+    """A sweep on an embedding changes the defect, and the in-gap state is a
+    number: a Yu-Shiba-Rusinov state moves into the gap as the exchange of
+    the impurity grows."""
+    d, sweep = ysr_sweep()
     assert pipeline.plan_calculation(d.document, sweep).problem is None
     result = run_calculation(d.document, sweep)
     energies, gap = result.arrays["energy"], result.arrays["gap"]
@@ -165,3 +172,33 @@ def test_the_cost_follows_the_window_and_the_modes():
     d.do("add_term", system=d.document.embedding(e).defect, kind="zeeman",
          params={"m": [0.0, 0.0, 0.3]})
     assert cost.estimate(d.document, c, builds)["seconds"] > 1.9 * five
+
+
+def test_the_script_of_a_sweep_changes_the_defect(pyqula, repo, tmp_path):
+    """The loop of an exported sweep builds the defect at every value, and
+    gives the engine's numbers."""
+    from .test_script_export import assert_same_arrays, run_scripts
+    d, sweep = ysr_sweep()
+    expected = run_calculation(d.document, sweep).arrays
+    got, = run_scripts([export_script(d.document, sweep)], repo, tmp_path)
+    assert_same_arrays(expected, got, "sweep of the defect")
+
+
+def test_a_pick_on_an_embedding_moves_its_calculations():
+    """An energy picked on the embedded DOS moves the embedded LDOS and
+    offers a new one on the embedding; no site or Fermi level target."""
+    from guiqula.registry import picks
+    d, s, defect, e, _, c = chain_and_impurity()
+    targets = picks.targets(d.document, e, {"energy": 2.24}, source=c)
+    labels = [t["label"] for t in targets]
+    assert f"{c} Embedded LDOS: energy = 2.24" in labels
+    assert any(t["target"] == "add" and t["system"] == e and t["kind"] == "embedding_ldos"
+               for t in targets)
+    assert not any(t["target"] in ("fermi_level", "region") for t in targets)
+
+
+def test_the_result_says_the_matched_hilbert_space(pyqula):
+    """A magnetic impurity on a spinless chain is computed spinful."""
+    d, s, defect, e, t, c = chain_and_impurity()
+    d.do("add_term", system=defect, kind="zeeman", params={"m": [0.0, 0.0, 0.5]})
+    assert run_calculation(d.document, c).mode == "spinful"

@@ -853,6 +853,7 @@ def embedded_pair(h, defect):
 def _embedding(h, ctx):
     from pyqula import embedding
     h, defect = embedded_pair(h, ctx.system("defect"))
+    ctx.note("mode", "nambu" if h.has_eh else "spinful" if h.has_spin else "spinless")
     return embedding.Embedding(h, m=defect)
 
 
