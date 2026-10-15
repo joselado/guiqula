@@ -422,6 +422,10 @@ pristine system, together with that gap, which in a superconductor is the Yu-Shi
 state of a magnetic impurity; there the states come in pairs at $\pm E$, and the search
 gives one of the two.
 
+The example `haldane_vacancy` (the start page's examples) is a vacancy in Haldane
+graphene: its DOS has the peak of the bound state at zero energy, inside the Chern gap,
+and its LDOS shows that state on the three neighbours of the vacancy.
+
 The in-gap state is a number, so a sweep collects it: Sweep this parameter on the exchange
 of the defect's term runs the In-gap state of the embedding at every value, and the curve
 is the bound state moving into the gap as the exchange grows. A change of either system

@@ -4367,10 +4367,12 @@ into the gap as the exchange grows), and in the window.
      lives; a system an embedding names cannot be removed, nor an
      embedding a calculation runs on; or the pristine system on the
      canvas;
-212. the embedding's icon is Tabler's focus-2, a point in rings; no
-     preset ships with this change; or a preset (a vacancy in Haldane
-     graphene, a Yu-Shiba-Rusinov chain) with its picture on the start
-     page.
+212. the embedding's icon is Tabler's focus-2, a point in rings; a preset
+     ships with this change, `haldane_vacancy` (a vacancy in Haldane
+     graphene: the DOS of the defect's cell with the bound state at zero,
+     2.09 against 0.009 in the pristine cell, its LDOS, and the in-gap
+     state, moved to -0.10 by a sublattice mass of 0.2 on both systems),
+     the maintainer's answer, over none, the Yu-Shiba-Rusinov chain or both.
 
 ### Where the section 13 items land
 
