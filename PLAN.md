@@ -4807,6 +4807,10 @@ pyqula has no thermal conductance. Decisions, the built option first:
 258. the canvas of a junction draws its central region, else its left lead;
      or always the left lead.
 
+The maintainer answered 253, 254 and 255 on 2026-10-15, each as built, asked
+one at a time as the ones with a face of the physics; decisions 234 to 258
+otherwise stand as built.
+
 ### Where the section 13 items land
 
 | Phase | Items |
