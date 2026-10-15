@@ -69,6 +69,7 @@ from guiqula import vendoring
 from guiqula.core import fields
 from guiqula.core import picks as pick_tools
 from guiqula.core import regions as region_tools
+from guiqula.core.document import kpath_params, kpath_users
 from guiqula.io import blender as blender_export
 from guiqula.io import bundle, crashreport, project, settings
 from guiqula.registry import base as registry
@@ -78,7 +79,7 @@ from guiqula.registry.params import VectorFieldParam
 from guiqula.ui.bars import MessageBar, StatusMessage
 from guiqula.ui.console import ConsoleWidget
 from guiqula.ui.help import HelpPanel
-from guiqula.ui.kspace import KSpaceView
+from guiqula.ui.kspace import KPathWindow
 from guiqula.ui.sliders import SlidersPanel
 from guiqula.ui.jobpanel import JobPanel
 from guiqula.ui.outliner import Outliner, embedding_rows, pseudo_ids, system_of
@@ -103,9 +104,8 @@ WINDOW_ACTIONS = ("select", "workspace", "tool", "select_sites", "region_from_se
                   "theme", "export_bundle", "export_blender", "help", "remote", "pick", "pick_to",
                   "run_at_once", "renderer_3d", "view_3d", "plot_text", "ui_text",
                   "reset_layout", "log", "panel", "add_menu", "run_stale", "start", "run",
-                  "grid", "grid_place")
+                  "grid", "grid_place", "kpath_window")
 STRUCTURE_TAB = 0
-KSPACE_TAB = 1
 # a new classical system: its lattice, and a supercell the usual orders fit in
 CLASSICAL_STARTS = {"classical_spin": ("triangular_lattice", 3, "Classical spins"),
                     "lattice_gas": ("triangular_lattice", 6, "Lattice gas"),
@@ -169,7 +169,7 @@ def workspace_of(entry, family=None):
     Document.find says of an entry id), or None for nothing selected."""
     if not entry:
         return None
-    if entry == "calculations" or family in ("calculation", "embedding"):
+    if entry in ("calculations", "kpaths") or family in ("calculation", "embedding", "kpath"):
         return "calculate"
     if family is not None:
         return "hamiltonian" if family == "term" else "geometry"
@@ -279,17 +279,9 @@ class MainWindow(QMainWindow):
         self.structure.paint_stroke.connect(self._paint_stroke)
         self.structure.navigation_changed.connect(self._navigation_changed)
         self.viewport.addTab(self.structure, "Structure")
-        self.kspace_view = KSpaceView()
-        self.kspace_view.path_edited.connect(
-            lambda calc, vertices: self._do("set_param", entry=calc, name="kpath",
-                                            value=vertices))
-        self.kspace_view.calculation_chosen.connect(self._kpath_calculation_chosen)
-        self.kspace_view.kpoint_picked.connect(self._kpoint_picked)
-        self.kpath_calc = None         # the calculation whose k-path the k-space tab edits
-        self.viewport.addTab(self.kspace_view, "k-space")
-        for tab in (STRUCTURE_TAB, KSPACE_TAB):
-            for side in (QTabBar.ButtonPosition.LeftSide, QTabBar.ButtonPosition.RightSide):
-                self.viewport.tabBar().setTabButton(tab, side, None)    # always there
+        self.kpath_windows = {}        # k-path id -> its KPathWindow on the zone (decision 219)
+        for side in (QTabBar.ButtonPosition.LeftSide, QTabBar.ButtonPosition.RightSide):
+            self.viewport.tabBar().setTabButton(STRUCTURE_TAB, side, None)    # always there
         self.viewport.tabCloseRequested.connect(self._close_tab)
         self.start_page.lattice_chosen.connect(
             lambda kind: self.new_system(kind) if self.session is not None else None)
@@ -417,7 +409,6 @@ class MainWindow(QMainWindow):
             button.setIcon(icons.icon(name))
             button.setIconSize(icons.size())
         self.viewport.setTabIcon(STRUCTURE_TAB, icons.icon("structure"))
-        self.viewport.setTabIcon(KSPACE_TAB, icons.icon("kspace"))
         for grid in self.grids.values():
             self.viewport.setTabIcon(self.viewport.indexOf(grid), icons.icon("grid"))
         self.new_grid_button.setIcon(icons.icon("grid"))
@@ -729,7 +720,12 @@ class MainWindow(QMainWindow):
         return self.open_add_menu(f"{system}/regions", position=position)
 
     def _section_add(self, path, button):
-        """A "+" of the outliner was clicked."""
+        """A "+" of the outliner was clicked; the k-paths' adds one."""
+        if path == "kpaths":
+            kpath = self._act("add_kpath")
+            if kpath is not None:
+                self.select(kpath)
+            return
         try:
             self.open_add_menu(path, anchor=button)
         except ValueError as error:
@@ -1086,6 +1082,7 @@ class MainWindow(QMainWindow):
         dispatcher.register_action("log", lambda enabled=True: self.set_log(enabled))
         dispatcher.register_action("grid", self.grid)
         dispatcher.register_action("grid_place", self.place_result)
+        dispatcher.register_action("kpath_window", self.kpath_window)
         dispatcher.register_action("panel", self.show_panel)
         dispatcher.register_action("view_3d", self.set_view_3d)
         dispatcher.register_action("add_menu", self.open_add_menu)
@@ -1225,7 +1222,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(title + (" *" if self.session.modified else ""))
 
     def _exists(self, item_id):
-        if item_id == "calculations":
+        if item_id in ("calculations", "kpaths"):
             return True
         system = system_of(item_id)
         try:
@@ -1265,6 +1262,8 @@ class MainWindow(QMainWindow):
                 self.properties.refresh(values=False)
                 if system == self.current_system():
                     self._refresh_structure()
+                elif any(w.system == system for w in self.kpath_windows.values()):
+                    self._refresh_kpath_windows()
                 self._update_status()
                 self._rerun_stale()
             elif job.status == "failed":
@@ -1295,7 +1294,7 @@ class MainWindow(QMainWindow):
                     if calc in self.plots and any(o[0] == job.label for o in chosen):
                         self._draw_result(calc)
                 if job.value is not None and job.value.kind == "fermi_surface":
-                    self._refresh_kspace()           # drawn under the zone
+                    self._refresh_kpath_windows()    # drawn under the zone
                 if job.label in self.plots:
                     self._draw_result(job.label)
                 if job.label == self.selected_calculation() and job.id not in self._auto_jobs:
@@ -1362,7 +1361,7 @@ class MainWindow(QMainWindow):
         self.outliner.set_current(entry)
         self.properties.show_item(self.session, entry)
         family = None
-        if entry and "/" not in entry and entry != "calculations":
+        if entry and "/" not in entry and entry not in ("calculations", "kpaths"):
             family = self.session.document.find(entry)[0]
         if family == "calculation":
             self.select_calculation(entry)        # before the workspace, which shows it
@@ -1371,7 +1370,7 @@ class MainWindow(QMainWindow):
             self.set_workspace(workspace)         # only a change: a Field previewed stays
         if family == "calculation":
             self.show_result(entry)
-        elif entry and entry != "calculations":
+        elif entry and entry not in ("calculations", "kpaths") and family != "kpath":
             self.viewport.setCurrentIndex(STRUCTURE_TAB)
         self._refresh_structure()
         self._update_status()
@@ -1757,8 +1756,6 @@ class MainWindow(QMainWindow):
             tab = ui.get("calculation") or self.selected_calculation()
         if tab == "structure":
             self.viewport.setCurrentIndex(STRUCTURE_TAB)
-        elif tab == "kspace":
-            self.viewport.setCurrentIndex(KSPACE_TAB)
         elif isinstance(tab, str) and tab.startswith("grid:") and \
                 tab.removeprefix("grid:") in self.grids:
             self.viewport.setCurrentWidget(self.grids[tab.removeprefix("grid:")])
@@ -1877,11 +1874,13 @@ class MainWindow(QMainWindow):
             return None
         document = self.session.document
         entry = self.selected
-        if entry and entry != "calculations":
+        if entry and entry not in ("calculations", "kpaths"):
             system = system_of(entry)
             if system is not None:
                 return system
             family, owner, _, _, obj = document.find(entry)
+            if family == "kpath":
+                return self._kpath_system(entry) or document.systems[0].id
             if family == "system":
                 return obj.id
             if family == "embedding":
@@ -1900,7 +1899,7 @@ class MainWindow(QMainWindow):
             return None
         document = self.session.document
         entry = self.selected
-        if entry and entry != "calculations" and "/" not in entry:
+        if entry and entry not in ("calculations", "kpaths") and "/" not in entry:
             family, _, _, _, obj = document.find(entry)
             if family == "embedding":
                 return obj.id
@@ -1911,7 +1910,7 @@ class MainWindow(QMainWindow):
     def _overlays(self, system_id, build):
         """What the selected entry touches, drawn over the structure."""
         entry = self.selected
-        if not entry or "/" in entry or entry == "calculations":
+        if not entry or "/" in entry or entry in ("calculations", "kpaths"):
             return {}
         family, owner, _, _, obj = self.session.document.find(entry)
         if owner is None or owner.id != system_id:
@@ -1934,7 +1933,7 @@ class MainWindow(QMainWindow):
         if system is None:
             self.structure.clear("No system yet: add one with New system, next to the "
                                  "workspace tabs.")
-            self._refresh_kspace()          # no system: no k-space tab either
+            self._refresh_kpath_windows()
             return
         build = self.builds.get(system)
         error = self.session.build_errors.get(system)
@@ -1959,7 +1958,7 @@ class MainWindow(QMainWindow):
         overlays.update(extra)
         caption += f"\n{text}" if text else ""
         self.structure.show_structure(system, build, caption, **overlays)
-        self._refresh_kspace()
+        self._refresh_kpath_windows()
         pending = self._pending_sites
         if pending is not None and pending[0] == system and self.session.build_is_current(system):
             self._pending_sites = None
@@ -1969,57 +1968,108 @@ class MainWindow(QMainWindow):
             except (ValueError, TypeError):
                 pass
 
-    # ---- the k-space tab (13.9)
-    def _kpath_calculations(self, system):
-        """[(id, label)] of the calculations of a system that take a k-path."""
-        out = []
-        for calc in self.session.document.calculations:
-            try:
-                spec = registry.get("calculation", calc.kind)
-            except registry.RegistryError:
-                continue
-            if calc.system == system and "kpath" in spec.param_map:
-                out.append((calc.id, f"{calc.id} {calc.kind}"))
-        return out
+    # ---- the zone windows of the k-paths (13.9, phase 9, part A)
+    def kpath_window(self, kpath=None, calculation=None, system=None):
+        """Open (or bring forward) the window of a k-path on the Brillouin
+        zone (kspaceWindow_<k>), drawn on the zone of a system: the
+        calculation's it is opened from, else the system given, else that of
+        the first calculation walking it, else the current system. kpath
+        left out: the k-path of the calculation, else of the last calculation
+        on the system that walks one, else a new empty one (a system's Show
+        Brillouin zone). Returns {"kpath", "system", "window"}."""
+        document = self.session.document
+        if calculation is not None:
+            calc = document.calculation(calculation)
+            system = system or self._zone_system(calc.system)
+            if kpath is None:
+                kpath = next((calc.params.get(n) for n in kpath_params(calc)
+                              if calc.params.get(n)), None)
+        if kpath is None:
+            system = system or self.current_system()
+            if system is None:
+                raise ValueError("there is no system, and so no Brillouin zone")
+            kpath = self._last_kpath_of(system)
+            if kpath is None:
+                kpath = self.session.do("add_kpath")
+        document = self.session.document
+        document.kpath(kpath)                       # raises for a k-path that is not there
+        system = system or self._kpath_system(kpath) or self.current_system()
+        window = self.kpath_windows.get(kpath)
+        if window is None:
+            window = self.kpath_windows[kpath] = KPathWindow(kpath, self)
+            window.view.path_edited.connect(
+                lambda k, vertices: self._do("set_kpath", kpath=k, vertices=vertices))
+            window.view.kpoint_picked.connect(
+                lambda k, position, w=window: self._kpoint_picked(k, position, w.system))
+        window.system = system
+        self._draw_kpath_window(window)
+        window.show()
+        window.raise_()
+        return {"kpath": kpath, "system": system, "window": window.objectName()}
 
-    def _kpath_calculation_chosen(self, calc):
-        self.kpath_calc = calc or None
-        self._refresh_kspace()
+    def _zone_system(self, target):
+        """The system whose zone a calculation on target walks: the system,
+        or the pristine one of an embedding."""
+        document = self.session.document
+        if document.target_kind(target) == "embedding":
+            return document.embedding(target).pristine
+        return target
 
-    def _refresh_kspace(self):
-        """Draw the zone of the current system; the k-space tab is there only
-        while that system has a periodic direction (PLAN.md phase 8, package
-        P3), and stays as it was while it is being built."""
-        system = self.current_system()
+    def _last_kpath_of(self, system):
+        """The k-path of the last calculation on a system that walks one."""
+        for calc in reversed(self.session.document.calculations):
+            if calc.system == system:
+                for name in kpath_params(calc):
+                    if calc.params.get(name):
+                        return calc.params[name]
+        return None
+
+    def _kpath_system(self, kpath):
+        """The system of the first calculation that walks a k-path."""
+        document = self.session.document
+        users = kpath_users(document, kpath)
+        return self._zone_system(document.calculation(users[0]).system) if users else None
+
+    def _refresh_kpath_windows(self):
+        """Redraw every zone window; one whose k-path is gone closes."""
+        if self.session is None:
+            return
+        ids = {k.id for k in self.session.document.kpaths}
+        for kpath, window in list(self.kpath_windows.items()):
+            if kpath not in ids:
+                window.close()
+                window.deleteLater()
+                del self.kpath_windows[kpath]
+            elif window.isVisible():
+                self._draw_kpath_window(window)
+
+    def _draw_kpath_window(self, window):
+        """Draw a k-path on the zone of its window's system, with the Fermi
+        surface of that system underneath when it has one."""
+        document = self.session.document
+        kpath = document.kpath(window.kpath_id)
+        system = window.system
+        if system is not None and not any(s.id == system for s in document.systems):
+            system = window.system = self._kpath_system(kpath.id) or self.current_system()
+        users = kpath_users(document, kpath.id)
+        title = f"k-path {kpath.id}" + (f" {kpath.name}" if kpath.name != kpath.id and
+                                        kpath.name else "")
+        window.setWindowTitle(f"{title} · Brillouin zone of {system} — guiqula")
+        view = window.view
+        view.renderer_3d = self.structure.renderer_3d     # a 3D zone as the 3D structure
         build = self.builds.get(system) if system else None
         if system is None:
-            self._show_kspace_tab(False)
-            self.kspace_view.clear("No system yet.")
+            view.clear("No system yet: the zone is drawn on a system's geometry.")
             return
         if build is None:
-            self.kspace_view.clear(f"{system}: building…")
+            view.clear(f"{system}: building…")
             return
         if build.get("kspace") is None:
-            self._show_kspace_tab(False)
-            self.kspace_view.clear(f"{system} is finite: it has no Brillouin zone.")
+            view.clear(f"{system} is finite: it has no Brillouin zone.")
             return
-        self._show_kspace_tab(True)
         kspace = dict(build["kspace"], dimensionality=build["dimensionality"])
-        calculations = self._kpath_calculations(system)
-        ids = [c for c, _ in calculations]
-        calc = self.kpath_calc if self.kpath_calc in ids else \
-            self.selected_calculation() if self.selected_calculation() in ids else \
-            (ids[0] if ids else None)
-        kpath = None
-        if calc is not None:
-            obj = self.session.document.calculation(calc)
-            try:
-                kpath = registry.get("calculation", obj.kind).normalize_params(
-                    obj.params)["kpath"]
-            except Exception:
-                kpath = None
         surface = None
-        for other in self.session.document.calculations:
+        for other in document.calculations:
             result = self.session.result(other.id)
             if other.system == system and other.kind == "fermi_surface" and result is not None \
                     and kspace.get("k2K") is not None:
@@ -2028,21 +2078,33 @@ class MainWindow(QMainWindow):
                 reduced = mesh @ np.asarray(kspace["k2K"]).T
                 surface = (reduced @ np.asarray(kspace["reciprocal"]))[:, :2], \
                     np.asarray(result.arrays["weight"])
-        what = f"the path of {calc}" if calc else "no calculation with a k-path on " + system
-        caption = (f"{system} · Brillouin zone · {what}"
-                   + (" (pyqula's default: dashed)" if calc and kpath is None else "")
+        walked = f"walked by {', '.join(users)}" if users else "walked by no calculation yet"
+        caption = (f"{kpath.id} on the zone of {system} · {walked}"
+                   + (" · pyqula's default path (dashed)" if not kpath.vertices else "")
                    + (" · Fermi surface underneath" if surface is not None else ""))
+        systems = {self._zone_system(document.calculation(c).system) for c in users}
+        if len(systems - {system}) > 0:
+            caption += (f" · also walked on {', '.join(sorted(systems - {system}))}, where "
+                        f"each label is the point of that system's own zone")
+        locked = self._kpath_locked(kpath.id)
+        if locked:
+            caption += f" · locked by {locked}: unlock it to edit the path"
         try:
-            self.kspace_view.show_kspace(kspace, calculations, calc, kpath, surface, caption)
+            view.show_kspace(kspace, kpath.vertices, surface, caption, editable=not locked)
         except Exception as error:       # a path through a label this lattice lacks
-            self.kspace_view.clear(f"{system}: cannot draw the path of {calc}: {error}")
+            view.clear(f"{system}: cannot draw {kpath.id}: {error}")
 
-    def _show_kspace_tab(self, shown):
-        """Show or hide the k-space tab; hidden while it is in front, the
-        Structure tab comes forward (not whichever tab is next to it)."""
-        if not shown and self.viewport.currentIndex() == KSPACE_TAB:
-            self.viewport.setCurrentIndex(STRUCTURE_TAB)
-        self.viewport.setTabVisible(KSPACE_TAB, shown)
+    def _kpath_locked(self, kpath):
+        """The lock that covers a k-path (through a calculation walking it),
+        or ""."""
+        document = self.session.document
+        for calc in kpath_users(document, kpath):
+            for lock in document.locks:
+                if lock == calc or lock.startswith(f"{calc}."):
+                    if lock == calc or document.calculation(calc).params.get(
+                            lock.split(".", 1)[1]) == kpath:
+                        return lock
+        return ""
 
     def _update_status(self):
         """The status bar's summary of the current system, with the estimate
@@ -2198,14 +2260,14 @@ class MainWindow(QMainWindow):
         self._update_status()
 
     def _tab_present(self, tab):
-        """Whether a tab ("structure", "kspace" or a calculation id) is still
+        """Whether a tab ("structure", "grid:<id>" or a calculation id) is still
         in the viewport's bar and visible."""
         if tab == "structure":
             return True
         if tab.startswith("grid:"):
             widget = self.grids.get(tab.removeprefix("grid:"))
         else:
-            widget = self.kspace_view if tab == "kspace" else self.plots.get(tab)
+            widget = self.plots.get(tab)
         index = self.viewport.indexOf(widget) if widget is not None else -1
         return index >= 0 and self.viewport.isTabVisible(index)
 
@@ -2255,10 +2317,9 @@ class MainWindow(QMainWindow):
         return self.result_view(calc) if calc is not None else None
 
     def current_tab(self):
-        """"structure", "kspace", or the id of the calculation whose tab is shown."""
+        """"structure", "grid:<id>", or the id of the calculation whose tab is
+        shown."""
         widget = self.viewport.currentWidget()
-        if widget is self.kspace_view:
-            return "kspace"
         if isinstance(widget, GridView):
             return f"grid:{widget.grid_id}"
         return widget.calc_id if isinstance(widget, PlotView) else "structure"
@@ -3287,7 +3348,7 @@ class MainWindow(QMainWindow):
         names there); box [x0, y0, x1, y1] or polygon [[x, y], ...]: the
         atoms inside, on a result drawn on them. Or values without a
         calculation, {quantity: value} on a system (the current one by
-        default): a k-point of the k-space tab, the sites of the canvas
+        default): a k-point of the zone window of a k-path, the sites of the canvas
         selection."""
         from guiqula.remote.api import jsonable
         if calculation is None:
@@ -3376,8 +3437,7 @@ class MainWindow(QMainWindow):
             self.show_result(calc)
             return {"target": kind, "calculation": calc}
         if kind == "kpath":
-            session.do("set_param", entry=target["calculation"], name=target["param"],
-                       value=target["kpath"])
+            session.do("set_kpath", kpath=target["kpath"], vertices=target["vertices"])
             self.show_result(target["calculation"])
             return {"target": kind, "calculation": target["calculation"]}
         if kind == "parameter":
@@ -3463,9 +3523,10 @@ class MainWindow(QMainWindow):
         self._pick_menu.popup(position)
         return self._pick_menu
 
-    def _kpoint_picked(self, k, position):
-        """A click in the k-space tab: what takes that k-point."""
-        self._popup_pick(position, system=self.current_system(), values={"kpoint": k})
+    def _kpoint_picked(self, k, position, system=None):
+        """A click in a zone window: what takes that k-point on its system."""
+        self._popup_pick(position, system=system or self.current_system(),
+                         values={"kpoint": k})
 
     def _selection_menu(self):
         """Calculate on selection: what takes the selected sites."""
@@ -3736,7 +3797,7 @@ class MainWindow(QMainWindow):
         if remember and self.use_settings:
             settings.put("plot_text", name)
         if self.session is not None:
-            self._refresh_structure()             # the k-space tab with it
+            self._refresh_structure()             # the zone window of a k-path with it
             for calc in list(self.plots):
                 self._draw_result(calc, force=True)
         return name
@@ -3943,7 +4004,7 @@ class MainWindow(QMainWindow):
         tab = self.current_tab()
         if tab.startswith("grid:"):
             self.close_grid(tab.removeprefix("grid:"))
-        elif tab not in ("structure", "kspace"):
+        elif tab != "structure":
             self.close_result(tab)
 
     def show_shortcuts(self):

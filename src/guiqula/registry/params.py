@@ -362,12 +362,37 @@ class CodeParam(Param):
         return value
 
 
+def normalize_vertices(name, value):
+    """The vertices of a k-path, checked: each a high-symmetry label pyqula
+    knows (kpointstk.labels: G, K, M, X, ...) or reduced coordinates [k1,
+    k2, k3] (in units of the reciprocal lattice vectors); [] or None is
+    pyqula's default path of the geometry, returned as []."""
+    if value is None or (isinstance(value, (list, tuple)) and len(value) == 0):
+        return []
+    if not isinstance(value, (list, tuple)) or len(value) < 2:
+        raise ParamError(f"{name}: a k-path has two vertices or more (or none: the default "
+                         f"path)")
+    out = []
+    for vertex in value:
+        if isinstance(vertex, str) and vertex.strip():
+            out.append(vertex.strip())
+        elif isinstance(vertex, (list, tuple)) and len(vertex) in (2, 3):
+            point = [_number(name, c, float, None, None) for c in vertex]
+            out.append(point + [0.0] * (3 - len(point)))
+        else:
+            raise ParamError(f"{name}: a vertex is a label (G, K, M, ...) or [k1, k2, "
+                             f"k3] in reciprocal lattice units, not {vertex!r}")
+    return out
+
+
 class KPathParam(Param):
-    """A path through the Brillouin zone: None (pyqula's default path of the
-    geometry) or its vertices, each a high-symmetry label pyqula knows
-    (kpointstk.labels: G, K, M, X, ...) or reduced coordinates [k1, k2, k3]
-    (in units of the reciprocal lattice vectors). The Brillouin-zone canvas
-    edits it (decision 13.9)."""
+    """A path through the Brillouin zone, by the id of a k-path of the
+    document (phase 9, part A), which calculations share: the planner
+    resolves it into its vertices (normalize_vertices), None for pyqula's
+    default path of the geometry, so that what an entry reads with
+    ctx.value is the path itself. The zone window edits the k-path
+    (decision 13.9). None is accepted while a calculation is added:
+    add_calculation names a k-path then."""
     type_name = "kpath"
 
     def __init__(self, name="kpath", default=None, label="k-path", doc=""):
@@ -376,17 +401,7 @@ class KPathParam(Param):
     def normalize(self, value):
         if value is None:
             return None
-        if not isinstance(value, (list, tuple)) or len(value) < 2:
-            raise ParamError(f"{self.name}: a k-path has two vertices or more (or is null: "
-                             f"the default path)")
-        out = []
-        for vertex in value:
-            if isinstance(vertex, str) and vertex.strip():
-                out.append(vertex.strip())
-            elif isinstance(vertex, (list, tuple)) and len(vertex) in (2, 3):
-                point = [_number(self.name, c, float, None, None) for c in vertex]
-                out.append(point + [0.0] * (3 - len(point)))
-            else:
-                raise ParamError(f"{self.name}: a vertex is a label (G, K, M, ...) or [k1, k2, "
-                                 f"k3] in reciprocal lattice units, not {vertex!r}")
-        return out
+        if not isinstance(value, str) or not value.strip():
+            raise ParamError(f"{self.name}: expected the id of a k-path of the document, got "
+                             f"{value!r}")
+        return value.strip()

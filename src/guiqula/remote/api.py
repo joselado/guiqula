@@ -143,6 +143,11 @@ WINDOW_ACTIONS = {
                   "result already there going to the cell this one left (or to its tab); "
                   "row and col left out: the first free cell; grid left out: the result back "
                   "into its tab",
+    "kpath_window": "kpath, or calculation (the k-path it walks), or system (the k-path of "
+                    "its last calculation that walks one, else a new one): open the k-path's "
+                    "window on the Brillouin zone, kspaceWindow_<k>, drawn on the zone of the "
+                    "calculation's system (else the system given, else of the first "
+                    "calculation walking it); returns {kpath, system, window}",
 }
 
 

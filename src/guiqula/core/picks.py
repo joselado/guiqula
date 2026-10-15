@@ -133,7 +133,7 @@ def mesh_node(result, x, y):
 
 def reduced_k(kspace, kx, ky):
     """Reduced k [k1, k2, k3] of a point of pyqula's mesh, through the
-    k2K matrix of the geometry (what the k-space tab uses: reduced = k2K
+    k2K matrix of the geometry (what the zone window of a k-path uses: reduced = k2K
     @ mesh); None when there is none (a result without it, or 1D)."""
     if not kspace or kspace.get("k2K") is None:
         return None

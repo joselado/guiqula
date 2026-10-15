@@ -130,8 +130,7 @@ moves or deletes.
 ### The drawings
 
 The centre holds the Structure tab (the geometry, the Hamiltonian or a Field, drawn on the
-atoms), the k-space tab (the Brillouin zone and the k-path, there only while the selected
-system has a periodic direction) and one tab per calculation's result, which can be
+atoms) and one tab per calculation's result, which can be
 closed (Ctrl+W), detached into a window of its own, or dragged into a grid (see Grids of
 results). Each drawing has a bar above it
 with what that drawing needs, and on a narrow window the bar wraps onto further lines
@@ -144,14 +143,14 @@ rather than hiding a control:
   shown, and Blender (see Exporting to Blender);
 - a result: Pick, Box and Lasso (see Picking from a plot), Overlay, Style (see The style
   of a plot), Export, Blender for a result drawn on the atoms, Save data and Detach;
-- the k-space tab: the calculation whose path is drawn, Add points, Remove last and
-  Default path;
+- the window of a k-path on the Brillouin zone (see K-paths and the Brillouin zone): Add
+  points, Remove last and Default path;
 - the 3D scene drawn with pyvista: Reset view and the View menu in place of Fit, Pan and
   Zoom.
 
 The buttons of the bars show icons, whose tooltips name them and their keys, where they
 have one: Show is an eye before the choice of view, and 3D a cube beside its check box.
-The k-space tab's path tools are icons too, a pin with a plus for Add points, a backspace
+The path tools of a k-path's window are icons too, a pin with a plus for Add points, a backspace
 key for Remove last and a circular arrow for Default path, and the brush's value and
 radius keep their words. Attach a slider, in a parameter's menu, carries the slider's
 icon. A result
@@ -551,12 +550,12 @@ the mesh stays so when it is moved), the eigenstate nearest that energy at that 
 drawn as its weight on the atoms, the Fermi surface and the quasiparticle interference
 pattern at the energy, the density of states on picked sites. On a sweep the menu sets
 the document at that point of the phase diagram and runs the swept calculation there; a
-picked k-point can become a new vertex of the k-path of the bands; picked sites can be
+picked k-point can become a new vertex of the k-path the bands walk; picked sites can be
 selected on the Structure tab or made a region. On a result drawn flat on the atoms, the
 Box and Lasso toggles of its bar pick every atom inside a drag, as the canvas tools
 select them.
 
-Two places that are not plots pick too. A click in the zone of the k-space tab, with Add
+Two places that are not plots pick too. A click in the zone of a k-path's window, with Add
 points off, or a right click there in any mode, picks the k-point under it, snapped onto
 a high-symmetry point nearby as a vertex would be (a click on a vertex picks the vertex),
 and offers the LDOS and the eigenstate at that k. On the Structure tab, Calculate on
@@ -673,26 +672,55 @@ and PDF (on white, whatever the theme), the arrays (.npz, and .csv for curves), 
 script that computes them and the document; File > Export pyqula script (Ctrl+E) writes
 the script alone. The scripts use pyqula only, not guiqula.
 
-## The k-space tab
+## K-paths and the Brillouin zone
 
-The k-space tab, there while the selected system has a periodic direction, draws the
-Brillouin zone of that system with the high-symmetry points pyqula knows for it, pyqula's
-default path (dashed) and the k-path of the calculation its bar names (path of). Add
-points appends vertices (they snap onto the high-symmetry points); with it on, a click on
-a vertex of the path adds that point again, so a path can pass twice through a point (Γ K
-M Γ). A vertex can be dragged, Remove last removes one, and Default path goes back to
-pyqula's. The k-path of a calculation's form takes the same path as text (`G K M G`). The
-latest Fermi surface of the system is drawn underneath, and a click in the zone with Add
-points off picks its k-point (see Picking from a plot). A three-dimensional lattice is
-drawn by the k3 = 0 cut of its zone (the plane of b1 and b2) with the high-symmetry points
-in that plane; a path that leaves the plane (pyqula's default one, or `Z` typed in the
-form) is drawn projected onto it.
+A k-path is an object of the document of its own, listed under K-paths in the outliner,
+after Calculations, and every calculation that walks one (the bands, the spectral function)
+names it, so that one path drives several calculations and an edit of it changes them all.
+The simplest case is the one of a new document: the first band structure of a system gets a
+new k-path, pyqula's default path until we draw one, and every band structure or spectral
+function added later on the same system walks the k-path of the last one, which is what
+makes the path last used the one a new calculation starts from. The k-path row of a
+calculation's form is a list of the document's k-paths, each written with its vertices and
+the calculations walking it (`k1 · Γ K M Γ · c1, c3`), so choosing another path is choosing
+it there; its menu gives New k-path, a new default path for this calculation alone, and
+Make single-user, a copy of the path that only this calculation walks, which is what to
+reach for when one band structure should go somewhere the others should not. The K-paths
+row's "+" adds a k-path, a k-path selected in the outliner shows its name, its vertices as
+text (`G K M G`, with reduced coordinates in parentheses, `(0.5, 0)`) and the calculations
+that walk it, and a k-path that no calculation walks reads unused and can be removed (one
+that is walked cannot). The number of points stays each calculation's `nk`, since it is a
+cost and not a path.
 
-When the k-path of the bands or of the spectral function is left empty they walk pyqula's
+The Zone button of the row, of the k-path's form or Show in the Brillouin zone in its
+context menu opens the window of that k-path, one window per k-path, which draws the
+Brillouin zone of the system of the calculation it was opened from with the high-symmetry
+points pyqula knows for it, pyqula's default path (dashed) and the k-path. Show Brillouin
+zone, in a system's context menu, opens the k-path of the last calculation of that system,
+or a new one when it has none, so the zone of a system is there even before any band
+structure. Add points appends vertices (they snap onto the high-symmetry points); with it
+on, a click on a vertex of the path adds that point again, so a path can pass twice through
+a point (Γ K M Γ). A vertex can be dragged, Remove last removes one, and Default path goes
+back to pyqula's. The latest Fermi surface of the system is drawn underneath, and a click in
+the zone with Add points off picks its k-point (see Picking from a plot). When the
+calculations walking one k-path run on systems with different zones, the caption says so: a
+label is the point of each system's own zone, so `K` is walked on each lattice where that
+lattice has it. A k-path walked by a calculation that a teaching preset locks is drawn
+without its tools, since an edit would change the locked calculation too.
+
+The zone of a three-dimensional crystal is drawn whole, in 3D, the Wigner-Seitz cell of the
+reciprocal lattice with every high-symmetry point on it and the path where it goes, and it
+turns with the mouse as the 3D structure does: by matplotlib, whose left button rotates it,
+or by pyvista with Blender's controls, as View > 3D drawing says. A click near a
+high-symmetry point or a vertex adds it to the path (Add points) or picks its k-point; a
+click elsewhere picks nothing, since a point of the screen is a line through the zone, and a
+vertex that is not a high-symmetry point is typed in the k-path's form instead.
+
+When the k-path of the bands or of the spectral function has no vertex they walk pyqula's
 default path, and the k axis names the high-symmetry points that path goes through, as it
-does for a path typed in the form: Γ K' M K Γ on the honeycomb, triangular and kagome
+does for a path drawn or typed: Γ K' M K Γ on the honeycomb, triangular and kagome
 lattices, Γ M Γ on a square one, Γ X Γ in one dimension and Γ X M Γ R in three. Γ, K and K'
-are the points pyqula's labels give (the ones the k-space tab draws), which means that the
+are the points pyqula's labels give (the ones the zone window draws), which means that the
 first corner of the default path is K' and not the K that pyqula's own guide writes; M, X and
 Y name a point by its kind, so the three M points of a hexagonal zone are all M, and `M` typed
 in a k-path is the point (1/2, 0), which is not always the M that the default path crosses. In
@@ -743,7 +771,7 @@ steps at once, and the selection follows. What is shown (the selection, the work
 the sliders, the overlays, the theme) is not undone. View > Theme chooses light, dark or
 the desktop's scheme, and the icons, the drawings and an empty result follow it. View >
 Plot text chooses the size of the text of every drawing, the labels, the ticks and the
-titles of the plots, of the canvas, of the k-space tab and of the exported figures: small,
+titles of the plots, of the canvas, of the zone windows and of the exported figures: small,
 normal or large, so that a projector or a small screen gets a readable size too; View > Interface text does the same for the text of the menus, the
 panels and the forms (normal or large). The settings (theme, plot text, interface text,
 recent files, always trust, remote control, run at once, the 3D drawing, the Blender

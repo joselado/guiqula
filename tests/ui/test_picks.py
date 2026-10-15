@@ -263,14 +263,13 @@ def test_run_at_once(window, qtbot):
         session.do("remove", entry=calc)
 
 
-def test_a_click_in_the_kspace_tab_picks_a_kpoint(window, qtbot, shot):
-    """With Add points off, a click in the zone is a k-point (snapped onto
-    K here), and the eigenstate there is computed."""
+def test_a_click_in_the_zone_picks_a_kpoint(window, qtbot, shot):
+    """With Add points off, a click in a k-path's zone window is a k-point
+    (snapped onto K here), and the eigenstate there is computed."""
     settle(qtbot, window)
     session = window.session
     window.select("s1")
-    window.viewport.setCurrentIndex(1)                       # the k-space tab
-    view = window.kspace_view
+    view = window.kpath_windows[window.kpath_window(system="s1")["kpath"]].view
     qtbot.waitUntil(lambda: view.ax is not None, timeout=10_000)
     from guiqula.ui import kspace as tools
     k_point = tools.special_images(view.kspace)["K"]

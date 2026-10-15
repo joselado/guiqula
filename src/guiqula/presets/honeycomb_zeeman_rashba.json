@@ -1,6 +1,7 @@
 {
   "version": 1,
   "notes": "Graphene with an exchange field and Rashba coupling\nA 2x2 honeycomb supercell with an exchange field whose z component turns with x (0.3 tanh(x/4)) and Rashba spin-orbit coupling: the bands coloured by sz (c1) and the density of states (c2). The first preset, and the one the tests and tools/drive.py use.",
+  "locks": [],
   "systems": [
     {
       "id": "s1",
@@ -67,7 +68,8 @@
       "kind": "bands",
       "params": {
         "nk": 100,
-        "operator": "sz"
+        "operator": "sz",
+        "kpath": "k1"
       }
     },
     {
@@ -83,6 +85,12 @@
         "mode": "ED",
         "operator": null
       }
+    }
+  ],
+  "kpaths": [
+    {
+      "id": "k1",
+      "vertices": []
     }
   ],
   "ui": {}

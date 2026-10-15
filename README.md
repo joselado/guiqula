@@ -108,8 +108,8 @@ kernels the first time and then keeps them in a cache.
   while you move the slider.
 - Overlays compare results. A Style button sets the widths, sizes, colours and colour maps
   that make sense for each kind of plot. A grid shows several results next to each other,
-  and you put each result in its cell by dragging its tab. You edit the k-path directly on
-  the Brillouin zone.
+  and you put each result in its cell by dragging its tab. A k-path is shared by the calculations
+  that walk it and edited directly on the Brillouin zone, in 3D for a 3D crystal.
 - Every result can export its figure, its data and the pyqula script that reproduces it. A
   structure, a local density of states or a magnetization can also be exported to
   Blender, as a .blend file, to render it. A Python console has access to the live

@@ -1,5 +1,5 @@
 """The bars of the drawings (PLAN.md phase 8, package P3): the structure
-canvas, each result view and the k-space tab carry a bar with what that
+canvas, each result view and the zone window of a k-path carry a bar with what that
 drawing needs, Fit, Pan, Zoom and Save image and the tools of the drawing,
 in place of matplotlib's navigation toolbar, whose Back, Forward, Subplots
 and Customize did nothing useful here.

@@ -261,7 +261,7 @@ def test_follow_sets_the_icons_at_the_first_show_and_after_a_change_of_theme(app
 @pytest.fixture(scope="module")
 def window(qapp):
     """The window at the small laptop's size on a preset, its controls shown:
-    the structure canvas, the k-space tab, a result's view with its status
+    the structure canvas, a k-path's zone window, a result's view with its status
     row, a form."""
     from guiqula.ui.app import build_main_window
     theme.apply(qapp, "light")
@@ -275,9 +275,8 @@ def window(qapp):
 
 def shown_everything(window, qtbot):
     from PySide6.QtWidgets import QApplication
-    from guiqula.ui.mainwindow import KSPACE_TAB
     qtbot.waitUntil(lambda: window.session.build_is_current("s1"), timeout=120_000)
-    window.viewport.setCurrentIndex(KSPACE_TAB)
+    window.kpath_window(calculation="c1")
     window.select("t1")
     window.show_result("c1")
     view = window.plots["c1"]
@@ -327,8 +326,9 @@ def test_every_control_the_package_names_carries_an_icon(window, qtbot):
     from guiqula.ui import outliner as tree
     view = shown_everything(window, qtbot)
     names = dict(WINDOW_ICONS)
-    for key in ("structure", "kspace"):
-        names.update({name.format(key=key): icon for name, icon in BAR_ICONS.items()})
+    names.update({name.format(key="structure"): icon for name, icon in BAR_ICONS.items()})
+    k = window.session.document.calculation("c1").params["kpath"]
+    names.update({name.format(key="kspace") + f"_{k}": icon for name, icon in BAR_ICONS.items()})
     names.update(STRUCTURE_ICONS)
     names.update(PLOT_ICONS)
     missing = [name for name in names
@@ -357,7 +357,7 @@ def test_every_control_the_package_names_carries_an_icon(window, qtbot):
     form = window.properties.form                  # t1's form and its ?
     assert ink(form.help_button.icon()) == ink(icons.icon("help"))
     tabs = window.viewport
-    assert not tabs.tabIcon(0).isNull() and not tabs.tabIcon(1).isNull()
+    assert not tabs.tabIcon(0).isNull()                     # Structure
     # the outliner: the kind of each row, and its marks drawn as icons
     kinds = {item_id: window.outliner.item(item_id).data(0, tree.KIND_ROLE)
              for item_id in ("s1", "s1/base", "op1", "t1", "s1/meanfield", "c1",

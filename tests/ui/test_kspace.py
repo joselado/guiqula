@@ -1,7 +1,9 @@
-"""The Brillouin-zone canvas (decision 13.9): the zone and the
-high-symmetry points of the current system, the k-path of a calculation
-drawn and edited (a vertex added, dragged onto a special point, the
-default path back), the Fermi surface underneath; the bands follow."""
+"""The Brillouin-zone canvas (decision 13.9) in the window of a k-path
+(phase 9, part A): the zone and the high-symmetry points of the system, the
+k-path drawn and edited (a vertex added, dragged onto a special point, the
+default path back), the Fermi surface underneath; the bands follow. A 3D
+crystal's zone is drawn in 3D (decision 236). The k-path row of a
+calculation's form and the K-paths section of the outliner."""
 import numpy as np
 import pytest
 from matplotlib.backend_bases import MouseEvent
@@ -37,54 +39,56 @@ def test_hexagonal_zone():
     assert np.allclose(tools.plane_basis(b), np.eye(3)[:2])      # drawn in x and y
 
 
-def test_a_three_dimensional_zone_is_its_k3_0_cut():
-    """The pyrochlore (fcc) as the worker hands it: b1 and b2 leave the xy
-    plane, and Z, R, A, B have k3 = 1/2. The canvas drew the xy projection:
-    'Z' sat on an image of M2, a click on it stored M2, and the zone was a
-    square. It is the k3 = 0 cut now, with the points in that plane only."""
-    import itertools
-    from guiqula.registry import kpaths
+def test_a_three_dimensional_zone_is_drawn_whole():
+    """The pyrochlore (fcc) as the worker hands it: the zone is the
+    truncated octahedron, 14 faces, its volume the reciprocal cell's, and
+    Z, R, A, B, off the plane k3 = 0, are points of it too."""
+    from guiqula.ui import kspace3d
     s = 1 / (2 * np.sqrt(2))
     b = s * np.array([[-1.0, 1.0, -1.0], [1.0, 1.0, 1.0], [-1.0, -1.0, 1.0]])
+    faces = tools.brillouin_zone_3d(b)
+    assert sorted(len(f) for f in faces) == [4] * 6 + [6] * 8
+    volume = 0.0
+    for face in faces:
+        normal = np.cross(face[1] - face[0], face[2] - face[0])
+        normal /= np.linalg.norm(normal)
+        area = np.linalg.norm(sum(np.cross(face[i], face[(i + 1) % len(face)])
+                                  for i in range(len(face)))) / 2
+        volume += area * abs(face[0].dot(normal)) / 3
+    assert np.isclose(volume, abs(np.linalg.det(b)))
     special = {"G": [0.0, 0.0, 0.0], "M": [0.5, 0.0, 0.0], "M2": [0.0, 0.5, 0.0],
                "M3": [0.5, 0.5, 0.0], "Z": [0.0, 0.0, 0.5], "R": [0.5, 0.5, 0.5],
                "A": [0.5, 0.0, 0.5], "B": [0.0, 0.5, 0.5]}
-    kspace = {"reciprocal": b, "special": special, "dimensionality": 3,
-              "default_path": np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.5]])}
-    drawn = tools.special_images(kspace)
-    assert set(drawn) == {"G", "M", "M2", "M3"}
-    clicked = []
-    for name, point in drawn.items():                    # a click on a label stores its point
-        stored = np.array(tools.snap(point + 0.01, kspace))
-        shift = stored - special[name]
-        assert stored[2] == 0 and np.allclose(shift, np.round(shift), atol=1e-9)
-        assert np.allclose(tools.to_plane(stored, b)[0], point)
-        clicked.append(list(stored))
-    assert kpaths.tick_names(b, 3, clicked, special) == \
-        [tools.NAMES.get(name, name) for name in drawn]  # and the bands name it so
-    zone = tools.brillouin_zone(b, 3)
-    assert len(zone) == 6                                # a hexagon, not a square
-    reciprocal = [np.array(n) @ b for n in itertools.product(range(-2, 3), repeat=3) if any(n)]
-    for corner in zone @ tools.plane_basis(b):           # in 3D: a corner of the cell's cut
-        margins = [g.dot(g) / 2 - corner.dot(g) for g in reciprocal]
-        assert min(margins) > -1e-9 and sum(abs(m) < 1e-9 for m in margins) >= 2
-    assert np.allclose(tools.to_plane(tools.to_reduced(zone[0], b), b)[0], zone[0])
+    kspace = {"reciprocal": b, "special": special, "dimensionality": 3}
+    names = [name for name, _, _ in kspace3d.special_points(kspace)]
+    assert {"G", "Z", "R", "A", "B"} <= set(names)
+    path = kspace3d.path_points(["G", "Z"], kspace)
+    shift = path[1] @ np.linalg.inv(b) - [0.0, 0.0, 0.5]       # an image of Z, nearest Γ
+    assert np.allclose(shift, np.round(shift), atol=1e-9)
+
+
+def zone(window, calc="c1"):
+    """The view of the zone window of the k-path a calculation walks."""
+    out = window.kpath_window(calculation=calc)
+    return window.kpath_windows[out["kpath"]].view, out["kpath"]
 
 
 def test_the_path_on_the_zone(window, qtbot, shot):
     session = window.session
     settle(qtbot, window)
-    window.viewport.setCurrentIndex(1)
-    assert window.current_tab() == "kspace"
-    view = window.kspace_view
-    assert view.bar.objectName() == "kspaceBar" and view.canvas.toolbar is view.toolbar
-    assert view.calc == "c1" and view.kpath is None             # the bands, default path
+    assert "kspace" not in [window.viewport.tabText(i).lower().replace("-", "")
+                            for i in range(window.viewport.count())]    # no k-space tab
+    view, k = zone(window)
+    assert view.objectName() == f"kspaceView_{k}"
+    assert window.findChild(type(view.window()), f"kspaceWindow_{k}") is view.window()
+    assert view.bar.objectName() == f"kspaceBar_{k}" and view.canvas.toolbar is view.toolbar
+    assert view.kpath is None                                    # the default path
     assert {"G", "K", "M"} <= set(view.kspace["special"])
     special = tools.special_images(view.kspace)
     b = view.kspace["reciprocal"]
 
     def drawn():
-        return tools.to_plane(session.document.calculation("c1").params["kpath"], b)
+        return tools.to_plane(session.document.kpath(k).vertices, b)
     view.add.setChecked(True)
     view.add_point(special["K"] + 0.01)                          # snaps onto K
     assert np.allclose(drawn(), [[0, 0], special["K"]], atol=1e-6)
@@ -111,9 +115,7 @@ def test_the_path_on_the_zone(window, qtbot, shot):
     qtbot.waitUntil(lambda: "Fermi surface" in view.caption.text(), timeout=20_000)
     shot(view, "zone")
     view.default.click()
-    assert session.document.calculation("c1").params["kpath"] is None
-    window.viewport.setCurrentIndex(1)          # running c1 brought its result forward
-    assert window.view_state()["tab"] == "kspace"
+    assert session.document.kpath(k).vertices == []
 
 
 def test_a_click_on_a_vertex_passes_through_it_again(window, qtbot):
@@ -121,13 +123,12 @@ def test_a_click_on_a_vertex_passes_through_it_again(window, qtbot):
     with Add points on (a path can go back to Γ); a drag still moves it."""
     session = window.session
     settle(qtbot, window)
-    window.viewport.setCurrentIndex(1)
-    view = window.kspace_view
+    view, k = zone(window)
     special = tools.special_images(view.kspace)
     b = view.kspace["reciprocal"]
 
     def path():
-        return session.document.calculation("c1").params["kpath"]
+        return session.document.kpath(k).vertices
 
     def click(point, jitter=0.0):
         x, y = view.ax.transData.transform(point)
@@ -153,3 +154,64 @@ def test_a_click_on_a_vertex_passes_through_it_again(window, qtbot):
     click(special["M"])
     assert len(path()) == 5
     view.default.click()
+
+
+def test_a_shared_kpath_drives_every_calculation_walking_it(window, qtbot):
+    """One k-path, two calculations (the bands and a second band structure
+    added after them): an edit in the zone changes both, Make single-user
+    gives one a copy, and the form's row says who walks what."""
+    session = window.session
+    settle(qtbot, window)
+    c = session.do("add_calculation", system="s1", kind="bands")
+    k = session.document.calculation("c1").params["kpath"]
+    assert session.document.calculation(c).params["kpath"] == k
+    window.select(c)
+    editor = window.properties.form.editors["kpath"]
+    assert editor.combo.objectName() == "kpath_kpath"
+    assert "c1" in editor.combo.currentText() and c in editor.combo.currentText()
+    assert editor.single.isEnabled()                         # walked by two
+    view, _ = zone(window, c)
+    view.add_point(tools.special_images(view.kspace)["K"])
+    assert session.document.kpath(k).vertices[-1] == [1 / 3, 1 / 3, 0.0] or \
+        len(session.document.kpath(k).vertices) == 2
+    editor.action.emit("single")                             # Make single-user
+    own = session.document.calculation(c).params["kpath"]
+    assert own != k and session.document.kpath(own).vertices == \
+        session.document.kpath(k).vertices
+    assert window.outliner.item(own) is not None             # a row in K-paths
+    assert c in window.outliner.item(own).text(1)
+    session.do("set_kpath", kpath=k, vertices=[])
+    session.do("remove", entry=c)
+    session.do("remove", entry=own)
+
+
+def test_a_system_shows_its_zone(window, qtbot):
+    """Show Brillouin zone (a system's context menu): the window of the
+    k-path of its last calculation walking one."""
+    settle(qtbot, window)
+    out = window.kpath_window(system="s1")
+    assert out["kpath"] == window.session.document.calculation("c1").params["kpath"]
+    assert out["window"] == f"kspaceWindow_{out['kpath']}"
+
+
+def test_a_click_on_the_3d_zone_adds_its_point(window, qtbot):
+    """A cubic crystal's zone in 3D (mplot3d): a click on the projection of a
+    high-symmetry point adds it to the path by its label."""
+    from guiqula.ui import kspace3d
+    session = window.session
+    s2 = session.do("add_system", lattice="cubic_lattice")
+    c = session.do("add_calculation", system=s2, kind="bands")
+    settle(qtbot, window)
+    view, k = zone(window, c)
+    qtbot.waitUntil(lambda: view.three_d and view.ax is not None, timeout=20_000)
+    assert view.ax.name == "3d" and "in 3D" in view.caption.text()
+    view.add.setChecked(True)
+    view.canvas.draw()
+    name, _, point = next(p for p in view.points_3d if p[0] == "R")
+    x, y = kspace3d.screen_mpl(view.ax, point)[0]
+    MouseEvent("button_press_event", view.canvas, x, y, button=1)._process()
+    MouseEvent("button_release_event", view.canvas, x, y, button=1)._process()
+    assert session.document.kpath(k).vertices == ["G", "R"]     # a new path starts at Γ
+    session.do("remove", entry=c)
+    session.do("remove", entry=k)
+    session.do("remove", entry=s2)

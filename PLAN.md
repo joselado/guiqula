@@ -33,7 +33,12 @@ maintainer answered 93, and the others stand as recommended) and built on
 report closes section 7, with decisions 107 to 145, which the maintainer
 answered on 2026-10-05 (all as recommended but 121, answered with its
 alternative), and section 4 draws the window as built. Phase 8 was merged into
-master and pushed on 2026-10-04.
+master and pushed on 2026-10-04. Phase 9, the Document as a graph with a node view
+beside the outliner, was planned on 2026-10-15 (the end of section 7,
+decisions 213 to 233); the maintainer answered 222, 224 and 226 and said to
+go ahead, and part A, the k-path as an object with its zone window (a 3D
+zone for a 3D crystal), was built the same day on branch kpath-window,
+decisions 234 to 239.
 
 ## 1. Requirements (as stated by the maintainer)
 
@@ -4373,6 +4378,296 @@ into the gap as the exchange grows), and in the window.
      2.09 against 0.009 in the pristine cell, its LDOS, and the in-gap
      state, moved to -0.10 by a sublattice mass of 0.2 on both systems),
      the maintainer's answer, over none, the Yu-Shiba-Rusinov chain or both.
+
+**Phase 9: the Document as a graph, and the node view (planned 2026-10-15,
+branch kpath-window).** The maintainer asked first that the k-path not sit at
+the level of the geometry, as the k-space tab beside Structure does, but be
+chosen by hand for each calculation that walks one (the bands, the spectral
+function), in a window bound to that calculation, a new one starting from the
+path last used on its system; asked where that window lives (one question),
+the maintainer picked a window opened from the k-path row of the calculation's
+form over a pane in its result tab or a drawing inside the form. Then, before
+anything was built, the maintainer asked for a node view as Blender has, in
+which the geometry, the Hamiltonian, the k-path and the calculations are
+connected, so that one k-path drives several calculations and one geometry
+several Hamiltonians; that the same view serve the embedding, the local probe
+and a heterostructure; and that it be an alternative view to the outliner,
+the two compatible and consistent. Asked whether to build the window per
+calculation first, the shared k-path first, or plan the whole first, the
+maintainer picked the plan. We will now see what the graph already is, what
+it lacks, and the four parts that build it, the k-path first since it closes
+the first request.
+
+What matters is that the Document is already a graph, drawn as a tree. A
+calculation names its system or embedding (`system`), a local probe names its
+tip (a `SystemParam`), an embedding names its pristine and its defective
+system, a term names a region, a `from_result` Field names a result of
+another calculation, and a sweep names the parameters it moves; each of these
+is an id, and the planner follows them into the keys (decision 14.9). The
+outliner draws one root per system with what it owns under it, which shows
+ownership and hides every link that crosses systems. Two things are owned
+today that several owners should share: the k-path, a parameter inside each
+calculation, and the geometry, a stack inside each system. So the change is
+one rule, borrowed from Blender's data-blocks: what more than one owner may
+use is an object of the Document named by id, and a link is that id. The
+outliner and the node view are then two views of the same Document, both
+selecting with the window's `select` action and both editing through the same
+Commands, and they hold nothing of their own but view state (the tree's
+folds, the nodes' places in `ui`), which is what keeps them consistent by
+construction rather than by synchronization.
+
+*Part A, the k-path as an object.* The Document gains `kpaths` (ids k1,
+k2, left out of the JSON while empty, as `embeddings` is), each an id, a name
+and its vertices, labels or reduced coordinates as `KPathParam` takes them
+today; an empty k-path is pyqula's default path of the geometry it is walked
+on, so the default is a k-path like any other and can be shared. A
+calculation's `kpath` becomes the id of one, never empty: `add_calculation`
+names the k-path of the last calculation in the Document that runs on the
+same system and takes a k-path, and makes a new empty one when there is
+none, so the Session, `guiqula run`, `drive.py` and the remote API all get
+the default and not only the window. The number of points stays the
+calculation's `nk`, which is its cost and not the path. The k-path row of a
+calculation's form becomes a combo of the document's k-paths, each written
+with its vertices and its users ("k1 · Γ K M Γ · c1, c3"), with New k-path
+and Make single-user (a copy named for this calculation) at its foot, and a
+zone button that opens the zone window. The zone window belongs to the
+k-path, not to the calculation: one plain window per k-path,
+`kspaceWindow_<k>` (never a floating dock, decision 88), holding today's
+`KSpaceView` without its "path of" combo, drawn on the zone of the system of
+the calculation it was opened from, with the Fermi surface of that system
+under it and the k-point pick of decision 53 as before (opened from the
+k-paths section of the outliner, it draws the zone of its first user, and of
+the current system when nothing names it yet); when the users of
+one k-path run on systems with different zones, its caption says so, since a
+label resolves on each system's own zone. The k-space tab beside Structure
+goes. A pick that adds a k-point to a path edits the k-path, and its label
+names every calculation that follows. The planner resolves the id into its vertices, and
+`ctx.value("kpath")` hands an entry the vertices as today, so `_path`, the
+export and the engine tests against direct pyqula calls do not change; the
+key of a calculation hashes the vertices it walks, not the id, so moving a calculation between two k-paths
+with the same vertices leaves its result current. The outliner lists the
+k-paths in a section of their own after Calculations, with a "+". Reading
+an older file lifts each inline path into a k-path named after its
+calculation, and the calculations of one system on the default path share
+one empty k-path; the presets are saved again with their k-paths. A system
+whose only k-space calculation is a Fermi surface, or which has none, keeps
+its zone through Show Brillouin zone in its context menu, which opens the
+window of the k-path of its last calculation that takes one, making an empty
+k-path when there is none, so the zone and its pick are never lost with the
+tab. The mutations are `add_kpath`, `set_kpath` (the vertices,
+one undo step per edit in the zone), `remove` refused while a calculation
+names it, `duplicate`, and `set_param` with the id; the window's action is
+`kpath_window`. The exported script writes `ks` from the vertices, as now.
+
+*Part B, the geometry as an object.* The Document gains `geometries` (ids
+geo1, geo2; `g` is taken by the grids of results in the view state), each
+with its base, its ops and its regions, the regions moving with it since a
+region is a selection of its sites; a system, quantum or classical, names
+one in `geometry`, and the terms of every system on that geometry may name
+its regions. This is a change of the schema: version 2, read from version 1
+by lifting each system's geometry and regions into a geometry of its own,
+so nothing is shared until it is asked for, and the nine presets saved
+again. The stage keys hash content and never ids (`registry/pipeline.py`),
+so a geometry shared by two systems is built once in a worker's cache
+without any change of the engine. A geometry's base may be another geometry
+as well as a lattice, cycles refused, its key the key of that geometry's
+last op, so that a ribbon or an island cut from a decorated cell follows
+every edit of that cell. New embedding of a defect makes the defect name the
+pristine geometry itself, and that sharing is what makes decision 203's check
+of the cell hold: a defect is made by its terms (`haldane_vacancy` makes its
+vacancy with an onsite energy of 1000 on one site), while an op that removes
+or adds sites would change the cell and is refused by that check, whichever
+geometry it sits on. The canvas shows the current system's
+geometry, a selected geometry alone without a Hamiltonian view; the
+outliner's Geometry section of a system shows its geometry by name, marked
+as shared with the other systems that name it, an op edited there being
+edited for all of them; the context menus gain New Hamiltonian on this
+geometry and Duplicate linked (Blender's Alt+D), and Duplicate copies the
+geometry as today. A classical system on the geometry of a quantum one is
+the case that motivates sharing beyond the Hamiltonians: a classical texture
+handed to the quantum system by a `from_result` Field then lives on exactly
+its sites. About 80 reads of `system.geometry` and `system.regions` in 18
+modules go through one helper, `geometry_of(document, system)`.
+
+*Part C, the node view.* An alternative view of the Outliner dock, switched
+at its top between Tree and Nodes, the dock widening while the nodes are
+shown and narrowing back. It is a `QGraphicsView` (Qt's, which renders
+offscreen, so no new dependency). A node is a geometry, a system (titled
+Hamiltonian or Model by its kind), a k-path, an embedding or a calculation,
+with its id, its name and the marks of `marks.py`, so a stale calculation
+reads stale in the tree, its tab and its node alike. The sockets are read
+from the declarations, never listed by hand, so a plugin's entries get them:
+a system has a geometry input, a calculation a target input (a system or an
+embedding, as `spec.systems` allows), one input per `SystemParam` (the tip)
+and one per `KPathParam`, an embedding its pristine and defect inputs; a
+`from_result` Field is drawn as a dashed link from the calculation whose
+result it reads to the system of the term, and a sweep as dotted links to
+the parameters it moves, both shown and not edited in this phase. The nodes
+sit in columns by kind from left to right (geometries, k-paths, systems,
+embeddings, calculations) in Document order; a node dragged keeps its place
+in `ui` as view state, not as a Command, and Arrange puts them back.
+Clicking a node selects its entry, and the tree, Properties, the workspace
+and the canvas follow as they do from the tree; drawing a link from an
+output to an input is one Command (the geometry of a system, the k-path or
+the target or the tip of a calculation, a role of an embedding), refused
+with its reason when the declaration does not take that kind; an input that
+is never empty (a geometry, a k-path, a target) is moved and never cut,
+while an optional one (the tip) can be cut, meaning pyqula's default. Shift+A
+opens the Add menu at the cursor, Del removes (refused while used, as
+`remove` is), and a double click opens a k-path's zone window or a
+calculation's result. Each gesture is a window action in `WINDOW_ACTIONS`
+with its example in `drive.py`'s help: `outliner_view`, `node_connect`,
+`node_move` and `node_arrange`, selection being the existing `select`. A
+test drives the same edit through the tree and through the nodes and
+compares the two Documents.
+
+*Part D, objects of several systems.* The embedding and the local probe are
+nodes from part C on, with no change of their own. A heterostructure in
+pyqula's transport sense, two semi-infinite leads with or without a central
+region (`heterostructures.build(h1, h2)` with `HT.set_coupling(T)`,
+`create_leads_and_central(h1, hc, h2)`, and `h.get_central_heterostructure(i,
+j, left, right)` for a finite central region contacted at two sites), is
+built as the embedding was: an object `junctions` naming a left and a right
+lead (one-dimensional quantum systems) and an optional central system, its
+node having those three inputs, with the calculations dI/dV against the
+energy, the Landauer transmission (refused on a Nambu junction, as pyqula
+refuses it), the DC current and the I-V curve (Floquet-Keldysh, the slow
+one for the cost guard) and the thermal conductance, each checked against a
+direct pyqula call. A heterostructure in the stacking sense, two geometries
+on top of each other (a bilayer, a twisted one), is then a geometry with
+two geometry inputs, left for later.
+
+The parts are built in that order, each on its own branch, merged with the
+suite passing and its documentation done; part A alone answers the first
+request, and none of A, B or D needs the node view to be useful, which only
+draws what they make. Decisions, for the maintainer to answer, the
+recommended option first:
+
+213. the Document's shared things are objects named by id, and the outliner
+     and the node view are two views of them, consistent because they hold
+     nothing but view state, the maintainer's request; or the node view as
+     the one editor, the outliner dropped;
+214. the k-path is an object of the Document, free of any system, its labels
+     resolved on the zone of each calculation's system; or a k-path owned by
+     a geometry, shared only by calculations on systems of that geometry;
+215. a k-path holds its vertices only and the number of points stays each
+     calculation's `nk`; or `nk` in the k-path, shared too;
+216. an empty k-path is pyqula's default path, and every calculation taking
+     a k-path names one; or no k-path for the default (`kpath` None), one
+     made only when a path is drawn, so the default cannot be shared;
+217. a new calculation names the k-path of the last calculation of the same
+     system in Document order, else a new empty one, in `add_calculation`;
+     or the k-path edited last, which needs the order of edits stored in
+     the Document;
+218. the form's k-path row is a combo of the k-paths with their vertices and
+     users, New k-path, Make single-user, and the zone button; or today's
+     text line kept, editing the shared k-path, with the combo beside it;
+219. the zone window belongs to the k-path, one per k-path, drawn on the zone
+     of the calculation it was opened from, and the k-space tab goes; or one
+     window per calculation, the answer before the node view, which would
+     give a shared k-path two editors;
+220. a pick that adds a k-point edits the shared k-path, its label naming
+     every calculation that follows; or the pick makes the path
+     single-user first;
+221. an older file's calculations on the default path share one empty
+     k-path per system and an inline path becomes a k-path of its own; or
+     one k-path per calculation, nothing shared until asked;
+222. the geometry is an object (`geometries`, geo1) owning its ops and
+     regions, schema version 2, a version-1 file read by lifting one
+     geometry per system, the maintainer's answer; or a system keeps its geometry inline and may
+     name another system's (`geometry_from`), no new version, the shared
+     geometry then owned by one of its users;
+223. regions belong to the geometry; or to each system, copied when a
+     geometry is shared;
+224. New embedding of a defect makes the defect name the pristine geometry,
+     so the two cells are one, and a geometry's base may be another
+     geometry (a ribbon cut from a decorated cell), the maintainer's
+     answer; or the defect's
+     geometry copied as decision 202 does, and lattices only as bases;
+225. New Hamiltonian on this geometry and Duplicate linked are added, and
+     Duplicate keeps copying; or Duplicate shares the geometry by default;
+226. the node view is the Outliner dock's alternative view (Tree or Nodes),
+     the maintainer's words and answer; or a Nodes tab in the viewport beside
+     Structure, larger and away from the tree; or a dock of its own, both
+     in sight at once;
+227. the drawing is Qt's `QGraphicsView`, no new dependency; or a node
+     editor package (NodeGraphQt), a dependency with a model of its own to
+     keep in step with the Document;
+228. the sockets are read from the declarations (`SystemParam`,
+     `KPathParam`, `spec.systems`, the `from_result` Fields, the sweeps);
+     or a table per kind in the view;
+229. the nodes sit in columns by kind, a dragged node's place kept in `ui`
+     as view state, with Arrange; or places stored as Commands, undoable
+     and marking the document changed;
+230. a link drawn is one Command, an input that cannot be empty is moved and
+     never cut, an optional one may be cut; or empty inputs allowed and the
+     node flagged invalid until linked;
+231. the `from_result` and sweep links are drawn and not edited in this
+     phase; or edited in the view as well;
+232. the junction (two leads and an optional central region) is an object
+     like the embedding, built after the node view, and the stacked
+     heterostructure later; or the junction before the node view;
+233. the order is A, B, C, D, each merged on its own; or the node view first,
+     drawing what exists, then A, B and D.
+
+The maintainer answered 222, 224 and 226 on 2026-10-15, each as recommended,
+asked one at a time as the ones that change the most; the other decisions
+stand as recommended unless answered.
+
+*Part A as built (2026-10-15, branch kpath-window).* The maintainer said to
+go ahead with the plan, and asked while it was being built that the zone of a
+three-dimensional crystal be drawn in 3D and turned as the 3D crystal is. The
+Document has `kpaths` (`KPath`: id, name, vertices), and a calculation's
+`KPathParam` holds the id of one. The planner puts the vertices in place of
+the id (`pipeline._resolve_kpaths`, None for no vertex), so an entry, the
+export and the key see exactly what they saw before; the keys of the 38
+calculations of the presets were computed on master and on the branch and
+are the same, so no saved result goes stale. A document is lifted when it is
+made or read (`lift_kpaths`, a validator of the Document, idempotent), and
+the presets were saved again with their k-paths. The mutations are
+`add_kpath`, `set_kpath`, `single_user_kpath` (Make single-user, and New
+k-path with `copy` false), `remove` (refused while walked), `duplicate` and
+`rename`. The form's row is the combo `kpath_<param>` with Zone
+(`kpathZone_<param>`) and a menu (`kpathMenu_<param>`); a k-path selected in
+the outliner shows `KPathForm` (`kpathName`, `kpathVertices`, `kpathUsers`,
+`kpathZone`); the outliner has the K-paths section after Calculations with
+`outlinerAdd_kpaths`, a k-path's context menu Show in the Brillouin zone and
+a system's Show Brillouin zone. The zone is `KPathWindow`, `kspaceWindow_<k>`,
+opened by the `kpath_window` action. The k-space tab, `KSPACE_TAB`,
+`kspace_view`, the "path of" combo `kpathCalculation` and the tab's state
+`"kspace"` are gone. Decisions, the built option first:
+
+234. a lock of a calculation, or of its k-path parameter, covers the
+     vertices of the k-path it walks (`core/locks.py`), so an edit of a
+     shared k-path through another calculation, the zone or a pick is
+     refused while a teaching preset locks one of its users, and the zone
+     window shows the path without its tools; or the lock covers the id
+     only, and a shared path changes under a locked calculation;
+235. `add_calculation` takes a k-path as its vertices as well as an id, and
+     vertices make a k-path of its own named after the calculation (drivers,
+     the remote API and the tests write a path in one command); or an id
+     only, a path first made with `add_kpath`;
+236. a three-dimensional crystal's zone is drawn whole in 3D, the Wigner-Seitz
+     cell of the reciprocal lattice computed with numpy in the window's
+     process (`kspace.brillouin_zone_3d`; scipy stays out of it, 13.15), by
+     mplot3d or by pyvista as View > 3D drawing says, turned with the mouse
+     as the 3D structure is (`ui/kspace3d.py`); a click near a high-symmetry
+     point or a vertex adds it (Add points) or picks it, and a click
+     elsewhere does nothing, since a point of the screen is a line through
+     the zone, the maintainer's request; or the k3 = 0 cut kept, with the 3D
+     zone beside it;
+237. the widgets of the zone are named after their k-path (`kspaceView_<k>`,
+     `kspaceCanvas_<k>`, `kspaceBar_<k>`, `kpathAdd_<k>`,
+     `kpathRemoveLast_<k>`, `kpathDefault_<k>`, `kspaceCaption_<k>`,
+     `kspaceScene_<k>`), since several windows may be open; or the old names
+     kept for the window opened last;
+238. a k-path no calculation walks stays in the document, its row reading
+     "unused", until it is removed (as Blender keeps a data-block with no
+     user while the file is open); or removed with its last user;
+239. a pick's k-point target edits the k-path once, however many
+     calculations walk it, its label naming them ("add k = ... to the
+     k-path k1 of c1, c3"); or one target per calculation, all editing the
+     same path.
 
 ### Where the section 13 items land
 

@@ -1,6 +1,7 @@
 {
   "version": 1,
   "notes": "Landau levels on a ribbon (Hofstadter model)\nA square-lattice ribbon in an out-of-plane magnetic field (Peierls phases, Landau gauge): flat Landau levels in the bulk and chiral edge states between them (c1), the quantum Hall effect on a lattice. The field is in flux quanta per unit cell.",
+  "locks": [],
   "systems": [
     {
       "id": "s1",
@@ -51,8 +52,15 @@
       "kind": "bands",
       "params": {
         "nk": 200,
-        "operator": null
+        "operator": null,
+        "kpath": "k1"
       }
+    }
+  ],
+  "kpaths": [
+    {
+      "id": "k1",
+      "vertices": []
     }
   ],
   "ui": {

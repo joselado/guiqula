@@ -42,7 +42,8 @@ from guiqula.core.document import DocumentError, terms_of
 from guiqula.core.hashing import content_hash
 from guiqula.registry import base as registry
 from guiqula.registry import plugins
-from guiqula.registry.params import FieldParam, ParamError, SystemParam
+from guiqula.registry.params import (FieldParam, KPathParam, ParamError, SystemParam,
+                                     normalize_vertices)
 
 MODES = ("spinless", "spinful", "nambu")
 KIND_LABELS = {"classical_spin": "classical spins", "lattice_gas": "lattice gas",
@@ -456,6 +457,25 @@ def _plan_embedding(document, calc, plan, trusted, results):
     return None
 
 
+def _resolve_kpaths(document, plan):
+    """Put the vertices of each k-path the calculation names in place of its
+    id (None for pyqula's default path), so that an entry, the script and
+    the key see the path and never the id; the problem, or None."""
+    for param in plan.spec.params:
+        if not isinstance(param, KPathParam) or plan.params.get(param.name) is None:
+            continue
+        try:
+            kpath = document.kpath(plan.params[param.name])
+        except DocumentError as error:
+            return f"{param.name}: {error}"
+        try:
+            vertices = normalize_vertices(f"{param.name} ({kpath.id})", kpath.vertices)
+        except ParamError as error:
+            return str(error)
+        plan.params[param.name] = vertices or None
+    return None
+
+
 def plan_calculation(document, calc_id, trusted=True, results=None):
     calc = document.calculation(calc_id)
     plan = CalculationPlan(calc.id, calc.kind, calc.system)
@@ -474,6 +494,8 @@ def plan_calculation(document, calc_id, trusted=True, results=None):
     system_kind = "embedding" if plan.embedding else plan.system.kind
     plan.spec, plan.params, plan.problem = _check_entry("calculation", calc.kind, calc.params,
                                                         system_kind, trusted, calc.plugin)
+    if plan.params is not None:
+        plan.problem = _resolve_kpaths(document, plan) or plan.problem
     if plan.problem is None and plan.system.problem:
         plan.problem = (f"pristine: {plan.system_id}: " if plan.embedding else "") \
             + plan.system.problem

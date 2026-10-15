@@ -10,6 +10,11 @@ A lock (a string in ``Document.locks``) names
   ``"s1.n"``);
 - a system's geometry, ``"s1/geometry"``: its lattice and its ops.
 
+A lock of a calculation, or of its k-path parameter, covers the vertices
+of the k-path it walks as well (phase 9, decision 234): a k-path is shared,
+so an edit of it through another calculation, the zone window or a pick
+changes the locked calculation too, and is refused.
+
 The dispatcher refuses any mutation that changes what a lock covers,
 comparing the Document before and after it (violations()), so every
 mutation is covered, including those written later. lock and unlock are
@@ -44,11 +49,22 @@ def value(document, target):
         return MISSING
     family, obj = found[0], found[-1]
     if not param:
-        return obj.model_dump(mode="json")
+        data = obj.model_dump(mode="json")
+        if family == "calculation":
+            data["kpaths"] = _walked(document, obj.params.values())
+        return data
     params = obj.geometry.base.params if family == "system" else getattr(obj, "params", None)
     if not isinstance(params, dict) or param not in params:
         return MISSING
+    if family == "calculation" and _walked(document, [params[param]]):
+        return [params[param], _walked(document, [params[param]])]
     return params[param]
+
+
+def _walked(document, values):
+    """{id: vertices} of the k-paths among these parameter values."""
+    kpaths = {k.id: k.vertices for k in document.kpaths}
+    return {v: kpaths[v] for v in values if isinstance(v, str) and v in kpaths}
 
 
 def check_target(document, target):

@@ -17,7 +17,10 @@ or ``<system>/base``, ``<system>/geometry``, ``<system>/regions``,
 ``<system>/model`` for a classical system) for the rows of a system that
 are not entries (pseudo_ids), ``<embedding>/pristine`` and
 ``<embedding>/defect`` for the rows under an embedding, which select the
-system they name (embedding_rows), and ``calculations``. The mean-field row
+system they name (embedding_rows), ``calculations`` and ``kpaths``, the
+section of the document's k-paths (phase 9, part A), whose rows are the
+k-paths themselves (k1, k2) with the calculations that walk them as their
+status. The mean-field row
 closes the Hamiltonian's list, with its own checkbox (set_meanfield).
 
 The section rows (a system's Geometry, Regions, Hamiltonian or Model, and
@@ -25,7 +28,8 @@ Calculations) carry a "+" at the right of their status cell (PLAN.md phase
 8, package P2): add_requested says which section, and the window opens the
 Add menu of that family for that system there (add_button(path) gives the
 button; outlinerAdd_<system>_geometry, _regions, _hamiltonian, _model and
-outlinerAdd_calculations). The rest of the cell is left to the row, so a
+outlinerAdd_calculations, and outlinerAdd_kpaths, which adds a k-path
+rather than opening a menu). The rest of the cell is left to the row, so a
 click there selects it as before.
 
 What a row is and in what state (package P7). The Entry column says what
@@ -72,6 +76,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QHeaderView, QInputDialog, QMe
                                QTreeWidget, QTreeWidgetItem, QWidget)
 
 from guiqula.core import regions as region_tools
+from guiqula.core.document import kpath_users
 from guiqula.registry import base as registry
 from guiqula.ui import icons, marks, shortcuts, theme
 from guiqula.ui.plots import scalar_rows
@@ -103,7 +108,9 @@ ADD_TIPS = {"geometry": "add a geometry op to {system} (a supercell, a ribbon, a
                            "others, or turn on its mean field",
             "model": "add a term to the model of {system}, applied after the others",
             "calculations": "add a calculation on the current system ({run} runs the selected "
-                            "one)"}
+                            "one)",
+            "kpaths": "add a k-path, pyqula's default path until it is drawn in its zone "
+                      "window; a calculation's k-path row chooses among them"}
 ADD_ROOM = 26                # the least room of a "+" in its status cell, in pixels
 TEXT_GAP = 12                # pixels between a detail row's label and its status on one line
 DETAIL_PAD = 3               # pixels below the status of a detail row read under its label
@@ -768,6 +775,9 @@ class Outliner(QTreeWidget):
             several = len(document.systems) > 1
             for calc in document.calculations:
                 self._add_calculation(session, calcs, calc, several)
+            kpaths = self._add(None, "kpaths", "K-paths")
+            for kpath in document.kpaths:
+                self._add_kpath(document, kpaths, kpath)
             self._mark_locks(document)
             self._add_pluses(document)
             for item_id in self._items:
@@ -1010,6 +1020,7 @@ class Outliner(QTreeWidget):
         self._add_plus(self._items["calculations"], "calculations",
                        ADD_TIPS["calculations"].format(run=shortcuts.text("run")),
                        enabled=bool(document.systems))
+        self._add_plus(self._items["kpaths"], "kpaths", ADD_TIPS["kpaths"])
 
     def _mark_locks(self, document):
         """"locked" (or "m locked") after the status of what a lock covers; a
@@ -1077,6 +1088,18 @@ class Outliner(QTreeWidget):
         item.setData(1, MARK_ROLE, state)
         if color is not None:
             self._paint(item, color, (1,))
+
+    def _add_kpath(self, document, parent, kpath):
+        """A k-path: its vertices, and the calculations that walk it as its
+        status."""
+        from guiqula.ui.forms import format_kpath
+        users = kpath_users(document, kpath.id)
+        path = format_kpath(kpath.vertices).replace("G", "Γ") if kpath.vertices else "default"
+        name = kpath.name if kpath.name != kpath.id else ""
+        self._add(parent, kpath.id, _entry_text(kpath.id, path, name),
+                  ", ".join(users) or "unused",
+                  [f"walked by {', '.join(users)}" if users else
+                   "no calculation walks it: removing it loses nothing"], kind="kspace")
 
     def update_calculation(self, session, calc_id, job=None):
         """Only the status of one calculation (progress arrives often); job:
@@ -1200,7 +1223,8 @@ class Outliner(QTreeWidget):
         QTimer.singleShot(0, lambda: self.command.emit(name, args))
 
     def _family(self, item_id):
-        if self._session is None or not item_id or "/" in item_id or item_id == "calculations":
+        if self._session is None or not item_id or "/" in item_id or \
+                item_id in ("calculations", "kpaths"):
             return None
         try:
             return self._session.document.find(item_id)
@@ -1217,7 +1241,7 @@ class Outliner(QTreeWidget):
 
     def move_current(self, step):
         found = self._family(self.current_id())
-        if found is None or found[0] in ("system", "embedding"):
+        if found is None or found[0] in ("system", "embedding", "kpath"):
             return
         _, _, items, index, _ = found
         if 0 <= index + step < len(items):
@@ -1274,7 +1298,7 @@ class Outliner(QTreeWidget):
 
     def rename_current(self):
         found = self._family(self.current_id())
-        if found is None or found[0] not in ("system", "region", "embedding"):
+        if found is None or found[0] not in ("system", "region", "embedding", "kpath"):
             return
         name, ok = QInputDialog.getText(self, "Rename", "Name:", text=found[-1].name)
         if ok and name.strip():
@@ -1296,11 +1320,17 @@ class Outliner(QTreeWidget):
         if family == "calculation":
             menu.addAction("Run", lambda: self.command.emit("run_calculation",
                                                             {"calculation": obj.id}))
-        if family in ("system", "region", "embedding"):
+        if family in ("system", "region", "embedding", "kpath"):
             menu.addAction("Rename...", self.rename_current)
+        if family == "kpath":
+            menu.addAction(icons.icon("kspace"), "Show in the Brillouin zone",
+                           lambda: self.command.emit("kpath_window", {"kpath": obj.id}))
         if family == "system" and obj.kind == "quantum":
             menu.addAction(icons.icon("embedding"), "New embedding of a defect",
                            lambda: self.command.emit("add_embedding", {"pristine": obj.id}))
+        if family == "system":
+            menu.addAction(icons.icon("kspace"), "Show Brillouin zone",
+                           lambda: self.command.emit("kpath_window", {"system": obj.id}))
         locks = self._session.document.locks if self._session is not None else []
         targets = [(obj.id, "")] + ([(f"{obj.id}/geometry", " the geometry")]
                                     if family == "system" else [])
@@ -1312,7 +1342,7 @@ class Outliner(QTreeWidget):
                 menu.addAction(f"Lock{what}", lambda t=target: self.command.emit(
                     "lock", {"target": t}))
         menu.addAction("Duplicate", self.duplicate_current)
-        if family not in ("system", "embedding"):
+        if family not in ("system", "embedding", "kpath"):
             menu.addAction("Move up", lambda: self.move_current(-1))
             menu.addAction("Move down", lambda: self.move_current(1))
         menu.addSeparator()

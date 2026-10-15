@@ -14,7 +14,7 @@ with the light one (rc("light")).
 
 Plot text (the maintainer's request, 2026-09-29): the labels, the ticks,
 the titles and the legends of every drawing (the result plots, the
-structure canvas, the k-space tab, the exported figures, pyvista's title
+structure canvas, the zone window of a k-path, the exported figures, pyvista's title
 and colour bar) take their size from one setting, text_size, "small",
 "normal" or "large" (View > Plot text; io/settings.py keeps it), through
 matplotlib's relative sizes: FONT_POINTS gives the base, the axis labels

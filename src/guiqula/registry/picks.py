@@ -35,10 +35,9 @@ select_sites, region, fermi_level), what doing it needs, and ``label``,
 the text of the menu. pyqula-free, like pipeline.py.
 """
 from guiqula.core import picks as pick_tools
-from guiqula.core.document import Document, terms_of
+from guiqula.core.document import Document, kpath_params, kpath_users, terms_of
 from guiqula.core import fields
 from guiqula.registry import base as registry
-from guiqula.registry.params import KPathParam
 
 FERMI_LEVEL = "Fermi level"     # the name of the onsite term the Fermi-level target keeps
 
@@ -175,24 +174,25 @@ def targets(document, system_id, values, source=None, mode=None, dimensionality=
                     "run": run, "label": label + (f" (and run {run})" if run else "")})
     if "kpoint" in values:
         k = [float(c) for c in values["kpoint"]]
+        text = pick_tools.kpoint_text(k)
+        seen = set()
         for calc in document.calculations:
             if calc.system != system_id:
                 continue
-            try:
-                spec = registry.get("calculation", calc.kind)
-            except registry.RegistryError:
-                continue
-            for param in spec.params:
-                if not isinstance(param, KPathParam):
+            for name in kpath_params(calc):
+                kpath_id = calc.params.get(name)
+                if kpath_id in seen or kpath_id not in {p.id for p in document.kpaths}:
                     continue
-                current = calc.params.get(param.name)
-                text = pick_tools.kpoint_text(k)
-                if current is None:
-                    kpath, label = ["G", k], f"k-path of {calc.id} from Γ to k = {text}"
+                seen.add(kpath_id)
+                current = document.kpath(kpath_id).vertices
+                users = ", ".join(kpath_users(document, kpath_id))
+                if not current:
+                    vertices, label = ["G", k], f"k-path {kpath_id} of {users} from Γ to k = {text}"
                 else:
-                    kpath, label = list(current) + [k], f"add k = {text} to the k-path of {calc.id}"
-                out.append({"target": "kpath", "calculation": calc.id, "param": param.name,
-                            "kpath": kpath, "label": label})
+                    vertices = list(current) + [k]
+                    label = f"add k = {text} to the k-path {kpath_id} of {users}"
+                out.append({"target": "kpath", "kpath": kpath_id, "calculation": calc.id,
+                            "vertices": vertices, "label": label})
     if kind == "embedding":       # its sites are the window's, and a Fermi level is two
         return out
     if values.get("sites"):

@@ -95,7 +95,7 @@ tests, `drive.py --widget` and the remote `widgets` and `screenshot` methods rel
   control starts the server, polled from the window's timer; a pick emits ordinary
   commands, and the pick menu is built by `pick_menu` and shown with `popup()`, never
   `exec()`; `pick` and `pick_to` take a calculation and a point, or `system` and `values`
-  (the k-space tab's click, Calculate on selection); the viewport's tab bar is a
+  (a zone window's click, Calculate on selection); the viewport's tab bar is a
   `ResultTabBar` (`ui/grid.py`), the New grid button `newGridButton` its corner widget and
   View > New grid of results `newGridAction`; a result view is in one place at a time, its
   tab, its `ResultWindow` or a cell of a grid (`grids`), moved by `place_result` (the
@@ -160,14 +160,24 @@ tests, `drive.py --widget` and the remote `widgets` and `screenshot` methods rel
   widen the Status column; an embedding is a detail row after the systems (`s2 in s1`, a
   warning when `cell_problem` finds the builds' cells differ) with the rows
   `<embedding>/pristine` and `<embedding>/defect`, which `select` turns into the system
-  they name, and a quantum system's context menu has New embedding of a defect.
+  they name, and a quantum system's context menu has New embedding of a defect. The K-paths
+  section (`kpaths`, after Calculations) lists the k-paths with the calculations walking
+  them as their status, its "+" `outlinerAdd_kpaths` adding one; a k-path's context menu
+  has Show in the Brillouin zone and a system's Show Brillouin zone (`kpath_window`).
   `tests/ui/test_outliner.py`'s `cut` checks the labels as well as the statuses on every
   preset.
 - `gallery.py` (the presets, the start page's cards and `Title` headings, deleted when
   closed), `sliders.py` (the Sliders panel;
   `range_from`, the range a label's menu gives a slider or a sweep), `kspace.py` (the
-  Brillouin-zone canvas, its tab hidden for a system without a periodic direction, its
-  path tools `kpathAdd`, `kpathRemoveLast` and `kpathDefault` icons alone in its bar),
+  Brillouin-zone canvas of one k-path, `KSpaceView`, in its plain window `KPathWindow`,
+  `kspaceWindow_<k>`, which the window keeps in `kpath_windows` and opens with the
+  `kpath_window` action; its widgets carry the k-path's id, `kspaceView_<k>`,
+  `kspaceBar_<k>`, the path tools `kpathAdd_<k>`, `kpathRemoveLast_<k>` and
+  `kpathDefault_<k>` icons alone in its bar, `kspaceScene_<k>` for pyvista; there is no
+  k-space tab since phase 9), `kspace3d.py` (the zone of a 3D crystal in 3D, by mplot3d or
+  pyvista as `renderer_3d` says, decision 236: a click near a high-symmetry point or a
+  vertex adds or picks it, through `kspace3d.screen_mpl` and `screen_pyvista`, and
+  `SceneCanvas.clicked` is the press released in place that pyvista's scene reports),
   `jobpanel.py`, `console.py` (the console panel), `bars.py` (recovery, error, cost and
   trust bars; `StatusMessage`, the last message in the status bar), `errors.py` (the
   exception hook), `formulas.py` (mathtext images; the rich tooltips of the Add menus).
@@ -183,7 +193,11 @@ tests, `drive.py --widget` and the remote `widgets` and `screenshot` methods rel
   document's other quantum systems, (default) first, and the form is rebuilt when the
   systems change (its `signature`); an embedding's form, `EmbeddingForm`, has
   `embeddingName`, the combos `embedding_pristine` and `embedding_defect` of the quantum
-  systems, and `embeddingInfo`. While an embedding or a calculation on it is selected,
+  systems, and `embeddingInfo`; a calculation's k-path is `KPathEditor`, the combo
+  `kpath_<param>` of the document's k-paths (`forms.kpath_label`: "k1 · Γ K M Γ · c1, c3")
+  with `kpathZone_<param>` and the menu `kpathMenu_<param>` (New k-path, Make
+  single-user), and a k-path selected in the outliner shows `KPathForm` (`kpathName`,
+  `kpathVertices`, `kpathUsers`, `kpathZone`). While an embedding or a calculation on it is selected,
   `current_system()` is its defect (the canvas) and `current_target()` the embedding (the
   calculations' Add menu, which then lists the Embedding group).
 - `structure.py`: the canvas (`structureView`), its three views (structure, Hamiltonian,
@@ -340,5 +354,12 @@ python tools/drive.py --do '{"do": "add_system", "lattice": "chain"}' --do '{"do
     {"mu": 1.0}}' --do '{"do": "add_calculation", "system": "e1", "kind": "embedding_dos"}' \
     --run c1 --widget plot_c1 --shot bound.png     # a defect in an infinite chain: its bound
                                                    # state at 2.24 (decisions 200 to 212)
+python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "kpath_window", "calculation": "c1"}' \
+    --widget kspaceWindow_k1 --shot zone.png       # a k-path's zone window (phase 9, part A)
+python tools/drive.py --do '{"do": "add_system", "lattice": "diamond_lattice"}' --do '{"do":
+    "add_calculation", "system": "s1", "kind": "bands", "params": {"kpath": ["G", "X", "R",
+    "Z", "G"]}}' --do '{"do": "renderer_3d", "name": "pyvista"}' --do '{"do":
+    "kpath_window", "calculation": "c1"}' --widget kspaceWindow_k1 --shot zone3d.png
+                                                   # the 3D zone of a 3D crystal (decision 236)
 PYTHONPATH=src python -m guiqula --remote preset      # the window, remote control on (3.7)
 ```

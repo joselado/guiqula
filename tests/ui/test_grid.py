@@ -34,11 +34,12 @@ def _in_tab(window, calc):
     return window.viewport.indexOf(window.plots[calc]) >= 0
 
 
-def _drop(widget, calc):
-    """What a drag ending on the widget does to it: it enters, then drops
-    (Qt delivers no drop to a widget that a drag did not enter)."""
+def _drop(widget, calc, at=None):
+    """What a drag ending on the widget does to it (at a point, its centre by
+    default): it enters, then drops (Qt delivers no drop to a widget that a
+    drag did not enter)."""
     mime = gridmod.mime_of(calc)
-    centre = QPointF(widget.rect().center())
+    centre = QPointF(at if at is not None else widget.rect().center())
     QApplication.sendEvent(widget, QDragEnterEvent(
         centre.toPoint(), Qt.DropAction.MoveAction, mime, Qt.MouseButton.LeftButton,
         Qt.KeyboardModifier.NoModifier))
@@ -163,7 +164,8 @@ def test_a_drop_on_a_cell_and_on_the_tab_bar(window, qtbot):
     assert gridmod.calc_of(gridmod.mime_of("c1")) == "c1"
     _drop(grid.cell(1, 0), "c1")
     qtbot.waitUntil(lambda: grid.placed() == {(1, 0): "c1"}, timeout=5_000)
-    _drop(window.viewport.tabBar(), "c1")
+    bar = window.viewport.tabBar()
+    _drop(bar, "c1", bar.tabRect(0).center())               # on Structure, not on the grid
     qtbot.waitUntil(lambda: _in_tab(window, "c1"), timeout=5_000)
     assert grid.placed() == {}
     # the tab bar drags results only

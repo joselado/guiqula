@@ -40,7 +40,7 @@
       "params": {
         "nk": 200,
         "operator": null,
-        "kpath": null
+        "kpath": "k1"
       }
     },
     {
@@ -57,6 +57,12 @@
         "operator": null,
         "seed": 1
       }
+    }
+  ],
+  "kpaths": [
+    {
+      "id": "k1",
+      "vertices": []
     }
   ],
   "ui": {

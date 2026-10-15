@@ -58,7 +58,8 @@
       "kind": "bands",
       "params": {
         "nk": 150,
-        "operator": null
+        "operator": null,
+        "kpath": "k1"
       }
     },
     {
@@ -97,6 +98,12 @@
         "steps2": 9,
         "output": "chern"
       }
+    }
+  ],
+  "kpaths": [
+    {
+      "id": "k1",
+      "vertices": []
     }
   ],
   "ui": {

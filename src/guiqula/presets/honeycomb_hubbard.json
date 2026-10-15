@@ -1,6 +1,7 @@
 {
   "version": 1,
   "notes": "Hubbard model on the honeycomb lattice (mean field)\nSpinful electrons on graphene with an onsite repulsion U = 3, solved at the mean-field level from an antiferromagnetic guess: above U of about 2.2 the Neel state opens a gap at half filling (c1). The mean field runs with the calculations; its total energy is shown in the outliner.",
+  "locks": [],
   "systems": [
     {
       "id": "s1",
@@ -43,7 +44,8 @@
       "kind": "bands",
       "params": {
         "nk": 200,
-        "operator": "sz"
+        "operator": "sz",
+        "kpath": "k1"
       }
     },
     {
@@ -59,6 +61,12 @@
         "mode": "ED",
         "operator": null
       }
+    }
+  ],
+  "kpaths": [
+    {
+      "id": "k1",
+      "vertices": []
     }
   ],
   "ui": {}
