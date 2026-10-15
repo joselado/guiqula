@@ -138,4 +138,4 @@ entry("meanfield", "interactions", "Mean-field interactions",
           "guess and iterates until the mean field is self-consistent. Runs with the "
           "calculations, not while editing.",
       requires=("spin",), apply=_apply, script=_script, cost=_cost,
-      guide=("The collinear Hubbard model", "Non-collinear Hubbard model", "Long range interactions", "Setting a filling", "guiqula: The mean field"), pyqula=("h.get_mean_field_hamiltonian",))
+      guide=("The collinear Hubbard model", "Non-collinear Hubbard model", "Long-range interactions", "Filling", "guiqula: The mean field"), pyqula=("h.get_mean_field_hamiltonian",))

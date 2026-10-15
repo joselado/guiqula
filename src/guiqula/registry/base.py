@@ -196,7 +196,7 @@ def entry(family, kind, label, *params, **meta):
     if family in ("lattice", "geometry_op"):
         meta.setdefault("systems", ALL_SYSTEMS)
     if family == "lattice":
-        meta.setdefault("guide", ("Setting up a Hamiltonian",))
+        meta.setdefault("guide", ("Building a Hamiltonian",))
     return register(EntrySpec(family=family, kind=kind, label=label, params=tuple(params), **meta))
 
 

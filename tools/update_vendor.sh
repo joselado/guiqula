@@ -10,14 +10,23 @@ if [ -z "$SRC" ]; then
 fi
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 DST="$HERE/vendor"
+# the guide: a MkDocs website since October 2026 (documentation/guide/ in the order of
+# mkdocs.yml), assembled into one Markdown file by tools/assemble_guide.py; before, one file
 GUIDE="$SRC/documentation/user_guide.md"
-if [ ! -f "$GUIDE" ]; then     # before writing anything: never a mixed copy
-    echo "update_vendor.sh: $GUIDE is missing; the in-app help needs pyqula's guide" >&2
+ASSEMBLED="$(mktemp)"
+trap 'rm -f "$ASSEMBLED"' EXIT
+if [ -f "$SRC/mkdocs.yml" ]; then      # before writing anything: never a mixed copy
+    python3 "$HERE/tools/assemble_guide.py" "$SRC" "$ASSEMBLED"
+elif [ -f "$GUIDE" ]; then
+    cp "$GUIDE" "$ASSEMBLED"
+else
+    echo "update_vendor.sh: neither $SRC/mkdocs.yml nor $GUIDE is there; the in-app help" \
+         "needs pyqula's guide" >&2
     exit 1
 fi
 mkdir -p "$DST"
 rsync -a --delete --exclude='__pycache__' --exclude='*.pyc' "$SRC/src/pyqula/" "$DST/pyqula/"
-cp "$GUIDE" "$DST/pyqula_user_guide.md"
+cp "$ASSEMBLED" "$DST/pyqula_user_guide.md"
 # only the package and the guide (the in-app help): upstream's examples stay upstream
 HEAD=$(git -C "$SRC" rev-parse HEAD)
 # the upstream repository's public URL, never the local path (the repository is public)
@@ -46,7 +55,7 @@ ${MOD:-    (none)}
 
 Contents:
 - \`pyqula/\` — the package (\`src/pyqula\` upstream), without \`__pycache__\`
-- \`pyqula_user_guide.md\` — upstream \`documentation/user_guide.md\` (the in-app help)
+- \`pyqula_user_guide.md\` — upstream's user guide, the pages of \`documentation/guide/\` in the order of \`mkdocs.yml\` joined by \`tools/assemble_guide.py\` (the in-app help)
 
 Upstream runtime dependencies at copy time (mirror them in guiqula's
 \`pyproject.toml\`; optional extras are not listed):

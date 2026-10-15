@@ -47,11 +47,13 @@ def _mean_field_scf_result(scf,return_total_energy):
     """Shared tail for the get_*_mean_field_hamiltonian wrappers below:
     SzSz/SxSx/SySy return the NotImplemented sentinel (not an SCF object)
     for spinless/BdG Hamiltonians, which must be checked before touching
-    scf.converged."""
+    scf.converged. A loop that did not converge raises
+    MeanFieldConvergenceError (scftk/convergence.py)."""
     if scf is NotImplemented:
         if return_total_energy: return (None,None)
         else: return None
-    if not scf.converged: scf.hamiltonian = None # no convergence
+    from .scftk.convergence import require_converged
+    require_converged(scf) # raise if the loop did not converge
     if return_total_energy:
         return (scf.hamiltonian,scf.total_energy)
     else: return scf.hamiltonian
@@ -133,6 +135,10 @@ class Hamiltonian():
 
     def get_berry_curvature(h,**kwargs):
         return topology.get_berry_curvature(h,**kwargs)
+
+    def get_berry_curvature_path(h,**kwargs):
+        """Berry curvature along a k-path, see topology.get_berry_curvature_path"""
+        return topology.get_berry_curvature_path(h,**kwargs)
 
     def get_spin_chern(h,**kwargs):
         """Spin Chern number (C_+ - C_-)/2 of the occupied states split by

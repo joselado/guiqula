@@ -100,13 +100,13 @@ def test_the_guides_contents_and_an_override(tmp_path, monkeypatch):
 
 def test_a_chapter_is_its_introduction_and_links():
     """A top-level section of pyqula's guide can be hundreds of lines: a
-    lattice's help shows the introduction of "Setting up a Hamiltonian" and
+    lattice's help shows the introduction of "Building a Hamiltonian" and
     links to its sections, not the whole chapter."""
     from guiqula.docs.guide import Guide
     text = entries.entry_help(registry.get("lattice", "honeycomb_lattice"))
-    assert "# Setting up a Hamiltonian" in text
-    assert "(help:pyqula/Including%20an%20onsite%20energy)" in text
-    assert "## Including an onsite energy" not in text
+    assert "# Building a Hamiltonian" in text
+    assert "(help:pyqula/Onsite%20energy)" in text
+    assert "## Onsite energy" not in text
     guide = Guide(TEXT)
     assert [c.anchor for c in guide.children("Top")] == ["Alpha", "Beta"]
     assert guide.own_text("Top").startswith("# Top\nintro") and "Alpha" not in \

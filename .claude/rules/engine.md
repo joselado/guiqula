@@ -133,7 +133,10 @@ and exported, what the plan and the build do, and what the refresh of `vendor/` 
 ## The vendored copy
 
 `tools/update_vendor.sh` refreshes the whole of `vendor/pyqula/` from an upstream checkout
-(`$PYQULA_SRC`, or the path given) and rewrites `vendor/VENDOR.md` (upstream URL and commit,
+(`$PYQULA_SRC`, or the path given), writes the guide (upstream's is a MkDocs website since
+October 2026, the pages of `documentation/guide/` in the order of `mkdocs.yml`, which
+`tools/assemble_guide.py` joins into one Markdown file, its included snippets written out,
+its collapsible blocks opened and its pictures left out) and rewrites `vendor/VENDOR.md` (upstream URL and commit,
 uncommitted upstream files that were included, upstream's runtime dependencies to mirror
 in `pyproject.toml`), then runs the help tests. A refresh is committed on its own; the one
 exception is the fix of registry `guide=` anchors that a renamed upstream guide section

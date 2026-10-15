@@ -33,7 +33,7 @@ entry("term", "onsite", "Onsite energy",
       group="Onsite", formula=r"\sum_i \mu(\vec r_i)\, c^\dagger_i c_i",
       doc="Onsite energy; a constant shifts the bands rigidly (chemical potential).",
       call=Call("h.add_onsite", "mu"),
-      guide=("Including an onsite energy",))
+      guide=("Onsite energy",))
 
 entry("term", "sublattice_imbalance", "Sublattice imbalance",
       FieldParam("mass", 0.1, "mass", "staggered onsite energy, +mass on A and -mass on B"),
@@ -46,7 +46,7 @@ entry("term", "zeeman", "Zeeman / exchange field",
       group="Magnetism", formula=r"\sum_i \vec m(\vec r_i)\cdot\vec\sigma_i",
       doc="Local exchange field acting on the spin; breaks time-reversal symmetry.",
       requires=("spin",), call=Call("h.add_zeeman", "m"),
-      guide=("Including an external Zeeman field",))
+      guide=("Zeeman field",))
 
 entry("term", "rashba", "Rashba spin-orbit coupling",
       FieldParam("c", 0.1, "strength", "Rashba coupling, evaluated at the bond midpoint",
@@ -196,7 +196,7 @@ entry("term", "electric_field", "Electric field",
           "layers, with E along z).",
       apply=_electric_field,
       script=lambda ctx: [f"h.add_onsite(lambda r: float(np.dot(np.array({ctx.code('E')}), r)))"],
-      guide=("Including an onsite energy",), pyqula=("h.add_onsite",))
+      guide=("Onsite energy",), pyqula=("h.add_onsite",))
 
 entry("term", "orbital_field", "Orbital magnetic field",
       FieldParam("B", 0.01, "field", "flux through a unit area in units of the flux quantum",
@@ -208,7 +208,7 @@ entry("term", "orbital_field", "Orbital magnetic field",
           "add_peierls); a periodic system needs a supercell that holds a whole flux quantum, "
           "or it is not periodic.",
       call=Call("h.add_peierls", "B", gauge="gauge"),
-      guide=("Including an external orbital field",))
+      guide=("Orbital magnetic field",))
 
 entry("term", "inplane_field", "In-plane magnetic field",
       FieldParam("b", 0.1, "field", "in units of the flux quantum", native=False),
@@ -250,7 +250,7 @@ entry("term", "pairing", "Superconducting pairing",
       requires=("nambu",), apply=_pairing,
       script=lambda ctx: [f"h.add_pairing(delta={ctx.code('delta')}, mode={ctx.code('mode')}, "
                           f"d={vector_function_code(ctx.code('d'))})"],
-      guide=("Spin-triplet d-vector and non-unitary superconductivity",), pyqula=("h.add_pairing",))
+      guide=("Spin-triplet pairing and the d-vector",), pyqula=("h.add_pairing",))
 
 
 def _phase_disorder(h, ctx):

@@ -25,6 +25,7 @@ from guiqula.registry import base as registry
 
 K1, B = 1.2, 0.75          # BM25's usual constants
 TITLE = 3                  # times a heading or an entry's label counts
+WHOLE = 1.5                # a heading that says exactly the question: its score times this
 CLOSE = 0.8                # difflib ratio from which a word stands for a mistyped one
 PREFIX = 4                 # letters from which a word of the question may be cut short
 EXPANSIONS = 3             # words of the index one word of the question may stand for
@@ -157,7 +158,10 @@ class Index:
                 weights[other] = max(weights.get(other, 0.0), weight)
         if not weights:
             return []
-        scored = [(self.score(d, weights), i) for i, d in enumerate(self.documents)]
+        asked = set(words(question))
+        scored = [(self.score(d, weights) * (WHOLE if asked and set(words(d.title)) == asked
+                                             else 1.0), i)
+                  for i, d in enumerate(self.documents)]
         scored = sorted((s for s in scored if s[0] > 0), key=lambda s: (-s[0], s[1]))
         return [self._hit(self.documents[i], score, weights) for score, i in scored[:limit]]
 

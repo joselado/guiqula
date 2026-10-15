@@ -134,7 +134,7 @@ entry("calculation", "bands", "Band structure",
       apply=_bands, script=_bands_script, plot=_bands_plot,
       cost=lambda p, size: p["nk"] * cost.diagonalization(size["dimension"])
       * (2 if p["operator"] else 1),
-      guide=("Electronic band structures", "guiqula: K-paths and the Brillouin zone",
+      guide=("Band structure", "guiqula: K-paths and the Brillouin zone",
              "guiqula: Picking from a plot"), pyqula=("h.get_bands",))
 
 
@@ -183,7 +183,7 @@ entry("calculation", "dos", "Density of states",
       apply=_dos, script=_dos_script, cost=_dos_cost,
       plot=lambda params: {"kind": "lines", "x": "energies", "y": "dos",
                            "xlabel": "energy", "ylabel": "DOS", "picks": {"x": "energy"}},
-      guide=("Density of states", "Chebyshev kernel polynomial (KPM) methods"), pyqula=("h.get_dos",))
+      guide=("Density of states", "Kernel polynomial method"), pyqula=("h.get_dos",))
 
 
 # ---- helpers shared by the first-wave calculations (phase 4)
@@ -321,7 +321,7 @@ entry("calculation", "eigenstate", "Eigenstate",
           "kind": "structure_scalar", "values": "weight",
           "clabel": f"|ψ|² of the state at E = {float(arrays['energy']):.4g}"},
       cost=lambda p, size: cost.diagonalization(size["dimension"]),
-      guide=("Electronic band structures", "Local density of states",
+      guide=("Band structure", "Local density of states",
              "guiqula: Picking from a plot"),
       pyqula=("htk.eigenvectors.get_eigenvectors", "h.full2profile"))
 
@@ -522,7 +522,7 @@ entry("calculation", "real_space_chern", "Local Chern marker",
       plot={"kind": "structure_scalar", "values": "marker", "clabel": "Chern marker",
             "symmetric": True},
       cost=lambda p, size: 4 * cost.diagonalization(size["dimension"]),
-      guide=("Chern number in real-space", "Topological markers"), pyqula=("topology.real_space_chern",))
+      guide=("Chern number in real space", "Topology in real space"), pyqula=("topology.real_space_chern",))
 
 
 # ---- k space
@@ -549,7 +549,7 @@ entry("calculation", "fermi_surface", "Fermi surface",
             "picks": {"x": "kmesh", "y": "kmesh", "fixed": {"energy": "energy"}}},
       cost=lambda p, size: p["nk"] ** 2 * cost.diagonalization(size["dimension"]),
       extra={"dimensions": (2,)},        # a pick offers it on two-dimensional systems only
-      guide=("Fermi surfaces", "guiqula: Picking from a plot"), pyqula=("h.get_fermi_surface",))
+      guide=("Fermi surface", "guiqula: Picking from a plot"), pyqula=("h.get_fermi_surface",))
 
 
 def _qpi(h, ctx):
@@ -624,7 +624,7 @@ entry("calculation", "spectral_function", "Spectral function",
            "picks": {"x": "kpath", "y": "energy"}}, params, arrays),
       cost=lambda p, size: p["nk"] * cost.diagonalization(size["dimension"])
       * (1 if p["mode"] == "ED" else p["ne"] / 3),
-      guide=("Momentum resolved spectral functions",), pyqula=("kdos.kdos_bands",))
+      guide=("Momentum-resolved spectral function",), pyqula=("kdos.kdos_bands",))
 
 
 def _surface(h, ctx):
@@ -660,7 +660,7 @@ entry("calculation", "surface_spectral_function", "Surface spectral function",
           "arrays = dict(k=k, energies=energies, surface=surface, bulk=bulk)"],
       plot=_surface_plot,
       cost=lambda p, size: 20 * p["nk"] * p["ne"] * cost.diagonalization(size["dimension"]) / 3,
-      guide=("Surface spectral functions",), pyqula=("h.get_surface_kdos",))
+      guide=("Surface spectral function",), pyqula=("h.get_surface_kdos",))
 
 
 # ---- topology

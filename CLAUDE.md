@@ -241,7 +241,8 @@ python tools/make_icons.py             # the PNG, ICO and ICNS from resources/gu
 python tools/make_thumbnails.py [name ...]   # the start page's pictures (resources/thumbnails),
                                              # after a new lattice, classical system or preset
 python tools/readme_images.py [name ...]   # the README's screenshots (docs/images), by drive.py
-tools/update_vendor.sh /path/to/pyqula  # refresh vendor/ from upstream pyqula ($PYQULA_SRC)
+tools/update_vendor.sh /path/to/pyqula  # refresh vendor/ from upstream pyqula ($PYQULA_SRC),
+                                        # its guide joined by tools/assemble_guide.py
 ```
 
 `drive.py` prints a JSON report last (its help says what it holds); a `--do` object names a

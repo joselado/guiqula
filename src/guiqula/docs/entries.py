@@ -90,7 +90,7 @@ def reference_anchor(guide, target):
             name = f"{short}.{target[len(prefix) + 1:]}"
     wanted = f"{name}()"
     for section in guide.sections:
-        if section.level >= 3 and wanted in [part.strip() for part in section.title.split(" / ")]:
+        if section.level >= 2 and wanted in [part.strip() for part in section.title.split(" / ")]:
             return section.anchor
     return None
 

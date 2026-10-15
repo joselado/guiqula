@@ -43,7 +43,7 @@ def test_f1_shows_the_help_of_the_selected_entry(window, qtbot, shot):
     assert window.properties.form.isVisible()                       # the form it explains
     text = panel.browser.toPlainText()
     assert "Adds zeeman to the matrix" in text                     # pyqula's docstring
-    assert "Including an external Zeeman field" in text           # pyqula's guide
+    assert "Zeeman field" in text           # pyqula's guide
     assert "h.add_zeeman([0.0, 0.0, lambda r: 0.3 * np.tanh(r[0] / 4)])" in text   # its values
     assert len(images(panel.browser)) >= 5                         # the equations, drawn
     image = panel.browser.loadResource(2, QUrl("formula:0"))
