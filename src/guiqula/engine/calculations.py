@@ -62,13 +62,13 @@ def _run_document_level(document, plan, cache, progress, trusted, results):
                         "guiqula": guiqula.__version__, "pyqula": provenance()})
 
 
-def reads(system_plan):
-    """{calculation id: ResultRef} the from_result Fields of a system read
+def reads(*system_plans):
+    """{calculation id: ResultRef} the from_result Fields of systems read
     (the applied entries', with the arrays they read only): a result keeps
     them, so that its script can be exported as it was computed after that
     calculation ran again."""
     names, refs = {}, {}
-    for stage in system_plan.stages:
+    for stage in (stage for plan in system_plans for stage in plan.stages):
         if stage.applied and stage.results:
             refs.update(stage.results)
             _arrays_read(stage.params, names)
@@ -114,8 +114,12 @@ def run_calculation(document, calc_id, cache=None, progress=None, trusted=True, 
         return _run_document_level(document, plan, cache, progress, trusted, results)
     start = time.perf_counter()
     built = build_system(document, plan.system_id, cache, trusted=trusted, results=results)
+    others = {name: build_system(document, other.system_id, cache, trusted=trusted,
+                                 results=results)
+              for name, other in plan.others.items()}       # the tip of a local probe
     build_seconds = time.perf_counter() - start
-    ctx = ApplyContext(plan.spec, plan.params, progress=progress)
+    ctx = ApplyContext(plan.spec, plan.params, progress=progress,
+                       systems={name: other.h for name, other in others.items()})
     start = time.perf_counter()
     try:
         seed(plan.spec, plan.params)
@@ -134,7 +138,8 @@ def run_calculation(document, calc_id, cache=None, progress=None, trusted=True, 
     return Result(calculation=calc_id, kind=plan.kind, key=plan.key, params=plan.params,
                   arrays=arrays, plot=plot,
                   reports=built.reports, mode=built.mode, document=document.to_json(),
-                  structure=geometry, reads=reads(built.plan),
+                  structure=geometry,
+                  reads=reads(built.plan, *(other.plan for other in others.values())),
                   kspace=structure.frame(built.g) if over_the_zone else None,
                   meta={"seconds": seconds, "build_seconds": build_seconds,
                         "cores": parallel.cores,

@@ -29,7 +29,7 @@ from guiqula.core import fields
 from guiqula.registry.params import (BoolParam, ChoiceParam, CodeParam, ConditionParam,
                                      FieldParam, FloatParam, FloatVectorParam, IntParam,
                                      IntVectorParam, KPathParam, PositionsParam, SeedParam,
-                                     TextParam, VectorFieldParam)
+                                     SystemParam, TextParam, VectorFieldParam)
 from guiqula.ui import theme
 
 INT_LIMIT = 2**31 - 1
@@ -1003,6 +1003,35 @@ class ChoiceEditor(Editor):
         self._quiet(self.combo, self.combo.setCurrentIndex, index)
 
 
+class SystemEditor(Editor):
+    """Another system of the document (the tip of a local probe): the
+    systems it may name, and for an optional one the entry's default."""
+
+    DEFAULT_TEXT = "(default)"
+
+    def __init__(self, param, systems=(), parent=None):
+        super().__init__(param, parent)
+        self.combo = QComboBox()
+        self.combo.setObjectName(f"system_{param.name}")
+        if param.optional:
+            self.combo.addItem(self.DEFAULT_TEXT, None)
+        for system_id, label, kind in systems:
+            if kind in param.kinds:
+                self.combo.addItem(label, system_id)
+        self.combo.activated.connect(lambda _: self.committed.emit())
+        self.layout_.addWidget(self.combo)
+
+    def value(self):
+        return self.combo.currentData()
+
+    def set_value(self, value):
+        index = self.combo.findData(value)
+        if index < 0:                  # a system that is gone: shown, the plan says why
+            self._quiet(self.combo, self.combo.addItem, f"{value} (missing)", value)
+            index = self.combo.findData(value)
+        self._quiet(self.combo, self.combo.setCurrentIndex, index)
+
+
 class PositionsEditor(Editor):
     """Positions are picked on the structure canvas; here only counted."""
 
@@ -1032,10 +1061,11 @@ class PositionsEditor(Editor):
         self.clear.setEnabled(bool(n))
 
 
-def make_editor(param, names=None, regions=(), sources=()):
+def make_editor(param, names=None, regions=(), sources=(), systems=()):
     """The editor for a registry parameter (subclasses first); regions:
     [(id, name)] a piecewise Field can use; sources: result_sources() a
-    from_result Field can read."""
+    from_result Field can read; systems: [(id, label, kind)] a SystemParam
+    can name, of the kinds it takes."""
     if isinstance(param, VectorFieldParam):
         return VectorFieldEditor(param, regions, sources=sources)
     if isinstance(param, FieldParam):
@@ -1070,4 +1100,6 @@ def make_editor(param, names=None, regions=(), sources=()):
         return ChoiceEditor(param, (names or {}).get(param.source))
     if isinstance(param, PositionsParam):
         return PositionsEditor(param)
+    if isinstance(param, SystemParam):
+        return SystemEditor(param, systems)
     raise TypeError(f"no editor for {type(param).__name__}")

@@ -174,7 +174,10 @@ tests, `drive.py --widget` and the remote `widgets` and `screenshot` methods rel
   (`propertiesScroll`; the panel `properties` is a QWidget since P8, and its
   `verticalScrollBar()` is the form's); the system form's spin, Nambu, hopping range and
   sparse; the Field editor, whose button shows the kind and opens the kind menu
-  `fieldKindMenu_<p>`, every kind button of a form as wide as the widest (`line_up`).
+  `fieldKindMenu_<p>`, every kind button of a form as wide as the widest (`line_up`); the
+  system a calculation names (the tip of a local probe) is the combo `system_<p>` of the
+  document's other quantum systems, (default) first, and the form is rebuilt when the
+  systems change (its `signature`).
 - `structure.py`: the canvas (`structureView`), its three views (structure, Hamiltonian,
   field), its bar `structureBar` with the selection tools, the mplot3d drawing of
   geometries that are not flat, and `blender_scene`, the arrays io/blender.py exports
@@ -316,5 +319,12 @@ python tools/drive.py honeycomb_zeeman_rashba --run c1 --python "session.act('ru
     p = session.act('pick', calculation='c1', x=20, y=0.5); print(p['label'], \
     [t['label'] for t in p['targets']]); session.act('pick_to', calculation='c1', x=20, \
     y=0.5, target=0)"                              # a pick on the bands (phase 7)
+python tools/drive.py --do '{"do": "add_system", "lattice": "chain"}' --do '{"do": "add_term",
+    "system": "s1", "kind": "swave", "params": {"delta": 0.1}}' --do '{"do": "add_system",
+    "lattice": "chain", "name": "tip"}' --do '{"do": "add_term", "system": "s2", "kind":
+    "onsite", "params": {"mu": 0.5}}' --do '{"do": "add_calculation", "system": "s1", "kind":
+    "local_probe", "params": {"probe": "s2", "emin": -0.3, "emax": 0.3, "ne": 61, "T": 0.3,
+    "delta": 0.001}}' --run c1 --widget plot_c1 --shot gap.png
+                                                   # a tip of its own (decisions 192 to 199)
 PYTHONPATH=src python -m guiqula --remote preset      # the window, remote control on (3.7)
 ```

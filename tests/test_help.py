@@ -124,6 +124,7 @@ def test_a_chapter_is_its_introduction_and_links():
                                                                 # help may spell it)
     ("superconducting pairing", ("entry", "term:pairing")),
     ("chern number", ("entry", "calculation:chern")),
+    ("STM tip dI/dV", ("guiqula", "A local probe")),
     ("topological invariants", ("pyqula", "Topological invariants")),
     ("keyboard shortcuts", ("guiqula", "Keyboard shortcuts")),
     ("export the script", ("guiqula", "Overlays and exports")),

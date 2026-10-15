@@ -70,6 +70,14 @@ def _regions(system):
     return tuple((r.id, r.name) for r in system.regions)
 
 
+def _systems(document, system_id):
+    """[(id, label, kind)] of the systems a calculation of system_id may
+    name (a SystemParam: the tip of a local probe), every one but its own;
+    the editor keeps those of the kinds the parameter takes."""
+    return tuple((s.id, f"{s.id} {s.name}".strip(), s.kind) for s in document.systems
+                 if s.id != system_id)
+
+
 def _quiet(widget, setter, value):
     widget.blockSignals(True)
     try:
@@ -192,15 +200,17 @@ class Form(QWidget):
             self.update_values()
         return ok
 
-    def add_editors(self, params, values, send, regions=(), sources=(), rows=None):
+    def add_editors(self, params, values, send, regions=(), sources=(), rows=None,
+                    systems=()):
         """One editor per parameter; send(name, value) commits it. regions:
         [(id, name)] the piecewise Fields can use; sources: the results a
         from_result Field can read (forms.result_sources); rows: the form
-        layout they go in (the form's own rows by default)."""
+        layout they go in (the form's own rows by default); systems: [(id,
+        label, kind)] a SystemParam can name."""
         rows = self.rows if rows is None else rows
         for param in params:
             editor = make_editor(param, getattr(self.session.jobs, "names", {}), regions,
-                                 sources)
+                                 sources, systems)
             editor.set_value(values[param.name])
             editor.committed.connect(lambda p=param, e=editor: self._send(e, p, send))
             if hasattr(editor, "preview"):
@@ -698,7 +708,9 @@ class EntryForm(Form):
             self.add_editors(spec.params, spec.normalize_params({}) | obj.params,
                              lambda name, value: self.commit("set_param", entry=entry_id,
                                                              name=name, value=value),
-                             _regions(owner) if family == "term" else (), self.sources)
+                             _regions(owner) if family == "term" else (), self.sources,
+                             systems=_systems(panel.session.document, obj.system)
+                             if family == "calculation" else ())
         self.guarded = [w for w in (self.enabled, self.region, self.region_link) if w is not None]
         self.status = QLabel()
         self.status.setObjectName("entryStatus")
@@ -720,7 +732,9 @@ class EntryForm(Form):
         regions = _regions(found[1]) if found[0] == "term" else ()
         sources = tuple((calc, tuple(arrays)) for calc, _, arrays in
                         result_sources(self.session, found[1].id)) if found[0] == "term" else ()
-        return (self.family, self.item_id, found[-1].kind, regions, sources)
+        systems = _systems(self.session.document, found[-1].system) \
+            if found[0] == "calculation" else ()
+        return (self.family, self.item_id, found[-1].kind, regions, sources, systems)
 
     def update_values(self):
         obj = self.session.document.find(self.item_id)[-1]

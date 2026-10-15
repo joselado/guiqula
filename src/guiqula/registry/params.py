@@ -228,22 +228,56 @@ class ChoiceParam(Param):
                     optional=self.optional)
 
 
+class SystemParam(Param):
+    """Another system of the document, by id, that a calculation uses
+    besides its own (the tip of a local probe, PLAN.md 13.1). The planner
+    plans it too and puts its key into the calculation's; the engine builds
+    it and hands its Hamiltonian to the entry (ctx.system(name)). optional:
+    None is allowed (and the entry says what it means then); kinds: the
+    system kinds it may name."""
+    type_name = "system"
+
+    def __init__(self, name, default=None, label=None, doc="", optional=True,
+                 kinds=("quantum",)):
+        super().__init__(name, default, label, doc)
+        self.optional = optional
+        self.kinds = tuple(kinds)
+
+    def normalize(self, value):
+        if value is None and self.optional:
+            return None
+        if not isinstance(value, str) or not value.strip():
+            raise ParamError(f"{self.name}: expected the id of a system, got {value!r}")
+        return value.strip()
+
+    def describe(self):
+        return dict(super().describe(), optional=self.optional, kinds=list(self.kinds))
+
+
 class PositionsParam(Param):
-    """A list of [x, y, z] positions."""
+    """A list of [x, y, z] positions; single: at most one (the site a local
+    probe touches), and a pick of several sites does not offer it."""
     type_name = "positions"
 
-    def __init__(self, name="positions", default=(), label=None, doc="", quantity=None):
+    def __init__(self, name="positions", default=(), label=None, doc="", quantity=None,
+                 single=False):
         super().__init__(name, list(default), label, doc, quantity)
+        self.single = single
 
     def normalize(self, value):
         if not isinstance(value, (list, tuple)):
             raise ParamError(f"{self.name}: expected a list of [x, y, z]")
+        if self.single and len(value) > 1:
+            raise ParamError(f"{self.name}: one position, and {len(value)} are given")
         out = []
         for p in value:
             if not isinstance(p, (list, tuple)) or len(p) != 3:
                 raise ParamError(f"{self.name}: every position is [x, y, z], got {p!r}")
             out.append([_number(self.name, c, float, None, None) for c in p])
         return out
+
+    def describe(self):
+        return dict(super().describe(), single=self.single)
 
 
 class FloatVectorParam(IntVectorParam):

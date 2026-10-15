@@ -50,7 +50,10 @@ def meanfield_iterations(params):
 def estimate(document, calc_id, builds, trusted=True, results=None):
     """{"seconds", "dimension", "sites", "dense_limit", "meanfield"} for a
     calculation, or None when its system is not built (or the calculation
-    cannot run). meanfield: the seconds of the mean field in the total."""
+    cannot run). meanfield: the seconds of the mean field in the total. An
+    entry's cost sees the size of its system, its mode, and the modes of the
+    other systems it names (size["others"], by parameter: the tip of a local
+    probe)."""
     plan = pipeline.plan_calculation(document, calc_id, trusted, results)
     if plan.problem is None and plan.spec is not None and plan.spec.document_level:
         inner = estimate(document, plan.params["calculation"], builds, trusted, results)
@@ -63,7 +66,8 @@ def estimate(document, calc_id, builds, trusted=True, results=None):
     if plan.problem or build is None or plan.spec is None or plan.spec.cost is None:
         return None
     size = {"dimension": int(build["dimension"]), "dimensionality": int(build["dimensionality"]),
-            "sites": int(build["sites"])}
+            "sites": int(build["sites"]), "mode": plan.system.mode,
+            "others": {name: {"mode": other.mode} for name, other in plan.others.items()}}
     seconds = float(plan.spec.cost(plan.params, size))
     meanfield = 0.0
     stage = plan.system.meanfield

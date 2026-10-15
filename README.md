@@ -83,6 +83,8 @@ kernels the first time and then keeps them in a cache.
 - Topology: Chern and spin Chern numbers, Z2 invariants, Berry curvature as a map and along
   a path, local Chern markers.
 - Optical conductivity.
+- The dI/dV that an STM tip measures on one site. The tip is a system of its own, so it
+  can be a metal, a superconductor or a magnet.
 - Sweeps of one or two parameters of any term, which give curves and phase diagrams.
 - Classical models on the same lattices: Heisenberg spins with isotropic or tensor exchange
   in a magnetic field (solved by minimizing the energy), and Ising models and lattice gases

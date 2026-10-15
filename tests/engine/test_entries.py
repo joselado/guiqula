@@ -551,6 +551,19 @@ def calc_system(name):
         d.do("add_term", system=s, kind="onsite", params={"mu": 0.2})
         h = geometry.chain().get_hamiltonian(has_spin=False)
         h.add_onsite(0.2)
+    elif name in ("metal_tip", "sc_tip"):     # an s-wave chain (s1) and a tip (s2) touching it
+        s = d.do("add_system", lattice="chain")
+        d.do("add_term", system=s, kind="swave", params={"delta": 0.1})
+        tip = d.do("add_system", lattice="chain")
+        d.do("set_construction", system=tip, has_spin=False)
+        d.do("add_term", system=tip, kind="onsite", params={"mu": 0.5})
+        h = geometry.chain().get_hamiltonian(has_spin=True)
+        h.add_swave(0.1)
+        h.tip = geometry.chain().get_hamiltonian(has_spin=False)    # what DIRECT reads
+        h.tip.add_onsite(0.5)
+        if name == "sc_tip":
+            d.do("add_term", system=tip, kind="swave", params={"delta": 0.1})
+            h.tip.add_swave(0.1)
     else:
         raise KeyError(name)
     return d, s, h
@@ -659,6 +672,18 @@ def _direct_site_dos(h, p):
     return {"energies": es, "dos": ds}
 
 
+def _direct_local_probe(h, p):
+    """The tip is the second system of the case (h.tip), or pyqula's own."""
+    from pyqula.transporttk.localprobe import LocalProbe
+    i = 0
+    if p["positions"]:
+        i = int(np.argmin(np.linalg.norm(np.asarray(h.geometry.r) - p["positions"][0],
+                                         axis=1)))
+    lp = LocalProbe(h, lead=getattr(h, "tip", None), delta=p["delta"], i=i, T=p["T"])
+    es = _energies(p)
+    return {"energies": es, "didv": lp.didv_curve(es, temp=p["temp"])}
+
+
 def _direct_qpi(h, p):
     q, _, qpi = h.get_qpi(energies=[p["energy"]], nk=p["nk"], delta=p["delta"], mode=p["mode"],
                           write=False)
@@ -675,6 +700,7 @@ DIRECT = {
     "eigenstate": _direct_eigenstate,
     "site_dos": _direct_site_dos,
     "qpi": _direct_qpi,
+    "local_probe": _direct_local_probe,
     "density": lambda h, p: {"density": h.get_vev(nk=p["nk"])},
     "magnetization": lambda h, p: {"magnetization": h.get_magnetization(nk=p["nk"])},
     "real_space_chern": lambda h, p: {"marker": pq("topology").real_space_chern(h)[1]},
@@ -741,6 +767,16 @@ CALC_CASES = {
     "site_dos": [({"positions": [[-0.5, 0, 0]], "ne": 30, "nk": 6, "delta": 0.1}, "rashba",
                   None),
                  ({"positions": [[0.5, 0, 0]], "ne": 20, "nk": 4, "delta": 0.1}, "swave", None)],
+    "local_probe": [
+        ({"positions": [[0.5, 0, 0]], "ne": 6, "emin": -1.0, "emax": 1.0}, "rashba",
+         lambda a: a["didv"].min() > 0),
+        ({"ne": 5, "emin": -1.0, "emax": 1.0}, "haldane", None),   # hopping beyond a cell
+        ({"probe": "s2", "ne": 7, "emin": -0.3, "emax": 0.3, "T": 0.3, "delta": 1e-3},
+         "metal_tip", lambda a: a["didv"][3] < 0.2 * a["didv"][2]),   # the gap, from inside
+        ({"probe": "s2", "ne": 3, "emin": -0.3, "emax": 0.3, "T": 0.3, "delta": 1e-3,
+          "temp": 0.02}, "metal_tip", None),
+        ({"probe": "s2", "ne": 2, "emin": 0.3, "emax": 0.5, "T": 0.3, "delta": 1e-3},
+         "sc_tip", None)],                                   # Floquet-Keldysh, above the gaps
     "qpi": [({"energy": 0.5, "nk": 10}, "rashba", None),
             ({"energy": 0.3, "nk": 8, "mode": "pm"}, "haldane", None)],
     "density": [({"nk": 6}, "zeeman", None)],
@@ -775,6 +811,7 @@ CALC_CASES = {
 }
 PLOT_KINDS = {"ldos": "structure_scalar", "density": "structure_scalar",
               "eigenstate": "structure_scalar", "site_dos": "lines", "qpi": "heatmap",
+              "local_probe": "lines",
               "magnetization": "structure_vector", "real_space_chern": "structure_scalar",
               "fermi_surface": "heatmap", "spectral_function": "heatmap",
               "berry_curvature": "heatmap", "chern": "scalar", "gap": "scalar"}

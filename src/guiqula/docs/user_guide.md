@@ -330,6 +330,51 @@ a command, through the same bar; off, a calculation waits for Run.
 An undo, or a value set back, makes the earlier result that matches the document current
 again, without a re-run.
 
+## A local probe
+
+We will now see how to compute what an STM tip measures on a sample, the differential
+conductance dI/dV against the bias, with a tip whose Hamiltonian you build yourself. The
+calculation is Local probe, in the Transport group, and it is pyqula's `LocalProbe`: a
+semi-infinite chain, the tip, coupled to one site of the infinite sample, and the dI/dV of
+that junction from its scattering matrix, in units of $e^2/h$ per channel.
+
+The simplest case needs one system. Add Local probe to it and leave its tip at (default):
+the tip is then pyqula's own, a spinless metallic chain, and the curve follows the local
+density of states of the site. The site is the first one of the unit cell unless you pick
+another, and the way we do this is by picking one site on a result drawn on the atoms (an
+LDOS, a density), which offers a new Local probe on that site; the site of the form takes
+one position, so a pick of several sites does not offer it.
+
+To change the tip, make it a system of its own: New system on the chain, whose terms make
+the tip what it is, an onsite energy for its Fermi level, an s-wave pairing for a
+superconducting tip, an exchange field for a magnetic one, or anything else a chain takes,
+and then choose that system as the tip of the calculation. The tip has to be
+one-dimensional, since pyqula couples the last cell of a chain to the site, and a system
+in use as a tip cannot be removed. Spin and Nambu are matched by pyqula, so a spinless tip
+on a spinful or a superconducting sample works as it is. A change of the tip makes the
+curve stale exactly as a change of the sample does, so a slider attached to the tip's
+pairing, with Follow on, redraws the curve as you drag it.
+
+What to look for in the curve is the gap and where it opens. A metallic tip on an s-wave
+sample with gap $\Delta$ gives a dI/dV that vanishes below $\Delta$ with a coherence peak
+at $\pm\Delta$; a superconducting tip of gap $\Delta_t$ moves the threshold to
+$\Delta+\Delta_t$, and below it only multiple Andreev reflections carry current, weakly at
+a low transparency. The transparency is the tip-sample coupling, 1 for a contact and well
+below 1 for the tunneling limit, where dI/dV is proportional to the local density of
+states of the sample. The broadening is not only numerical: it is a finite quasiparticle
+lifetime of the sample, so inside a gap it leaves a conductance of about
+$G_N\delta/\Delta$, and for the gap to look empty at a small transparency $\delta$ has to
+be well below $\Delta G_N$.
+
+The cost depends on the tip more than on the sample. A normal tip costs milliseconds an
+energy on a chain and a fraction of a second in two dimensions; a superconducting tip on a
+superconducting sample goes through Floquet-Keldysh, tens of seconds an energy and more
+near zero bias; a finite temperature averages over about 150 times as many energies. The
+estimate beside Run knows all three. The exported script builds the tip first, kept as
+`probe`, then the sample, and calls `localprobe.LocalProbe(h, lead=probe, ...)` and its
+`didv_curve`. A sweep collects numbers and a curve is not one, so in practice the tip's
+parameters are scanned with a slider.
+
 ## Drawing in 3D
 
 A geometry that is not flat (a 3D lattice, buckled or stacked layers) is drawn in 3D on the

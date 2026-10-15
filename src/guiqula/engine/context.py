@@ -4,7 +4,9 @@ position, restricted to the entry's region; piecewise Fields look up the
 regions they name in ``regions``; a Field pyqula evaluates at the bond
 midpoints takes what is known on the sites only from the bond's ends, on
 ``geometry``, core/bonds.py), a progress reporter, and ``note`` for what
-the entry wants reported (the mean field's total energy)."""
+the entry wants reported (the mean field's total energy); a calculation
+that names other systems (SystemParam) finds their Hamiltonians in
+``systems``, by parameter name (``system(name)``)."""
 import importlib
 
 from guiqula.core import bonds
@@ -17,7 +19,7 @@ from guiqula.registry.params import (ChoiceParam, ConditionParam, FieldParam, Pa
 
 class ApplyContext:
     def __init__(self, spec, params, region=None, progress=None, regions=None, results=None,
-                 geometry=None):
+                 geometry=None, systems=None):
         self.spec = spec
         self.params = params
         self.region = region
@@ -25,6 +27,7 @@ class ApplyContext:
         self.regions = regions or {}
         self.results = results or {}
         self.geometry = geometry
+        self.systems = systems or {}
         self.notes = {}
         self._progress = progress
 
@@ -52,6 +55,11 @@ class ApplyContext:
         if isinstance(param, ChoiceParam) and param.source and value is not None:
             _check_source(param, value)
         return value
+
+    def system(self, name):
+        """The Hamiltonian of the system a SystemParam names, built (None
+        when it names none)."""
+        return self.systems.get(name)
 
     def note(self, name, value):
         """Something to report with the stage (JSON data)."""
