@@ -44,7 +44,7 @@ from guiqula.registry.params import FieldParam, VectorFieldParam
 from guiqula.ui import formulas, icons, marks, theme
 from guiqula.ui.forms import (KPathEditor, format_kpath, format_number, kpath_label, line_up,
                               make_editor, parse_kpath, result_sources)
-from guiqula.ui.outliner import cell_problem, system_of
+from guiqula.ui.outliner import cell_problem, geometry_summary, system_of
 from guiqula.ui.sliders import range_from
 
 EVERYWHERE = "(everywhere)"
@@ -73,11 +73,6 @@ def _regions(document, system):
     return tuple((r.id, r.name) for r in document.geometry_of(system.id).regions)
 
 
-def _first_geometry(document, system_id):
-    """The geometry with the base lattice that a system's starts from."""
-    return geometry_chain(document, document.system(system_id).geometry)[0]
-
-
 def _system_for(panel, owner):
     """The system an op's or a region's form speaks of: the one it was
     selected under (panel.context, a linked row of the outliner), else the
@@ -93,6 +88,15 @@ def _systems(document, system_id):
     editor keeps those of the kinds the parameter takes."""
     return tuple((s.id, f"{s.id} {s.name}".strip(), s.kind) for s in document.systems
                  if s.id != system_id and s.variant_of is None)
+
+
+def geometry_label(document, geometry):
+    """"geo1 · Honeycomb lattice · 1 op · s1, s2": a geometry in a list,
+    with what it is and the systems built on it."""
+    users = document.systems_on(geometry.id)
+    name = f" {geometry.name}" if geometry.name and geometry.name != geometry.id else ""
+    return f"{geometry.id}{name} · {geometry_summary(document, geometry)} · " + \
+        (", ".join(users) if users else "no system")
 
 
 def _kpaths(document):
@@ -298,6 +302,10 @@ class Form(QWidget):
                 (" or " if len(offers) > 1 else "") + offers[-1]
         label.setText(param.label + (" (locked)" if locked_by else ""))
         label.setToolTip(tip)
+
+    def param_lock_targets(self, name):
+        """The locks that may name a parameter of this form ("t1.m")."""
+        return [f"{self.lock_owner}.{name}"] if self.lock_owner else []
 
     def _sweepable(self, name):
         """Whether a slider or a sweep can move this parameter (a number of
@@ -509,8 +517,7 @@ class Form(QWidget):
         locks = set(self.session.document.locks)
         whole = [t for t in self.whole_locks() if t in locks]
         for name, editor in self.editors.items():
-            own = f"{self.lock_owner}.{name}" if self.lock_owner else None
-            by = whole + ([own] if own in locks else [])
+            by = whole + [t for t in self.param_lock_targets(name) if t in locks]
             editor.setEnabled(not by)
             if name in self.labels:
                 self._label_says(name, by)
@@ -551,7 +558,10 @@ class EmptyForm(Form):
 
 
 class SystemForm(Form):
-    """Name, base lattice, Hamiltonian construction, what the build found."""
+    """Name, the geometry it is built on (a combo of the document's
+    geometries, decision 273: choosing another is set_geometry, the lattice
+    being the geometry's own form's), the Hamiltonian construction, what
+    the build found."""
 
     def __init__(self, panel, system_id):
         system = panel.session.document.system(system_id)
@@ -563,21 +573,14 @@ class SystemForm(Form):
         self.name.setObjectName("systemName")
         self.name.editingFinished.connect(self._rename)
         self.rows.addRow("name", self.name)
-        self.lattice = QComboBox()
-        self.lattice.setObjectName("latticeBox")
-        for spec in sorted(registry.entries("lattice"), key=lambda s: (s.group, s.label)):
-            self.lattice.addItem(f"{spec.label} ({spec.group})", spec.kind)
-        self.lattice.activated.connect(self._set_lattice)
-        self.rows.addRow("lattice", self.lattice)
-        base = _first_geometry(panel.session.document, system_id).base
-        self.base_kind = base.kind
-        try:
-            spec = registry.get("lattice", self.base_kind)
-            self.add_editors(spec.params, spec.normalize_params({}) | base.params,
-                             lambda name, value: self.commit("set_param", entry=system_id,
-                                                             name=name, value=value))
-        except registry.RegistryError:
-            pass
+        self.geometry = QComboBox()
+        self.geometry.setObjectName("systemGeometry")
+        self.geometry.setToolTip("the geometry the system is built on (geometry): the sites, "
+                                 "shared with every other system that names it; another one "
+                                 "here moves the system onto it, keeping its terms, and the "
+                                 "lattice and the ops are edited on the geometry's own row")
+        self.geometry.activated.connect(self._set_geometry)
+        self.rows.addRow("geometry", self.geometry)
         if source.hamiltonian is not None:
             box = QGroupBox("Hamiltonian construction")
             box.setObjectName("constructionBox")
@@ -615,23 +618,25 @@ class SystemForm(Form):
         self.update_values()
 
     def signature(self):
-        return ("system", self.system_id,
-                _first_geometry(self.session.document, self.system_id).base.kind)
+        return ("system", self.system_id)
 
     def _source(self):
         """The system whose Hamiltonian the form shows: a variant's original."""
         return source_of(self.session.document, self.session.document.system(self.system_id))
 
     def update_values(self):
-        system = self.session.document.system(self.system_id)
+        document = self.session.document
+        system = document.system(self.system_id)
         source = self._source()
         _quiet(self.name, self.name.setText, system.name)
-        base = _first_geometry(self.session.document, self.system_id).base
-        _quiet(self.lattice, self.lattice.setCurrentIndex, self.lattice.findData(base.kind))
-        for name, editor in self.editors.items():
-            param = editor.param
-            editor.set_value(base.params.get(name, param.default))
-        line_up(self.editors.values())
+        self.geometry.blockSignals(True)
+        try:
+            self.geometry.clear()
+            for geometry in document.geometries:
+                self.geometry.addItem(geometry_label(document, geometry), geometry.id)
+            self.geometry.setCurrentIndex(self.geometry.findData(system.geometry))
+        finally:
+            self.geometry.blockSignals(False)
         if source.hamiltonian is not None:
             c = source.hamiltonian.construction
             _quiet(self.has_spin, self.has_spin.setCurrentIndex,
@@ -645,15 +650,15 @@ class SystemForm(Form):
         self.info.setText(self._info())
 
     def whole_locks(self):
-        return [self.system_id, f"{self.system_id}/geometry"]
+        return [self.system_id]
 
     def apply_locks(self):
-        """The geometry lock covers the lattice; the system's lock everything."""
+        """The system's lock covers everything; its geometry lock, which
+        covers the chain it is built on, the choice of the geometry too."""
         super().apply_locks()
         locks = self.session.document.locks
-        self.lattice.setEnabled(not any(t in locks for t in self.whole_locks()))
-        for widget in self.guarded:
-            widget.setEnabled(self.system_id not in locks)
+        self.geometry.setEnabled(self.system_id not in locks
+                                 and f"{self.system_id}/geometry" not in locks)
 
     def _info(self):
         session, system_id = self.session, self.system_id
@@ -678,11 +683,10 @@ class SystemForm(Form):
         if name and name != self.session.document.system(self.system_id).name:
             self.commit("rename", entry=self.system_id, name=name)
 
-    def _set_lattice(self, index):
-        kind = self.lattice.itemData(index)
-        first = _first_geometry(self.session.document, self.system_id)
-        if kind != first.base.kind:              # the lattice the geometry starts from
-            self.commit("set_lattice", system=first.id, lattice=kind)
+    def _set_geometry(self, index):
+        geometry = self.geometry.itemData(index)
+        if geometry != self.session.document.system(self.system_id).geometry:
+            self.commit("set_geometry", system=self.system_id, geometry=geometry)
 
     def _set_spin(self, index):
         has_spin = self.has_spin.itemData(index)
@@ -1007,8 +1011,8 @@ class EntryForm(Form):
         self.commit("set_region", entry=self.item_id, region=region)
 
     def restrict_to_region(self):
-        """The region link: the Regions menu of the term's system (P2's "+"
-        menu of its Regions row), below the link."""
+        """The region link: the Regions menu of the term's system's geometry
+        (P2's "+" menu of its Regions row), below the link."""
         link = self.region_link
         where = link.mapToGlobal(link.rect().bottomLeft()) if link is not None else None
         self.panel.regions_requested.emit(self.system_id, where)
@@ -1092,12 +1096,19 @@ class EntryForm(Form):
 
 
 class GeometryForm(Form):
-    """A geometry of the document (phase 9, part B): its name, what it
-    starts from (a lattice or another geometry) and the systems built on
-    it. Its ops and regions are edited as any, under a system's Geometry
-    row or under it in the outliner."""
+    """A geometry of the document (phase 9, part B; decision 273: the form of
+    any geometry, selected on its own row, under a system's Geometry row or
+    as a node): its name, the lattice it starts from with the lattice's
+    parameters (latticeBox and the editors; on a geometry that starts from
+    another geometry, that one instead, the lattice being its), and the
+    systems built on it. Its ops and regions are edited as any, under it in
+    the outliner. A lattice parameter's lock is the geometry's (geo1.n) or
+    any of its systems' (s1.n, what a file written before named)."""
 
     def __init__(self, panel, geometry_id):
+        document = panel.session.document
+        geometry = document.geometry(geometry_id)
+        self.lock_owner = geometry_id
         super().__init__(panel, geometry_id, f"Geometry {geometry_id}",
                          "The sites: a base lattice, or another geometry it starts from, then "
                          "its ops; every system built on it shares it, so an op or a region "
@@ -1106,33 +1117,77 @@ class GeometryForm(Form):
         self.name.setObjectName("geometryName")
         self.name.editingFinished.connect(self._rename)
         self.rows.addRow("name", self.name)
+        self.lattice = QComboBox()
+        self.lattice.setObjectName("latticeBox")
+        self.lattice.setToolTip("the base lattice the geometry starts from (set_lattice): "
+                                "changing it keeps the ops, the regions and the terms of "
+                                "every system built on it")
+        for spec in sorted(registry.entries("lattice"), key=lambda s: (s.group, s.label)):
+            self.lattice.addItem(f"{spec.label} ({spec.group})", spec.kind)
+        self.lattice.activated.connect(self._set_lattice)
         self.start = QLabel()
         self.start.setObjectName("geometryStart")
-        self.rows.addRow("starts from", self.start)
+        self.parent_id = geometry.parent
+        if geometry.parent is None:
+            self.rows.addRow("lattice", self.lattice)
+            self.base_kind = geometry.base.kind
+            try:
+                spec = registry.get("lattice", self.base_kind)
+                self.add_editors(spec.params, spec.normalize_params({}) | geometry.base.params,
+                                 lambda name, value: self.commit("set_param", entry=geometry_id,
+                                                                 name=name, value=value))
+            except registry.RegistryError:
+                pass
+        else:
+            self.base_kind = None
+            self.lattice.setVisible(False)
+            self.rows.addRow("starts from", self.start)
         self.users = QLabel()
         self.users.setObjectName("geometryUsers")
         self.users.setWordWrap(True)
         self.rows.addRow("built on it", self.users)
-        self.guarded = [self.name]
+        self.guarded = [self.name, self.lattice]
         self.update_values()
 
     def whole_locks(self):
-        return [self.item_id]
+        """The geometry's own lock, and the lock of every system built on it
+        or on a geometry that starts from it (s1/geometry covers the chain)."""
+        document = self.session.document
+        out = [self.item_id]
+        for system in document.systems:
+            try:
+                chain = geometry_chain(document, system.geometry)
+            except Exception:
+                continue
+            if any(g.id == self.item_id for g in chain):
+                out += [system.id, f"{system.id}/geometry"]
+        return out
+
+    def param_lock_targets(self, name):
+        """A lattice parameter's lock names the geometry (geo1.n) or a system
+        built on it (s1.n)."""
+        document = self.session.document
+        return [f"{self.item_id}.{name}"] + [f"{s}.{name}"
+                                             for s in document.systems_on(self.item_id)]
 
     def signature(self):
-        return ("geometry", self.item_id)
+        geometry = self.session.document.geometry(self.item_id)
+        return ("geometry", self.item_id, geometry.parent,
+                geometry.base.kind if geometry.parent is None else None)
 
     def update_values(self):
         document = self.session.document
         geometry = document.geometry(self.item_id)
         _quiet(self.name, self.name.setText, geometry.name)
         if geometry.parent is not None:
-            self.start.setText(f"the geometry {geometry.parent}")
+            parent = document.geometry(geometry.parent)
+            self.start.setText(f"the geometry {parent.id} ({geometry_summary(document, parent)})")
         else:
-            try:
-                self.start.setText(registry.get("lattice", geometry.base.kind).label)
-            except registry.RegistryError:
-                self.start.setText(geometry.base.kind)
+            _quiet(self.lattice, self.lattice.setCurrentIndex,
+                   self.lattice.findData(geometry.base.kind))
+            for name, editor in self.editors.items():
+                editor.set_value(geometry.base.params.get(name, editor.param.default))
+            line_up(self.editors.values())
         users = document.systems_on(self.item_id)
         children = [g.id for g in document.geometries if g.parent == self.item_id]
         self.users.setText(", ".join(users + [f"{c} (a geometry)" for c in children])
@@ -1143,6 +1198,12 @@ class GeometryForm(Form):
         name = self.name.text().strip()
         if name != self.session.document.geometry(self.item_id).name:
             self.commit("rename", entry=self.item_id, name=name)
+
+    def _set_lattice(self, index):
+        kind = self.lattice.itemData(index)
+        geometry = self.session.document.geometry(self.item_id)
+        if geometry.parent is not None or kind != geometry.base.kind:
+            self.commit("set_lattice", system=self.item_id, lattice=kind)
 
 
 class KPathForm(Form):
@@ -1565,9 +1626,13 @@ class PropertiesPanel(QWidget):
             return MeanFieldForm(self, item_id)
         if item_id.endswith("/model"):
             return ModelForm(self, item_id)
-        system = system_of(item_id)
-        if system is not None:
-            return SystemForm(self, system)
+        head = system_of(item_id)
+        if head is not None:
+            if any(g.id == head for g in document.geometries):   # geo1/base, geo1/regions
+                return GeometryForm(self, head)
+            if item_id == f"{head}/geometry":          # a system's Geometry row: its geometry
+                return GeometryForm(self, document.system(head).geometry)
+            return SystemForm(self, head)
         family = document.find(item_id)[0]
         if family == "system":
             return SystemForm(self, item_id)

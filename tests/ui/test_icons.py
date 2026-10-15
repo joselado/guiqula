@@ -287,7 +287,7 @@ def shown_everything(window, qtbot):
 
 
 # the controls package P8 names (PLAN.md section 7), by objectName, with their icon
-WINDOW_ICONS = {"newSystemButton": "new", "addButton": "add", "runButton": "run",
+WINDOW_ICONS = {"newButton": "new", "addButton": "add", "runButton": "run",
                 "cancelButton": "cancel", "autoRerunButton": "follow", "logToggle": "log"}
 BAR_ICONS = {"{key}Fit": "fit", "{key}Pan": "pan", "{key}Zoom": "zoom_in",
              "{key}SaveImage": "image"}
@@ -345,7 +345,7 @@ def test_every_control_the_package_names_carries_an_icon(window, qtbot):
     assert box.text() == "" and box.toolTip().startswith("3D: ") and \
         box.accessibleName() == "3D"
     assert window.findChild(QWidget, "canvasViewLabel").accessibleName() == "Show"
-    for name in ("newSystemButton", "addButton", "runButton", "logToggle"):   # beside
+    for name in ("newButton", "addButton", "runButton", "logToggle"):   # beside
         assert window.findChild(QWidget, name).toolButtonStyle() == \
             Qt.ToolButtonStyle.ToolButtonTextBesideIcon, name
     assert window.cancel_button.toolTip().startswith("Cancel: ") and \
@@ -360,10 +360,11 @@ def test_every_control_the_package_names_carries_an_icon(window, qtbot):
     assert not tabs.tabIcon(0).isNull()                     # Structure
     # the outliner: the kind of each row, and its marks drawn as icons
     kinds = {item_id: window.outliner.item(item_id).data(0, tree.KIND_ROLE)
-             for item_id in ("s1", "s1/base", "op1", "t1", "s1/meanfield", "c1",
+             for item_id in ("s1", "geo1", "geo1/base", "op1", "t1", "s1/meanfield", "c1",
                              "s1/geometry")}
-    assert kinds == {"s1": "structure", "s1/base": "lattice", "op1": "op", "t1": "term",
-                     "s1/meanfield": "meanfield", "c1": "calculation", "s1/geometry": None}
+    assert kinds == {"s1": "structure", "geo1": "structure", "geo1/base": "lattice",
+                     "op1": "op", "t1": "term", "s1/meanfield": "meanfield",
+                     "c1": "calculation", "s1/geometry": "lattice"}
     assert tree.status_parts(f"{marks.DONE} 1") == [("done", ""), (None, "1")]
     assert tree.status_parts(marks.FAILED, "invalid") == [("invalid", "")]
     assert tree.status_parts(marks.FAILED, "failed") == [("failed", "")]

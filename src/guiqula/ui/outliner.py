@@ -1,8 +1,12 @@
-"""The outliner (PLAN.md section 4): the whole Document as one tree. One
-node per system with its Geometry stack (the base lattice, then the ops),
-its Regions and its Hamiltonian (the terms, each with the Hilbert space
-after it), one node per embedding with the two systems it names, then the
-Calculations with their result status.
+"""The outliner (PLAN.md section 4): the whole Document as one tree, the
+objects of the Document each listed once (phase 9, decisions 273 to 275).
+The Geometries come first, one row per geometry with its base lattice, its
+ops and its Regions under it; then one node per system, whose Geometry row
+is one line naming the geometry it is built on (and the systems it is
+shared with) and selects that geometry, over its Hamiltonian (the terms,
+each with the Hilbert space after it); one node per embedding and per
+junction with the systems they name; then the Calculations with their
+result status and the K-paths with the calculations that walk them.
 
 Ops and terms carry a checkbox (enabled). Ops, terms, regions and
 calculations are reordered by dragging them within their own list (or with
@@ -11,26 +15,27 @@ args) for the window to run through the dispatcher; it never touches the
 Document itself, and Qt never moves an item: the tree is rebuilt from the
 Document after the move command.
 
-Items carry the id of what they show: an entry id (s1, op2, t3, r1, c2),
-or ``<system>/base``, ``<system>/geometry``, ``<system>/regions``,
+Items carry the id of what they show: an entry id (geo1, s1, op2, t3, r1,
+c2, k1), or ``<geometry>/base`` and ``<geometry>/regions`` for the rows of
+a geometry that are not entries (geometry_pseudo_ids), ``<system>/geometry``
+(the link row, which selects the geometry with that system as the context),
 ``<system>/hamiltonian``, ``<system>/meanfield`` (``<system>/model_stack``,
-``<system>/model`` for a classical system) for the rows of a system that
-are not entries (pseudo_ids), ``<embedding>/pristine`` and
-``<embedding>/defect`` for the rows under an embedding, which select the
-system they name (embedding_rows), ``calculations`` and ``kpaths``, the
-section of the document's k-paths (phase 9, part A), whose rows are the
-k-paths themselves (k1, k2) with the calculations that walk them as their
-status. The mean-field row
-closes the Hamiltonian's list, with its own checkbox (set_meanfield).
+``<system>/model`` for a classical system) for those of a system
+(pseudo_ids), ``<embedding>/pristine`` and ``<embedding>/defect`` for the
+rows under an embedding, which select the system they name (embedding_rows),
+and the sections ``geometries``, ``calculations`` and ``kpaths``. The
+mean-field row closes the Hamiltonian's list, with its own checkbox
+(set_meanfield).
 
-The section rows (a system's Geometry, Regions, Hamiltonian or Model, and
-Calculations) carry a "+" at the right of their status cell (PLAN.md phase
-8, package P2): add_requested says which section, and the window opens the
-Add menu of that family for that system there (add_button(path) gives the
-button; outlinerAdd_<system>_geometry, _regions, _hamiltonian, _model and
-outlinerAdd_calculations, and outlinerAdd_kpaths, which adds a k-path
-rather than opening a menu). The rest of the cell is left to the row, so a
-click there selects it as before.
+The section rows (Geometries, a geometry's own row and its Regions, a
+system's Hamiltonian or Model, Calculations and K-paths) carry a "+" at the
+right of their status cell (PLAN.md phase 8, package P2): add_requested
+says which section, and the window opens the Add menu of that family there
+(add_button(path) gives the button; outlinerAdd_geometries, which makes a
+geometry from a lattice, outlinerAdd_<geometry>_ops, _regions,
+outlinerAdd_<system>_hamiltonian, _model, outlinerAdd_calculations, and
+outlinerAdd_kpaths, which adds a k-path rather than opening a menu). The
+rest of the cell is left to the row, so a click there selects it as before.
 
 What a row is and in what state (package P7). The Entry column says what
 the row is: the id and the kind, then the name, an op's parameters, a
@@ -98,11 +103,10 @@ ICON_ROW = 4                 # pixels a row is higher than its icon (every row: 
 INDENT = 14                  # pixels of indentation per level of the tree
 MOVABLE = ("op", "term", "region", "calculation")
 # the rows of a system that carry a "+", and the name of their section in a path
-ADD_SECTIONS = {"geometry": "geometry", "regions": "regions", "hamiltonian": "hamiltonian",
-                "model_stack": "model"}
-ADD_TIPS = {"geometry": "add a geometry op to {system} (a supercell, a ribbon, an island, "
-                        "cuts, strain...), applied after the others",
-            "regions": "add a region to {system}: the sites where an expression of the "
+ADD_SECTIONS = {"hamiltonian": "hamiltonian", "model_stack": "model"}
+ADD_TIPS = {"ops": "add a geometry op to {geometry} (a supercell, a ribbon, an island, "
+                   "cuts, strain...), applied after the others, for every system built on it",
+            "regions": "add a region to {geometry}: the sites where an expression of the "
                        "position holds, or the sites selected on the canvas",
             "hamiltonian": "add a term to the Hamiltonian of {system}, applied after the "
                            "others, or turn on its mean field",
@@ -110,7 +114,10 @@ ADD_TIPS = {"geometry": "add a geometry op to {system} (a supercell, a ribbon, a
             "calculations": "add a calculation on the current system ({run} runs the selected "
                             "one)",
             "kpaths": "add a k-path, pyqula's default path until it is drawn in its zone "
-                      "window; a calculation's k-path row chooses among them"}
+                      "window; a calculation's k-path row chooses among them",
+            "geometries": "add a geometry from a lattice, with no Hamiltonian on it yet: for "
+                          "a second Hamiltonian or a variant (New > Hamiltonian on it, or a "
+                          "link in the node view)"}
 ADD_ROOM = 26                # the least room of a "+" in its status cell, in pixels
 TEXT_GAP = 12                # pixels between a detail row's label and its status on one line
 DETAIL_PAD = 3               # pixels below the status of a detail row read under its label
@@ -133,22 +140,26 @@ def drop_index(old, target, below):
     return before - 1 if old < before else before
 
 
-def list_heads(family, system):
-    """Rows a drop onto means "to the top of the list" for this family."""
-    return {"op": {f"{system}/geometry", f"{system}/base"},
-            "term": {f"{system}/hamiltonian", f"{system}/model_stack", f"{system}/model"},
-            "region": {f"{system}/regions"}, "calculation": {"calculations"}}[family]
+def list_heads(family, owner):
+    """Rows a drop onto means "to the top of the list" for this family
+    (owner: the geometry of an op or a region, the system of a term)."""
+    return {"op": {owner, f"{owner}/base"},
+            "term": {f"{owner}/hamiltonian", f"{owner}/model_stack", f"{owner}/model"},
+            "region": {f"{owner}/regions"}, "calculation": {"calculations"}}[family]
 
 
 def system_of(item_id):
-    """The system part of a pseudo id (s1/base -> s1), else None."""
+    """The head of a pseudo id (s1/hamiltonian -> s1, geo1/base -> geo1),
+    else None; a system's, a geometry's, an embedding's or a junction's,
+    which the caller tells apart by the Document."""
     return item_id.split("/", 1)[0] if "/" in item_id else None
 
 
 def pseudo_ids(system):
-    """The rows of a system that are not entries: a quantum system has a
-    Hamiltonian and its mean field, a classical one a model."""
-    rows = ["geometry", "base", "regions", "problem"]
+    """The rows of a system that are not entries: its Geometry row (the link
+    to the geometry it is built on), a quantum system's Hamiltonian and
+    mean field, a classical one's model."""
+    rows = ["geometry", "problem"]
     if system.hamiltonian is not None:
         rows += ["hamiltonian", "meanfield"]
     if system.model is not None:
@@ -158,19 +169,49 @@ def pseudo_ids(system):
     return {f"{system.id}/{row}" for row in rows}
 
 
-def linked_rows(document, system):
-    """The rows of the ops and regions of a geometry under a system that is
-    not the first to name it (phase 9, part B, decision 240): the first
-    system in document order shows them by their own ids, every later one
-    as <system>/<entry>, which select turns into the entry, keeping that
-    system as the one shown. {row id: entry id}."""
+def geometry_pseudo_ids(geometry):
+    """The rows of a geometry that are not entries: its base lattice (or the
+    geometry it starts from) and its Regions section."""
+    return {f"{geometry.id}/base", f"{geometry.id}/regions"}
+
+
+def old_geometry_rows(document, system):
+    """The rows a system had before its geometry was listed once (decision
+    241's rule: what was written before keeps working): <system>/base and
+    <system>/regions, as the rows of its geometry. {old row: row}."""
     try:
         geometry = document.geometry_of(system.id)
     except Exception:
         return {}
-    if document.systems_on(geometry.id)[:1] == [system.id]:
-        return {}
-    return {f"{system.id}/{entry.id}": entry.id for entry in geometry.ops + geometry.regions}
+    return {f"{system.id}/base": f"{geometry.id}/base",
+            f"{system.id}/regions": f"{geometry.id}/regions"}
+
+
+def geometry_summary(document, geometry):
+    """"Honeycomb lattice · 1 op", or "from geo1 · 2 ops": what a geometry
+    is, in a row or a list."""
+    start = f"from {geometry.parent}" if geometry.parent else \
+        _label("lattice", geometry.base.kind)
+    count = len(geometry.ops)
+    return start + (f" · {count} op{'s' if count != 1 else ''}" if count else "")
+
+
+def geometry_plan(session, geometry_id):
+    """(plan, system) of the first system built on a geometry, or on one
+    that starts from it (its ops are stages of that plan), else (None,
+    None)."""
+    document = session.document
+    for system in document.systems:
+        try:
+            chain = geometry_chain(document, system.geometry)
+        except Exception:
+            continue
+        if any(g.id == geometry_id for g in chain):
+            try:
+                return session.plan_system(system.id), system.id
+            except Exception:
+                return None, system.id
+    return None, None
 
 
 def embedding_rows(embedding):
@@ -684,7 +725,6 @@ class Outliner(QTreeWidget):
         self._add_buttons = {}          # section path -> its "+" (rebuilt with the tree)
         self._details = {}              # item id -> its state and messages in words
         self._locks = {}                # item id -> (status text, tooltip line) of its locks
-        self._linked = {}               # row id -> entry id of a shared geometry's later rows
         self._refreshing = False
         self._pending = []            # the spans and colours of a refresh (_later)
         self._viewport_width = -1
@@ -818,9 +858,9 @@ class Outliner(QTreeWidget):
             self._add_buttons = {}
             self._details = {}
             self._locks = {}
-            self._linked = {}
             self._pending = []
             document = session.document
+            self._add_geometries(session)
             for system in document.systems:
                 self._add_system(session, system)
             for embedding in document.embeddings:
@@ -834,7 +874,6 @@ class Outliner(QTreeWidget):
             kpaths = self._add(None, "kpaths", "K-paths")
             for kpath in document.kpaths:
                 self._add_kpath(document, kpaths, kpath)
-            self._add_geometries(session)
             self._mark_locks(document)
             for call, args in self._pending:
                 call(*args)
@@ -908,56 +947,17 @@ class Outliner(QTreeWidget):
 
         document = session.document
         shared = document.geometry_of(system.id)
-        users = document.systems_on(shared.id)
-        others = [u for u in users if u != system.id]
-        linked = linked_rows(document, system)
-        prefix = f"{system.id}/" if linked else ""
+        others = [u for u in document.systems_on(shared.id) if u != system.id]
         name = shared.name if shared.name and shared.name != shared.id else ""
-        geometry = self._add(top, f"{system.id}/geometry", " · ".join(
+        # the link row: the geometry the system is built on, listed once under Geometries
+        self._add(top, f"{system.id}/geometry", " · ".join(
             [f"Geometry {shared.id}"] + [part for part in (
-                name, f"shared with {', '.join(others)}" if others else "") if part]),
-            details=["the base lattice, then the ops in their order"] + (
-                [f"the geometry {shared.id}, shared with {', '.join(others)}: an op or a "
-                 f"region edited here is edited for them too"] if others else []))
-        base = plan.stages[0]
-        chain = geometry_chain(document, shared.id)
-        parent = chain[-2] if len(chain) > 1 else None
-        base_item = self._add(
-            geometry, f"{system.id}/base",
-            _label("lattice", base.kind) if parent is None else
-            _entry_text(f"from {parent.id}", parent.name if parent.name != parent.id else ""),
-            details=["the base lattice"] if parent is None else
-            [f"it starts from the geometry {parent.id}, every op of which comes first"],
-            kind="lattice")
-        if base.problem:
-            self._mark_invalid(base_item, base.problem)
-        for op in shared.ops:
-            self._linked.update({prefix + op.id: op.id} if prefix else {})
-            self._add_entry(geometry, op, "geometry_op", stages[op.id], runtime.get(op.id),
-                            summary=_summary(op.params), item_id=prefix + op.id)
-
-        positions = build["positions"] if build is not None and current else None
-        count = len(shared.regions)
-        regions = self._add(top, f"{system.id}/regions", "Regions",
-                            details=[f"{count} region{'s' if count != 1 else ''}"
-                                     if count else "no region yet: the + makes one"])
-        for region in shared.regions:
-            selection = _selection_text(region.select)
-            name = region.name if region.name != region.id else ""
-            row = prefix + region.id
-            if prefix:
-                self._linked[row] = region.id
-            item = self._add(regions, row, _entry_text(region.id, name, selection),
-                             details=[f"the sites of {selection}"], movable=True, kind="region")
-            if positions is not None:
-                try:
-                    inside = int(region_tools.evaluate_positions(region.select,
-                                                                 positions).sum())
-                    item.setText(1, _sites(inside))
-                    self._details[row].append(f"{_sites(inside)} of the current build")
-                except Exception as error:
-                    self._mark_invalid(item, str(error))
-
+                name, geometry_summary(document, shared),
+                f"shared with {', '.join(others)}" if others else "") if part]),
+            details=[f"built on the geometry {shared.id}, listed under Geometries: selecting "
+                     f"this row shows it, with {system.id} on the canvas"] + (
+                [f"shared with {', '.join(others)}: an op or a region edited there is "
+                 f"edited for them too"] if others else []), kind="lattice")
         if system.variant_of is not None:         # the original's Hamiltonian or model
             what = "Hamiltonian" if system.kind == "quantum" else "Model"
             self._add(top, f"{system.id}/hamiltonian",
@@ -1096,8 +1096,8 @@ class Outliner(QTreeWidget):
     def _add_entry(self, parent, entry, family, stage, report, mode=None, summary="",
                    item_id=None):
         """An op or a term: what it is in the label (with an op's parameters
-        and the region a term is restricted to), its state in the status;
-        item_id: the row's id, a linked row's (linked_rows) or the entry's."""
+        and the region a term is restricted to), its state in the status
+        (stage None: an op of a geometry no system is built on, no state)."""
         region = getattr(entry, "region", None)
         code = isinstance(entry.params.get("code"), str)          # a Python node
         item_id = item_id or entry.id
@@ -1112,7 +1112,7 @@ class Outliner(QTreeWidget):
         item.setCheckState(0, Qt.CheckState.Checked if entry.enabled else Qt.CheckState.Unchecked)
         if code:                                               # a Python node: its code
             details.append(entry.params["code"].rstrip())
-        message = stage.problem
+        message = stage.problem if stage is not None else ""
         if report is not None and report["status"] == "invalid":
             message = report["message"]
         if not entry.enabled:
@@ -1126,7 +1126,7 @@ class Outliner(QTreeWidget):
             status = _mode(mode) if mode else ""
             if mode:
                 details.append(f"the Hilbert space after it: {_mode(mode)}")
-            if stage.warnings:
+            if stage is not None and stage.warnings:
                 status = f"{marks.mark('warning')} {status}".strip()
                 details += [f"{marks.mark('warning')} {warning}" for warning in stage.warnings]
             item.setText(1, status)
@@ -1134,6 +1134,12 @@ class Outliner(QTreeWidget):
 
     def _add_pluses(self, document):
         """The "+" of every section row of the tree."""
+        self._add_plus(self._items["geometries"], "geometries", ADD_TIPS["geometries"])
+        for geometry in document.geometries:
+            self._add_plus(self._items[geometry.id], f"{geometry.id}/ops",
+                           ADD_TIPS["ops"].format(geometry=geometry.id))
+            self._add_plus(self._items[f"{geometry.id}/regions"], f"{geometry.id}/regions",
+                           ADD_TIPS["regions"].format(geometry=geometry.id))
         for system in document.systems:
             for row, section in ADD_SECTIONS.items():
                 item = self._items.get(f"{system.id}/{row}")
@@ -1146,20 +1152,30 @@ class Outliner(QTreeWidget):
         self._add_plus(self._items["kpaths"], "kpaths", ADD_TIPS["kpaths"])
 
     def _mark_locks(self, document):
-        """"locked" (or "m locked") after the status of what a lock covers; a
-        lattice parameter's on the base lattice row."""
+        """"locked" (or "m locked") after the status of what a lock covers: a
+        lattice parameter's (s1.n or geo1.n) on the base lattice row of the
+        geometry, a system's geometry lock (s1/geometry) on its Geometry row
+        and on the geometry's own row, a geometry's (geo1) on that row."""
+        systems = {s.id: s for s in document.systems}
         for lock in document.locks:
             head, _, param = lock.partition(".")
-            if param and "/" not in head and any(s.id == head for s in document.systems):
-                head = f"{head}/base"
-            item = self._items.get(head)
-            if item is None:
-                continue
+            rows = [head]
+            if param and "/" not in head:
+                if head in systems:
+                    rows = [f"{systems[head].geometry}/base"]
+                elif any(g.id == head for g in document.geometries):
+                    rows = [f"{head}/base"]
+            elif head.endswith("/geometry") and head.split("/")[0] in systems:
+                rows = [head, systems[head.split("/")[0]].geometry]
             text = f"{param} {marks.mark('locked')}" if param else marks.mark("locked")
-            old = self._locks.get(head)
-            self._locks[head] = (f"{old[0]} · {text}" if old else text,
-                                 (old[1] + "\n" if old else "") + LOCK_TIP.format(lock=lock))
-            item.setText(1, f"{item.text(1)} · {text}" if item.text(1) else text)
+            for row in rows:
+                item = self._items.get(row)
+                if item is None:
+                    continue
+                old = self._locks.get(row)
+                self._locks[row] = (f"{old[0]} · {text}" if old else text,
+                                    (old[1] + "\n" if old else "") + LOCK_TIP.format(lock=lock))
+                item.setText(1, f"{item.text(1)} · {text}" if item.text(1) else text)
 
     def _mark_invalid(self, item, message):
         item.setText(1, marks.mark("invalid"))
@@ -1214,28 +1230,70 @@ class Outliner(QTreeWidget):
             self._paint(item, color, (1,))
 
     def _add_geometries(self, session):
-        """The geometries no system names (one a ribbon starts from, one left
-        when its systems went): their ops under them, the systems' own being
-        under each system's Geometry row."""
+        """The Geometries section, first in the tree: every geometry of the
+        document once (decision 274), with its base lattice (or the geometry
+        it starts from), its ops with their state in the plan of the first
+        system built on it, and its Regions, the systems built on it as its
+        status ("unused" when none, so that removing it loses nothing)."""
         document = session.document
-        unused = [g for g in document.geometries if not document.systems_on(g.id)]
-        if not unused:
-            return
         section = self._add(None, "geometries", "Geometries",
-                            details=["the geometries no system is built on"])
-        for geometry in unused:
+                            details=["the geometries, each listed once: a system is built on "
+                                     "one, and several may share it"])
+        for geometry in document.geometries:
+            users = document.systems_on(geometry.id)
             children = [g.id for g in document.geometries if g.parent == geometry.id]
             name = geometry.name if geometry.name != geometry.id else ""
-            start = f"from {geometry.parent}" if geometry.parent else \
-                _label("lattice", geometry.base.kind)
-            item = self._add(section, geometry.id, _entry_text(geometry.id, start, name),
-                             f"start of {', '.join(children)}" if children else "unused",
-                             [f"{', '.join(children)} start from it" if children else
-                              "no system is built on it: removing it loses nothing"],
-                             kind="structure")
+            status = ", ".join(users) if users else "unused"
+            details = [f"built on by {', '.join(users)}" if users else
+                       "no system is built on it: removing it loses nothing"]
+            if children:
+                details.append(f"{', '.join(children)} start from it")
+            item = self._add(section, geometry.id, _entry_text(
+                geometry.id, geometry_summary(document, geometry), name), status, details,
+                kind="structure")
+            font = self.font()
+            font.setBold(True)
+            item.setFont(0, font)
+            plan, first = geometry_plan(session, geometry.id)
+            stages = {st.id: st for st in plan.stages if st.id} if plan is not None else {}
+            build = session.builds.get(first) if first is not None else None
+            current = first is not None and session.build_is_current(first)
+            runtime = {r["id"]: r for r in build["reports"]} if build and current else {}
+            parent = geometry.parent
+            base_item = self._add(
+                item, f"{geometry.id}/base",
+                _label("lattice", geometry.base.kind) if parent is None else
+                _entry_text(f"from {parent}", document.geometry(parent).name
+                            if document.geometry(parent).name != parent else ""),
+                details=["the base lattice"] if parent is None else
+                [f"it starts from the geometry {parent}, every op of which comes first"],
+                kind="lattice")
+            base = plan.stages[0] if plan is not None and plan.stages else None
+            if base is not None and base.problem and parent is None:
+                self._mark_invalid(base_item, base.problem)
             for op in geometry.ops:
-                self._add(item, op.id, _entry_text(op.id, _label("geometry_op", op.kind),
-                                                   op.name, _summary(op.params)), kind="op")
+                self._add_entry(item, op, "geometry_op", stages.get(op.id), runtime.get(op.id),
+                                summary=_summary(op.params))
+            positions = build["positions"] if build is not None and current else None
+            count = len(geometry.regions)
+            regions = self._add(item, f"{geometry.id}/regions", "Regions",
+                                details=[f"{count} region{'s' if count != 1 else ''}"
+                                         if count else "no region yet: the + makes one"])
+            for region in geometry.regions:
+                selection = _selection_text(region.select)
+                rname = region.name if region.name != region.id else ""
+                row = self._add(regions, region.id, _entry_text(region.id, rname, selection),
+                                details=[f"the sites of {selection}"], movable=True,
+                                kind="region")
+                if positions is not None:
+                    try:
+                        inside = int(region_tools.evaluate_positions(region.select,
+                                                                     positions).sum())
+                        row.setText(1, _sites(inside))
+                        self._details[region.id].append(f"{_sites(inside)} of the current "
+                                                        f"build")
+                    except Exception as error:
+                        self._mark_invalid(row, str(error))
 
     def _add_kpath(self, document, parent, kpath):
         """A k-path: its vertices, and the calculations that walk it as its
@@ -1364,7 +1422,7 @@ class Outliner(QTreeWidget):
         if self._refreshing or column != 0 or not item.flags() & Qt.ItemFlag.ItemIsUserCheckable \
                 or item.data(0, Qt.ItemDataRole.CheckStateRole) is None:
             return
-        item_id = self._linked.get(item.data(0, ID_ROLE), item.data(0, ID_ROLE))
+        item_id = item.data(0, ID_ROLE)
         enabled = item.checkState(0) == Qt.CheckState.Checked
         if item_id.endswith("/meanfield"):
             name, args = "set_meanfield", {"system": system_of(item_id), "enabled": enabled}
@@ -1374,7 +1432,6 @@ class Outliner(QTreeWidget):
         QTimer.singleShot(0, lambda: self.command.emit(name, args))
 
     def _family(self, item_id):
-        item_id = self._linked.get(item_id, item_id)
         if self._session is None or not item_id or "/" in item_id or \
                 item_id in ("calculations", "kpaths", "geometries"):
             return None
@@ -1384,8 +1441,8 @@ class Outliner(QTreeWidget):
             return None
 
     def current_entry(self):
-        """The entry the current row shows (a linked row's entry)."""
-        return self._linked.get(self.current_id(), self.current_id())
+        """The entry the current row shows."""
+        return self.current_id()
 
     def delete_current(self):
         if self._family(self.current_id()):
@@ -1421,12 +1478,9 @@ class Outliner(QTreeWidget):
             return None
         family, owner, items, old, obj = found
         target_id = target.data(0, ID_ROLE)
-        if self._linked.get(target_id, target_id) == obj.id:
+        if target_id == obj.id:
             return None
-        document = self._session.document
-        systems = document.systems_on(owner.id) if family in ("op", "region") else \
-            [owner.id] if owner is not None else [None]
-        if any(target_id in list_heads(family, system) for system in systems):
+        if target_id in list_heads(family, owner.id if owner is not None else None):
             new = 0
         else:
             other = self._family(target_id)
@@ -1487,6 +1541,9 @@ class Outliner(QTreeWidget):
                                                             {"calculation": obj.id}))
         if family in ("geometry", "system", "region", "embedding", "junction", "kpath"):
             menu.addAction("Rename...", self.rename_current)
+        if family == "geometry":
+            menu.addAction(icons.icon("structure"), "New Hamiltonian on this geometry",
+                           lambda: self.command.emit("add_system", {"geometry": obj.id}))
         if family == "system":
             menu.addAction(icons.icon("structure"), "New Hamiltonian on this geometry",
                            lambda: self.command.emit("add_system", {"geometry": obj.geometry}))

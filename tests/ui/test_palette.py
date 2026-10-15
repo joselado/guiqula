@@ -84,11 +84,26 @@ def test_the_menu_lists_by_group_and_filters(window, qtbot):
     assert set(menu.entries) == {"ising_interaction", "ising_field", "python"}
     assert menu.filter("") == [f"addTerm_{k}" for k in menu.entries]
     assert window.workspace_tabs.tabText(1) == "Model"
-    lattices = window.palette_menu("lattice")              # the lattices of quantum systems
-    assert "newSystem_honeycomb_lattice" in lattices.filter("")
-    assert lattices.filter("")[-3:] == ["newClassical_classical_spin", "newClassical_lattice_gas",
-                                         "newClassical_ising"]
+    lattices = window.palette_menu("lattice")              # New: the lattices, then the rest
+    listed = lattices.filter("")
+    assert "newSystem_honeycomb_lattice" in listed
+    classical = ["newClassical_classical_spin", "newClassical_lattice_gas", "newClassical_ising"]
+    assert listed[listed.index(classical[0]):listed.index(classical[0]) + 3] == classical
     assert "newClassical_ising" in lattices.filter("ising")
+    # the objects of the document after them (decision 276), for the current system
+    assert listed[-5:] == ["newHamiltonian_geo1", "newHamiltonian_geo2", "newKpath",
+                           "newGeometry", "newCalculation"]
+    assert "newEmbedding" not in listed                     # the current system is classical
+    assert lattices.filter("hamiltonian on geo") == ["newHamiltonian_geo1", "newHamiltonian_geo2"]
+    window.select("s1")
+    listed = window.palette_menu("lattice").filter("")
+    assert listed[-7:] == ["newHamiltonian_geo1", "newHamiltonian_geo2", "newEmbedding",
+                           "newJunction", "newKpath", "newGeometry", "newCalculation"]
+    assert window.findChild(QAction, "newEmbedding").text() == "Embedding of a defect in s1"
+    alone = window.palette_menu("lattice", adds="geometry").filter("")     # a geometry alone
+    assert "newSystem_honeycomb_lattice" in alone and not any(
+        n.startswith(("newClassical", "newHamiltonian", "newKpath")) for n in alone)
+    window.palette_menu("lattice")                           # back to a system
     window.session.do("remove", entry=ising)
 
 
@@ -156,21 +171,22 @@ def test_the_plus_of_a_section_adds_to_its_own_system(window, qtbot):
     settle(qtbot, window)
     assert window.current_system() == second
     outliner = window.outliner
-    for path in ("s1/geometry", "s1/regions", "s1/hamiltonian", f"{second}/geometry",
-                 f"{second}/regions", f"{second}/hamiltonian", "calculations"):
+    geometry = session.document.system(second).geometry
+    for path in ("geometries", "geo1/ops", "geo1/regions", "s1/hamiltonian", f"{geometry}/ops",
+                 f"{geometry}/regions", f"{second}/hamiltonian", "calculations", "kpaths"):
         button = outliner.add_button(path)
         assert isinstance(button, QToolButton) and button.isVisible(), path
         assert button.objectName() == "outlinerAdd_" + path.replace("/", "_")
         assert button.toolTip() and button.isEnabled(), path
-    assert outliner.add_button("s1/model") is None
+    assert outliner.add_button("s1/model") is None and outliner.add_button("s1/geometry") is None
     # a piecewise Field of a system without regions says where they are made: the "+"
     window.select("t2")
     hint = window.properties.form.editors["c"].no_regions.text()
-    assert "+ of its Regions row" in hint and "toolbar" not in hint
+    assert "+ of the Regions row of its geometry" in hint and "toolbar" not in hint
     # the button leaves the rest of the status cell to its row, whose height it keeps
-    item = outliner.item("s1/regions")
+    item = outliner.item("geo1/regions")
     cell = outliner.visualRect(outliner.indexFromItem(item, 1))
-    button = outliner.add_button("s1/regions")
+    button = outliner.add_button("geo1/regions")
     assert outliner.viewport().childAt(QPoint(cell.left() + 4, cell.center().y())) is None
     assert outliner.viewport().childAt(button.mapTo(outliner.viewport(),
                                                     button.rect().center())) is button
@@ -184,19 +200,18 @@ def test_the_plus_of_a_section_adds_to_its_own_system(window, qtbot):
     menu.hide()
     assert session.document.find(window.selected)[1].id == "s1"
     assert terms(window)[-1].kind == "haldane" and window.workspace == "hamiltonian"
-    outliner.add_button(f"{second}/geometry").click()
+    outliner.add_button(f"{geometry}/ops").click()        # the geometry's own "+"
     menu = window.palette_menus["geometry_op"]
-    assert menu.system == second
+    assert menu.system == geometry
     menu.entries["island"].trigger()
     menu.hide()
-    geometry = session.document.system(second).geometry
     assert session.document.find(window.selected)[1].id == geometry
     assert window.workspace == "geometry"
     # Regions: by expression, and from a selection of that system's sites only
     window.select("s1")
     settle(qtbot, window)
-    outliner.add_button("s1/regions").click()
-    assert window.regions_menu.isVisible() and window.regions_system == "s1"
+    outliner.add_button("geo1/regions").click()
+    assert window.regions_menu.isVisible() and window.regions_system == "geo1"
     assert not window.region_selection_action.isEnabled()
     window.findChild(QAction, "addRegion_expression").trigger()
     window.regions_menu.hide()
@@ -229,7 +244,8 @@ def test_the_plus_of_a_section_adds_to_its_own_system(window, qtbot):
 def test_selecting_an_entry_shows_its_workspace(window, qtbot):
     fresh(qtbot, window)
     for entry, workspace in (("t1", "hamiltonian"), ("op1", "geometry"), ("c1", "calculate"),
-                             ("s1/meanfield", "hamiltonian"), ("s1/base", "geometry"),
+                             ("s1/meanfield", "hamiltonian"), ("geo1/base", "geometry"),
+                             ("s1/geometry", "geometry"), ("geo1", "geometry"),
                              ("calculations", "calculate"), ("s1/hamiltonian", "hamiltonian"),
                              ("s1", "geometry"), ("t2", "hamiltonian")):
         window.session.act("select", entry=entry)
@@ -289,7 +305,7 @@ def test_the_first_row(window, qtbot):
             and bar.parent() is window]
     assert bars == ["workspaceToolbar", "runToolbar"]       # the selection row went (P3)
     first = window.findChild(QToolBar, "workspaceToolbar")
-    assert first.findChild(QToolButton, "newSystemButton") is window.new_system_button
+    assert first.findChild(QToolButton, "newButton") is window.new_button
     assert first.findChild(QToolButton, "addButton") is window.add_button
     for name in ("opSearch", "termSearch", "calculationSearch", "addOpButton",
                  "addTermButton", "addCalculationButton", "addRegionButton", "meanfieldButton",
@@ -308,8 +324,8 @@ def test_the_first_row(window, qtbot):
     for bar in (b for b in window.findChildren(QToolBar) if b.parent() is window):
         chevron = bar.findChild(QToolButton, "qt_toolbar_ext_button")
         assert chevron is None or not chevron.isVisible(), bar.objectName()
-    # New system and Add open their menus with a click that returns at once
-    window.new_system_button.click()
+    # New and Add open their menus with a click that returns at once
+    window.new_button.click()
     assert window.palette_menus["lattice"].isVisible()
     window.palette_menus["lattice"].hide()
     window.add_button.click()

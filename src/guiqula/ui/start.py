@@ -763,14 +763,14 @@ class StartPage(QWidget):
         card = Card("lattice", spec.kind, spec.label, tag=spec.group,
                     search=f"{spec.group} {spec.doc}",
                     tooltip=f"<b>{spec.label}</b> ({spec.group})<br>{spec.doc}<br>A click "
-                            f"adds a system on it (New system).")
+                            f"adds a system on it (New).")
         card.clicked.connect(lambda checked=False, k=spec.kind: self.lattice_chosen.emit(k))
         return self._deferred(card)
 
     def _classical_card(self, kind, label):
         card = Card("classical", kind, label, tag="classical", search="classical",
                     tooltip=f"<b>{label}</b><br>A classical system on its usual lattice, in "
-                            f"a supercell (New system > Classical systems).")
+                            f"a supercell (New > Classical systems).")
         card.clicked.connect(lambda checked=False, k=kind: self.classical_chosen.emit(k))
         return self._deferred(card)
 

@@ -15,7 +15,7 @@ from guiqula.io import autosave, project
 from guiqula.session import Session
 from guiqula.ui import errors, marks
 from guiqula.ui.app import build_main_window
-from guiqula.ui.properties import EntryForm, RegionForm, SystemForm
+from guiqula.ui.properties import EntryForm, GeometryForm, RegionForm, SystemForm
 
 
 @pytest.fixture(scope="module")
@@ -117,7 +117,7 @@ def test_drag_to_reorder(window, qtbot):
     qtbot.waitUntil(lambda: terms() == ["t3", "t1", "t2"], timeout=5000)
     assert drop(window, qtbot, "t3", "t2", below=True) == ("t3", 2)
     qtbot.waitUntil(lambda: terms() == ["t1", "t2", "t3"], timeout=5000)
-    assert drop(window, qtbot, "op2", "s1/base", below=True) == ("op2", 0)    # the list head
+    assert drop(window, qtbot, "op2", "geo1/base", below=True) == ("op2", 0)  # the list head
     qtbot.waitUntil(lambda: [o.id for o in session.document.geometry_of("s1").ops]
                     == ["op2", "op1"], timeout=5000)
     assert drop(window, qtbot, "t1", "op1", below=False) is None              # another list
@@ -140,9 +140,12 @@ def test_select_action_drives_properties_and_viewport(window, qtbot):
     assert not formula.pixmap().isNull() and "sigma" in formula.toolTip()
     window.session.act("select", entry="c2")
     assert window.current_tab() == "c2" and window.selected_calculation() == "c2"
-    window.session.act("select", entry="s1/base")
-    assert isinstance(window.properties.form, SystemForm)
+    window.session.act("select", entry="geo1/base")
+    assert isinstance(window.properties.form, GeometryForm)
     assert window.properties.form.lattice.currentData() == "honeycomb_lattice"
+    window.session.act("select", entry="s1")
+    assert isinstance(window.properties.form, SystemForm)
+    assert window.properties.form.geometry.currentData() == "geo1"
     assert "8 sites" in window.properties.form.info.text()
     assert not window.session.dispatcher.can_undo()          # selection is not undoable
     settle(qtbot, window)              # t2 showed the Hamiltonian view, which builds it
@@ -191,7 +194,9 @@ def test_palettes_add_and_select(window, qtbot):
     assert window.selected == "c3" and window.current_tab() == "c3"
     menu_action(window, "lattice", "newSystem_kagome_lattice").trigger()
     assert window.selected == "s2" and isinstance(window.properties.form, SystemForm)
+    window.select("s2/geometry")                 # the lattice is the geometry's (decision 273)
     form = window.properties.form
+    assert isinstance(form, GeometryForm) and window.current_system() == "s2"
     form.lattice.setCurrentIndex(form.lattice.findData("lieb_lattice"))
     form.lattice.activated.emit(form.lattice.currentIndex())
     assert window.session.document.geometry_of("s2").base.kind == "lieb_lattice"

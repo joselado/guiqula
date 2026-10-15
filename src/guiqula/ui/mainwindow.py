@@ -84,8 +84,8 @@ from guiqula.ui.kspace import KPathWindow
 from guiqula.ui.nodes import NodeView, OutlinerPanel
 from guiqula.ui.sliders import SlidersPanel
 from guiqula.ui.jobpanel import JobPanel
-from guiqula.ui.outliner import (Outliner, linked_rows, pseudo_ids, system_of,
-                                 target_rows)
+from guiqula.ui.outliner import (Outliner, geometry_pseudo_ids, geometry_summary,
+                                 old_geometry_rows, pseudo_ids, system_of, target_rows)
 from guiqula.ui.palette import FAMILIES as PALETTE_FAMILIES, MenuButton, PaletteMenu
 from guiqula.ui.marks import ERROR_STATES, calculation_state, mark
 from guiqula.ui.grid import MAX_SIDE as GRID_MAX_SIDE, GridView, ResultTabBar
@@ -434,7 +434,7 @@ class MainWindow(QMainWindow):
         """The icons of the window's own controls (icons.follow): the first
         toolbar row, the Log toggle and the viewport's Structure and k-space
         tabs; the menus' are set as each opens first (_set_menu_icons)."""
-        for button, name in ((self.new_system_button, "new"), (self.add_button, "add"),
+        for button, name in ((self.new_button, "new"), (self.add_button, "add"),
                              (self.run_button, "run"), (self.cancel_button, "cancel"),
                              (self.auto_rerun_button, "follow"), (self.log_toggle, "log")):
             button.setIcon(icons.icon(name))
@@ -510,7 +510,7 @@ class MainWindow(QMainWindow):
         return bar
 
     def _build_toolbars(self):
-        """The first row: the workspace tabs, New system and Add (the Add
+        """The first row: the workspace tabs, New and Add (the Add
         menus of ui/palette.py, which the outliner's "+" open too), then the
         run controls (PLAN.md phase 8, package P2). The selection tools are
         on the structure canvas's bar (package P3), and the window connects
@@ -542,7 +542,7 @@ class MainWindow(QMainWindow):
                 "Classical systems", label, f"newClassical_{kind}",
                 f"{label.lower()} on a {n}x{n} supercell of the "
                 f"{registry.get('lattice', lattice).label.lower()} (decision 13.5)",
-                lambda checked=False, k=kind: self.new_classical_system(k))
+                lambda checked=False, k=kind: self.new_classical_system(k), kinds=("system",))
         self.palette_menus["term"].add_extra(
             "Interactions", "Mean field (interactions)", "addMeanfield",
             "interactions, the Hubbard U and the V and J between neighbours, solved "
@@ -550,11 +550,15 @@ class MainWindow(QMainWindow):
             "selects its row",
             lambda: self.add_meanfield(self.palette_menus["term"].system), kinds=("quantum",))
         bar.addSeparator()
-        self.new_system_button = self._menu_button(
-            bar, "New system", "newSystemButton", self.palette_menus["lattice"],
-            "a new system: a quantum one on a lattice, or classical spins, a lattice gas or an "
-            "Ising model (a document can hold several)")
-        self.new_system_button.clicked.connect(lambda: self.open_add_menu("systems"))
+        # New (decision 276): a system on a lattice, classical spins, a lattice gas or an
+        # Ising model, then the objects of the Document (a Hamiltonian on a geometry, an
+        # embedding, a junction, a k-path, a geometry alone), named for the current selection
+        self.new_button = self._menu_button(
+            bar, "New", "newButton", self.palette_menus["lattice"],
+            "new: a system on a lattice (a document can hold several), classical spins, a "
+            "lattice gas or an Ising model, or an object of the document: a Hamiltonian on "
+            "a geometry, an embedding, a junction, a k-path, a geometry alone")
+        self.new_button.clicked.connect(lambda: self.open_add_menu("new"))
         self.add_button = self._menu_button(bar, "Add", "addButton",
                                             self.palette_menus["geometry_op"],
                                             ADD_TIPS["geometry"], "find")
@@ -616,9 +620,9 @@ class MainWindow(QMainWindow):
         self.auto_rerun_button.clicked.connect(lambda checked: self._window_act(
             "auto_rerun", self.set_auto_rerun, enabled=checked))
         run.addWidget(self.auto_rerun_button)
-        # the icons (PLAN.md phase 8, package P8, _set_icons): New system, Add and Run keep
+        # the icons (PLAN.md phase 8, package P8, _set_icons): New, Add and Run keep
         # their text beside, Cancel and Follow show the icon alone, their name in the tooltip
-        for button in (self.new_system_button, self.add_button, self.run_button):
+        for button in (self.new_button, self.add_button, self.run_button):
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         # the selection tools sit on the canvas they act on, in its bar (PLAN.md phase 8,
         # package P3); the window acts on what they ask
@@ -635,19 +639,95 @@ class MainWindow(QMainWindow):
         structure.blender_requested.connect(lambda: self.export_blender_dialog(None))
 
     # ---- the Add menus (PLAN.md phase 8, package P2)
-    def palette_menu(self, family, system=None):
+    def palette_menu(self, family, system=None, adds="system"):
         """The Add menu of a family (lattice, geometry_op, term,
         calculation) with its entries made for the kind of a system (the
         current one when left out), which an entry chosen in it is added
-        to (the current one at that moment when left out)."""
+        to (the current one at that moment when left out); system may be a
+        geometry's id for the ops and the regions (decision 241). The
+        lattice menu is New: adds says what a lattice chosen makes, a
+        system or a geometry alone, and its items name the current system
+        and list the document's geometries, so they are made at each
+        opening (new_items)."""
         menu = self.palette_menus[family]
         menu.system = system
+        if family == "lattice":
+            menu.adds = adds
+            self._new_items(menu)
+            return menu.prepare(adds)
         target = system or (self.current_target() if family == "calculation"
                             else self.current_system())
-        kind = "quantum"                   # New system offers the lattices of quantum systems
-        if family != "lattice" and target is not None and self.session is not None:
-            kind = self.session.document.target_kind(target)    # or "embedding"
+        kind = "quantum"
+        if target is not None and self.session is not None:
+            document = self.session.document
+            if any(g.id == target for g in document.geometries):
+                users = document.systems_on(target)       # a geometry: its first system's kind
+                kind = document.system(users[0]).kind if users else "quantum"
+            else:
+                kind = document.target_kind(target)       # or "embedding", "junction"
         return menu.prepare(kind)
+
+    def _new_items(self, menu):
+        """The items of New after the lattices (decision 276): a Hamiltonian
+        on each geometry of the document, an embedding of a defect in the
+        current quantum system, a junction with it as a lead, a k-path, a
+        geometry alone (the lattices again, adding no system), and a
+        calculation on the current target (the Add menu of the
+        calculations, so that Shift+A in the node view reaches every kind of
+        node). Each is offered for a system (adds), none for a geometry."""
+        document = self.session.document if self.session is not None else None
+        items = []
+        for geometry in (document.geometries if document is not None else []):
+            users = document.systems_on(geometry.id)
+            items.append((f"Hamiltonian on {geometry.id} · {geometry_summary(document, geometry)}",
+                          f"newHamiltonian_{geometry.id}",
+                          f"an empty Hamiltonian on the geometry {geometry.id}"
+                          + (f", shared with {', '.join(users)}" if users else "")
+                          + ": the same sites, with terms of its own",
+                          lambda checked=False, g=geometry.id: self._do_and_select(
+                              "add_system", geometry=g)))
+        menu.set_items("Hamiltonian on a geometry", items)
+        system = self.current_system()
+        quantum = system is not None and document.system(system).kind == "quantum" \
+            and document.system(system).variant_of is None
+        items = []
+        if quantum:
+            items += [(f"Embedding of a defect in {system}", "newEmbedding",
+                       f"a defect in the infinite crystal {system}: a copy of {system} on the "
+                       f"same geometry, whose extra terms are the defect, embedded in it "
+                       f"(see Embedding a defect)",
+                       lambda checked=False, s=system: self._do_and_select(
+                           "add_embedding", pristine=s)),
+                      (f"Junction with {system} as a lead", "newJunction",
+                       f"two semi-infinite leads, {system} and a copy of it to which what "
+                       f"makes it different is added, with an optional central region (see "
+                       f"A junction)",
+                       lambda checked=False, s=system: self._do_and_select(
+                           "add_junction", left=s))]
+        items += [("K-path", "newKpath",
+                   "a k-path through the Brillouin zone, pyqula's default path until it is "
+                   "drawn in its zone window; a calculation's k-path row chooses among them",
+                   lambda checked=False: self._do_and_select("add_kpath")),
+                  ("Geometry alone, from a lattice...", "newGeometry",
+                   "a geometry with no Hamiltonian on it, for a second Hamiltonian or a "
+                   "variant (a link in the node view): the lattices again, one of which "
+                   "makes it",
+                   lambda checked=False: self._open_later("geometries"))]
+        if system is not None:
+            items.append((f"Calculation on {self.current_target()}...", "newCalculation",
+                          "the Add menu of the calculations on the current system, embedding "
+                          "or junction", lambda checked=False: self._open_later("calculations")))
+        menu.set_items("Objects", items)
+
+    def _open_later(self, section):
+        """Open an Add menu once the menu that asked for it has closed."""
+        QTimer.singleShot(0, lambda: self._guarded_add_menu(section))
+
+    def _guarded_add_menu(self, section, position=None):
+        try:
+            self.open_add_menu(section, position=position)
+        except ValueError as error:
+            self.message(str(error), error=True)
 
     def _palette_shown(self, menu):
         """A menu shown by Qt rather than by open_add_menu (a press held on
@@ -659,7 +739,7 @@ class MainWindow(QMainWindow):
         """An entry chosen in an Add menu: added to the menu's system (the
         current one when it names none, or no longer exists) and selected."""
         if menu.family == "lattice":
-            return self.new_system(kind)
+            return self.new_geometry(kind) if menu.adds == "geometry" else self.new_system(kind)
         system = menu.system if menu.system and self._exists(menu.system) \
             else self._target_system(menu.family == "calculation")
         if system is None:
@@ -669,55 +749,68 @@ class MainWindow(QMainWindow):
         return self._do_and_select(command, system=system, kind=kind)
 
     def _add_target(self, section):
-        """(menu, system) of an Add menu (open_add_menu's section)."""
+        """(menu, system, path) of an Add menu (open_add_menu's section):
+        the menu, what it adds to, and the path of the outliner "+" that
+        opens it (the section itself when it is one)."""
         if not section:
             system = self.current_system()
             if system is None:
-                return self.palette_menu("lattice"), None
-            return self.palette_menu(WORKSPACE_FAMILIES[self.workspace], system), system
-        if section == "systems":
-            return self.palette_menu("lattice"), None
+                return self.palette_menu("lattice"), None, "new"
+            return self.palette_menu(WORKSPACE_FAMILIES[self.workspace], system), system, ""
+        if section in ("new", "systems"):
+            return self.palette_menu("lattice"), None, "new"
+        if section == "geometries":
+            return self.palette_menu("lattice", adds="geometry"), None, "geometries"
         if section == "calculations":
             system = self.current_target()
             if system is None:
-                raise ValueError("add a system first (New system)")
-            return self.palette_menu("calculation", system), system
-        system, _, part = section.partition("/")
-        if self.session is None or not any(s.id == system for s in
-                                           self.session.document.systems):
-            raise ValueError(f"no system {system!r} in the document")
-        kind = self.session.document.system(system).kind
-        if part == "geometry":
-            return self.palette_menu("geometry_op", system), system
-        if part == "regions":
-            return self.regions_menu, system
+                raise ValueError("add a system first (New)")
+            return self.palette_menu("calculation", system), system, "calculations"
+        head, _, part = section.partition("/")
+        if self.session is None:
+            raise ValueError(f"no system {head!r} in the document")
+        document = self.session.document
+        geometry = next((g.id for g in document.geometries if g.id == head), None)
+        if geometry is None and any(s.id == head for s in document.systems):
+            geometry = document.system(head).geometry    # a system's: its geometry's (241)
+        if geometry is not None and part in ("geometry", "ops"):
+            return self.palette_menu("geometry_op", head), head, f"{geometry}/ops"
+        if geometry is not None and part == "regions":
+            return self.regions_menu, head, f"{geometry}/regions"
+        if not any(s.id == head for s in document.systems):
+            raise ValueError(f"no system or geometry {head!r} in the document")
+        kind = document.system(head).kind
         if part in ("hamiltonian", "model"):
             if (part == "model") == (kind == "quantum"):
                 where = "model" if kind != "quantum" else "hamiltonian"
-                raise ValueError(f"{system} is a {kind.replace('_', ' ')} system: its terms "
-                                 f"are under {system}/{where}")
-            return self.palette_menu("term", system), system
-        raise ValueError(f"unknown section {section!r}; sections: <system>/geometry, "
-                         f"<system>/regions, <system>/hamiltonian, <system>/model, "
-                         f"calculations, systems")
+                raise ValueError(f"{head} is a {kind.replace('_', ' ')} system: its terms "
+                                 f"are under {head}/{where}")
+            return self.palette_menu("term", head), head, f"{head}/{part}"
+        raise ValueError(f"unknown section {section!r}; sections: <geometry>/ops, "
+                         f"<geometry>/regions (or <system>/geometry, <system>/regions, its "
+                         f"geometry's), <system>/hamiltonian, <system>/model, calculations, "
+                         f"geometries or new")
 
     def open_add_menu(self, section=None, search="", position=None, anchor=None):
         """Open an Add menu with its search line focused (popup: it returns
-        at once): the "+" of an outliner section, the toolbar's Add and New
-        system, Ctrl+F. section: <system>/geometry, <system>/regions,
-        <system>/hamiltonian, <system>/model, calculations, or systems (New
-        system); left out, the family of the workspace on the current system,
-        or New system while the document has none. search is typed into it.
+        at once): the "+" of an outliner section, the toolbar's Add and New,
+        Ctrl+F, Shift+A in the node view. section: <geometry>/ops,
+        <geometry>/regions (<system>/geometry and <system>/regions name its
+        geometry's), <system>/hamiltonian, <system>/model, calculations, new
+        (the New menu; systems is its old name) or geometries (the lattices
+        of New making a geometry alone); left out, the family of the
+        workspace on the current system, or New while the document has
+        none. search is typed into it.
         It opens below the anchor (the button clicked; the section's "+" or
         the toolbar button when left out) or at a global position [x, y].
         Returns what it lists: the menu, the system it adds to, the
         objectNames of its entries (best first after a search) and the best
         match, which Enter adds."""
-        menu, system = self._add_target(section)
+        menu, system, path = self._add_target(section)
         if anchor is None:
-            anchor = self.outliner.add_button(section) if section else None
+            anchor = self.outliner.add_button(path) if path else None
             if anchor is None or not anchor.isVisible():
-                anchor = self.new_system_button if menu is self.palette_menus["lattice"] \
+                anchor = self.new_button if menu is self.palette_menus["lattice"] \
                     else self.add_button
         if position is None:
             position = anchor.mapToGlobal(anchor.rect().bottomLeft())
@@ -726,7 +819,11 @@ class MainWindow(QMainWindow):
         if menu is self.regions_menu:
             self.regions_system = system
             by_selection = self.region_selection_action
-            selected = self.structure.system_id == system and len(self.structure.selected()) > 0
+            drawn = self.structure.system_id             # the system on the canvas, or a
+            on_it = drawn is not None and (drawn == system or (any(   # system on the geometry
+                s.id == drawn for s in self.session.document.systems)
+                and self.session.document.system(drawn).geometry == system))
+            selected = on_it and len(self.structure.selected()) > 0
             by_selection.setEnabled(selected)
             by_selection.setToolTip(
                 "a region of the sites selected on the canvas" if selected else
@@ -1262,28 +1359,27 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(title + (" *" if self.session.modified else ""))
 
     def _selected_row(self):
-        """The outliner row of the selection: a linked row when an op or a
-        region was selected under a later system on its geometry."""
-        if self.context is not None and self.selected:
-            row = f"{self.context}/{self.selected}"
-            if self.outliner.item(row) is not None:
-                return row
+        """The outliner row of the selection: a system's Geometry row when
+        its geometry was selected under it (the context), else the row of
+        the selection itself."""
         document = self.session.document if self.session is not None else None
-        if document is not None and self.selected and self.outliner.item(self.selected) is None \
-                and any(g.id == self.selected for g in document.geometries):
-            users = document.systems_on(self.selected)  # a geometry is its first system's row
-            if users:
-                return f"{self.context if self.context in users else users[0]}/geometry"
+        if self.context is not None and self.selected and document is not None:
+            system = next((s for s in document.systems if s.id == self.context), None)
+            if system is not None and system.geometry == self.selected and \
+                    self.outliner.item(f"{self.context}/geometry") is not None:
+                return f"{self.context}/geometry"
         return self.selected
 
     def _node_of(self, entry):
         """The node of the node view an outliner row stands for: a system's
-        geometry and lattice rows are its geometry's node."""
+        Geometry row and a geometry's own rows are its geometry's node."""
         head = system_of(entry)
         document = self.session.document
-        if head is not None and entry in (f"{head}/geometry", f"{head}/base") and \
-                any(s.id == head for s in document.systems):
-            return document.system(head).geometry
+        if head is not None:
+            if entry == f"{head}/geometry" and any(s.id == head for s in document.systems):
+                return document.system(head).geometry
+            if any(g.id == head for g in document.geometries):
+                return head
         return entry
 
     def _exists(self, item_id):
@@ -1294,10 +1390,13 @@ class MainWindow(QMainWindow):
             rows = target_rows(self.session.document, system) if system is not None else None
             if rows is not None:                  # under an embedding or a junction
                 return item_id in rows
+            document = self.session.document
+            if system is not None and any(g.id == system for g in document.geometries):
+                return item_id in geometry_pseudo_ids(document.geometry(system))
             if system is not None:      # a row the outliner shows for a system of its kind
-                target = self.session.document.system(system)
+                target = document.system(system)
                 return item_id in pseudo_ids(target) or \
-                    item_id in linked_rows(self.session.document, target)
+                    item_id in old_geometry_rows(document, target)
             self.session.document.find(item_id)
             return True
         except Exception:
@@ -1410,12 +1509,16 @@ class MainWindow(QMainWindow):
 
     # ---- selection and workspaces
     def select(self, entry=""):
-        """Select an outliner item (an entry id, a system's pseudo id such
-        as s1/base, or "" for nothing): properties, canvas overlays and the
-        viewport tab follow, and so does the workspace: Geometry for a
-        system, its lattice, an op or a region, Hamiltonian for a term, the
-        mean field or a model, Calculate for a calculation (PLAN.md phase 8,
-        package P2). Adding an entry selects it, so an add switches too."""
+        """Select an outliner item (an entry id, a pseudo id such as
+        geo1/base or s1/hamiltonian, or "" for nothing): properties, canvas
+        overlays and the viewport tab follow, and so does the workspace:
+        Geometry for a geometry, a system, a lattice, an op or a region,
+        Hamiltonian for a term, the mean field or a model, Calculate for a
+        calculation (PLAN.md phase 8, package P2). Adding an entry selects
+        it, so an add switches too. A system's Geometry row selects its
+        geometry with that system as the context, the one the canvas draws
+        (decision 274); s1/base and s1/regions, the rows of before, are the
+        geometry's base and Regions rows (decision 241's rule)."""
         entry = entry or ""
         if self.session is None:
             return ""
@@ -1427,9 +1530,11 @@ class MainWindow(QMainWindow):
             entry = rows[entry]          # a row under an embedding or a junction: its system
         self.context = None
         if head is not None and any(s.id == head for s in self.session.document.systems):
-            linked = linked_rows(self.session.document, self.session.document.system(head))
-            if entry in linked:      # an op or a region of a shared geometry, under head
-                entry, self.context = linked[entry], head
+            system = self.session.document.system(head)
+            if entry == f"{head}/geometry":           # the link row: the geometry, under head
+                entry, self.context = system.geometry, head
+            else:
+                entry = old_geometry_rows(self.session.document, system).get(entry, entry)
         self.selected = entry
         self.outliner.set_current(self._selected_row())
         self.node_view.select_node(self._node_of(entry))
@@ -1970,6 +2075,10 @@ class MainWindow(QMainWindow):
         entry = self.selected
         if entry and entry not in ("calculations", "kpaths", "geometries"):
             system = system_of(entry)
+            if system is not None and any(g.id == system for g in document.geometries):
+                users = document.systems_on(system)     # a geometry's row: a system on it
+                return self.context if self.context in users else \
+                    (users[0] if users else document.systems[0].id)
             if system is not None:
                 return system
             family, owner, _, _, obj = document.find(entry)
@@ -2043,7 +2152,7 @@ class MainWindow(QMainWindow):
     def _refresh_structure(self):
         system = self.current_system()
         if system is None:
-            self.structure.clear("No system yet: add one with New system, next to the "
+            self.structure.clear("No system yet: add one with New, next to the "
                                  "workspace tabs.")
             self._refresh_kpath_windows()
             return
@@ -2219,12 +2328,9 @@ class MainWindow(QMainWindow):
             self.select(node)
 
     def _node_add_menu(self, position):
-        """Shift+A in the node view: the Add menu of the workspace at the
-        cursor."""
-        try:
-            self.open_add_menu(position=[position.x(), position.y()])
-        except ValueError as error:
-            self.message(str(error), error=True)
+        """Shift+A in the node view: the New menu at the cursor (decision
+        276), every kind of node in it."""
+        self._guarded_add_menu("new", position=[position.x(), position.y()])
 
     # ---- the zone windows of the k-paths (13.9, phase 9, part A)
     def kpath_window(self, kpath=None, calculation=None, system=None):
@@ -2414,6 +2520,10 @@ class MainWindow(QMainWindow):
     def new_system(self, lattice):
         return self._do_and_select("add_system", lattice=lattice)
 
+    def new_geometry(self, lattice):
+        """A geometry alone on a lattice, no system built on it yet."""
+        return self._do_and_select("add_geometry", lattice=lattice)
+
     def new_classical_system(self, kind):
         """A classical system on its usual lattice, in a supercell."""
         lattice, n, label = CLASSICAL_STARTS[kind]
@@ -2429,7 +2539,7 @@ class MainWindow(QMainWindow):
         may be an embedding), or None, said in the status bar."""
         system = self.current_target() if calculation else self.current_system()
         if system is None:
-            self.message("add a system first (New system)", error=True)
+            self.message("add a system first (New)", error=True)
         elif calculation:      # a variant's calculations are its original's (decision 262)
             found = next((s for s in self.session.document.systems if s.id == system), None)
             if found is not None and found.variant_of is not None:

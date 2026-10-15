@@ -177,7 +177,7 @@ def tools():
         ("widgets", "The names of the window's widgets a screenshot takes (a folded card of "
                     "the start page is listed once Show all or a search has made it).",
          _schema(), True),
-        ("help", "Help as Markdown: of a document item (item: t1, c1, s1/base...), of a "
+        ("help", "Help as Markdown: of a document item (item: t1, c1, geo1/base...), of a "
                  "registry entry (kind, with family if ambiguous), or of a section of a "
                  'guide (guide: "pyqula" or "guiqula", anchor: a heading); a guide alone '
                  'gives its contents; guide "plugins" lists the installed plugins; search '

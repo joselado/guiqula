@@ -81,8 +81,15 @@ it is and what it builds; what follows is the widget names and the behaviour tha
 tests, `drive.py --widget` and the remote `widgets` and `screenshot` methods rely on.
 
 - `mainwindow.py`: the first toolbar row of the workspace tabs, which follow the selection
-  (`workspace_of`), New system and Add (`PaletteMenu`s, which the outliner's "+" open too,
-  `open_add_menu`) and the run controls (`runButton` names `selected_calculation()`: the
+  (`workspace_of`), New and Add (`PaletteMenu`s, which the outliner's "+" open too,
+  `open_add_menu`; New is `newButton`, the lattice palette with the objects of the document
+  after the lattices, decision 276: `newHamiltonian_<geometry>`, `newEmbedding`,
+  `newJunction`, `newKpath`, `newGeometry` (the lattices again, `adds="geometry"`, making a
+  geometry alone) and `newCalculation`, made at each opening by `_new_items` since they
+  name the current system; `open_add_menu("new")`, which Shift+A in the node view opens
+  at the cursor, `"geometries"` for the geometry mode, `"<geometry>/ops"` and
+  `"<geometry>/regions"` for a geometry's "+", `"<system>/geometry"` and
+  `"<system>/regions"` still naming its geometry's) and the run controls (`runButton` names `selected_calculation()`: the
   outliner's calculation, else the tab's, else the first; its `runMenu`, `cancelButton`,
   Follow); `centralStack`, the start page in the viewport's place while the document has no
   system (`show_start`); the panels, `Dock`s without a float button, Properties over Help,
@@ -112,7 +119,9 @@ tests, `drive.py --widget` and the remote `widgets` and `screenshot` methods rel
   `Band._chain` puts a card made later in its band's Tab order; `preset_card` makes the
   gallery's cards too. `tests/ui/test_start.py` fails for a lattice, a classical system or
   a preset without a picture in `resources/thumbnails/`.
-- `palette.py`: `PaletteMenu`, the Add menu of one family: a search line, the entries by
+- `palette.py`: `PaletteMenu`, the Add menu of one family (the lattice one being New, whose
+  own items `set_items` makes again at each opening and whose `adds` says whether a lattice
+  makes a system or a geometry alone): a search line, the entries by
   group, `search_entries`, Enter adding the best match; `MenuButton`, which opens its menu
   with `popup()`.
 - `canvasbar.py`: `CanvasBar`, the bar of a drawing: Fit, Pan, Zoom, the drawing's tools
@@ -160,14 +169,23 @@ tests, `drive.py --widget` and the remote `widgets` and `screenshot` methods rel
   widen the Status column; an embedding is a detail row after the systems (`s2 in s1`, a
   warning when `cell_problem` finds the builds' cells differ) with the rows
   `<embedding>/pristine` and `<embedding>/defect`, which `select` turns into the system
-  they name, and a quantum system's context menu has New embedding of a defect. A system's
-  Geometry row reads `Geometry geo1 · shared with s2`; the first system on a geometry shows
-  its ops and regions by their ids and every later one as linked rows `<system>/<entry>`
-  (`linked_rows`, `_linked`, `current_entry()`), which the window's `select` turns into the
-  entry with `window.context` (and `properties.context`) set to that system; a system's
-  context menu has New Hamiltonian on this geometry and Duplicate linked (Alt+D); the
-  geometries no system is built on are under Geometries (`geometries`), whose form is
-  `GeometryForm` (`geometryName`, `geometryStart`, `geometryUsers`). The K-paths
+  they name, and a quantum system's context menu has New embedding of a defect. The
+  Geometries section (`geometries`, first in the tree, decision 274) lists every geometry
+  once (`geo1`, bold, its lattice and the number of its ops in the label, the systems
+  built on it or "unused" as its status) with its base row `<geometry>/base` (the lattice,
+  or `from geo1`), its ops, whose state is the plan of the first system built on it
+  (`geometry_plan`), and its Regions row `<geometry>/regions` with the regions
+  (`geometry_pseudo_ids`); its "+" is `outlinerAdd_<geometry>_ops`, its Regions row's
+  `outlinerAdd_<geometry>_regions`, and the section's `outlinerAdd_geometries` makes a
+  geometry alone. A system's Geometry row, `<system>/geometry`, is one line with no
+  children (`Geometry geo1 · Honeycomb lattice · 1 op · shared with s2`, `geometry_summary`),
+  which the window's `select` turns into the geometry with `window.context` (and
+  `properties.context`) set to that system, the one the canvas draws, the tree keeping that
+  row current (`_selected_row`); `<system>/base` and `<system>/regions`, the rows of before,
+  select the geometry's (`old_geometry_rows`, decision 241's rule). A lock `s1.n` or
+  `geo1.n` marks the geometry's base row, `s1/geometry` its Geometry row and the geometry's
+  own row (`_mark_locks`). A geometry's context menu has New Hamiltonian on this geometry,
+  a system's that and Duplicate linked (Alt+D). The K-paths
   section (`kpaths`, after Calculations) lists the k-paths with the calculations walking
   them as their status, its "+" `outlinerAdd_kpaths` adding one; a k-path's context menu
   has Show in the Brillouin zone and a system's Show Brillouin zone (`kpath_window`). A
@@ -217,8 +235,15 @@ tests, `drive.py --widget` and the remote `widgets` and `screenshot` methods rel
   parameter, Preview on the canvas), the region link, a calculation's estimate and
   `formRun` in the footer of the panel (`propertiesFooter`) under the scrolled form
   (`propertiesScroll`; the panel `properties` is a QWidget since P8, and its
-  `verticalScrollBar()` is the form's); the system form's spin, Nambu, hopping range and
-  sparse; the Field editor, whose button shows the kind and opens the kind menu
+  `verticalScrollBar()` is the form's); the system form, `SystemForm` (`systemName`, the
+  combo `systemGeometry` of the document's geometries, `geometry_label`, which
+  `set_geometry` follows, and the construction box's spin, Nambu, hopping range and
+  sparse); the geometry form, `GeometryForm`, for any geometry row, its own, a system's
+  Geometry row or its node (decision 273: `geometryName`, `latticeBox` and the lattice's
+  parameter editors, which `set_param` on the geometry's id and `set_lattice` follow, or
+  `geometryStart` when it starts from another geometry, and `geometryUsers`; a lattice
+  parameter's lock is `geo1.n` or any of its systems' `s1.n`, `param_lock_targets`); the
+  Field editor, whose button shows the kind and opens the kind menu
   `fieldKindMenu_<p>`, every kind button of a form as wide as the widest (`line_up`); the
   system a calculation names (the tip of a local probe) is the combo `system_<p>` of the
   document's other quantum systems, (default) first, and the form is rebuilt when the
@@ -386,8 +411,12 @@ python tools/drive.py --do '{"do": "add_system", "lattice": "chain"}' --do '{"do
     --run c1 --widget plot_c1 --shot bound.png     # a defect in an infinite chain: its bound
                                                    # state at 2.24 (decisions 200 to 212)
 python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "duplicate_linked", "system": "s1"}' \
-    --do '{"do": "select", "entry": "s2/op1"}' --shot shared.png
-                                                   # a geometry shared by two systems (part B)
+    --do '{"do": "select", "entry": "s2/geometry"}' --shot shared.png
+                                                   # a geometry shared by two systems, listed
+                                                   # once (part B, decisions 273 to 275)
+python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "add_menu", "section": "new"}' \
+    --widget paletteMenu_lattice --shot new.png    # New: the lattices, then the objects of
+                                                   # the document (decision 276)
 python tools/drive.py honeycomb_zeeman_rashba --do '{"do": "outliner_view", "name": "nodes"}' \
     --do '{"do": "add_kpath", "vertices": ["G", "K", "M", "G"]}' --do '{"do": "node_connect",
     "source": "k2", "target": "c1", "socket": "kpath"}' --widget outlinerDock --shot nodes.png

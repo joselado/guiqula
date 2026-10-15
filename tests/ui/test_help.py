@@ -74,8 +74,10 @@ def test_the_guides_and_the_question_mark(window, qtbot):
     assert panel.title.text() == "Band structure" and "h.get_bands" in panel.browser.toPlainText()
     assert in_front(window, "helpDock") and in_front(window, "propertiesDock")
     assert window.properties.form is form and form.isVisible()
-    window.select("s1/regions")
+    window.select("geo1/regions")
     assert window.help() == "Selections and regions"
+    window.select("s1/geometry")
+    assert window.help() == "Systems and geometry"
     window.select("s1")
     assert window.help() == "Systems and geometry"
     window.select("")

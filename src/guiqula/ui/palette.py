@@ -1,15 +1,19 @@
 """The Add menus (PLAN.md phase 8, package P2): one searchable menu per
-family of registry entries (the lattices of New system, the geometry ops,
-the terms, the calculations), opened from the place where the entry will
+family of registry entries (the lattices of New, the geometry ops, the
+terms, the calculations), opened from the place where the entry will
 appear: the "+" of an outliner section, the toolbar's Add (the family of
-the workspace) and New system, Ctrl+F.
+the workspace) and New, Ctrl+F, Shift+A in the node view.
 
 A PaletteMenu has a search line at its top and then the entries of its
 family that a kind of system takes, by group, each with the rich tooltip of
 ui/formulas.py; a menu may end with items of its own (the classical
-systems of New system, the mean field of the terms). Typing filters the
-entries with search_entries, the best match is drawn in bold, and Enter
-adds it. A letter typed while an entry has the keyboard goes to the search
+systems and the objects of the document in New, the mean field of the
+terms), added once (add_extra) or made again at each opening (set_items,
+for items that name what the document holds). Typing filters the entries
+with search_entries, the best match is drawn in bold, and Enter adds it.
+The lattice menu is New (decision 276): it offers every lattice whatever
+the kind it is prepared for, and adds says what a lattice chosen makes, a
+system or a geometry alone (its own items are offered for "system" only). A letter typed while an entry has the keyboard goes to the search
 line, so that QMenu never triggers an entry by its first letter. The
 entries are made at the menu's first showing (or by prepare()), in the
 colours of the theme of that moment, and made again when the kind of
@@ -136,6 +140,7 @@ class PaletteMenu(QMenu):
         self.setStyle(self._style)
         self.system = None           # the system the window adds the chosen entry to
         self.system_kind = "quantum"  # the kind of system whose entries it offers
+        self.adds = "system"         # the lattice menu: what a lattice chosen makes
         self.search = SearchLine(self)
         self.search.setObjectName("paletteSearch")
         self.search.setPlaceholderText(PLACEHOLDERS.get(family, "find"))
@@ -176,8 +181,25 @@ class PaletteMenu(QMenu):
         return action
 
     def offered(self):
-        """The registry entries it offers for its kind of system."""
+        """The registry entries it offers for its kind of system (every
+        lattice, whatever a lattice menu was prepared for)."""
+        if self.family == "lattice":
+            return grouped(self.family)
         return [spec for spec in grouped(self.family) if self.system_kind in spec.systems]
+
+    def set_items(self, section, items):
+        """The items of a section of the menu's own, made again: items are
+        (text, objectName, tooltip, slot) tuples, offered for a system
+        (kinds ("system",), the New menu's adds). The old ones go."""
+        for title, old in list(self._extras):
+            if title == section:
+                for action, _ in old:
+                    self.removeAction(action)
+                    action.deleteLater()
+                self._extras.remove((title, old))
+        for text, name, tooltip, slot in items:
+            self.add_extra(section, text, name, tooltip, slot, kinds=("system",))
+        self._made = None
 
     def prepare(self, system_kind=None):
         """Make the entries for a kind of system (the one of the last call
