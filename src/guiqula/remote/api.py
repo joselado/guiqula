@@ -152,10 +152,15 @@ WINDOW_ACTIONS = {
                      "widens the dock)",
     "node_connect": "source, target (node ids: a geometry, k-path, system, embedding or "
                     "calculation), socket (the target's input: geometry, parent, target, "
-                    "pristine, defect, or a calculation's system or k-path parameter): one "
-                    "Command linking them, refused with its reason; returns its name",
-    "node_cut": "node, socket: empty an optional input (the tip of a local probe), meaning "
-                "the default; an input that is never empty is refused",
+                    "pristine, defect, or a calculation's system or k-path parameter), "
+                    "replace=false: one Command linking them, refused with its reason; onto a "
+                    "calculation's target or a system's geometry that has an input it adds "
+                    "one, a variant, and shows the results of every input in a grid "
+                    "(replace: moves it instead); returns its name",
+    "node_cut": "node, socket, source: empty an optional input (the tip of a local probe), "
+                "meaning the default, or take away the further input source (its variant); "
+                "an input that is never empty is refused",
+    "show_variants": "calculation: a grid of the result views of it and its variants",
     "node_move": "node, x, y: keep a node at a place of the node view (view state, not a "
                  "Command)",
     "node_arrange": "every node back in the column of its kind; returns the places",

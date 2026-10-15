@@ -67,8 +67,10 @@ a k-path on the Brillouin zone, kspaceWindow_<k>, with its zone
 kspaceView_<k> and its tools kpathAdd_<k>, kpathRemoveLast_<k>,
 kpathDefault_<k>), outliner_view (tree, nodes: the Outliner dock's node view,
 nodeView), node_connect (source, target, socket: a link of the node view as one
-Command), node_cut (node, socket: an optional input emptied), node_move (node,
-x, y), node_arrange; the
+Command; replace, or a further input of a calculation's target or a system's
+geometry, a variant), node_cut (node, socket, source: an optional input
+emptied, or a further input taken away), node_move (node, x, y),
+node_arrange, show_variants (calculation: it and its variants in a grid); the
 session's undo, redo (with "steps") and history; lock and unlock are
 mutations. The driven window never reads or writes the settings file.
 Every calculation's result has its own view, plot_<calculation id>, with

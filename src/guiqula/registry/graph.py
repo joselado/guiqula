@@ -58,6 +58,8 @@ class Socket:
     required: bool = True       # never empty: moved by a link, never cut
     source: str | None = None   # the id of the node linked to it, if any
     kinds: tuple = ()           # for a system input: the system kinds it takes
+    extra: list = field(default_factory=list)   # [(source, variant id)]: its further inputs
+    multi: bool = False         # takes further inputs (a variant each)
 
 
 @dataclass
@@ -78,6 +80,7 @@ class Link:
     target: str                 # node id
     socket: str                 # the target's input ("" for a dashed or dotted link)
     style: str = "solid"        # solid, dashed (a from_result Field), dotted (a sweep)
+    variant: str | None = None  # the variant a further input of the socket is
 
 
 def _label(family, kind):
@@ -118,10 +121,21 @@ def nodes(document):
                         "(" + ", ".join(f"{c:g}" for c in v[:2]) + ")" for v in kpath.vertices)
         add(Node(kpath.id, "kpath", "k-path", kpath.name, [], "kpath",
                  detail=path or "pyqula's default path"))
+    variants = {}                              # original id: [(input, variant id)]
     for system in document.systems:
+        if system.variant_of is not None:      # drawn as a further geometry of its original
+            variants.setdefault(system.variant_of, []).append((system.geometry, system.id))
+    hidden = {s.id for s in document.systems if s.variant_of is not None}
+    for calc in document.calculations:
+        if calc.variant_of is not None and calc.system not in hidden:
+            variants.setdefault(calc.variant_of, []).append((calc.system, calc.id))
+    for system in document.systems:
+        if system.variant_of is not None:
+            continue
         title = "Hamiltonian" if system.kind == "quantum" else "Model"
         add(Node(system.id, "system", title, system.name,
-                 [Socket("geometry", "geometry", ("geometry",), True, system.geometry)],
+                 [Socket("geometry", "geometry", ("geometry",), True, system.geometry,
+                         extra=variants.get(system.id, []), multi=True)],
                  "system"))
     for embedding in document.embeddings:
         add(Node(embedding.id, "embedding", "Embedding", embedding.name, [
@@ -135,6 +149,8 @@ def nodes(document):
             Socket("central", "central region", ("system",), False, junction.central,
                    ("quantum",))], "junction"))
     for calc in document.calculations:
+        if calc.variant_of is not None:          # drawn as a further input of its original
+            continue
         spec = _calc_spec(calc)
         target_kinds = tuple(spec.systems) if spec is not None else ()
         accepts = tuple(kind for kind, takes in (
@@ -142,7 +158,8 @@ def nodes(document):
             ("embedding", "embedding" in target_kinds),
             ("junction", "junction" in target_kinds)) if takes)
         inputs = [Socket("target", "runs on", accepts or ("system",), True, calc.system,
-                         tuple(k for k in target_kinds if k not in ("embedding", "junction")))]
+                         tuple(k for k in target_kinds if k not in ("embedding", "junction")),
+                         extra=variants.get(calc.id, []), multi=True)]
         for param in (spec.params if spec is not None else ()):
             if isinstance(param, SystemParam):
                 inputs.append(Socket(param.name, param.label, ("system",), not param.optional,
@@ -163,6 +180,8 @@ def links(document, graph=None):
     ids = {n.id for n in graph}
     out = [Link(socket.source, node.id, socket.name) for node in graph
            for socket in node.inputs if socket.source in ids]
+    out += [Link(source, node.id, socket.name, variant=variant) for node in graph
+            for socket in node.inputs for source, variant in socket.extra if source in ids]
     for system in document.systems:
         params = [t.params for t in terms_of(system)]
         if system.hamiltonian is not None:
@@ -205,10 +224,12 @@ def node_kind(document, node_id):
     return family if family in COLUMNS else None
 
 
-def connect(document, source, target, socket):
+def connect(document, source, target, socket, replace=False):
     """The Command (name, args) that links the output of node source to the
     input socket of node target; GraphError, saying why, when the
-    declaration does not take it."""
+    declaration does not take it. On an input that takes further inputs (a
+    calculation's target, a system's geometry) and has one, the link adds
+    one, a variant (add_variant), unless replace, which moves it."""
     graph = {n.id: n for n in nodes(document)}
     if target not in graph:
         raise GraphError(f"{target!r} is not a node with inputs")
@@ -230,6 +251,10 @@ def connect(document, source, target, socket):
             raise GraphError(f"the {entry.label} of {target} takes a "
                              f"{' or '.join(entry.kinds).replace('_', ' ')} system, and "
                              f"{source} is {kind.replace('_', ' ')}")
+    if entry.multi and not replace and entry.source is not None:
+        if source == entry.source or source in [s for s, _ in entry.extra]:
+            raise GraphError(f"{source} is an input of {target} already")
+        return "add_variant", {"entry": target, "target": source}
     if node.kind == "system":
         return "set_geometry", {"system": target, "geometry": source}
     if node.kind == "geometry":
@@ -243,14 +268,18 @@ def connect(document, source, target, socket):
     return "set_param", {"entry": target, "name": socket, "value": source}
 
 
-def cut(document, target, socket):
+def cut(document, target, socket, source=None):
     """The Command that empties an optional input (meaning the entry's
-    default); GraphError for an input that is never empty."""
+    default), or takes away a further input of source (removing its
+    variant); GraphError for an input that is never empty."""
     graph = {n.id: n for n in nodes(document)}
     node = graph.get(target)
     entry = next((s for s in node.inputs if s.name == socket), None) if node else None
     if entry is None:
         raise GraphError(f"{target} has no input {socket!r}")
+    variant = next((v for s, v in entry.extra if s == source), None)
+    if variant is not None:
+        return "remove", {"entry": variant}
     if entry.required:
         raise GraphError(f"the {entry.label} of {target} is never empty: link another one "
                          f"to it instead")

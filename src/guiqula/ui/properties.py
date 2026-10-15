@@ -36,7 +36,8 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QFrame, QGroup
                                QToolButton, QVBoxLayout, QWidget)
 
 from guiqula.core import regions as region_tools
-from guiqula.core.document import DocumentError, geometry_chain, kpath_users, terms_of
+from guiqula.core.document import (DocumentError, geometry_chain, kpath_users, source_of,
+                                   terms_of)
 from guiqula.registry import base as registry
 from guiqula.registry import cost
 from guiqula.registry.params import FieldParam, VectorFieldParam
@@ -553,6 +554,7 @@ class SystemForm(Form):
 
     def __init__(self, panel, system_id):
         system = panel.session.document.system(system_id)
+        source = source_of(panel.session.document, system)     # a variant: its original's
         self.lock_owner = system_id
         super().__init__(panel, system_id, f"System {system_id}", "")
         self.system_id = system_id
@@ -575,7 +577,7 @@ class SystemForm(Form):
                                                              name=name, value=value))
         except registry.RegistryError:
             pass
-        if system.hamiltonian is not None:
+        if source.hamiltonian is not None:
             box = QGroupBox("Hamiltonian construction")
             box.setObjectName("constructionBox")
             form = QFormLayout(box)
@@ -604,7 +606,7 @@ class SystemForm(Form):
                 form.addRow(label, widget)
             self.layout().insertWidget(3, box)
         self.guarded = [self.name] + ([self.has_spin, self.nambu, self.sparse, self.tij]
-                                      if system.hamiltonian is not None else [])
+                                      if source.hamiltonian is not None else [])
         self.info = QLabel()
         self.info.setObjectName("systemInfo")
         self.info.setWordWrap(True)
@@ -615,8 +617,13 @@ class SystemForm(Form):
         return ("system", self.system_id,
                 _first_geometry(self.session.document, self.system_id).base.kind)
 
+    def _source(self):
+        """The system whose Hamiltonian the form shows: a variant's original."""
+        return source_of(self.session.document, self.session.document.system(self.system_id))
+
     def update_values(self):
         system = self.session.document.system(self.system_id)
+        source = self._source()
         _quiet(self.name, self.name.setText, system.name)
         base = _first_geometry(self.session.document, self.system_id).base
         _quiet(self.lattice, self.lattice.setCurrentIndex, self.lattice.findData(base.kind))
@@ -624,8 +631,8 @@ class SystemForm(Form):
             param = editor.param
             editor.set_value(base.params.get(name, param.default))
         line_up(self.editors.values())
-        if system.hamiltonian is not None:
-            c = system.hamiltonian.construction
+        if source.hamiltonian is not None:
+            c = source.hamiltonian.construction
             _quiet(self.has_spin, self.has_spin.setCurrentIndex,
                    self.has_spin.findData(bool(c.has_spin)))
             _quiet(self.nambu, self.nambu.setChecked, c.nambu)
@@ -678,7 +685,7 @@ class SystemForm(Form):
 
     def _set_spin(self, index):
         has_spin = self.has_spin.itemData(index)
-        if has_spin != self.session.document.system(self.system_id).hamiltonian.construction \
+        if has_spin != self._source().hamiltonian.construction \
                 .has_spin:
             self.commit("set_construction", system=self.system_id, has_spin=has_spin)
 
@@ -690,7 +697,7 @@ class SystemForm(Form):
                                "neighbour shell")
             self.update_values()
             return
-        if tij != self.session.document.system(self.system_id).hamiltonian.construction.tij:
+        if tij != self._source().hamiltonian.construction.tij:
             self.commit("set_construction", system=self.system_id, tij=tij)
 
 
@@ -903,9 +910,17 @@ class EntryForm(Form):
             self.rows.addRow(self.region_link)
         if family == "calculation":
             self.rows.addRow("system", QLabel(obj.system))
+            if obj.variant_of:
+                note = QLabel(f"a variant of {obj.variant_of}: its parameters are "
+                              f"{obj.variant_of}'s, and an edit here edits them for both")
+                note.setObjectName("variantNote")
+                note.setWordWrap(True)
+                self.rows.addRow(note)
         if spec is not None:
             self.sources = result_sources(panel.session, owner.id) if family == "term" else []
-            self.add_editors(spec.params, spec.normalize_params({}) | obj.params,
+            values = source_of(panel.session.document, obj).params \
+                if family == "calculation" else obj.params      # a variant's: its original's
+            self.add_editors(spec.params, spec.normalize_params({}) | values,
                              lambda name, value: self.commit("set_param", entry=entry_id,
                                                              name=name, value=value),
                              _regions(panel.session.document, owner) if family == "term"
@@ -948,8 +963,10 @@ class EntryForm(Form):
         if self.region is not None:
             _quiet(self.region, self.region.setCurrentIndex, self.region.findData(obj.region))
         for name, editor in self.editors.items():
-            if name in obj.params:
-                editor.set_value(obj.params[name])
+            params = source_of(self.session.document, obj).params \
+                if self.family == "calculation" else obj.params
+            if name in params:
+                editor.set_value(params[name])
         line_up(self.editors.values())            # the kind buttons of all rows, one width
         self.update_reports()
 
