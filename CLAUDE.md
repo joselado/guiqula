@@ -21,10 +21,12 @@ section 9 says what it keeps and what it drops.
 (section 1), the architecture (section 3: headless core + command API + worker process +
 Qt view, and 3.8, any parameter spatially modulable), the window as built (section 4), the
 decisions (sections 12 to 14; section 11 records where every former open question was
-settled, so no design question is open) and the phases (section 7: what each of phases 0
+settled; the open ones are phase 9's, decisions 213 to 233) and the phases (section 7: what each of phases 0
 to 8 built, its report with numbered decisions, and the maintainer's answers). Read it
 before designing anything; update it when a decision changes. Status: phases 0 to 8 are
-done and merged into master (2026-10-04). A numbered decision stands as built unless the
+done and merged into master (2026-10-04). Phase 9 (the Document as a graph: k-paths and geometries as
+shared objects, a node view beside the outliner) is planned at the end of section 7,
+decisions 213 to 233, waiting for the maintainer's answers. A numbered decision stands as built unless the
 maintainer answers it; a new change records its decisions, numbered on from the last, at
 the end of section 7, the recommended option first.
 
