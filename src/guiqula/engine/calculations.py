@@ -133,7 +133,8 @@ def run_calculation(document, calc_id, cache=None, progress=None, trusted=True, 
     if ctx.notes.get("xticks"):            # the vertices of a k-path, named
         plot["xticks"] = ctx.notes["xticks"]
         plot["xlabel"] = "k"               # the axis is the path, not the index of a point
-    geometry = structure.describe(built.g) if plot["kind"] in STRUCTURE_PLOTS else None
+    geometry = structure.describe(ctx.notes.get("geometry", built.g)) \
+        if plot["kind"] in STRUCTURE_PLOTS else None   # an entry's own (an embedding's window)
     over_the_zone = "kmesh" in (plot.get("picks") or {}).values()
     return Result(calculation=calc_id, kind=plan.kind, key=plan.key, params=plan.params,
                   arrays=arrays, plot=plot,

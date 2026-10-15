@@ -564,9 +564,61 @@ def calc_system(name):
         if name == "sc_tip":
             d.do("add_term", system=tip, kind="swave", params={"delta": 0.1})
             h.tip.add_swave(0.1)
+    elif name in EMBEDDINGS:       # s is the embedding, h the pristine one, h.defect the other
+        d, s, h = embedding_case(name)
     else:
         raise KeyError(name)
     return d, s, h
+
+
+EMBEDDINGS = {
+    # an onsite impurity on a spinless metallic chain (the guide's example)
+    "impurity_chain": ("chain", False, [("onsite", {"mu": 0.2})],
+                       [("onsite", {"mu": {"kind": "expression", "expr": "1.0*(abs(x)<0.01)"}})]),
+    # a magnetic impurity on a spinless chain: the defect turns spinful, so the
+    # pristine one must too (the union of the modes)
+    "magnetic_chain": ("chain", False, [("onsite", {"mu": 0.2})],
+                       [("zeeman", {"m": [0.0, 0.0, 0.5]})]),
+    # a vacancy (a large onsite energy) in Haldane graphene, a Chern insulator
+    "haldane_vacancy": ("honeycomb_lattice", False, [("haldane", {"t": 0.1})],
+                        [("onsite", {"mu": {"kind": "expression",
+                                            "expr": "1000.0*(abs(x+0.5)<0.01)"}})]),
+    # a magnetic impurity in an s-wave chain: a Yu-Shiba-Rusinov state in the gap
+    "ysr_chain": ("chain", True, [("swave", {"delta": 0.2})],
+                  [("zeeman", {"m": [0.0, 0.0, 0.3]})]),
+}
+
+
+def embedding_case(name):
+    """An embedding built through commands (the defect a copy of the pristine
+    system with the defect's terms added), and the same pair directly."""
+    from pyqula import geometry
+    lattice, has_spin, terms, defect_terms = EMBEDDINGS[name]
+    d = Dispatcher()
+    pristine = d.do("add_system", lattice=lattice)
+    d.do("set_construction", system=pristine, has_spin=has_spin)
+    for kind, params in terms:
+        d.do("add_term", system=pristine, kind=kind, params=params)
+    e = d.do("add_embedding", pristine=pristine)
+    defect = d.document.embedding(e).defect
+    for kind, params in defect_terms:
+        d.do("add_term", system=defect, kind=kind, params=params)
+    h = getattr(geometry, lattice)().get_hamiltonian(has_spin=has_spin)
+    for kind, params in terms:
+        {"onsite": lambda: h.add_onsite(params["mu"]),
+         "haldane": lambda: h.add_haldane(params["t"]),
+         "swave": lambda: h.add_swave(params["delta"])}[kind]()
+    hv = h.copy()
+    for kind, params in defect_terms:
+        if kind == "zeeman":
+            hv.add_zeeman(params["m"])
+        else:
+            mu, x0 = (1.0, 0.0) if name == "impurity_chain" else (1000.0, -0.5)
+            hv.add_onsite(lambda r: mu if abs(r[0] - x0) < 0.01 else 0.0)
+    if hv.has_spin and not h.has_spin:
+        h.turn_spinful()
+    h.defect = hv
+    return d, e, h
 
 
 def _energies(p):
@@ -684,6 +736,27 @@ def _direct_local_probe(h, p):
     return {"energies": es, "didv": lp.didv_curve(es, temp=p["temp"])}
 
 
+def _direct_embedding_ldos(h, p):
+    from pyqula import embedding
+    eb = embedding.Embedding(h, m=h.defect)
+    return {"ldos": eb.get_ldos(energy=p["energy"], delta=p["delta"], nsuper=p["window"],
+                                nk=p["nk"], write=False)[2]}
+
+
+def _direct_embedding_dos(h, p):
+    from pyqula import embedding
+    es = _energies(p)
+    _, dos = embedding.Embedding(h, m=h.defect).multidos(es=es, delta=p["delta"], nk=p["nk"])
+    _, pristine = embedding.Embedding(h).multidos(es=es, delta=p["delta"], nk=p["nk"])
+    return {"energies": es, "dos": np.column_stack([dos, pristine])}
+
+
+def _direct_embedding_ingap(h, p):
+    from pyqula import embedding
+    eb = embedding.Embedding(h, m=h.defect)
+    return {"energy": eb.get_energy_ingap_state(ne=p["ne"], nk=p["nk"]), "gap": h.get_gap()}
+
+
 def _direct_qpi(h, p):
     q, _, qpi = h.get_qpi(energies=[p["energy"]], nk=p["nk"], delta=p["delta"], mode=p["mode"],
                           write=False)
@@ -701,6 +774,9 @@ DIRECT = {
     "site_dos": _direct_site_dos,
     "qpi": _direct_qpi,
     "local_probe": _direct_local_probe,
+    "embedding_ldos": _direct_embedding_ldos,
+    "embedding_dos": _direct_embedding_dos,
+    "embedding_ingap": _direct_embedding_ingap,
     "density": lambda h, p: {"density": h.get_vev(nk=p["nk"])},
     "magnetization": lambda h, p: {"magnetization": h.get_magnetization(nk=p["nk"])},
     "real_space_chern": lambda h, p: {"marker": pq("topology").real_space_chern(h)[1]},
@@ -777,6 +853,17 @@ CALC_CASES = {
           "temp": 0.02}, "metal_tip", None),
         ({"probe": "s2", "ne": 2, "emin": 0.3, "emax": 0.5, "T": 0.3, "delta": 1e-3},
          "sc_tip", None)],                                   # Floquet-Keldysh, above the gaps
+    "embedding_ldos": [
+        ({"window": 9, "nk": 100}, "impurity_chain", None),
+        ({"window": 5, "nk": 100, "energy": 0.3}, "magnetic_chain", None),
+        ({"window": 3, "nk": 20, "energy": 0.05}, "haldane_vacancy",
+         lambda a: a["ldos"].min() < 1e-3)],                 # nothing on the vacancy
+    "embedding_dos": [({"ne": 9, "nk": 60}, "impurity_chain", None),
+                      ({"ne": 5, "nk": 20, "emin": -1.0, "emax": 1.0}, "haldane_vacancy",
+                       lambda a: a["dos"][2, 0] > 100 * a["dos"][2, 1])],   # the bound state
+                                                                            # in the gap at 0
+    "embedding_ingap": [({"ne": 21, "nk": 40}, "ysr_chain",
+                         lambda a: abs(a["energy"]) < a["gap"] / 2)],    # inside the gap
     "qpi": [({"energy": 0.5, "nk": 10}, "rashba", None),
             ({"energy": 0.3, "nk": 8, "mode": "pm"}, "haldane", None)],
     "density": [({"nk": 6}, "zeeman", None)],
@@ -811,7 +898,8 @@ CALC_CASES = {
 }
 PLOT_KINDS = {"ldos": "structure_scalar", "density": "structure_scalar",
               "eigenstate": "structure_scalar", "site_dos": "lines", "qpi": "heatmap",
-              "local_probe": "lines",
+              "local_probe": "lines", "embedding_ldos": "structure_scalar",
+              "embedding_dos": "lines", "embedding_ingap": "scalar",
               "magnetization": "structure_vector", "real_space_chern": "structure_scalar",
               "fermi_surface": "heatmap", "spectral_function": "heatmap",
               "berry_curvature": "heatmap", "chern": "scalar", "gap": "scalar"}
@@ -832,8 +920,9 @@ def test_calculation(pyqula, kind, case):
         assert np.allclose(result.arrays[key], np.asarray(value), rtol=0, atol=1e-10), key
     if kind in PLOT_KINDS:
         assert result.plot["kind"] == PLOT_KINDS[kind]
-    if result.plot["kind"].startswith("structure_"):       # drawn on the atoms it ran on
-        assert np.allclose(result.structure["positions"], np.asarray(h.geometry.r))
+    if result.plot["kind"].startswith("structure_"):       # drawn on the atoms it ran on,
+        g = h.geometry.supercell(p["window"]) if kind == "embedding_ldos" else h.geometry
+        assert np.allclose(result.structure["positions"], np.asarray(g.r))   # or the window
     else:
         assert result.structure is None
     if kind == "surface_spectral_function":                # a curve in 1D, a map in 2D

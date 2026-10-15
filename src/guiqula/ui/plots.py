@@ -4,6 +4,8 @@ drawn in the UI process from a Result's arrays.
 Kinds (the ``kind`` of a Result's plot spec, which also names the arrays):
 
 - ``lines``: y (one or more columns) against x (or against its index);
+  ``labels``, one per column, draws each in its colour with a legend (the
+  defect's DOS and the pristine one of an embedding);
 - ``colored_scatter``: the same, points coloured by c (bands with an
   operator);
 - ``heatmap``: c on the points (x, y), given flat (one value per point, a
@@ -115,18 +117,24 @@ DETACH_TIPS = {False: "Detach: show this result in a window of its own, to compa
 def _lines(ax, result, style):
     """y against x, or against its index when the spec names no x; the
     style's width, colour (the theme's first cycle colour by default), dots
-    on the points and fill under the curves (ui/plotstyle.py)."""
+    on the points and fill under the curves (ui/plotstyle.py); with labels,
+    the columns after the first in the next cycle colours, and a legend."""
     arrays, plot = result.arrays, result.plot
     y = np.asarray(arrays[plot["y"]])
     x = np.asarray(arrays[plot["x"]]) if plot.get("x") else np.arange(len(y))
     y = y.reshape(len(x), -1)
     width = style["linewidth"]
     color = style["color"] or "C0"
-    ax.plot(x, y, color=color, linewidth=width, marker="o" if style["dots"] else None,
-            markersize=3 * width)
-    if style["fill"]:
-        for column in y.T:
-            ax.fill_between(x, 0.0, column, color=color, alpha=0.25, linewidth=0)
+    labels = plot.get("labels") or []
+    colors = [color] + [f"C{i}" for i in range(1, y.shape[1])] \
+        if len(labels) == y.shape[1] else [color] * y.shape[1]
+    for column, c, label in zip(y.T, colors, labels or [None] * y.shape[1]):
+        ax.plot(x, column, color=c, linewidth=width, marker="o" if style["dots"] else None,
+                markersize=3 * width, label=label)
+        if style["fill"]:
+            ax.fill_between(x, 0.0, column, color=c, alpha=0.25, linewidth=0)
+    if len(labels) == y.shape[1]:
+        ax.legend(fontsize="small")
     return np.repeat(x[:, None], y.shape[1], axis=1).ravel(), y.ravel(), None
 
 

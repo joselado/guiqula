@@ -120,7 +120,10 @@ def export_script(document, calc_id, skipped=None, trusted=True, results=None):
 def _docstring(plan, what=None):
     return [f'"""pyqula script exported by guiqula {guiqula.__version__}.',
             "",
-            what or f"Calculation {plan.calc_id} ({plan.kind}) on system {plan.system_id}.",
+            what or f"Calculation {plan.calc_id} ({plan.kind}) on " + (
+                f"embedding {plan.embedding} (pristine {plan.system_id}, defect "
+                f"{plan.others['defect'].system_id})." if plan.embedding
+                else f"system {plan.system_id}."),
             "Run it with pyqula importable; it writes result.npz in the current directory.",
             '"""']
 
