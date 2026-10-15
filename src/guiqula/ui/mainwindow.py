@@ -259,14 +259,18 @@ class MainWindow(QMainWindow):
         self.node_view.cut_requested.connect(
             lambda node, socket, source: self._act("node_cut", node=node, socket=socket,
                                                    source=source or None))
-        self.node_view.moved.connect(lambda node, x, y: self.node_move(node, x, y))
+        self.node_view.moved.connect(
+            lambda node, x, y: self._act("node_move", node=node, x=x, y=y))
         self.node_view.add_requested.connect(self._node_add_menu)
-        self.node_view.delete_requested.connect(lambda node: self._act("remove", entry=node))
+        self.node_view.delete_requested.connect(
+            lambda chosen: self._act("remove", entry=chosen[0]) if len(chosen) == 1 else
+            self._act("remove_entries", entries=chosen))
         self.outliner_panel = OutlinerPanel(self.outliner, self.node_view)
         self.outliner_panel.view_chosen.connect(lambda name: self._act("outliner_view",
                                                                        name=name))
         self.outliner_panel.arrange_requested.connect(lambda: self._act("node_arrange"))
         self.node_places = {}          # {node id: [x, y]} of the nodes moved by hand
+        self._node_ids = set()         # the nodes of the Document the places were kept for
         self.variant_grids = {}        # calculation id: the grid of it and its variants
         self.properties = PropertiesPanel(self._do)
         self.properties.preview.connect(self._preview_requested)
@@ -1215,6 +1219,7 @@ class MainWindow(QMainWindow):
             self._update_title()
             self._update_actions()
             return
+        self._prune_places(event)
         if self.selected and not self._exists(self.selected):
             self.selected = ""
         self.show_start(not self.session.document.systems)   # before the canvas draws
@@ -1228,6 +1233,8 @@ class MainWindow(QMainWindow):
                 self.properties.refresh()
             self._refresh_structure()
             self._refresh_results()
+            if event is not None and event["type"] in ("undo", "redo"):
+                self._refill_variant_grids()
             self._prune_sliders()
             if self.sliders:
                 self.sliders_panel.show_values([self._slider_value(sl) for sl in self.sliders])
@@ -1261,7 +1268,23 @@ class MainWindow(QMainWindow):
             row = f"{self.context}/{self.selected}"
             if self.outliner.item(row) is not None:
                 return row
+        document = self.session.document if self.session is not None else None
+        if document is not None and self.selected and self.outliner.item(self.selected) is None \
+                and any(g.id == self.selected for g in document.geometries):
+            users = document.systems_on(self.selected)  # a geometry is its first system's row
+            if users:
+                return f"{self.context if self.context in users else users[0]}/geometry"
         return self.selected
+
+    def _node_of(self, entry):
+        """The node of the node view an outliner row stands for: a system's
+        geometry and lattice rows are its geometry's node."""
+        head = system_of(entry)
+        document = self.session.document
+        if head is not None and entry in (f"{head}/geometry", f"{head}/base") and \
+                any(s.id == head for s in document.systems):
+            return document.system(head).geometry
+        return entry
 
     def _exists(self, item_id):
         if item_id in ("calculations", "kpaths", "geometries"):
@@ -1409,7 +1432,7 @@ class MainWindow(QMainWindow):
                 entry, self.context = linked[entry], head
         self.selected = entry
         self.outliner.set_current(self._selected_row())
-        self.node_view.select_node(entry)
+        self.node_view.select_node(self._node_of(entry))
         self.properties.context = self.context
         self.properties.show_item(self.session, entry)
         family = None
@@ -1705,8 +1728,10 @@ class MainWindow(QMainWindow):
                  "canvas_view": self.canvas_view, "results": list(self.plots)}
         if self.outliner_panel.view() == "nodes":
             state["outliner"] = "nodes"
-        if self.node_places:
-            state["nodes"] = {node: list(place) for node, place in self.node_places.items()}
+        nodes = self._node_set() if self.node_places else set()
+        places = {node: list(place) for node, place in self.node_places.items() if node in nodes}
+        if places:                     # a removed node's place stays for an undo, unsaved
+            state["nodes"] = places
         if self.structure.projection != "auto":
             state["projection"] = self.structure.projection
         if self.auto_rerun:
@@ -1747,6 +1772,9 @@ class MainWindow(QMainWindow):
                             if isinstance(p, list) and len(p) == 2 and
                             all(isinstance(v, (int, float)) for v in p)} \
             if isinstance(places, dict) else {}
+        nodes = self._node_set() if self.node_places else set()
+        self.node_places = {node: p for node, p in self.node_places.items() if node in nodes}
+        self._node_ids = nodes
         self.set_outliner_view("nodes" if ui.get("outliner") == "nodes" else "tree")
         preview = ui.get("preview")
         if isinstance(preview, list) and len(preview) == 2 and all(isinstance(p, str)
@@ -2058,7 +2086,7 @@ class MainWindow(QMainWindow):
         the same Document, drawn again together."""
         self.outliner.refresh(self.session)
         if self.outliner_panel.view() == "nodes":
-            self.node_view.refresh(self.session, self.node_places, self.selected)
+            self.node_view.refresh(self.session, self.node_places, self._node_of(self.selected))
 
     def set_outliner_view(self, name="tree"):
         """The Outliner dock shows the tree or the nodes; the dock widens
@@ -2073,7 +2101,7 @@ class MainWindow(QMainWindow):
             self.resizeDocks([dock], [wide if name == "nodes" else TREE_WIDTH],
                              Qt.Orientation.Horizontal)
         if name == "nodes" and self.session is not None:
-            self.node_view.refresh(self.session, self.node_places, self.selected)
+            self.node_view.refresh(self.session, self.node_places, self._node_of(self.selected))
             if name != was:
                 QTimer.singleShot(0, self.node_view.frame_all)   # once the dock has widened
         return name
@@ -2131,20 +2159,50 @@ class MainWindow(QMainWindow):
         self.viewport.setCurrentWidget(self.grids[grid])
         return self.grid_state(grid)
 
+    def _refill_variant_grids(self):
+        """After an undo or a redo, a variant back in the Document without a
+        view goes back into the grid of its original, as the link that made
+        it put it."""
+        document = self.session.document
+        calcs = {c.id for c in document.calculations}
+        for root, grid in list(self.variant_grids.items()):
+            if root not in calcs or grid not in self.grids:
+                self.variant_grids.pop(root)
+                continue
+            if any(calc not in self.plots for calc in [root] + variants_of(document, root)):
+                self.show_variants(root)    # a member with no view at all, not one moved out
+
     def node_move(self, node, x, y):
         """Keep a node at a place (view state in the ui block, not a Command)."""
+        if node not in {n.id for n in graph_tools.nodes(self.session.document)}:
+            raise ValueError(f"no node {node!r} in the document")
         self.node_places[node] = [float(x), float(y)]
+        self._node_ids = self._node_set()
         if self.outliner_panel.view() == "nodes":
-            item = self.node_view.node_items.get(node)
-            if item is not None and (item.pos().x(), item.pos().y()) != (x, y):
-                item.setPos(float(x), float(y))
+            self.node_view.set_place(node, x, y)
         return self.node_places[node]
+
+    def _node_set(self):
+        return {n.id for n in graph_tools.nodes(self.session.document)} \
+            if self.session is not None else set()
+
+    def _prune_places(self, event):
+        """A node a mutation makes starts in its column, even when its id is
+        that of a removed node whose place is kept for an undo (decision
+        270); an undo or a redo keeps the places."""
+        if not self.node_places:
+            return
+        nodes = self._node_set()
+        if event is not None and event["type"] == "mutation":
+            for node in nodes - self._node_ids:
+                self.node_places.pop(node, None)
+        self._node_ids = nodes
 
     def node_arrange(self):
         """Every node back in the column of its kind, in Document order."""
         self.node_places = {}
         if self.session is not None and self.outliner_panel.view() == "nodes":
-            self.node_view.refresh(self.session, {}, self.selected)
+            self.node_view.refresh(self.session, {}, self._node_of(self.selected))
             self.node_view.frame_all()
         return graph_tools.layout(graph_tools.nodes(self.session.document))
 

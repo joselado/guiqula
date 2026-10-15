@@ -4746,7 +4746,8 @@ the two Documents. Decisions, the built option first:
 
 246. the graph is a module without Qt (`registry/graph.py`), tested without
      a window, the view drawing what it says; or the graph read in the view;
-247. geometries and k-paths share the first column, and a column with no
+247. geometries and k-paths share the first column (the k-paths under the
+     systems since decision 272), and a column with no
      node is left out, so that a document fits the dock at 1200 px; or one
      column per kind always;
 248. the dock widens to 640 px at most and to 40 percent of the window, and
@@ -4883,6 +4884,52 @@ graph and the forms agree with them. Decisions, the built option first:
 267. the node view refuses as the tip of a local probe the system the
      calculation, or one of its variants, runs on, as the planner and the
      form do; or the link accepted and the calculation flagged.
+268. a calculation that names a system as the tip of its probe takes no
+     variant on that system, and in the node view no link of it onto its
+     target either (a variant or, with Ctrl, a move), since a variant
+     follows its original's parameters and would then probe itself, so
+     `add_variant` and the link are refused saying which parameter names
+     it; or the variant made and flagged by the planner.
+
+*The node view, the faults found (2026-10-15).* A second review of the node
+view found gestures that the window did not finish: Del on several nodes
+tried them in column order, so a system went before the calculations that
+use it and was refused; the place of a removed node was saved and taken by
+the next entry given its id; a refresh landing while a link was drawn deleted
+the socket it started from, and one landing while a node was dragged put the
+node back in its column; a redo of a variant left it out of its grid; and
+the link of a k-path to a calculation passed behind the system between them,
+so that it looked as if it came out of the system. Fixes with no choice in
+them, recorded here only: Home on an empty document no longer zooms in (the
+first node added is drawn at its size), the scene grows with a node moved
+far so Home and the scroll bars reach it, a geometry node and its tree row
+(`s1/geometry`) select each other, the menu of an input is deleted when it
+closes, and a redo of `add_variant` puts the variant back in its original's
+grid as decision 261 has it, and the "+" of a section row reads its row
+through a persistent index, since a grab right after a link (`drive.py`'s
+`node_connect` then `--shot`) resized it after the tree was rebuilt and Qt
+read freed rows (a segfault). Decisions, the built option first:
+
+269. Del on the nodes selected removes them as one step, `remove_entries`,
+     each after whatever among them uses it (a calculation before its
+     system, a system before its geometry), and refuses the whole selection
+     when something left out of it still uses one, saying what; or each
+     node removed on its own, the users first, as several steps and keeping
+     what can go;
+270. the place of a removed node stays in the window, so an undo brings the
+     node back to it, but is neither saved nor read from a file unless the
+     node is in the Document, and a node that a mutation makes starts in its
+     column even when its id is that of a removed one; `node_move` refuses an
+     id that is no node; or a place forgotten with its node, an undo putting
+     it back in its column;
+271. a refresh that lands while a link is drawn or a node is held by the
+     mouse waits for the drop and is drawn after it, so the link is made and
+     the node keeps its new place; or the gesture dropped, the drawing
+     taking over at once;
+272. a k-path sits in the systems' column, under them, so that its link to
+     a calculation crosses no system (`registry/graph.py`), which replaces
+     decision 247's k-paths in the first column (the geometries keep it);
+     or the links drawn over the nodes, or routed around them.
 
 ### Where the section 13 items land
 

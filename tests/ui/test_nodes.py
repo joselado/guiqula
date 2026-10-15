@@ -3,6 +3,7 @@ the nodes and links of the Document, a link drawn with the mouse as one
 Command, the same edit made through the tree's form and through the nodes
 giving the same Document, refusals said, places kept as view state."""
 import json
+from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QPoint, Qt
@@ -167,3 +168,197 @@ def test_the_forms_leave_the_variants_out(nodes):
     with pytest.raises(Exception, match="the system it runs on"):     # its own: refused
         session.act("node_connect", source="s1", target="c5", socket="probe")
     assert session.document.calculation("c5").params["probe"] is None
+
+
+def test_del_removes_a_selection_with_what_it_uses_as_one_step(qapp, no_jobs, qtbot):
+    """Del on a system selected with its geometry and its calculations
+    removes the users first, as one undo step (decision 269); a selection
+    still used from outside it is refused whole."""
+    window, session = make_window(qapp, no_jobs)
+    try:
+        session.act("outliner_view", name="nodes")
+        view = window.node_view
+        undo = len(session.dispatcher.history()["undo"])
+        view.scene().clearSelection()
+        for node in ("s1", "c1"):                     # c2 still runs on s1: refused whole
+            view.node_items[node].setSelected(True)
+        view.setFocus()
+        QTest.keyClick(view, Qt.Key.Key_Delete)
+        assert [c.id for c in session.document.calculations] == ["c1", "c2"]
+        assert "c2" in window.log.toPlainText().splitlines()[-1]
+        view.scene().clearSelection()
+        for node in ("geo1", "k1", "s1", "c1", "c2"):
+            view.node_items[node].setSelected(True)
+        QTest.keyClick(view, Qt.Key.Key_Delete)
+        qtbot.waitUntil(lambda: not session.document.systems)
+        assert not session.document.calculations and not session.document.geometries
+        assert [k.id for k in session.document.kpaths] == ["k2"]
+        assert len(session.dispatcher.history()["undo"]) == undo + 1
+        session.undo()
+        assert [s.id for s in session.document.systems] == ["s1"]
+        assert [c.id for c in session.document.calculations] == ["c1", "c2"]
+    finally:
+        window.close()
+        session.close()
+
+
+def test_a_place_is_not_inherited_by_a_new_entry(nodes):
+    """The place of a removed node is not saved, comes back with an undo,
+    and is not taken by a new entry that gets the same id (decision 270)."""
+    window, session = nodes
+    session.act("outliner_view", name="nodes")
+    session.act("node_move", node="c2", x=500, y=500)
+    column = window.node_view.node_items["c1"].pos().x()
+    session.do("remove", entry="c2")
+    assert "nodes" not in window.view_state()
+    session.undo()
+    assert window.node_view.node_items["c2"].pos().x() == 500
+    session.do("remove", entry="c2")
+    assert session.do("add_calculation", system="s1", kind="ldos") == "c2"
+    assert window.node_view.node_items["c2"].pos().x() == column
+    assert "c2" not in window.node_places and "nodes" not in window.view_state()
+    with pytest.raises(Exception, match="zz99"):
+        session.act("node_move", node="zz99", x=1, y=2)
+    window.apply_view_state({"nodes": {"zz99": [1, 2], "s1": [400, 300]}})
+    assert window.node_places == {"s1": [400.0, 300.0]}
+
+
+def test_a_link_drag_survives_a_refresh(nodes):
+    """A build or a job ending while a link is drawn (the scene drawn again)
+    raises nothing, and the link is still made on the drop (decision 271)."""
+    window, session = nodes
+    session.act("outliner_view", name="nodes")
+    view = window.node_view
+    view.resetTransform()
+    view.centerOn(view.node_items["k2"])
+    viewport = view.viewport()
+    start, end = view.socket_point("k2"), view.socket_point("c1", "kpath")
+    QTest.mousePress(viewport, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, start)
+    QTest.mouseMove(viewport, QPoint(start.x() + 30, start.y()))
+    window._refresh_tree()                                  # what _job_changed does
+    QTest.mouseMove(viewport, end)
+    QTest.mouseRelease(viewport, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, end)
+    assert session.document.calculation("c1").params["kpath"] == "k2"
+
+
+def test_a_node_drag_survives_a_refresh(nodes):
+    window, session = nodes
+    session.act("outliner_view", name="nodes")
+    view = window.node_view
+    view.resetTransform()
+    view.centerOn(view.node_items["c1"])
+    item = view.node_items["c1"]
+    start = view.mapFromScene(item.mapToScene(QPoint(60, 8)))
+    viewport = view.viewport()
+    QTest.mousePress(viewport, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, start)
+    for step in range(1, 5):
+        QTest.mouseMove(viewport, QPoint(start.x() - 10 * step, start.y() + 15 * step))
+    window._refresh_tree()
+    end = QPoint(start.x() - 50, start.y() + 75)
+    QTest.mouseMove(viewport, end)
+    QTest.mouseRelease(viewport, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, end)
+    place = window.node_places.get("c1")
+    assert place is not None
+    assert view.node_items["c1"].pos().x() == place[0] and view.node_items["c1"].pos().y() == place[1]
+    assert place[1] > 0
+
+
+def test_nodes_on_an_empty_document_are_drawn_at_their_size(qapp, no_jobs, qtbot):
+    window = build_main_window()
+    window.resize(1200, 800)
+    window.show()
+    session = Session(jobs=no_jobs)
+    window.attach(session)
+    try:
+        session.act("outliner_view", name="nodes")
+        qtbot.wait(50)                                  # the queued frame_all
+        assert window.node_view.transform().m11() == 1.0
+        session.do("add_system", lattice="honeycomb_lattice")
+        assert window.node_view.transform().m11() == 1.0
+    finally:
+        window.close()
+        session.close()
+
+
+def test_home_reaches_a_node_moved_far(nodes):
+    window, session = nodes
+    session.act("outliner_view", name="nodes")
+    view = window.node_view
+    session.act("node_move", node="c2", x=3000, y=2000)
+    view.setFocus()
+    QTest.keyClick(view, Qt.Key.Key_Home)
+    shown = view.mapToScene(view.viewport().rect()).boundingRect()
+    for node in ("s1", "c2"):
+        assert shown.contains(view.node_items[node].sceneBoundingRect()), node
+
+
+def test_a_geometry_node_and_its_tree_row_select_each_other(nodes):
+    window, session = nodes
+    session.act("outliner_view", name="nodes")
+    view = window.node_view
+    view.scene().clearSelection()
+    view.node_items["geo1"].setSelected(True)
+    assert window.selected == "geo1" and window.outliner.current_id() == "s1/geometry"
+    window.select("s1/geometry")
+    assert view.node_items["geo1"].isSelected()
+
+
+def test_the_menu_of_a_socket_is_deleted_when_it_closes(nodes, qapp):
+    from PySide6.QtCore import QEvent
+    from PySide6.QtGui import QContextMenuEvent
+    from PySide6.QtWidgets import QMenu
+    window, session = nodes
+    session.act("outliner_view", name="nodes")
+    view = window.node_view
+    point = view.socket_point("c1", "kpath")
+    for _ in range(3):
+        view.contextMenuEvent(QContextMenuEvent(QContextMenuEvent.Reason.Mouse, point,
+                                                view.viewport().mapToGlobal(point)))
+        shown = [m for m in view.findChildren(QMenu, "nodeSocketMenu") if m.isVisible()]
+        assert len(shown) == 1
+        shown[0].hide()
+        qapp.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert len(view.findChildren(QMenu, "nodeSocketMenu")) == 0
+
+
+def test_no_k_path_link_passes_behind_a_node(qapp, no_jobs):
+    """On every preset's default layout a k-path's link meets no node but
+    the two it joins (decision 272)."""
+    from pathlib import Path
+    import guiqula
+    from guiqula.ui.nodes import NodeView
+    presets = sorted(p.stem for p in (Path(guiqula.__file__).parent / "presets").glob("*.json"))
+    view = NodeView()
+    for preset in presets:
+        session = Session(preset, jobs=no_jobs)
+        try:
+            view.refresh(session)
+            for link in view.link_items:
+                if view.node_items[link.link.source].node.kind != "kpath":
+                    continue
+                path = link.path()
+                for node, item in view.node_items.items():
+                    if node in (link.link.source, link.link.target):
+                        continue
+                    box = item.sceneBoundingRect()
+                    assert not any(box.contains(path.pointAtPercent(i / 100))
+                                   for i in range(101)), (preset, link.link.source, node)
+        finally:
+            session.close()
+    view.deleteLater()
+
+
+def test_a_grab_after_a_link_does_not_crash(run_python, tmp_path):
+    # the "+" of a section row kept a plain QModelIndex, which the resize of a
+    # grab read after the tree was rebuilt: a segfault, so in its own process
+    drive = str(Path(run_python.src).parent / "tools" / "drive.py")
+    code = ("import sys, runpy; sys.argv = " + repr([
+        drive, "honeycomb_zeeman_rashba", "--no-warm",
+        "--do", '{"do": "outliner_view", "name": "nodes"}',
+        "--do", '{"do": "add_kpath", "vertices": ["G", "K", "M", "G"]}',
+        "--do", '{"do": "node_connect", "source": "k2", "target": "c1", "socket": "kpath"}',
+        "--widget", "outlinerDock", "--shot", str(tmp_path / "nodes.png")])
+        + "; runpy.run_path(sys.argv[0], run_name='__main__')")
+    result = run_python(code, timeout=300)
+    assert result.returncode == 0, result.stderr[-2000:]
+    assert (tmp_path / "nodes.png").exists()

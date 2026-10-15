@@ -178,6 +178,10 @@ def _calculation_variant(document, original, target):
                                  if c.variant_of == original.id]
     if target in taken:
         raise CommandError(f"{original.id} runs on {target} already")
+    for param in spec.params:   # the variant follows these, so it would name itself
+        if isinstance(param, SystemParam) and original.params.get(param.name) == target:
+            raise CommandError(f"{original.id} names {target} as its {param.label}: a variant "
+                               f"on it would name the system it runs on")
     variant = Calculation(id=document.new_id("calculation"), system=target, kind=original.kind,
                           plugin=original.plugin, variant_of=original.id)
     document.calculations.append(variant)
@@ -689,6 +693,33 @@ def remove(document, entry):
             raise CommandError(f"k-path {entry!r} is walked by calculations {users}")
     del items[index]
 
+
+@mutation
+def remove_entries(document, entries):
+    """Remove several entries as one step (Del on nodes selected together),
+    each after whatever among them uses it: a system after its
+    calculations, a geometry after its systems. Refused whole, saying why,
+    when something left out of entries still uses one of them."""
+    if not isinstance(entries, list) or not all(isinstance(e, str) for e in entries) \
+            or not entries:
+        raise CommandError("entries is a list of entry ids")
+    left, removed = list(dict.fromkeys(entries)), []
+    while left:
+        refused = []
+        for entry in left:
+            try:
+                remove(document.copy_deep(), entry)    # a refusal changes nothing
+            except (CommandError, DocumentError) as error:
+                refused.append((entry, error))
+                continue
+            remove(document, entry)
+            removed.append(entry)
+        if len(refused) == len(left):    # say what holds from outside, not the chain
+            outside = [str(error) for entry, error in refused
+                       if not any(f"'{other}'" in str(error) for other in left if other != entry)]
+            raise CommandError((outside or [str(refused[0][1])])[0])
+        left = [entry for entry, _ in refused]
+    return removed
 
 def _systems_named(calc):
     """Ids of the other systems a calculation names (SystemParam)."""

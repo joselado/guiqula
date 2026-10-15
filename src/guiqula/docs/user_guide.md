@@ -155,14 +155,18 @@ parameters, terms or model of its own: an edit of either is an edit of the origi
 tree writes it as such ("c3 Density of states · variant of c1", "Hamiltonian of s1"). Ctrl
 held while dropping replaces the input instead of adding one, and the right click on the
 input takes a further one away; Ctrl onto an input that a variant has already is refused,
-since the original and its variant would then run on the same one. A calculation moved to
+since the original and its variant would then run on the same one, and so is the tip of a
+probe dropped onto the probe's own target, since the variant would follow the original's
+parameters and probe itself. A calculation moved to
 another system takes the variants of that system and leaves those of its old one, and the
 geometry of a variant has to have the regions its original's terms name, as the geometry of
 the original does. A variant is no system of its own for the rest of the project either: an
 embedding, a junction or the tip of a probe names its original, and Duplicate on a variant
 makes it an entry of its own, with a copy of its original's Hamiltonian or parameters, which
 can then be named anywhere. A click selects, as in the tree, a double click opens a
-k-path's zone window or a calculation's result, Shift+A opens the Add menu at the cursor, Del removes,
+k-path's zone window or a calculation's result, Shift+A opens the Add menu at the cursor, Del removes the
+nodes selected as one step of the undo history (a system with its calculations and its
+geometry together, the users first, and nothing when something left out still uses one),
 Home shows the whole graph and the wheel zooms. The dock widens while the nodes show; a node
 dragged keeps its place in the project, and Arrange puts every node back in its column.
 

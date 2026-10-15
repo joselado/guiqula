@@ -295,3 +295,30 @@ def test_the_tip_of_a_probe_is_not_the_system_it_runs_on():
         graph.connect(d.document, s3, c1, "probe")    # its variant runs on s3
     assert graph.connect(d.document, s2, c1, "probe") == (
         "set_param", {"entry": c1, "name": "probe", "value": s2})
+
+
+def test_a_variant_is_not_made_on_the_tip_of_its_probe():
+    d = Dispatcher(Document())
+    s1, s2 = (d.do("add_system", lattice="chain") for _ in range(2))
+    c1 = d.do("add_calculation", system=s1, kind="local_probe", params={"probe": s2})
+    for replace in (False, True):    # a variant, or a move onto the tip
+        with pytest.raises(graph.GraphError, match="names s2 as its tip"):
+            graph.connect(d.document, s2, c1, "target", replace=replace)
+    with pytest.raises(CommandError, match="names s2 as its tip"):
+        d.do("add_variant", entry=c1, target=s2)
+    assert not [c for c in d.document.calculations if c.variant_of == c1]
+
+
+def test_the_k_paths_sit_under_the_systems():
+    """A k-path is in the systems' column, below them (decision 272), so its
+    link to a calculation crosses no system."""
+    d = Dispatcher(Document())
+    for _ in range(3):
+        d.do("add_system", lattice="honeycomb_lattice")
+    d.do("add_calculation", system="s1", kind="bands")
+    nodes = {n.id: n for n in graph.nodes(d.document)}
+    assert nodes["k1"].column == nodes["s1"].column
+    assert nodes["k1"].row == 3 and [nodes[s].row for s in ("s1", "s2", "s3")] == [0, 1, 2]
+    assert [nodes[g].row for g in ("geo1", "geo2", "geo3")] == [0, 1, 2]
+    where = graph.layout(list(nodes.values()))
+    assert where["k1"][1] > max(where[s][1] for s in ("s1", "s2", "s3"))

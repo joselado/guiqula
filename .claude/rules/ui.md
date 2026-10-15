@@ -184,9 +184,13 @@ tests, `drive.py --widget` and the remote `widgets` and `screenshot` methods rel
   widgets, so tests read `node_items` and `link_items` and `socket_point(node, socket)`
   gives a pixel to drag from or to; every gesture is a window action (`outliner_view`,
   `node_connect`, `node_cut`, `node_move`, `node_arrange`), the places of moved nodes are
-  view state (`ui["nodes"]`), and the window refreshes it with the tree (`_refresh_tree`).
+  view state (`ui["nodes"]`, saved for the nodes of the Document only, decision 270), Del
+  on several nodes is one `remove_entries` (decision 269), and the window refreshes the
+  view with the tree (`_refresh_tree`), a refresh waiting while a link or a node is held
+  (decision 271).
   A drop onto a calculation's target or a system's geometry that has an input adds a
-  variant (`add_variant`; Ctrl replaces, refused onto an input a variant has already), drawn
+  variant (`add_variant`; Ctrl replaces, refused onto an input a variant has already, and the
+  calculation's own tip refused as a target, decision 268), drawn
   as a further link (`Socket.extra`), and `show_variants` puts the original and its variants
   in a grid (`variant_grids`). A variant is no node and no system of its own, so no form
   offers it (the combos of an embedding, a junction and a tip leave it out, decision 262).

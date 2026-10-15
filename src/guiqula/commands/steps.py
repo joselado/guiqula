@@ -87,6 +87,8 @@ def describe(name, args, document):
         return f"{'enable' if args.get('enabled') else 'disable'} {entry}"
     if name == "remove":
         return f"remove {_entry_name(document, entry)}"
+    if name == "remove_entries":
+        return f"remove {', '.join(args.get('entries') or [])}"
     if name == "duplicate":
         return f"duplicate {_entry_name(document, entry)}"
     if name == "move":

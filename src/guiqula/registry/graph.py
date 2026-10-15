@@ -38,7 +38,7 @@ from guiqula.registry.params import KPathParam, SystemParam
 COLUMNS = ("geometry", "kpath", "system", "embedding", "junction", "calculation")
 # the column of each kind, left to right: what a node takes is to its left (the k-paths
 # under the geometries, which nothing links to each other)
-COLUMN_OF = {"geometry": 0, "kpath": 0, "system": 1, "embedding": 2, "junction": 2,
+COLUMN_OF = {"geometry": 0, "kpath": 1, "system": 1, "embedding": 2, "junction": 2,
              "calculation": 3}
 OUTPUT = {"geometry": "geometry", "kpath": "kpath", "system": "system",
           "embedding": "embedding", "junction": "junction", "calculation": "result"}
@@ -99,12 +99,13 @@ def _calc_spec(calc):
 
 def nodes(document):
     """The nodes of a Document, each with its sockets, in columns by kind and
-    in Document order within a column."""
+    in Document order within a column, the k-paths under the systems
+    (decision 272)."""
     out = []
 
     def add(node):
         node.column = COLUMN_OF[node.kind]
-        node.row = sum(1 for n in out if n.column == node.column)
+        node.row = sum(1 for n in out if n.column == node.column and n.kind != "kpath")
         out.append(node)
 
     for geometry in document.geometries:
@@ -177,6 +178,12 @@ def nodes(document):
                                      calc.params.get(param.name)))
         add(Node(calc.id, "calculation", spec.label if spec is not None else calc.kind,
                  calc.name, inputs, "result"))
+    below = {}                  # a k-path under the systems, so its link crosses none
+    for node in out:
+        if node.kind != "kpath":
+            below[node.column] = max(below.get(node.column, 0), node.row + 1)
+    for n, node in enumerate(n for n in out if n.kind == "kpath"):
+        node.row = below.get(node.column, 0) + n
     return out
 
 
@@ -263,6 +270,12 @@ def connect(document, source, target, socket, replace=False):
         if source == entry.source or source in [s for s, _ in entry.extra]:
             # a replace too: the original and its variant would share one input
             raise GraphError(f"{source} is an input of {target} already")
+        if node.kind == "calculation":
+            named = next((s for s in node.inputs if s.name != "target"
+                          and "system" in s.accepts and s.source == source), None)
+            if named is not None:   # a variant follows the original's parameters
+                raise GraphError(f"{target} names {source} as its {named.label}, so it "
+                                 f"cannot run on it too; link another one")
         if not replace:
             return "add_variant", {"entry": target, "target": source}
     if node.kind == "calculation" and socket != "target" and out.kind == "system":

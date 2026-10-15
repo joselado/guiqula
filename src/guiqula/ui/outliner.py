@@ -68,7 +68,7 @@ outliner squeezed narrower than a word of the label is it elided (wraps).
 import re
 import math
 
-from PySide6.QtCore import QEvent, QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QPersistentModelIndex, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (QAction, QBrush, QColor, QFontMetrics, QFontMetricsF, QIcon,
                            QPalette, QRegion)
 from PySide6.QtWidgets import (QAbstractItemView, QHeaderView, QInputDialog, QMenu, QStyle,
@@ -746,7 +746,9 @@ class Outliner(QTreeWidget):
         button.setEnabled(enabled)
         button.clicked.connect(lambda checked=False: self.add_requested.emit(path, button))
         item.setData(1, ADD_ROLE, path)
-        index = self.indexFromItem(item, 0)
+        # persistent: a resize of the cell can come after the tree was rebuilt,
+        # when a plain QModelIndex points at freed rows (a segfault)
+        index = QPersistentModelIndex(self.indexFromItem(item, 0))
         self.setItemWidget(item, 1, AddCell(button, lambda: self.first_line(index)))
         self._add_buttons[path] = button
         return button
@@ -1286,9 +1288,12 @@ class Outliner(QTreeWidget):
     def first_line(self, index):
         """The height of a row's first line (EntryDelegate.line_height),
         which a section row's "+" takes."""
+        if not index.isValid():            # a row of a tree since rebuilt
+            return self.fontMetrics().height()
         option = QStyleOptionViewItem()
         self.initViewItemOption(option)
-        return self._entry_delegate.line_height(option, index.siblingAtColumn(0), first=True)
+        index = self.model().index(index.row(), 0, index.parent())
+        return self._entry_delegate.line_height(option, index, first=True)
 
     def label_rect(self, index, height):
         """Where a row's label is laid out: its cell in the Entry column from

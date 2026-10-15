@@ -105,3 +105,17 @@ def test_a_calculation_added_on_a_variant_goes_to_its_original(two):
     assert session.document.calculation(calc).system == "s1"
     assert [session.document.calculation(c).system
             for c in variants_of(session.document, calc)] == [variant]
+
+
+def test_a_redone_variant_comes_back_into_its_grid(two):
+    """Redo of a link that added a variant shows the variant's result in the
+    grid of its original again, as the link did (decision 261)."""
+    window, session = two
+    session.act("node_connect", source="s2", target="c1", socket="target")
+    grid = window.variant_grids["c1"]
+    session.act("undo")
+    assert variants_of(session.document, "c1") == []
+    session.act("redo")
+    variant = variants_of(session.document, "c1")
+    assert len(variant) == 1 and variant[0] in window.plots
+    assert set(window.grids[grid].placed().values()) == {"c1", variant[0]}

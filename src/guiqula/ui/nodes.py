@@ -15,15 +15,17 @@ link (connect_requested); a right click on an input whose link may be cut
 offers Cut (cut_requested); a node dragged reports its place (moved), kept
 by the window in the ui block; a click selects (selected), a double click
 opens (activated: a k-path's zone window, a calculation's result); Shift+A
-asks for the Add menu at the cursor (add_requested), Del for a removal
-(delete_requested), Home frames everything.
+asks for the Add menu at the cursor (add_requested), Del for the removal
+of the nodes selected, as one step (delete_requested), Home frames
+everything. A refresh that lands while a link is drawn or a node held
+waits for the drop.
 
 Its widgets: nodeView, and in the panel outlinerViewTabs (Tree, Nodes),
 outlinerStack and nodeArrange. The items are no widgets: tests and drivers
 read NodeView.node_items ({node id: NodeItem}) and NodeView.link_items."""
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QCursor, QFont, QFontMetricsF, QPainter, QPainterPath, \
-    QPen
+from PySide6.QtGui import QBrush, QColor, QCursor, QFont, QFontMetricsF, QGuiApplication, \
+    QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (QGraphicsEllipseItem, QGraphicsItem, QGraphicsPathItem,
                                QGraphicsScene, QGraphicsView, QHBoxLayout, QMenu,
                                QStackedWidget, QTabBar, QToolButton, QVBoxLayout, QWidget)
@@ -167,7 +169,7 @@ class NodeView(QGraphicsView):
     cut_requested = Signal(str, str, str)        # node, input name, the further input or ""
     moved = Signal(str, float, float)            # a node dragged to x, y
     add_requested = Signal(object)               # Shift+A: the cursor's global position
-    delete_requested = Signal(str)               # Del on a node
+    delete_requested = Signal(list)              # Del on the nodes selected: their ids
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -179,6 +181,8 @@ class NodeView(QGraphicsView):
         self.node_items, self.link_items = {}, []
         self._drag = None            # (output socket, temporary link) while a link is drawn
         self._places = {}            # where each node was drawn, to report the moved ones
+        self._moving = False         # a node held by the mouse: a refresh waits for its drop
+        self._pending = None         # the refresh that waited
         self._quiet = False
         self.scene().selectionChanged.connect(self._selection_changed)
         self.setToolTip("the document as a graph: drag an output (right) onto an input "
@@ -187,7 +191,13 @@ class NodeView(QGraphicsView):
     # ---- drawing
     def refresh(self, session, places=None, current=""):
         """Draw the Document of a Session: places, {node id: [x, y]} kept by
-        hand (the rest in columns by kind); current, the node selected."""
+        hand (the rest in columns by kind); current, the node selected.
+        While a link is drawn or a node is held by the mouse, the drawing
+        waits for the drop (decision 271), since it deletes what is held."""
+        if self._held():
+            self._pending = (session, places, current)
+            return
+        self._drag, self._moving, self._pending = None, False, None
         document = session.document
         nodes = graph_tools.nodes(document)
         where = graph_tools.layout(nodes, places)
@@ -217,7 +227,7 @@ class NodeView(QGraphicsView):
                 self.node_items[current].setSelected(True)
         finally:
             self._quiet = False
-        self.setSceneRect(self.scene().itemsBoundingRect().adjusted(-60, -60, 60, 60))
+        self.fit_scene_rect()
 
     def update_links(self):
         for item in self.link_items:
@@ -231,9 +241,26 @@ class NodeView(QGraphicsView):
                 target.mapToScene(QPointF(0, HEADER / 2))
             item.route(start, end)
 
+    def fit_scene_rect(self):
+        """The scene's rect around every node, so the scroll bars and Home
+        reach a node wherever it was moved."""
+        self.setSceneRect(self.scene().itemsBoundingRect().adjusted(-60, -60, 60, 60))
+
     def frame_all(self):
+        if not self.node_items:      # nothing to frame: a node added later at its size
+            self.resetTransform()
+            return
+        self.fit_scene_rect()
         self.fitInView(self.scene().itemsBoundingRect().adjusted(-20, -20, 20, 20),
                        Qt.AspectRatioMode.KeepAspectRatio)
+
+    def set_place(self, node_id, x, y):
+        """Put a node at a place (the window's node_move)."""
+        item = self.node_items.get(node_id)
+        if item is not None and (item.pos().x(), item.pos().y()) != (x, y):
+            item.setPos(float(x), float(y))
+            self._places[node_id] = (float(x), float(y))
+            self.fit_scene_rect()
 
     def select_node(self, node_id):
         """Select a node without emitting selected (the window drives this)."""
@@ -280,6 +307,8 @@ class NodeView(QGraphicsView):
             event.accept()
             return
         super().mousePressEvent(event)
+        self._moving = event.button() == Qt.MouseButton.LeftButton and \
+            isinstance(self.scene().mouseGrabberItem(), NodeItem)
 
     def mouseMoveEvent(self, event):
         if self._drag is not None:
@@ -296,16 +325,37 @@ class NodeView(QGraphicsView):
             self._drag = None
             self.scene().removeItem(link)
             target = self._socket_at(event.position().toPoint())
+            source = socket.node
+            self._refresh_pending()
             if target is not None and target.is_input:
                 replace = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
-                self.connect_requested.emit(socket.node, target.node, target.name, replace)
+                self.connect_requested.emit(source, target.node, target.name, replace)
             return
         super().mouseReleaseEvent(event)
+        self._moving = False
+        moved = False
         for node, item in self.node_items.items():
             place = (item.pos().x(), item.pos().y())
             if place != self._places.get(node):
                 self._places[node] = place
+                moved = True
                 self.moved.emit(node, *place)
+        if moved:
+            self.fit_scene_rect()
+        self._refresh_pending()
+
+    def _held(self):
+        """Whether the left button still holds a link being drawn or a node
+        (a drop lost elsewhere frees the drawing again)."""
+        down = bool(QGuiApplication.mouseButtons() & Qt.MouseButton.LeftButton)
+        return down and (self._drag is not None or
+                         (self._moving and isinstance(self.scene().mouseGrabberItem(), NodeItem)))
+
+    def _refresh_pending(self):
+        """The refresh that waited for a drop, if any."""
+        pending, self._pending = self._pending, None
+        if pending is not None:
+            self.refresh(*pending)
 
     def mouseDoubleClickEvent(self, event):
         for item in self.items_at(event.position().toPoint()):
@@ -322,11 +372,13 @@ class NodeView(QGraphicsView):
         entry = next(s for s in node.inputs if s.name == socket.name)
         menu = QMenu(self)
         menu.setObjectName("nodeSocketMenu")
+        menu.aboutToHide.connect(menu.deleteLater)     # one menu per right click, not kept
+        node_id, name = socket.node, socket.name
         for source, variant in entry.extra:
             menu.addAction(f"Take away the input {source} ({variant})",
-                           lambda s=source: self.cut_requested.emit(socket.node, socket.name, s))
+                           lambda s=source: self.cut_requested.emit(node_id, name, s))
         cut = menu.addAction("Cut the link (the default)",
-                             lambda: self.cut_requested.emit(socket.node, socket.name, ""))
+                             lambda: self.cut_requested.emit(node_id, name, ""))
         cut.setEnabled(not entry.required and entry.source is not None)
         if entry.required:
             cut.setToolTip("never empty: link another one to it instead")
@@ -338,8 +390,8 @@ class NodeView(QGraphicsView):
             self.add_requested.emit(QCursor.pos())
         elif key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
             chosen = [n for n, item in self.node_items.items() if item.isSelected()]
-            for node in chosen:
-                self.delete_requested.emit(node)
+            if chosen:                   # one removal, users first (decision 269)
+                self.delete_requested.emit(chosen)
         elif key == Qt.Key.Key_Home:
             self.frame_all()
         else:

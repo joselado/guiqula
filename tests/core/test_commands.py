@@ -317,3 +317,21 @@ def test_every_mutation_has_a_step_text():
     missing = [name for name in MUTATIONS if f'"{name}"' not in source
                and name not in steps.FAMILY_OF_COMMAND]
     assert not missing
+
+
+def test_remove_entries_takes_the_users_first_as_one_step():
+    """Del on a selection of nodes (decision 269): the entries removed users
+    first, in one undo step, or none of them when something outside still
+    uses one."""
+    d = Dispatcher()
+    s = d.do("add_system", lattice="chain")
+    c1 = d.do("add_calculation", system=s, kind="dos")
+    c2 = d.do("add_calculation", system=s, kind="bands")
+    with pytest.raises(CommandError, match=c2):
+        d.do("remove_entries", entries=["geo1", s, c1])
+    assert len(d.document.calculations) == 2
+    d.do("remove_entries", entries=["geo1", s, c1, c2, "k1"])
+    assert not d.document.systems and not d.document.calculations and not d.document.kpaths
+    assert d.history()["undo"][0] == "remove geo1, s1, c1, c2, k1"
+    d.undo()
+    assert [c.id for c in d.document.calculations] == [c1, c2]
