@@ -93,15 +93,15 @@ def test_lattice_parameters(panel):
     """A lattice that takes parameters (a ribbon's width) shows them in the
     system's form; an edit goes through set_param on the system."""
     from guiqula.ui.forms import IntEditor
-    from guiqula.ui.properties import SystemForm
+    from guiqula.ui.properties import GeometryForm
     panel, session = panel
     session.do("set_lattice", system="s1", lattice="honeycomb_zigzag_ribbon")
-    panel.show_item(session, "s1")
-    assert isinstance(panel.form, SystemForm)
+    panel.show_item(session, "geo1")              # the lattice is the geometry's (decision 273)
+    assert isinstance(panel.form, GeometryForm)
     editor = panel.form.editors["width"]
     assert isinstance(editor, IntEditor) and editor.value() == 10
     editor.spin.setValue(4)
     assert session.document.geometry_of("s1").base.params == {"width": 4}
     session.do("set_lattice", system="s1", lattice="multilayer_graphene")
-    panel.show_item(session, "s1")
+    panel.show_item(session, "geo1")
     assert panel.form.editors["stacking"].value() == "AB"

@@ -20,7 +20,7 @@ def test_main_window_builds_without_workers(qtbot, shot):
                        (QTabBar, "workspaceTabs"),
                        (QToolButton, "runButton"), (QToolButton, "cancelButton"),
                        (QToolButton, "autoRerunButton"), (QMenu, "runMenu"),
-                       (QToolButton, "newSystemButton"), (QToolButton, "addButton"),
+                       (QToolButton, "newButton"), (QToolButton, "addButton"),
                        (QMenu, "paletteMenu_term"), (QMenu, "regionsMenu"),
                        (QToolButton, "regionFromSelectionButton"), (QFrame, "errorBar"),
                        (QFrame, "recoveryBar"), (QFrame, "costBar"), (QLabel, "statusLabel"),

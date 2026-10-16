@@ -119,11 +119,13 @@ WINDOW_ACTIONS = {
     "panel": "name (outlinerDock, propertiesDock, helpDock, slidersDock, jobsDock, logDock, "
              "consoleDock, or the panel's title), shown=true|false: show and raise a panel, "
              "or hide it",
-    "add_menu": "section (<system>/geometry, <system>/regions, <system>/hamiltonian, "
-                "<system>/model, calculations or systems; left out: the workspace's family on "
-                "the current system), search: open an Add menu as its \"+\" does, the text "
-                "typed in its search line; returns the entries it lists and the best match, "
-                "which Enter adds",
+    "add_menu": "section (<geometry>/ops, <geometry>/regions, <system>/hamiltonian, "
+                "<system>/model, calculations, new (the New menu: the lattices, then the "
+                "objects of the document) or geometries (the lattices making a geometry alone); "
+                "<system>/geometry and <system>/regions name its geometry's; left out: the "
+                "workspace's family on the current system), search: open an Add menu as its "
+                "\"+\" does, the text typed in its search line; returns the entries it lists "
+                "and the best match, which Enter adds",
     "run_stale": "run every calculation whose result is stale (the slow ones after one "
                  "question in the cost bar); returns their ids",
     "start": "search: the start page's filter (the page shows while the document has no "
@@ -599,7 +601,7 @@ class RemoteAPI:
     # ---- help, console, journal
     def help(self, item=None, kind=None, family=None, guide=None, anchor=None, search=None,
              limit=None):
-        """An outliner item's help (item: an entry id, s1/base...), a registry
+        """An outliner item's help (item: an entry id, geo1/base...), a registry
         entry's (kind, and family when the kind is ambiguous), a section of
         a guide (guide "pyqula" or "guiqula", anchor), a guide's contents,
         the plugins (guide "plugins"), or the entries and sections that

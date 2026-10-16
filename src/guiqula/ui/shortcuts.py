@@ -86,7 +86,7 @@ SHORTCUTS = (
     ("view_flip", ("Num+9",), "3D canvas", "the opposite side of the view"),
     ("view_zoom", ("Num++", "Num+-"), "3D canvas", "zoom in and out"),
     ("view_selected", ("Num+.",), "3D canvas", "the selected sites in sight"),
-    ("node_add", ("Shift+A",), "node view", "the Add menu at the cursor"),
+    ("node_add", ("Shift+A",), "node view", "the New menu at the cursor"),
     ("node_delete", ("Del", "Backspace"), "node view", "remove the selected node"),
     ("node_frame", ("Home",), "node view", "show the whole graph"),
     ("console_run", ("Return",), "console", "run the input"),

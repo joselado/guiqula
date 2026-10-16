@@ -41,7 +41,12 @@ zone for a 3D crystal), was built the same day on branch kpath-window,
 decisions 234 to 239, and merged; part B, the geometry as an object (schema
 version 2), decisions 240 to 245, merged; part C, the node view, decisions
 246 to 252, merged; part D, the junction, decisions 253 to 258, merged, so
-that phase 9 is built.
+that phase 9 is built. A review of the window against phase 9's rule (what
+several owners use is an object, and the views hold only view state) found
+the forms, the tree and the places where objects are made still on the
+older model, and the maintainer answered three questions on 2026-10-15:
+decisions 273 to 277, built on branch geometry-object, replace 240, 242,
+244 and 251 as built.
 
 ## 1. Requirements (as stated by the maintainer)
 
@@ -554,9 +559,11 @@ still shows its values at the sites (phase 2, left for later).
 One window, one document, three workspaces switched by tabs in the header
 (Blender-style), sharing the same outliner, viewport and properties panel.
 The window as phase 8 built it (2026-10-04), with what phase 9 changed in
-it (2026-10-15: the K-paths section, the Geometry row naming its geometry,
-the k-path row of a form, Tree and Nodes at the top of the Outliner, and no
-k-space tab, the zone being a window of each k-path), at 1200x800 on
+it (2026-10-15: the K-paths section, the k-path row of a form, Tree and
+Nodes at the top of the Outliner, no k-space tab, the zone being a window
+of each k-path, and, decisions 273 to 277, the Geometries section first in
+the tree with each geometry once, the Geometry row of a system one line
+naming it, and New in place of New system), at 1200x800 on
 `honeycomb_zeeman_rashba` with c1 run and then made stale by a change of
 t1 (`python tools/drive.py honeycomb_zeeman_rashba --run c1 --python
 "session.do('set_param', entry='t1', name='m', value=[0, 0, 0.3])"`; the
@@ -566,27 +573,28 @@ tracked):
 ```
 +-------------------------------------------------------------------------------------------------+
 | File  Edit  View  Run  Help                                                                     |
-| [Geometry][Hamiltonian][Calculate] | ⊞ New system v  + Add v  ▷ Run c1 · bands |v  ■  ⟲         |
+| [Geometry][Hamiltonian][Calculate] | ⊞ New v  + Add v  ▷ Run c1 · bands |v  ■  ⟲                |
 +-------------------------------+----------------------------------------+------------------------+
 | Outliner                   x  | Structure | c1 bands ↻  x              | Properties           x |
 | [Tree][Nodes]                 |                                        |                        |
 | Entry                 Status  | ⤢ ✥ ⊕ | ↖ | ≡v ⇥ ▦ ↗                 ▣ | Band structure       ? |
-| v ⬡ s1  graphene with exch…   | ↻ stale: the model cha… [▷ Run again]  | c1 · Spectral          |
-|     2D · 8 sites · spinful    |         c1 · bands · spinful           | Bands along a path     |
-|   v Geometry geo1          +  |    3 +--------------------+  sz        | through the zone...    |
-|       ⁞ Honeycomb lattice     |      | \/  \/  \/  \/  \/ |  [#]       | system     s1          |
-|     [x] ⚒ op1 Supercell · n … |    0 | /\  /\  /\  /\  /\ |  [#]       | k-points   [100    ]   |
-|       Regions              +  |      | \/  \/  \/  \/  \/ |  [#]       | operator   [sz    v]   |
-|   v Hamiltonian            +  |   -3 +--------------------+            | k-path [k1 · def…][Zone]|
-|     [x] Σ t1 Zeeman…  spinful |      Γ      K'   M   K       Γ         | result: stale          |
-|     [x] Σ t2 Rashba…  spinful |                  k                     |                        |
-|     [ ] ∞ Mean field      off |                                        | estimate: under a      |
-|   v Calculations           +  |                                        | second  [▷ Run again]  |
-|       ⌇ c1 Band structure   ↻ |                                        | ---------------------- |
-|       ⌇ c2 Density of states  |                                        | Jobs                 x |
-|   v K-paths                +  | 0.06 s                                 | j2  run c1  done  100% |
-|       ⬢ k1 default    c1      |                                        |                        |
-|                               |                                        | Help | Sliders | Jobs  |
+| v Geometries               +  | ↻ stale: the model cha… [▷ Run again]  | c1 · Spectral          |
+|   v ⬡ geo1 Honeycomb… s1   +  |         c1 · bands · spinful           | Bands along a path     |
+|       ⁞ Honeycomb lattice     |    3 +--------------------+  sz        | through the zone...    |
+|     [x] ⚒ op1 Supercell · n … |      | \/  \/  \/  \/  \/ |  [#]       | system     s1          |
+|       Regions              +  |    0 | /\  /\  /\  /\  /\ |  [#]       | k-points   [100    ]   |
+| v ⬡ s1  graphene with exch…   |      | \/  \/  \/  \/  \/ |  [#]       | operator   [sz    v]   |
+|     2D · 8 sites · spinful    |   -3 +--------------------+            | k-path [k1 · def…][Zone]|
+|     ⁞ Geometry geo1 · Honey…  |      Γ      K'   M   K       Γ         | result: stale          |
+|   v Hamiltonian            +  |                  k                     |                        |
+|     [x] Σ t1 Zeeman…  spinful |                                        | estimate: under a      |
+|     [x] Σ t2 Rashba…  spinful |                                        | second  [▷ Run again]  |
+|     [ ] ∞ Mean field      off |                                        | ---------------------- |
+|   v Calculations           +  |                                        | Jobs                 x |
+|       ⌇ c1 Band structure   ↻ | 0.06 s                                 | j2  run c1  done  100% |
+|       ⌇ c2 Density of states  |                                        |                        |
+|   v K-paths                +  |                                        |                        |
+|       ⬢ k1 default    c1      |                                        | Help | Sliders | Jobs  |
 +-------------------------------+----------------------------------------+------------------------+
 | s1 · 2D · 8 sites · spinful · dimension 16 · c1: under a second      j2 c1 done   [Log]         |
 +-------------------------------------------------------------------------------------------------+
@@ -595,11 +603,12 @@ tracked):
 The drawing writes an icon as a sign: on the first row ⊞ new, + add, ▷
 run, ■ cancel (the one filled icon) and ⟲ follow; on the bar of a result ⤢
 fit, ✥ pan, ⊕ zoom, ↖ pick, ≡ overlay, ⇥ export, ▦ save data, ↗ detach and
-▣ save image; in the outliner ⬡ a system, ⁞ its lattice, ⚒ an op, Σ a
+▣ save image; in the outliner ⬡ a geometry or a system, ⁞ a lattice (and
+the Geometry row of a system, the link to its geometry), ⚒ an op, Σ a
 term, ∞ the mean field and ⌇ a calculation, and ↻ the stale mark, which the
 tab writes as that very sign. The icons are Tabler Icons drawn in the
 theme's text colour, and every control that shows only its icon is named
-by its tooltip, while New system, Add and Run keep their text beside it. A
+by its tooltip, while New, Add and Run keep their text beside it. A
 calculation's estimate and Run sit at the foot of Properties, under the
 scrolled form, so that a long form keeps them in sight.
 
@@ -609,11 +618,17 @@ classical systems last) and the examples as cards with pictures, and the
 recent files, each band folded to its first row (three for the files) until
 Show all, and a line saying what comes next, with a link to the guide.
 
-- **Outliner** (left): the whole pipeline as one tree, with one top-level
-  node per system (the mockup shows a document with a single system; a
-  classical system shows a *Model* stack in place of *Hamiltonian*, and the
-  middle workspace tab reads *Model* while it is selected). Each section row
-  has a "+" that opens the Add menu of its family for its system. A row's
+- **Outliner** (left): the whole pipeline as one tree, each object of the
+  Document once (decisions 273 to 275): the Geometries first, one row per
+  geometry with its lattice, its ops and its Regions under it and the
+  systems built on it as its status, then one top-level node per system,
+  whose Geometry row is one line naming its geometry and selecting it, with
+  that system on the canvas (the mockup shows a document with a single
+  system; a classical system shows a *Model* stack in place of
+  *Hamiltonian*, and the middle workspace tab reads *Model* while it is
+  selected), then the embeddings, the junctions, the Calculations and the
+  K-paths. Each section row has a "+" that opens the Add menu of its family
+  for its geometry or system. A row's
   label says what it is, after an icon of its kind, and its Status column
   in what state, with one set of marks shared by the result tabs and the
   status row of a plot (`ui/marks.py`), written ✓ current, ↻ stale, the
@@ -634,10 +649,14 @@ Show all, and a line saying what comes next, with a link to the guide.
   lists and what the Structure tab draws (the sites and bonds, or the
   Hamiltonian view), not the data. Entries are added from the "+" of their
   outliner section or from Add, one menu per family with a search line
-  (Blender's Add menu, Inkscape's search): the lattices with the classical
-  systems last (New system), the geometry ops, the terms grouped by physics
-  (hopping, onsite, magnetism, spin-orbit, superconductivity, fields,
-  disorder) with the mean field last, the calculations by group. **Run**
+  (Blender's Add menu, Inkscape's search): the geometry ops, the terms
+  grouped by physics (hopping, onsite, magnetism, spin-orbit,
+  superconductivity, fields, disorder) with the mean field last, the
+  calculations by group; the objects of the Document from **New**
+  (decision 276; Shift+A in the node view): the lattices with the
+  classical systems after them, then a Hamiltonian on each geometry, an
+  embedding of a defect in the current system, a junction with it as a
+  lead, a k-path, a geometry alone and the calculations' menu. **Run**
   names the calculation it acts on (selected in the outliner, else the tab
   shown, else the first); its arrow lists the others and every stale
   result, and Cancel and Follow (the automatic re-run of cheap results) sit
@@ -656,7 +675,10 @@ Show all, and a line saying what comes next, with a link to the guide.
   status row above its plot (stale with Run again, running with its
   progress and Cancel, failed with the message).
 - **Properties** (right): the form for the selected entry, generated from
-  its schema, in the words of the physics. The button of each number shows
+  its schema, in the words of the physics; a geometry's form holds its
+  lattice and the lattice's parameters, a system's the geometry it is built
+  on (a combo of the Document's geometries) and the Hamiltonian
+  construction (decision 273). The button of each number shows
   the kind of its Field (`f(r)` for a plain number) and its menu changes the
   kind; the menu of a parameter's name locks it, attaches a slider, adds a
   sweep or previews the Field on the canvas. Live preview: changing a
@@ -4936,6 +4958,84 @@ Decisions, the built option first:
      decision 247's k-paths in the first column (the geometries keep it);
      or the links drawn over the nodes, or routed around them.
 
+*The geometry as an object in the window, and New (2026-10-15, branch
+geometry-object).* Asked whether the interface as it had evolved left
+something of the original design to reconsider, the answer was that phase
+9 moved the Document to one rule, what several owners use is an object
+named by id and the views hold nothing but view state, and that three parts
+of the window still read the model in which a system owned its geometry
+and only systems and entries were made: selecting the row `Geometry geo1 ·
+shared with s2`, or the `geo1 Geometry` node, opened a form titled `System
+s1` with the lattice inside it (`properties._make` reached `SystemForm`
+through `system_of` before the geometry family); the tree drew the ops and
+regions of a shared geometry under every system on it, three times for
+three systems, where the node view drew geo1 once, and a geometry's place
+in the tree depended on whether it was used; and the five kinds of object
+were each made from a different place (New system on the toolbar, four
+items of a system's context menu, the "+" of K-paths, New k-path in a
+form), Shift+A in the node view reaching none of them. The maintainer
+answered the three questions as recommended, one at a time. What was built:
+`GeometryForm` for any geometry row (its own, a system's Geometry row, the
+node), with `latticeBox` and the lattice's parameter editors, which
+`set_param` on the geometry's id and `set_lattice` follow, `geometryStart`
+when it starts from another geometry, and `geometryUsers`; `SystemForm`
+keeps its name and the Hamiltonian construction and gains `systemGeometry`,
+a combo of the Document's geometries that `set_geometry` follows. The tree
+lists the Geometries first, each once (`geo1`, its base row `geo1/base`,
+its ops, its Regions row `geo1/regions`, the systems built on it as its
+status, "unused" when none), and a system's Geometry row, `s1/geometry`, is
+one line with no children that `select` turns into the geometry with that
+system as `window.context`, the one the canvas draws, the tree keeping the
+link row current; `s1/base` and `s1/regions` select the geometry's rows,
+and `open_add_menu("s1/geometry")` and `("s1/regions")` open its menus
+(`old_geometry_rows`, decision 241's rule), so what was written before
+keeps working; `linked_rows` and `_linked` are gone. New system became New
+(`newButton`): the lattices, the classical systems, then at each opening
+(`_new_items`, `PaletteMenu.set_items`) a Hamiltonian on each geometry
+(`newHamiltonian_<geometry>`), an embedding of a defect in the current
+quantum system (`newEmbedding`), a junction with it as a lead
+(`newJunction`), a k-path (`newKpath`), a geometry alone (`newGeometry`,
+the lattices again in the menu's geometry mode, `adds="geometry"`, which the
+"+" of Geometries opens too) and the calculations' Add menu on the current
+target (`newCalculation`); Shift+A in the node view opens it at the cursor.
+Decisions, the built option first:
+
+273. a geometry has a form of its own whenever it is selected, in the tree
+     (its row, a system's Geometry row) or in the node view, holding its
+     name, its lattice with the lattice's parameters (or the geometry it
+     starts from) and the systems built on it, and the system's form keeps
+     its name and the Hamiltonian construction and chooses the geometry in
+     a combo (the maintainer's answer, replacing 244 as built); or the
+     system form kept with the lattice in it and a line naming the other
+     systems on the geometry; or 244 left as built;
+274. the tree lists each geometry once, in a Geometries section before the
+     systems, with its lattice, ops and regions and the systems built on it
+     as its status, and a system's Geometry row is one line naming it that
+     selects it with that system on the canvas, as K-paths already worked
+     (the maintainer's answer, replacing 240 and 242 as built); or the ops
+     and regions under the first system that uses the geometry and a link
+     line under every later one; or the rows repeated under every system
+     (240);
+275. a lattice parameter's lock may name the geometry (`geo1.n`) or any
+     system built on it (`s1.n`, what the teaching presets and files written
+     before name), the geometry's form disabled by either, and a system's
+     geometry lock (`s1/geometry`) marks its Geometry row and the geometry's
+     own row; or `s1.n` dropped for `geo1.n`, the presets rewritten;
+276. one New menu on the toolbar and under Shift+A in the node view: the
+     lattices, the classical systems, then a Hamiltonian on each geometry of
+     the document, an embedding of a defect in the current quantum system, a
+     junction with it as a lead and a k-path; the context menus and the "+"
+     of K-paths stay as shortcuts (the maintainer's answer, replacing 251 as
+     built); or the places kept and Shift+A alone gaining the objects; or
+     each object left where it was made;
+277. New lists two items beyond the five the maintainer named: a geometry
+     alone (the lattices again, in the menu's geometry mode, since the "+"
+     of Geometries and a variant on a second geometry need one with no
+     system on it) and the calculations' Add menu on the current target, so
+     that every kind of node is one menu away from Shift+A; or New lists the
+     five only, a bare geometry made from the Geometries "+" alone and a
+     calculation from Add.
+
 ### Where the section 13 items land
 
 | Phase | Items |
@@ -5079,6 +5179,14 @@ expressions (3.8, a review decision of 2026-09-28), was answered the same
 day: a comparison stays the number 1.0 where it holds and 0.0 elsewhere, as
 built, rather than numpy's booleans (whose `+` is an or and whose `-`
 fails) or a refusal of any arithmetic on a comparison. Nothing is open.
+
+One item noted while the window was reviewed against phase 9's rule
+(2026-10-15, decisions 273 to 277) and left for later: the Geometry and
+Hamiltonian workspace tabs set the canvas view (`CANVAS_VIEW_OF`) and the
+Show menu of the structure bar sets it too, two places choosing one thing,
+and since the "+" of each section opens the right Add menu the tabs now do
+little besides, so what they are for is a question to ask once the New
+menu has been used for a while; nothing was built for it.
 
 ## 12. Decisions (made by the maintainer, 2026-09-26)
 

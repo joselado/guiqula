@@ -298,9 +298,10 @@ def test_a_geometry_node_and_its_tree_row_select_each_other(nodes):
     view = window.node_view
     view.scene().clearSelection()
     view.node_items["geo1"].setSelected(True)
-    assert window.selected == "geo1" and window.outliner.current_id() == "s1/geometry"
-    window.select("s1/geometry")
-    assert view.node_items["geo1"].isSelected()
+    assert window.selected == "geo1" and window.outliner.current_id() == "geo1"
+    window.select("s1/geometry")                 # the system's link row: the same node
+    assert window.selected == "geo1" and view.node_items["geo1"].isSelected()
+    assert window.outliner.current_id() == "s1/geometry"
 
 
 def test_the_menu_of_a_socket_is_deleted_when_it_closes(nodes, qapp):

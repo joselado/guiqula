@@ -276,6 +276,14 @@ def item_help(session, item_id):
         return OWN_SECTIONS["embedding"], section_page("guiqula", OWN_SECTIONS["embedding"])
     if slash and any(j.id == system_id for j in document.junctions):
         return OWN_SECTIONS["junction"], section_page("guiqula", OWN_SECTIONS["junction"])
+    if slash and any(g.id == system_id for g in document.geometries):
+        if part == "base":                # a geometry's lattice row (decision 274)
+            spec = registry.get("lattice", geometry_chain(document, system_id)[0].base.kind)
+            users = document.systems_on(system_id)
+            return spec.label, entry_help(spec, _stage(session, users[0], None, "base")
+                                          if users else None)
+        section = OWN_SECTIONS.get(part, "Systems and geometry")
+        return section, section_page("guiqula", section)
     if slash:
         system = document.system(system_id)
         if part == "base":

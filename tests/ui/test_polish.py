@@ -305,6 +305,7 @@ def test_locks_in_the_forms_and_the_outliner(window, qtbot):
     assert "s2/geometry" in form.labels["n"].toolTip()
     assert not form.enabled.isEnabled()
     assert "locked" in window.outliner.item("s2/geometry").text(1)
+    assert "locked" in window.outliner.item(session.document.system("s2").geometry).text(1)
     window.select("t1")                        # the modulation is free
     form = window.properties.form
     assert form.editors["s"].isEnabled() and form.enabled.isEnabled()

@@ -165,11 +165,13 @@ def test_the_rows_say_what_they_are(window, qtbot):
     load(qtbot, window, "honeycomb_zeeman_rashba")
     outliner = window.outliner
     texts = {i: (outliner.item(i).text(0), outliner.item(i).text(1)) for i in (
-        "s1/geometry", "s1/base", "op1", "s1/regions", "s1/hamiltonian", "t1", "t2",
-        "s1/meanfield", "calculations", "c1", "c2")}
+        "geometries", "geo1", "geo1/base", "op1", "geo1/regions", "s1/geometry",
+        "s1/hamiltonian", "t1", "t2", "s1/meanfield", "calculations", "c1", "c2")}
     assert texts == {
-        "s1/geometry": ("Geometry geo1", ""), "s1/base": ("Honeycomb lattice", ""),
-        "op1": ("op1  Supercell · n [2, 2, 1]", ""), "s1/regions": ("Regions", ""),
+        "geometries": ("Geometries", ""), "geo1": ("geo1  Honeycomb lattice · 1 op", "s1"),
+        "geo1/base": ("Honeycomb lattice", ""), "op1": ("op1  Supercell · n [2, 2, 1]", ""),
+        "geo1/regions": ("Regions", ""),
+        "s1/geometry": ("Geometry geo1 · Honeycomb lattice · 1 op", ""),
         "s1/hamiltonian": ("Hamiltonian", ""), "t1": ("t1  Zeeman / exchange field", "spinful"),
         "t2": ("t2  Rashba spin-orbit coupling", "spinful"), "s1/meanfield": ("Mean field", "off"),
         "calculations": ("Calculations", ""), "c1": ("c1  Band structure", ""),
@@ -186,7 +188,8 @@ def test_the_rows_say_what_they_are(window, qtbot):
         assert item.toolTip(0) == item.toolTip(1) and item.toolTip(0).startswith(label)
     assert "the Hilbert space after it: spinful" in outliner.item("t1").toolTip(0)
     assert outliner.item("op1").toolTip(0).count("n [2, 2, 1]") == 1   # once, in the label
-    assert "the base lattice" in outliner.item("s1/base").toolTip(0)
+    assert "the base lattice" in outliner.item("geo1/base").toolTip(0)
+    assert "built on by s1" in outliner.item("geo1").toolTip(0)
     assert "not run yet" in outliner.item("c1").toolTip(0)
     assert "on s1" in outliner.item("c1").toolTip(0)
     # several systems: a calculation names its own
@@ -270,7 +273,7 @@ def test_the_mean_field_reads_unclipped(window, qtbot, shot):
     dock = window.docks["outlinerDock"]
     window.resizeDocks([dock], [200], Qt.Orientation.Horizontal)       # narrower: wrapped
     settle(qtbot, window)
-    one_line = outliner.visualItemRect(outliner.item("s1/geometry")).height()
+    one_line = outliner.visualItemRect(outliner.item("s1/hamiltonian")).height()
     assert outliner.visualItemRect(item).height() > 2 * one_line
     assert cut(outliner) == []
     shot(dock, "narrow")

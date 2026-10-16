@@ -49,9 +49,9 @@ component: a painted Field on sites), pick (calculation, and x, y in the
 data coordinates of its plot, or box or polygon: what the point stands for
 and the targets that take it), pick_to (calculation, the same point, and
 target: start or move a calculation there), remote (enabled: remote control
-on or off), add_menu (section: s1/geometry, s1/regions, s1/hamiltonian,
-s1/model, calculations or systems, and search: an Add menu opened as its
-"+" does, whose widget is paletteMenu_<family> or regionsMenu), run_stale
+on or off), add_menu (section: geo1/ops, geo1/regions, s1/hamiltonian,
+s1/model, calculations, new or geometries, and search: an Add menu opened
+as its "+" does, whose widget is paletteMenu_<family> or regionsMenu), run_stale
 (every stale result), start (search: the start page's filter, whose widget
 is startPage, shown while the document has no system; its cards are
 startLattice_<kind>, startPreset_<name>, ..., made as they come into sight,

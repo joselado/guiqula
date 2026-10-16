@@ -46,12 +46,12 @@ The window is one document seen through four places: the outliner on the left, t
 drawings in the centre, the form of the selected entry on the right with its help below
 it, and the status bar at the bottom. Above them, the first toolbar row holds the
 workspace tabs (Geometry, Hamiltonian, Calculate; the middle one reads Model for a
-classical system), New system, Add and the run controls. New system, Add and Run show
+classical system), New, Add and the run controls. New, Add and Run show
 their names beside their icons; Cancel, a filled square, and Follow, two arrows in a loop,
 show the icon alone, and their tooltips name them, as for every control that shows only an
 icon. The icons are drawn in the text colour of the theme, so they change with it, and
 greyed with the control when it is disabled. The workspaces follow the
-selection, meaning that selecting a system, its lattice, an op or a region shows Geometry,
+selection, meaning that selecting a geometry, a system, a lattice, an op or a region shows Geometry,
 a term, the mean field or a model shows Hamiltonian, and a calculation shows Calculate,
 and since adding an entry selects it, an add shows its workspace too. A workspace changes
 what Add lists and how the Structure tab draws the system (the sites and bonds, or the
@@ -63,19 +63,33 @@ the project, and it can be driven from the console or a script.
 ### Adding entries
 
 An entry is added from the place where it will appear. Each section row of the outliner
-(a system's Geometry, Regions, Hamiltonian or Model, and Calculations) has a "+" at its
-right, which opens the menu of that family for that system: a search line at the top,
+(a geometry's own row for its ops and its Regions row, a system's Hamiltonian or Model,
+and Calculations) has a "+" at its
+right, which opens the menu of that family for that geometry or system: a search line at the top,
 then the entries by group, each with its formula and its one-line description in the
 tooltip. Typing narrows the list to the entries that match and draws the best match in
 bold, Enter adds it, and the arrow keys reach the others. The menu of the Hamiltonian
 ends with Mean field (interactions), which turns the system's mean-field block on and
-selects it, and the menu of the Regions row offers a region by expression and a region
+selects it, and the menu of a geometry's Regions row offers a region by expression and a region
 from the sites selected on the canvas. Add, on the toolbar, is the same menu for the
 workspace shown and the current system (Ctrl+F opens it with the search line ready, or
-goes to the start page's filter while the document has no system), and New system lists the lattices by
-dimension with the classical systems in its last section. With several systems, the "+"
-of a system's section adds to that system, while Add and the "+" of Calculations add to
+goes to the start page's filter while the document has no system). With several systems, the "+"
+of a system's section adds to that system, the "+" of a geometry to that geometry (and so
+to every system built on it), while Add and the "+" of Calculations add to
 the system of the selected entry (the first one when nothing is selected).
+
+The objects of the document, the things a node of the node view stands for, are made from
+New, on the toolbar (Shift+A in the node view opens it at the cursor): the lattices by
+dimension, each making a quantum system on a geometry of its own, the classical systems
+after them, then a Hamiltonian on each geometry of the document (an empty one on the same
+sites, which the systems on it share), an embedding of a defect in the current quantum
+system, a junction with it as a lead, a k-path, a geometry alone (the lattices again, for a
+second Hamiltonian or a variant, with no system on it until one is linked to it) and the
+Add menu of the calculations on the current target, so that every kind of node is one
+menu away. The "+" of the Geometries section makes a geometry alone too, and the context
+menus keep their shortcuts (a geometry's row and a system's row give New Hamiltonian on
+this geometry, a quantum system's row New embedding of a defect and New junction with
+this lead, and the "+" of K-paths adds a k-path).
 
 ### Running a calculation
 
@@ -96,18 +110,27 @@ outliner.
 
 ### The outliner
 
-The outliner is the whole document as a tree, and each row says what it is and in what
-state. An icon before the label gives the kind of row: a quantum system (hexagons) or a
-classical one (a magnet), its lattice, an op, a region, a term (a sum sign), the mean
-field, a calculation, Python code. A system's row gives its name in bold and a summary of
-what was built ("2D · 8 sites · spinful", or "0D · 40 sites · classical spins" for a
-classical one). The label of an entry carries its id, its kind and its name, then an op's
+The outliner is the whole document as a tree, each object of the document listed once, in
+the order of the pipeline: the Geometries first, each with its lattice, its ops and its
+Regions under it and the systems built on it as its status; then the systems, whose
+Geometry row is one line naming the geometry and the systems it is shared with and
+selects that geometry (with that system on the canvas, so an op edited from there is seen
+on it), over the Hamiltonian or the Model; then the embeddings and junctions with the
+systems they name, the Calculations and the K-paths. Each row says what it is and in what
+state. An icon before the label gives the kind of row: a geometry or a quantum system
+(hexagons), a classical system (a magnet), a lattice, an op, a region, a term (a sum
+sign), the mean field, a calculation, Python code. A system's row gives its name in bold
+and a summary of what was built ("2D · 8 sites · spinful", or "0D · 40 sites · classical
+spins" for a classical one), a geometry's its lattice and the number of its ops. The label
+of an entry carries its id, its kind and its name, then an op's
 parameters, a region's selection or the region a term acts in, on further lines when it is
 wider than the column, so that it is never cut, and the Status column carries its state
 only, the marks drawn as icons (on the system's summary and the mean field's line too):
 
 - the Hilbert space after a term (spinless, spinful, Nambu), which is how one sees where
   a Zeeman field made the Hamiltonian spinful;
+- the systems built on a geometry ("s1, s2", or "unused", which is a geometry that can
+  be removed without losing anything);
 - the number of sites of a region;
 - the mean field's interactions ("U = 3, runs with the calculations"; its total energy
   after a run, "U = 3, E = -1.68"; "off" when it is off);
@@ -164,7 +187,7 @@ the original does. A variant is no system of its own for the rest of the project
 embedding, a junction or the tip of a probe names its original, and Duplicate on a variant
 makes it an entry of its own, with a copy of its original's Hamiltonian or parameters, which
 can then be named anywhere. A click selects, as in the tree, a double click opens a
-k-path's zone window or a calculation's result, Shift+A opens the Add menu at the cursor, Del removes the
+k-path's zone window or a calculation's result, Shift+A opens the New menu at the cursor, Del removes the
 nodes selected as one step of the undo history (a system with its calculations and its
 geometry together, the users first, and nothing when something left out still uses one),
 Home shows the whole graph and the wheel zooms. The dock widens while the nodes show; a node
@@ -234,8 +257,8 @@ A form speaks the physics, and the engine's names (the pyqula call, has_spin, th
 parameter's name) are in the tooltips and the help. Its head is the entry's title with
 its enabled switch and the ? of its help, then the group and a line of what the entry
 does, and its formula. A term of a system without regions reads "acts everywhere ·
-restrict to a region", whose link opens the menu of the system's Regions row, and once the
-system has a region the form has a region box in its place. Every number of a term is a
+restrict to a region", whose link opens the menu of the Regions row of its geometry, and once the
+geometry has a region the form has a region box in its place. Every number of a term is a
 Field, and the button beside it says which kind it is: f(r) for a plain number, else
 expression, piecewise, profile, interpolated, painted or from result; its menu chooses
 the kind (see Fields: parameters that depend on the position).
@@ -244,7 +267,12 @@ A right click on a parameter's name opens its menu: Lock this parameter (or Unlo
 a lock can name it; Attach a slider, over a range from zero to twice the value (from -1
 to 1 for a zero, within the bounds the parameter takes); Sweep this parameter, which adds
 a sweep of eleven values over the same range and selects it (see Sweeps and sliders);
-and for a Field, Preview on the canvas. The system's form says spin (spinless or
+and for a Field, Preview on the canvas. A geometry's form holds its name, the lattice it
+starts from with the lattice's parameters (the width of a ribbon, the stacking of a
+multilayer), or the geometry it starts from instead, and the systems built on it; a
+system's form holds its name, the geometry it is built on as a choice among the
+document's geometries (another one there moves the system onto it, keeping its terms, as a
+link in the node view does), and the Hamiltonian construction: spin (spinless or
 spinful), superconducting (Nambu), hopping range (neighbours) and sparse matrices (large
 systems). The spin and Nambu choices ask for what a term otherwise decides by itself (a
 Zeeman field makes the Hamiltonian spinful, a pairing makes it Nambu), so spinless there
@@ -254,8 +282,8 @@ neighbours, ticked whenever one of them is not zero.
 
 ## Systems and geometry
 
-New system (on the toolbar, or a card of the start page) makes a quantum system on a
-lattice, and from its last section classical spins, a lattice gas or an Ising model. A
+New (on the toolbar, or a card of the start page) makes a quantum system on a lattice,
+and from its Classical systems section classical spins, a lattice gas or an Ising model. A
 document may hold several systems (a texture computed on one can drive another, see
 Fields). The geometry is the lattice followed by its ops, applied in order: changing an
 op, or the lattice, rebuilds everything after it and keeps the terms. Ops that act on
@@ -267,18 +295,22 @@ projection, where the selection tools work (see Drawing in 3D).
 A geometry is an object of the document of its own, with an id (geo1, geo2), and a system
 is built on one, so that one geometry can carry several systems: two Hamiltonians on the
 same sites to compare, or a classical model whose texture a quantum system then reads on
-exactly its sites (see Fields). The context menu of a system gives New Hamiltonian on this
-geometry, an empty Hamiltonian on the same sites, and Duplicate linked (Alt+D), a copy of the
+exactly its sites (see Fields). New > Hamiltonian on geo1 (also New Hamiltonian on this
+geometry in the context menu of the geometry or of a system on it) makes an empty
+Hamiltonian on the same sites, and Duplicate linked (Alt+D) a copy of the
 system that shares its geometry, while Duplicate (Ctrl+D) copies the geometry too, as
-before. The Geometry row of a system names its geometry and, when another system is built
-on it, says so ("Geometry geo1 · shared with s2"), which is the reminder that an op or a
-region edited there is edited for both. The first system in the document shows the ops and
-regions of a shared geometry by their own ids, and every later one shows the same rows
-under itself, so that selecting one there edits the same op while the canvas draws that
-system. A geometry can also start from another one rather than from a lattice, a ribbon or
-an island cut from a decorated cell, and it then follows every edit of that cell; the Geometry
-row of its system reads "from geo1" in place of the lattice. A geometry no system is built
-on is listed under Geometries, after K-paths, with its ops, and can be removed.
+before. The geometry is listed once, under Geometries at the top of the outliner, with
+its lattice, its ops and its regions, and the systems built on it as its status; the
+Geometry row of each system names it ("Geometry geo1 · Honeycomb lattice · 1 op · shared
+with s2"), which is the reminder that an op or a region edited there is edited for both,
+and selects it with that system on the canvas. The lattice and its parameters are edited
+on the geometry's form, the Hamiltonian construction on the system's, which also chooses
+the geometry the system is built on. A geometry can also start from another one rather
+than from a lattice, a ribbon or an island cut from a decorated cell, and it then follows
+every edit of that cell; its first row then reads "from geo1" in place of the lattice. A
+geometry no system is built on reads "unused" and can be removed; New > Geometry alone
+(or the "+" of Geometries) makes one, for a second Hamiltonian or a variant linked to it
+in the node view.
 
 ## Selections and regions
 
@@ -289,8 +321,8 @@ they are on (Pick, Box and Lasso then show unchecked): click one of those three 
 again; the drawing moves as described under Moving in space. With sites selected:
 
 - Remove selected adds (or extends) a Remove atoms op that deletes them by position;
-- Region from selection, on the bar or in the menu of the "+" of the system's Regions row,
-  makes a named region of their positions;
+- Region from selection, on the bar or in the menu of the "+" of the Regions row of the
+  system's geometry, makes a named region of their positions;
 - Calculate on selection offers what takes the selected sites (see Picking from a plot).
 
 A region can also be an expression of x, y, z and r (Region by expression, in the same
@@ -361,7 +393,7 @@ the engine's own default.
 
 ## Classical systems
 
-A classical system (the last section of New system, or the last cards of the start
+A classical system (the Classical systems section of New, or the last cards of the start
 page's lattices) has a Model in place of a Hamiltonian: classical spins, a lattice gas
 at a filling, or an Ising model, set up on the system's geometry, with its own terms
 (exchange shells, fields, chemical potentials, exchange tensors) and calculations
@@ -404,7 +436,7 @@ another, and the way we do this is by picking one site on a result drawn on the 
 LDOS, a density), which offers a new Local probe on that site; the site of the form takes
 one position, so a pick of several sites does not offer it.
 
-To change the tip, make it a system of its own: New system on the chain, whose terms make
+To change the tip, make it a system of its own: New on the chain, whose terms make
 the tip what it is, an onsite energy for its Fermi level, an s-wave pairing for a
 superconducting tip, an exchange field for a magnetic one, or anything else a chain takes,
 and then choose that system as the tip of the calculation. The tip has to be
@@ -1005,7 +1037,7 @@ functions only: the window loads the plugin too, and must start without pyqula.
 | 3D canvas | Num+9 | the opposite side of the view |
 | 3D canvas | Num++, Num+- | zoom in and out |
 | 3D canvas | Num+. | the selected sites in sight |
-| node view | Shift+A | the Add menu at the cursor |
+| node view | Shift+A | the New menu at the cursor |
 | node view | Del, Backspace | remove the selected node |
 | node view | Home | show the whole graph |
 | console | Return | run the input |

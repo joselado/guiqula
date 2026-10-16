@@ -29,7 +29,10 @@ shared objects, a node view beside the outliner) is planned at the end of sectio
 decisions 213 to 233, built in its four parts: A (the k-path as an object, with its zone
 window, decisions 234 to 239), B (the geometry as an object, schema version 2, decisions
 240 to 245), C (the node view, decisions 246 to 252) and D (the junction, decisions 253 to
-258), all merged into master (2026-10-15). A numbered decision stands as built unless the
+258), all merged into master (2026-10-15); decisions 273 to 277 (2026-10-15, branch
+geometry-object) then made the window follow phase 9's rule too: a geometry has a form of
+its own and is listed once in the tree, and the objects of the Document are made from one
+New menu. A numbered decision stands as built unless the
 maintainer answers it; a new change records its decisions, numbered on from the last, at
 the end of section 7, the recommended option first.
 
